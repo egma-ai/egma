@@ -1351,16 +1351,33 @@ type SimulationPlanRow = {
   readonly jobStatus: string | null;
 };
 
+/**
+ * How one simulation's current grades stand against its frozen plan.
+ *
+ * `selected` is the number of project graders the plan holds. The three
+ * results count the current grade of each of them, so a simulation with
+ * grading still to do tallies fewer results than it selected.
+ */
+export type SimulationGradeTally = {
+  readonly passed: number;
+  readonly failed: number;
+  readonly errored: number;
+  readonly selected: number;
+};
+
 type ResolvedSimulationState = {
   readonly gradable: boolean;
   readonly state: TraceGradingState | null;
   readonly combinedScore: number | null;
+  readonly tally: SimulationGradeTally | null;
 };
 
 export type SimulationGradingState = {
   readonly simulationId: string;
   readonly state: TraceGradingState | null;
   readonly combinedScore: number | null;
+  /** Null when there is no grading state to count: no plan, or no trace yet. */
+  readonly tally: SimulationGradeTally | null;
 };
 
 export type SimulationGradingRef = {
@@ -1448,19 +1465,42 @@ function resolvedSimulationState(
   facts: ReadonlyMap<string, ReadonlyMap<string, CurrentSimulationGradeFact>>,
 ): ResolvedSimulationState {
   if (row.status !== "completed") {
-    return { gradable: false, state: null, combinedScore: null };
+    return { gradable: false, state: null, combinedScore: null, tally: null };
   }
 
   const group = selectedGroup(row);
   if (group.items.length === 0) {
-    return { gradable: false, state: "not_requested", combinedScore: null };
+    return {
+      gradable: false,
+      state: "not_requested",
+      combinedScore: null,
+      tally: null,
+    };
   }
 
+  // Work in flight reads no grade facts, so the tally reports the plan with
+  // no result counted yet rather than a count nothing was read for.
+  const waiting: SimulationGradeTally = {
+    passed: 0,
+    failed: 0,
+    errored: 0,
+    selected: group.items.length,
+  };
   if (row.jobStatus === "claimed") {
-    return { gradable: true, state: "running", combinedScore: null };
+    return {
+      gradable: true,
+      state: "running",
+      combinedScore: null,
+      tally: waiting,
+    };
   }
   if (row.jobStatus === "pending") {
-    return { gradable: true, state: "pending", combinedScore: null };
+    return {
+      gradable: true,
+      state: "pending",
+      combinedScore: null,
+      tally: waiting,
+    };
   }
 
   const traceId = traceIdOfSimulation(row.simulationId);
@@ -1468,19 +1508,40 @@ function resolvedSimulationState(
     throw new Error(`simulation ${row.simulationId} has no trace identity`);
   }
   const current = facts.get(traceId);
-  let errored = false;
+  let passed = 0;
+  let failed = 0;
+  let errored = 0;
+  let complete = true;
   for (const item of group.items) {
     const grade = current?.get(item.projectGraderId);
     if (grade === undefined) {
-      return {
-        gradable: true,
-        state: row.jobStatus === "abandoned" ? "error" : "pending",
-        combinedScore: null,
-      };
+      complete = false;
+      continue;
     }
-    errored ||= grade.errored;
+    // A current grade reads the way `currentGrades` in grading/results.ts reads
+    // it: no score is an error, and a score is measured against the threshold
+    // the plan froze.
+    if (grade.errored || grade.score === null) errored += 1;
+    else if (grade.score >= item.passThreshold) passed += 1;
+    else failed += 1;
   }
-  if (errored) return { gradable: true, state: "error", combinedScore: null };
+  const tally: SimulationGradeTally = {
+    passed,
+    failed,
+    errored,
+    selected: group.items.length,
+  };
+  if (!complete) {
+    return {
+      gradable: true,
+      state: row.jobStatus === "abandoned" ? "error" : "pending",
+      combinedScore: null,
+      tally,
+    };
+  }
+  if (errored > 0) {
+    return { gradable: true, state: "error", combinedScore: null, tally };
+  }
   return {
     gradable: true,
     state: "complete",
@@ -1488,6 +1549,7 @@ function resolvedSimulationState(
       group.items.map((item) => item.projectGraderId),
       current === undefined ? [] : [...current.values()],
     ),
+    tally,
   };
 }
 
@@ -1537,6 +1599,7 @@ export async function readSimulationGradingStates(
       simulationId: row.simulationId,
       state: resolved.state,
       combinedScore: resolved.combinedScore,
+      tally: resolved.tally,
     }];
   });
 }

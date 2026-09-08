@@ -59,12 +59,14 @@ describe("one run waiting for trace grades", () => {
       (simulations.body.simulations as Array<{
         gradingState: string;
         combinedScore: number | null;
+        gradeTally: Record<string, number> | null;
         startedAt: string | null;
         endedAt: string | null;
       }>).map(
         (simulation) => ({
           gradingState: simulation.gradingState,
           combinedScore: simulation.combinedScore,
+          gradeTally: simulation.gradeTally,
           hasStartedAt: simulation.startedAt !== null,
           hasEndedAt: simulation.endedAt !== null,
         }),
@@ -73,12 +75,16 @@ describe("one run waiting for trace grades", () => {
       {
         gradingState: "pending",
         combinedScore: null,
+        // Grading is still owed, so the row names the plan and counts no
+        // result against it yet.
+        gradeTally: { passed: 0, failed: 0, errored: 0, selected: 1 },
         hasStartedAt: true,
         hasEndedAt: true,
       },
       {
         gradingState: "pending",
         combinedScore: null,
+        gradeTally: { passed: 0, failed: 0, errored: 0, selected: 1 },
         hasStartedAt: true,
         hasEndedAt: true,
       },

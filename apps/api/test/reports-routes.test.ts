@@ -620,6 +620,8 @@ describe("the lifecycle lands", () => {
       expect.objectContaining({
         id: simulationId,
         executionFailure: "the platform refused the exchange",
+        // Nothing was graded and nothing can be: no trace, so no tally.
+        gradeTally: null,
       }),
     ]);
     const detail = await ask(

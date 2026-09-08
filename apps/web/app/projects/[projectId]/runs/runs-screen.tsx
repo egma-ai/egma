@@ -52,10 +52,10 @@ function StartedAt({ instant }: { readonly instant: string }) {
     <time
       className="tabular-nums text-foreground"
       dateTime={instant}
-      title={formatViewerInstant(instant, "minute")}
+      title={formatViewerInstant(instant, "second")}
       suppressHydrationWarning
     >
-      {asListInstant(instant)}
+      {asListInstant(instant, "minute")}
     </time>
   );
 }
@@ -71,7 +71,7 @@ function columnsFor(
       key: "run",
       header: "Run",
       primary: true,
-      width: "24%",
+      width: "22%",
       cell: (run) => (
         <Link
           className="font-medium text-foreground no-underline underline-offset-4 pointer-hover:underline pointer-hover:decoration-brand focus-visible:underline"
@@ -84,13 +84,13 @@ function columnsFor(
     {
       key: "suite",
       header: "Test suite",
-      width: "20%",
+      width: "16%",
       cell: (run) => <span className="text-foreground">{suiteLabel(run)}</span>,
     },
     {
       key: "agent",
       header: "Agent",
-      width: "22%",
+      width: "18%",
       cell: (run) => (
         <span className="flex min-w-0 flex-col">
           <span className="truncate text-foreground">
@@ -101,9 +101,22 @@ function columnsFor(
       ),
     },
     {
+      key: "connection",
+      header: "Connection",
+      width: "18%",
+      cell: (run) => (
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate text-foreground">
+            {run.connectionName ?? "Unavailable connection"}
+          </span>
+          <span className="text-faint">{run.productLabel}</span>
+        </span>
+      ),
+    },
+    {
       key: "started",
       header: "Started",
-      width: "17%",
+      width: "14%",
       cell: (run) =>
         run.startedAt === null ? (
           <span className="text-faint">Not started</span>
@@ -114,7 +127,7 @@ function columnsFor(
     {
       key: "status",
       header: "Status",
-      width: "17%",
+      width: "12%",
       cell: (run) => <RunStatus status={run.status} />,
     },
     {

@@ -1,10 +1,10 @@
 "use client";
 
 import type { VariantProps } from "class-variance-authority";
-import { Loader2Icon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import {
+  type GradeTally,
   type GradingWord,
   type RunStatusWord,
   type SimulationStatusWord,
@@ -23,10 +23,9 @@ import { cn } from "@/lib/utils";
  * ------------------------------------------------------------------------ */
 
 /**
- * A run's machinery. **Nothing here is ever `good`.**
- *
- * `completed` means the work finished, which is not the same as the work going
- * well. Painting it green would answer a question this word does not ask.
+ * A run's machinery. `completed` means the work finished, which is not the
+ * same as the work going well: the verdicts live on each simulation's own
+ * square. The run's green square says only that the run is done.
  */
 const RUN_STATUS_MEANING: Readonly<Record<RunStatusWord, string>> = {
   pending: "Nothing has been claimed yet.",
@@ -48,63 +47,154 @@ export type StateMarkKind =
   | "waiting"
   | "active"
   | "complete"
+  | "passed"
   | "stopped"
   | "failed"
   | "not-requested"
   | "error";
 
 /**
- * Use text plus distinct marks for simulation, grading, and result states.
- * Run status uses text, with a loader while running.
+ * The state colour a filled square wears, by what it stands for. Yellow is
+ * work that is not settled, green is finished or passed, red is failed or
+ * errored, and grey is stopped or never asked for.
+ */
+const FILLED_MARK: Readonly<Record<StateMarkKind, string>> = {
+  waiting: "border-warning bg-warning",
+  active: "border-warning bg-warning",
+  complete: "border-success bg-success",
+  passed: "border-success bg-success",
+  stopped: "border-faint bg-faint",
+  "not-requested": "border-faint bg-faint",
+  failed: "border-failure bg-failure",
+  error: "border-failure bg-failure",
+};
+
+/**
+ * One square for every state, beside the word that says it.
+ *
+ * The outline form is the step marker beside a transcript line and the grading
+ * chip: only a failure fills. The `filled` form is the run and simulation
+ * status square, which wears its state colour and pulses while work is
+ * active. `moving` is the older spin for a chip; `pulse` wins when both are
+ * set.
  */
 export function StateMark({
   kind,
   moving = false,
+  filled = false,
+  pulse = false,
 }: {
   readonly kind: StateMarkKind;
   readonly moving?: boolean;
+  readonly filled?: boolean;
+  readonly pulse?: boolean;
 }) {
   return (
     <span
       className={cn(
         "block size-2.5 flex-none border border-current",
-        kind === "failed" || kind === "error"
-          ? "border-failure bg-failure"
-          : "bg-transparent",
+        filled
+          ? FILLED_MARK[kind]
+          : kind === "failed" || kind === "error"
+            ? "border-failure bg-failure"
+            : "bg-transparent",
       )}
       data-slot="state-mark"
       data-state-mark={kind}
-      data-motion={moving ? "active" : undefined}
+      data-filled={filled ? "true" : undefined}
+      data-motion={pulse ? "pulse" : moving ? "active" : undefined}
       aria-hidden="true"
     />
   );
 }
 
+const RUN_STATUS_MARK: Readonly<Record<RunStatusWord, StateMarkKind>> = {
+  pending: "waiting",
+  running: "active",
+  completed: "complete",
+  canceled: "stopped",
+};
+
+/**
+ * The run's word with its filled square in front. Pending and running pulse
+ * because the work is not settled; completed is green; canceled is grey, and
+ * the word stays in the ordinary ink because a stopped run is not a warning.
+ */
 export function RunStatus({
   status,
 }: {
   readonly status: RunStatusWord;
 }) {
+  const active = status === "pending" || status === "running";
   return (
     <span
-      className={cn(
-        "inline-flex min-w-0 items-center gap-2 whitespace-nowrap text-sm text-foreground",
-        status === "canceled" && "text-warning",
-      )}
+      className="inline-flex min-w-0 items-center gap-2 whitespace-nowrap text-sm text-foreground"
       data-slot="run-status"
       data-status={status}
       title={RUN_STATUS_MEANING[status]}
     >
-      {status === "running" ? (
-        <Loader2Icon
-          className="size-3.5 flex-none animate-spin motion-reduce:animate-none"
-          data-slot="run-status-loader"
-          aria-hidden="true"
-        />
-      ) : null}
+      <StateMark kind={RUN_STATUS_MARK[status]} filled pulse={active} />
       {RUN_STATUS_LABEL[status]}
     </span>
   );
+}
+
+export type SimulationSquare = {
+  readonly kind: StateMarkKind;
+  readonly pulse: boolean;
+  readonly word: string;
+};
+
+/**
+ * One square and one word for a simulation, read in a fixed order.
+ *
+ * Execution comes first: a canceled or failed simulation never graded. Then
+ * the grading work, which pulses until it settles. Then the verdict, which is
+ * per grader and never an overall threshold (ADR-0017 stands): green when
+ * every frozen grader passed its own pass threshold, red when any failed. An
+ * errored grader makes the grading state `error`, so it never reaches the
+ * count. The word beside a graded square is the count, `2/3 passed`, so the
+ * colour is never the only carrier. `claimed` is shown as `Queued`, because
+ * which simulator holds it is not the reader's business.
+ */
+export function simulationSquare(row: {
+  readonly status: SimulationStatusWord;
+  readonly gradingState: GradingWord | null;
+  readonly gradeTally: GradeTally | null;
+}): SimulationSquare {
+  switch (row.status) {
+    case "canceled":
+      return { kind: "stopped", pulse: false, word: "Canceled" };
+    case "failed":
+      return { kind: "failed", pulse: false, word: "Execution failed" };
+    case "queued":
+    case "claimed":
+      return { kind: "waiting", pulse: true, word: "Queued" };
+    case "running":
+      return { kind: "active", pulse: true, word: "Running" };
+    case "completed":
+      break;
+  }
+  switch (row.gradingState) {
+    case null:
+    case "not_requested":
+      return { kind: "not-requested", pulse: false, word: "Not graded" };
+    case "pending":
+    case "running":
+      return { kind: "active", pulse: true, word: "Grading" };
+    case "error":
+      return { kind: "error", pulse: false, word: "Grading failed" };
+    case "complete":
+      break;
+  }
+  const tally = row.gradeTally;
+  if (tally === null || tally.selected === 0) {
+    return { kind: "not-requested", pulse: false, word: "Not graded" };
+  }
+  const word = `${String(tally.passed)}/${String(tally.selected)} passed`;
+  return tally.failed > 0
+    ? { kind: "failed", pulse: false, word }
+    : { kind: "passed", pulse: false, word };
 }
 
 /**

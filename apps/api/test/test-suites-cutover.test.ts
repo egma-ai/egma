@@ -427,7 +427,7 @@ describe("the Test Suites cutover", () => {
     const registered = await request(api.app, "POST", "/v1/agents", key, {
       agentPlatform: "retell",
       name: "Front desk",
-      connection: RETELL,
+      connection: { ...RETELL, name: "Northside chat" },
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
     const agent = registered.body.agent as { id: string };
@@ -445,6 +445,7 @@ describe("the Test Suites cutover", () => {
       suiteName: "Northside Ford",
       suiteDeleted: false,
       name: "Friday regression",
+      connectionName: "Northside chat",
       expectedSimulationCount: 2,
     });
     expect(started.body.simulations).toBeUndefined();
@@ -476,9 +477,14 @@ describe("the Test Suites cutover", () => {
     expect(listed.statusCode, JSON.stringify(listed.body)).toBe(200);
     expect(listed.body.runs).toHaveLength(1);
     expect(listed.body).toHaveProperty("nextPageToken");
+    // The list names the connection each run reached, so a runs table can
+    // show it without a read per row.
+    expect((listed.body.runs as readonly Record<string, unknown>[])[0])
+      .toMatchObject({ connectionId: connection.id, connectionName: "Northside chat" });
 
     const detail = await request(api.app, "GET", `/v1/runs/${runId}`, key);
     expect(detail.statusCode, JSON.stringify(detail.body)).toBe(200);
+    expect(detail.body).toMatchObject({ connectionName: "Northside chat" });
     expect(detail.body.simulations).toBeUndefined();
     expect(detail.body.gradingPlan).toBeUndefined();
     expect(detail.body.mockTools).toBeUndefined();

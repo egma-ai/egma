@@ -49,6 +49,7 @@ import {
   gradeSummary,
   type DisplayGradeAssertion,
 } from "./grade.tsx";
+import type { GradeTally } from "../lib/runs.ts";
 import { StateMark } from "./run-status.tsx";
 
 type RecordingStatus = "absent" | "loading" | "ready" | "failed";
@@ -218,6 +219,56 @@ function scoreText(score: number | null): string {
   return score === null ? "-" : score.toFixed(2);
 }
 
+/**
+ * How many of this simulation's frozen graders passed, failed or errored,
+ * counted the way the platform counts them: one current grade per project
+ * grader in the frozen plan, measured against the threshold the plan froze.
+ *
+ * Nothing here creates an overall verdict. ADR-0017 stands: the count is the
+ * fact, and each grader keeps its own threshold.
+ */
+export function evidenceGradeTally(evidence: SimulationEvidence): GradeTally {
+  const planned = (evidence.gradingPlan?.items ?? []).map(
+    (item) => item.projectGraderId,
+  );
+  const selected = planned;
+  let passed = 0;
+  let failed = 0;
+  let errored = 0;
+  for (const projectGraderId of selected) {
+    const grade = evidence.grades.find(
+      (one) => one.projectGraderId === projectGraderId,
+    );
+    if (grade === undefined) continue;
+    if (grade.result === "errored") errored += 1;
+    else if (grade.result === "passed") passed += 1;
+    else failed += 1;
+  }
+  return { passed, failed, errored, selected: selected.length };
+}
+
+/**
+ * The count of passed graders, and what else the graders returned.
+ *
+ * Null while grading is in flight or while any selected grader has no
+ * current grade, because a partial count would read as a settled one.
+ */
+function gradersPassedText(evidence: SimulationEvidence): string | null {
+  if (evidence.gradingState === "pending" || evidence.gradingState === "running") {
+    return null;
+  }
+  const tally = evidenceGradeTally(evidence);
+  if (tally.selected === 0) return "-";
+  if (tally.passed + tally.failed + tally.errored < tally.selected) return null;
+  return [
+    `${String(tally.passed)}/${String(tally.selected)}`,
+    tally.failed === 0 ? null : `${String(tally.failed)} failed`,
+    tally.errored === 0 ? null : `${String(tally.errored)} errored`,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" · ");
+}
+
 function p90TurnLatency(metrics: readonly Measured[]): string {
   const latency = metrics.find(
     (metric) =>
@@ -247,13 +298,20 @@ function summaryValue(value: string) {
   );
 }
 
-/** The four simulation-level facts required before reading grader output. */
+/**
+ * The four simulation-level facts required before reading grader output.
+ *
+ * The first is how many graders passed, not an average of their scores: an
+ * average is one number over graders that each answered their own question,
+ * and it invites the overall verdict this product does not have.
+ */
 export function SimulationEvidenceSummary({
   evidence,
 }: {
   readonly evidence: SimulationEvidence;
 }) {
   const turns = turnsOf(evidence);
+  const gradersPassed = gradersPassedText(evidence);
   return (
     <div className="@container/summary min-w-0">
     <section
@@ -264,9 +322,16 @@ export function SimulationEvidenceSummary({
       aria-label="Simulation summary"
     >
       <div className={SUMMARY_STRIP_CELL}>
-        <span className={SUMMARY_STRIP_LABEL}>Total avg score</span>
+        <span className={SUMMARY_STRIP_LABEL}>Graders passed</span>
         <strong className={SUMMARY_VALUE}>
-          {summaryValue(scoreText(evidence.combinedScore))}
+          {gradersPassed === null ? (
+            <>
+              <span aria-hidden="true">—</span>
+              <span className="sr-only">Grading</span>
+            </>
+          ) : (
+            summaryValue(gradersPassed)
+          )}
         </strong>
       </div>
       <div className={SUMMARY_STRIP_CELL}>

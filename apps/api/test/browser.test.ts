@@ -2436,6 +2436,14 @@ describe("the complete product, walked in order in a second project", () => {
     return found ?? "";
   }
 
+  /** The run's own row on the runs list, found by the link that opens it. */
+  function runRowOn(which: Page, runAddress: string): Locator {
+    return which
+      .locator("main table tbody tr")
+      .filter({ has: which.locator(`a[href$="/runs/${runIdOf(runAddress)}"]`) });
+  }
+
+
   /** The conversation an address names, the same way. */
   function simulationIdOf(address: string): string {
     const found = /\/simulations\/(sim_[0-9A-HJKMNP-TV-Z]{26})/u.exec(
@@ -2551,24 +2559,18 @@ describe("the complete product, walked in order in a second project", () => {
    * labelled `Status`, taken by its label rather than by a class a build hashes or
    * by a sentence somebody may reword.
    */
-  async function machineryOfTheRun(which: Page): Promise<string> {
-    return which.evaluate(() => {
-      // The DOM library is deliberately not compiled into these tests, so the
-      // shape this needs is named here rather than imported.
-      const document = Reflect.get(globalThis, "document") as {
-        querySelectorAll(selector: string): Iterable<{
-          readonly textContent: string | null;
-          readonly nextElementSibling: {
-            readonly textContent: string | null;
-          } | null;
-        }>;
-      };
-      for (const label of document.querySelectorAll("main dt")) {
-        if ((label.textContent ?? "").trim() !== "Status") continue;
-        return (label.nextElementSibling?.textContent ?? "").trim();
-      }
-      return "";
-    });
+  /**
+   * The run's own status word, read off its row on the runs list. The run
+   * page stopped repeating the run facts on 2026-09-07, so the list is where
+   * the machinery is said.
+   */
+  async function machineryOfTheRun(which: Page, runAddress: string): Promise<string> {
+    const said = await runRowOn(which, runAddress)
+      .locator('[data-slot="run-status"]')
+      .first()
+      .textContent()
+      .catch(() => null);
+    return (said ?? "").trim();
   }
 
   beforeAll(async () => {
@@ -3448,14 +3450,20 @@ describe("the complete product, walked in order in a second project", () => {
       const shown = await walk.innerText("main");
       expect(shown).toContain("Reschedules a booked appointment");
       expect(shown).toContain("Impatient Rita");
-      expect(shown).toContain("Support reception");
-      // What the run was against, as it now stands — the agent, and the
-      // connection exactly as this run went over it.
-      expect(shown).toContain("The Support line");
-      expect(shown).toContain("phone_number-1");
 
       conversation = `${new URL(runAddress).pathname}/simulations/${simulation?.id ?? ""}`;
       expect(conversation).toMatch(/\/simulations\/sim_[0-9A-HJKMNP-TV-Z]{26}$/u);
+
+      // The run facts left this page on 2026-09-07. The runs list says what
+      // the run was against, as it now stands — its suite, the agent, and the
+      // connection exactly as this run went over it.
+      await walk.goto(at("runs"));
+      const runRow = runRowOn(walk, runAddress);
+      await runRow.waitFor({ timeout: 30_000 });
+      const rowSaid = await runRow.innerText();
+      expect(rowSaid).toContain("Support reception");
+      expect(rowSaid).toContain("The Support line");
+      expect(rowSaid).toContain("phone_number-1");
     },
     SETTLE,
   );
@@ -3550,18 +3558,24 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.getByRole("tab", { name: "Results summary" }).click();
       const results = walk.getByRole("tabpanel", { name: "Results summary" });
       const summary = results.getByRole("region", { name: "Simulation summary" });
-      expect(await summary.innerText()).toMatch(/Total avg score\s+0\.86/u);
+      expect(await summary.innerText()).toMatch(/Graders passed\s+1\/1/u);
+      expect(await summary.innerText()).not.toContain("Total avg score");
 
       const grades = results.getByRole("region", { name: "Grader results" });
+      expect(await grades.innerText()).toMatch(/Graders\s+1\/1 passed/u);
       const expected = grades.getByRole("region", {
         name: "Expected behaviors",
       });
-      expect(await expected.innerText()).toContain(
-        "Pass threshold 0.62 · Definition v1",
-      );
-      // The average summary is rounded for scanning. A grader result keeps
-      // the exact stored score.
-      expect(await expected.innerText()).toContain("Total Score 0.857");
+      // A passed grader starts folded: its header says the result, the exact
+      // stored score and the frozen threshold, and nothing else.
+      expect(await expected.innerText()).toContain("Result · Passed");
+      expect(await expected.innerText()).toContain("Score 0.857 · Threshold 0.62");
+      expect(await expected.innerText()).not.toContain("Definition v1");
+      expect(
+        await expected.getByRole("table", { name: "Expected behaviors results" }).count(),
+      ).toBe(0);
+      await expected.getByRole("button", { name: "Expected behaviors" }).click();
+      expect(await expected.innerText()).toContain("v1");
       expect(
         await expected
           .getByRole("table", { name: "Expected behaviors results" })
@@ -3588,9 +3602,9 @@ describe("the complete product, walked in order in a second project", () => {
        * Read the run's own status. Page-wide text matching could find a completed
        * simulation while the run incorrectly remains running.
        */
-      await walk.goto(runAddress);
+      await walk.goto(at("runs"));
       await expect
-        .poll(() => machineryOfTheRun(walk), { timeout: 30_000 })
+        .poll(() => machineryOfTheRun(walk, runAddress), { timeout: 30_000 })
         .toBe("Completed");
     },
     SETTLE,
@@ -4356,47 +4370,36 @@ describe("the complete product, walked in order in a second project", () => {
       SETTLE,
     );
 
-    /** The same text-first run status appears in list and detail forms. */
+    /**
+     * The run's status is said once, on the list, as a filled square before
+     * its word. The run page no longer repeats the run facts (developer
+     * decision, 2026-09-07): its simulations carry their own squares.
+     */
     it(
-      "keeps one status meaning on a list and on the page it links to",
+      "says the run's status on the list as a filled square and not again on the page",
       async () => {
-        const stateOf = async (): Promise<string> =>
-          walk
-            .locator('main [data-slot="run-status"][data-status="completed"]')
-            .first()
-            .evaluate((element) => {
-              if (element.getBoundingClientRect().height === 0) return "";
-              return JSON.stringify({
-                status: element.getAttribute("data-status"),
-                text: element.textContent?.trim().toLowerCase(),
-                loader:
-                  element.querySelector('[data-slot="run-status-loader"]') !== null,
-                marker: element.querySelector('[data-slot="state-mark"]') !== null,
-              });
-            })
-            .catch(() => "");
-
-        const settledState = async (): Promise<string> => {
-          let state = "";
-          await expect
-            .poll(
-              async () => {
-                state = await stateOf();
-                return state;
-              },
-              { timeout: 30_000 },
-            )
-            .not.toBe("");
-          return state;
-        };
-
         await walk.goto(at("runs"));
-        const onTheList = await settledState();
+        const status = walk
+          .locator('main [data-slot="run-status"][data-status="completed"]')
+          .first();
+        await status.waitFor({ timeout: 30_000 });
+        expect((await status.textContent())?.trim()).toBe("Completed");
+        const mark = status.locator('[data-slot="state-mark"]');
+        expect(await mark.getAttribute("data-filled")).toBe("true");
+        expect(await mark.getAttribute("data-state-mark")).toBe("complete");
+        expect(await mark.getAttribute("data-motion")).toBeNull();
+        expect(
+          await status.locator('[data-slot="run-status-loader"]').count(),
+        ).toBe(0);
 
         await walk.goto(runAddress);
-        const onThePage = await settledState();
-
-        expect(onThePage, `${onTheList} on the list`).toBe(onTheList);
+        await walk
+          .getByRole("tab", { name: "Results summary" })
+          .waitFor({ timeout: 30_000 });
+        expect(await walk.locator('main [data-slot="run-status"]').count()).toBe(0);
+        expect(
+          await walk.getByRole("group", { name: "Run summary" }).count(),
+        ).toBe(0);
       },
       SETTLE,
     );
@@ -5052,11 +5055,11 @@ describe("the complete product, walked in order in a second project", () => {
 
       // A run reads the suite's current name. Renaming does not create a suite
       // version or change the suite identity recorded on the run.
-      await walk.goto(runAddress);
-      const summary = walk.getByRole("group", { name: "Run summary" });
-      await expect.poll(() => summary.innerText()).toContain("Northside Ford");
-      expect(await summary.innerText()).not.toContain("Support reception");
-      expect(await summary.innerText()).not.toContain("(deleted)");
+      await walk.goto(at("runs"));
+      const runRow = runRowOn(walk, runAddress);
+      await expect.poll(() => runRow.innerText()).toContain("Northside Ford");
+      expect(await runRow.innerText()).not.toContain("Support reception");
+      expect(await runRow.innerText()).not.toContain("(deleted)");
 
       // And deleting is the same row's menu, under the same hairline.
       await walk.goto(at("tests"));
@@ -5093,10 +5096,11 @@ describe("the complete product, walked in order in a second project", () => {
 
       // Deleting authoring data does not delete execution evidence. The same
       // run and simulation remain, and the last suite name is marked clearly.
+      await walk.goto(at("runs"));
+      await expect
+        .poll(() => runRowOn(walk, runAddress).innerText())
+        .toContain("Northside Ford (deleted)");
       await walk.goto(runAddress);
-      await expect.poll(() => summary.innerText()).toContain(
-        "Northside Ford (deleted)",
-      );
       await walk
         .getByRole("button", { name: /Reschedules a booked appointment/u })
         .first()
@@ -5238,7 +5242,7 @@ describe("project grader model settings", () => {
       await proof.goto(`${origin}/projects/${projectId}/runs/${run.runId}`);
       await proof.getByRole("tab", { name: "Results summary" }).click();
       const results = proof.getByRole("region", { name: "Grader results" });
-      await expect.poll(() => results.innerText()).toContain("Total Score 0.667");
+      await expect.poll(() => results.innerText()).toContain("Score 0.667 · Threshold 1");
       expect(await results.innerText()).toContain("The grader could not determine whether the criterion was met.");
       await results.screenshot({ path: "/tmp/egma-grader-fractional-error-results.png" });
     } finally {

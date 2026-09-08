@@ -128,6 +128,8 @@ const runHeaderSchema = {
     status: runStatusSchema,
     agentId: stringIdSchema,
     connectionId: stringIdSchema,
+    /** The connection's current name, or null when its row is gone. */
+    connectionName: nullable(stringSchema),
     agentPlatform: nullable(stringSchema),
     connectionType: stringSchema,
     accessVariant: stringSchema,
@@ -158,6 +160,7 @@ const runHeaderSchema = {
     "status",
     "agentId",
     "connectionId",
+    "connectionName",
     "agentPlatform",
     "connectionType",
     "accessVariant",
@@ -221,6 +224,25 @@ const runDetailSchema = {
   ],
 } as const;
 
+/**
+ * How the current grades of one simulation stand against its frozen plan.
+ *
+ * `selected` counts the project graders the plan holds. The three results
+ * count the current grade of each of them, so they sum to `selected` only
+ * once every grader has a result.
+ */
+const gradeTallySchema = {
+  type: "object",
+  properties: {
+    passed: integerSchema,
+    failed: integerSchema,
+    errored: integerSchema,
+    selected: integerSchema,
+  },
+  required: ["passed", "failed", "errored", "selected"],
+  additionalProperties: false,
+} as const;
+
 const runSimulationSchema = {
   type: "object",
   properties: {
@@ -235,6 +257,8 @@ const runSimulationSchema = {
     status: simulationStatusSchema,
     gradingState: nullable(gradingStateSchema),
     combinedScore: nullable(normalizedScoreSchema),
+    /** Null when the simulation has no grading state to count. */
+    gradeTally: nullable(gradeTallySchema),
     reason: nullable(endingReasonSchema),
     executionFailure: nullable(stringSchema),
     startedAt: nullable(dateTimeSchema),
@@ -254,6 +278,7 @@ const runSimulationSchema = {
     "status",
     "gradingState",
     "combinedScore",
+    "gradeTally",
     "reason",
     "executionFailure",
     "startedAt",

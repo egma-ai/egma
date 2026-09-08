@@ -15471,6 +15471,16 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "connectionName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "agentPlatform": {
                       "anyOf": [
                         {
@@ -15631,6 +15641,7 @@
                     "status",
                     "agentId",
                     "connectionId",
+                    "connectionName",
                     "agentPlatform",
                     "connectionType",
                     "accessVariant",
@@ -15917,6 +15928,16 @@
                             "type": "string",
                             "minLength": 1
                           },
+                          "connectionName": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "agentPlatform": {
                             "anyOf": [
                               {
@@ -16077,6 +16098,7 @@
                           "status",
                           "agentId",
                           "connectionId",
+                          "connectionName",
                           "agentPlatform",
                           "connectionType",
                           "accessVariant",
@@ -16280,6 +16302,16 @@
                     "connectionId": {
                       "type": "string",
                       "minLength": 1
+                    },
+                    "connectionName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "agentPlatform": {
                       "anyOf": [
@@ -16619,6 +16651,7 @@
                     "status",
                     "agentId",
                     "connectionId",
+                    "connectionName",
                     "agentPlatform",
                     "connectionType",
                     "accessVariant",
@@ -16859,6 +16892,37 @@
                               }
                             ]
                           },
+                          "gradeTally": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "passed": {
+                                    "type": "integer"
+                                  },
+                                  "failed": {
+                                    "type": "integer"
+                                  },
+                                  "errored": {
+                                    "type": "integer"
+                                  },
+                                  "selected": {
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "passed",
+                                  "failed",
+                                  "errored",
+                                  "selected"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "reason": {
                             "anyOf": [
                               {
@@ -16935,6 +16999,7 @@
                           "status",
                           "gradingState",
                           "combinedScore",
+                          "gradeTally",
                           "reason",
                           "executionFailure",
                           "startedAt",
@@ -17407,6 +17472,16 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "connectionName": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "agentPlatform": {
                       "anyOf": [
                         {
@@ -17567,6 +17642,7 @@
                     "status",
                     "agentId",
                     "connectionId",
+                    "connectionName",
                     "agentPlatform",
                     "connectionType",
                     "accessVariant",
