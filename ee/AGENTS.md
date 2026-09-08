@@ -1,7 +1,7 @@
 # ee — Egma's commercially licensed code
 
 Everything under this directory is licensed under `ee/LICENSE`, not under the
-repository's Apache License. The root `LICENSE` says so.
+repository's MIT license. The root `LICENSE` says so.
 
 **Keep EE-only concerns out of open code paths.** The open product must build,
 boot, test and run with this package absent. That is one rule with two halves:

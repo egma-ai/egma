@@ -1,9 +1,9 @@
 {
   "name": "@egma/livekit",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Test and monitor LiveKit Agents JS workers with Egma.",
   "type": "module",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "homepage": "https://github.com/egma-ai/egma",
   "repository": {
     "type": "git",
