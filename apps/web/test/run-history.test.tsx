@@ -482,13 +482,44 @@ describe("one run after suites", () => {
     expect(firstSquare?.getAttribute("data-filled")).toBe("true");
     expect(firstSquare?.getAttribute("data-motion")).toBeNull();
     expect(within(first).getByText("Patient caller · 1/1 passed")).toBeTruthy();
-    expect(screen.getByText("1 simulation")).toBeTruthy();
+    /*
+     * The list head is one 56px bar: the word with the count as a quiet
+     * annotation on it, and no search field at all.
+     */
+    const simulationList = screen.getByRole("complementary", {
+      name: "Simulations in this run",
+    });
+    const listHead = within(simulationList).getByRole("heading", {
+      name: /^Simulations/u,
+    });
+    expect(listHead.textContent).toBe("Simulations · 1");
+    expect(listHead.parentElement?.className).toContain("pt-5");
+    expect(listHead.parentElement?.className).toContain("pb-3");
+    expect(screen.queryByText("1 simulation")).toBeNull();
+    expect(within(simulationList).queryByLabelText("Search simulations")).toBeNull();
+    expect(within(simulationList).queryByRole("searchbox")).toBeNull();
+    expect(within(simulationList).queryByRole("textbox")).toBeNull();
     const resultsTab = screen.getByRole("tab", { name: "Results summary" });
+    const transcriptTab = screen.getByRole("tab", { name: /Transcript/u });
     expect(resultsTab.getAttribute("data-state")).toBe("active");
     expect(resultsTab.className).toContain(
       "group-data-[variant=line]/tabs-list:after:-bottom-px",
     );
     expect(resultsTab.className).not.toContain("bg-selected");
+    /*
+     * The rail is drawn by the tabs themselves: two pixels of Ember under the
+     * chosen one, one neutral pixel under the other, and no rule across the
+     * whole row.
+     */
+    const rail = resultsTab.closest('[data-slot="tabs-list"]')?.parentElement;
+    expect(rail?.className).not.toContain("border-b");
+    expect(resultsTab.className).toContain("data-[state=active]:after:bg-brand");
+    for (const tab of [resultsTab, transcriptTab]) {
+      expect(tab.className).toContain("data-[state=inactive]:after:bg-border");
+      expect(tab.className).toContain(
+        "group-data-[orientation=horizontal]/tabs:data-[state=inactive]:after:h-px",
+      );
+    }
     const graderResults = await screen.findByRole("region", { name: "Grader results" });
     const expected = within(graderResults).getByRole("region", {
       name: "Expected behaviors",
@@ -519,7 +550,8 @@ describe("one run after suites", () => {
     expect(graderTrigger.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(graderTrigger);
     expect(graderTrigger.getAttribute("aria-expanded")).toBe("true");
-    expect(within(expected).getByText("v2")).toBeTruthy();
+    /* An opened section is its evidence: no version line above the table. */
+    expect(within(expected).queryByText("v2")).toBeNull();
     expect(within(expected).queryByText("Definition v2")).toBeNull();
     const behaviorTable = within(expected).getByRole("table", {
       name: "Expected behaviors results",
@@ -553,6 +585,13 @@ describe("one run after suites", () => {
     }
     expect(within(simulationSummary).queryByText("Total avg score")).toBeNull();
     expect(within(simulationSummary).getByText("1/1")).toBeTruthy();
+    /* Summary values read in the sans face, on tabular figures. */
+    expect(within(simulationSummary).getByText("1/1").className).not.toContain(
+      "font-mono",
+    );
+    expect(within(simulationSummary).getByText("1/1").className).toContain(
+      "tabular-nums",
+    );
     expect(within(simulationSummary).getByText("-")).toBeTruthy();
     expect(within(simulationSummary).queryByText("Not available")).toBeNull();
     expect(within(simulationSummary).getByText("Not recorded").className).toContain(
@@ -567,28 +606,42 @@ describe("one run after suites", () => {
     const resultsPanel = screen.getByRole("tabpanel", { name: "Results summary" });
     expect(resultsPanel.className).toContain("overflow-y-auto");
     expect(resultsPanel.parentElement?.className).toContain("overflow-hidden");
-    /* The Graders line stands over the sections and counts them. */
-    expect(within(graderResults).getByRole("heading", { name: "Graders" }))
-      .toBeTruthy();
-    expect(within(graderResults).getByText("1/1 passed")).toBeTruthy();
     /*
-     * Regrade acts on the selected simulation, so it stands in the tab rail's
-     * own row rather than inside either tab panel.
+     * The Graders line names the sections under it and counts nothing: the
+     * summary bar above already says how many passed. Regrade is the one
+     * control on that line, and it is a small square with a written label.
      */
-    const regrade = screen.getByRole("button", { name: "Regrade" });
-    const rail = resultsTab.closest('[data-slot="tabs-list"]')?.parentElement;
-    expect(rail?.contains(regrade)).toBe(true);
-    expect(resultsPanel.contains(regrade)).toBe(false);
+    const gradersHeading = within(graderResults).getByRole("heading", {
+      name: "Graders",
+    });
+    expect(within(graderResults).queryByText("1/1 passed")).toBeNull();
+    const regrade = screen.getByRole("button", {
+      name: "Regrade this simulation",
+    });
+    expect(screen.queryByRole("button", { name: "Regrade" })).toBeNull();
+    expect(gradersHeading.parentElement?.contains(regrade)).toBe(true);
+    expect(rail?.contains(regrade)).toBe(false);
+    expect(resultsPanel.contains(regrade)).toBe(true);
+    expect(regrade.getAttribute("title")).toBe("Regrade this simulation");
+    expect(regrade.className).toContain("size-5.5");
+    expect(regrade.className).toContain("pointer-coarse:size-(--tap-target)");
+    expect(regrade.hasAttribute("disabled")).toBe(false);
     expect(screen.queryByRole("link", { name: "Open full simulation" })).toBeNull();
+    /*
+     * The heading is the test's name at the body step. The square and the
+     * state word stay on the row in the list beside it.
+     */
     const selectedHeader = document.querySelector(
       '[data-slot="selected-simulation-header"]',
     );
-    expect(selectedHeader?.textContent).toBe("Books service1/1 passed");
+    expect(selectedHeader?.textContent).toBe("Books service");
+    expect(selectedHeader?.querySelector('[data-slot="state-mark"]')).toBeNull();
+    expect(selectedHeader?.className).toContain("py-4");
     expect(
-      selectedHeader
-        ?.querySelector('[data-slot="state-mark"]')
-        ?.getAttribute("data-state-mark"),
-    ).toBe("passed");
+      within(selectedHeader as HTMLElement).getByRole("heading", {
+        name: "Books service",
+      }).className,
+    ).toContain("text-base font-medium");
     expect(selectedHeader?.textContent).not.toContain("completed");
     expect(selectedHeader?.textContent).not.toContain("Graded");
     expect(screen.queryByRole("button", { name: /run again|retry/i })).toBeNull();
@@ -639,6 +692,16 @@ describe("one run after suites", () => {
     const grading = screen.getByRole("region", { name: "Simulation summary" });
     expect(within(grading).getByText("Graders passed")).toBeTruthy();
     expect(within(grading).getAllByText("—").length).toBeGreaterThan(0);
+    /*
+     * The facts come first and the notice stands under them: the bar is what
+     * the reader came for, and the notice says why it is not settled yet.
+     */
+    const notice = screen.getByText("Grading in progress").closest("[role]");
+    expect(notice?.getAttribute("role")).toBe("status");
+    expect(
+      grading.compareDocumentPosition(notice as Node) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("shows partial-transcript disclosure before the recorded conversation", async () => {
@@ -734,7 +797,7 @@ describe("one run after suites", () => {
     expect(historyDetails.getByText(/score -$/iu)).toBeTruthy();
     expect(historyDetails.queryAllByText(/—/u)).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole("button", { name: "Regrade" }));
+    fireEvent.click(screen.getByRole("button", { name: "Regrade this simulation" }));
     const dialog = screen.getByRole("dialog", { name: "Regrade “Books service”?" });
     expect(within(dialog).getByText(REGRADE_IS_NOT_A_REPLAY)).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Regrade simulation" }));
@@ -784,6 +847,77 @@ describe("one run after suites", () => {
     expect(screen.queryByText("Not started")).toBeNull();
   });
 
+  /*
+   * A conversation that has not happened has no evidence to draw. The panel
+   * says which wait this is, under the Egma mark breathing on the status
+   * square's own keyframe.
+   */
+  it("waits under the Egma mark while the conversation is still being held", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers(
+      detailStubs(
+        runDetail({ status: "running", finishedAt: null }),
+        {
+          status: 200,
+          body: {
+            simulations: [
+              simulation({
+                status: "running",
+                gradingState: null,
+                gradeTally: null,
+                combinedScore: null,
+                endedAt: null,
+              }),
+            ],
+            nextPageToken: null,
+          },
+        },
+        {
+          status: 200,
+          body: simulationEvidence({
+            status: "running",
+            gradingState: "not_requested",
+            grades: [],
+            gradeHistory: [],
+            combinedScore: null,
+            endedAt: null,
+            transcript: null,
+          }),
+        },
+      ),
+    );
+    render(<RunDetailPage />);
+
+    const panel = await screen.findByRole("tabpanel", { name: "Results summary" });
+    const mark = within(panel).getByAltText("Egma");
+    expect(mark.getAttribute("src")).toBe("/brand/egma-mark-light.svg");
+    expect(mark.getAttribute("data-slot")).toBe("waiting-mark");
+    expect(mark.getAttribute("data-motion")).toBe("pulse");
+    expect(mark.className).toContain("size-14");
+    expect(within(panel).getByText("Running")).toBeTruthy();
+    expect(
+      within(panel).getByText(
+        "The conversation is happening now. Results appear here when it ends.",
+      ),
+    ).toBeTruthy();
+    /* Nothing pretends to be evidence while there is none. */
+    expect(screen.queryByRole("region", { name: "Simulation summary" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Grader results" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Graders" })).toBeNull();
+    /* The rail is still there: the transcript is live while this runs. */
+    expect(screen.getByRole("tab", { name: "Results summary" })).toBeTruthy();
+  });
+
+  it("shows no waiting mark once the simulation has finished", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers(detailStubs());
+    render(<RunDetailPage />);
+
+    const settled = await screen.findByRole("region", { name: "Grader results" });
+    expect(within(settled).queryByAltText("Egma")).toBeNull();
+    expect(document.querySelector('[data-slot="waiting-mark"]')).toBeNull();
+  });
+
   it("shows a deleted suite as history, not as a live link", async () => {
     routed.pathname = "/projects/prj_1/runs/run_1";
     answers(detailStubs(runDetail({ suiteDeleted: true, name: null })));
@@ -817,7 +951,12 @@ describe("one run after suites", () => {
     );
     render(<RunDetailPage />);
 
-    expect(await screen.findByText("2 simulations")).toBeTruthy();
+    const paged = await screen.findByRole("complementary", {
+      name: "Simulations in this run",
+    });
+    expect(
+      within(paged).getByRole("heading", { name: /^Simulations/u }).textContent,
+    ).toBe("Simulations · 2");
     expect(screen.queryByText("1 loaded")).toBeNull();
     expect(screen.getByText("More simulations are available")).toBeTruthy();
     expect(screen.queryByText(/simulations so far/iu)).toBeNull();
@@ -874,14 +1013,16 @@ describe("one run after suites", () => {
     expect((await screen.findByRole("alert")).textContent).toContain(
       "Retell did not answer the test call. This is an execution problem, not a failed grade.",
     );
-    /* The heading carries the same square and word as the row in the list. */
+    /* The heading is the test's name; the failed square is on the row. */
     const failedHeader = document.querySelector(
       '[data-slot="selected-simulation-header"]',
     );
-    expect(failedHeader?.textContent).toBe("Books serviceExecution failed");
+    expect(failedHeader?.textContent).toBe("Books service");
+    expect(failedHeader?.querySelector('[data-slot="state-mark"]')).toBeNull();
     expect(
-      failedHeader
-        ?.querySelector('[data-slot="state-mark"]')
+      screen
+        .getByRole("button", { name: /Books service,/u })
+        .querySelector('[data-slot="state-mark"]')
         ?.getAttribute("data-state-mark"),
     ).toBe("failed");
     expect(await screen.findByText("No grading was requested")).toBeTruthy();
@@ -2161,9 +2302,19 @@ describe("one run after suites", () => {
         .getByRole("button", { name: "Expected behaviors" })
         .getAttribute("aria-expanded"),
     ).toBe("false");
+    /*
+     * A grader with no table keeps its written finding, because that is its
+     * only evidence. Neither section says which frozen version it was.
+     */
     expect(within(policy).getByText("The agent did not confirm consent.")).toBeTruthy();
-    expect(within(policy).getByText("v2")).toBeTruthy();
-    expect(within(results).getByText("1/2 passed")).toBeTruthy();
+    expect(within(policy).queryByText("v2")).toBeNull();
+    expect(within(expected).queryByText("v2")).toBeNull();
+    /* The Graders line carries no count beside its word. */
+    expect(within(results).queryByText("1/2 passed")).toBeNull();
+    expect(
+      within(results).getByRole("heading", { name: "Graders" }).parentElement
+        ?.textContent,
+    ).toBe("Graders");
   });
 
   it("keeps a chat transcript and its tool calls in one ordered detail tab", async () => {
