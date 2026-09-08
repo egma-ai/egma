@@ -59,7 +59,7 @@ function suiteLabel(run: RunRow): string {
  * width with a full minimum keeps the column off that measurement, so the
  * requested percentages hold and the name takes a second line instead.
  */
-const WRAPS = "block w-0 min-w-full whitespace-normal break-words";
+const WRAPS = "block w-0 min-w-full whitespace-normal break-words stacked:w-auto stacked:min-w-0";
 
 /** Started names a moment: the date on one line, the clock under it. */
 function StartedAt({ instant }: { readonly instant: string }) {

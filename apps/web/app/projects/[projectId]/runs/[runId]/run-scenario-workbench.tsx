@@ -567,7 +567,7 @@ function WaitingForSimulation({
         data-slot="waiting-mark"
         data-motion="pulse"
         src="/brand/egma-mark-light.svg"
-        alt="Egma"
+        alt=""
         width={56}
         height={56}
       />
@@ -606,6 +606,7 @@ function ResultSummary({
       <div className="flex min-w-0 flex-col gap-4">
         <SimulationFacts evidence={evidence} />
         <ResultNotice evidence={evidence} />
+        <GradersLine regrade={regrade} />
         <div className="border border-border bg-surface p-5 max-[40rem]:p-4">
           <h3 className="m-0 text-base font-medium text-foreground">
             No grading was requested
@@ -623,6 +624,7 @@ function ResultSummary({
       <div className="flex min-w-0 flex-col gap-4">
         <SimulationFacts evidence={evidence} />
         <ResultNotice evidence={evidence} />
+        <GradersLine regrade={regrade} />
         <div className="border border-border bg-surface p-5 max-[40rem]:p-4">
           <h3 className="m-0 text-base font-medium text-foreground">
             {stillGrading ? "Graders are preparing" : "No grades are available"}
@@ -702,9 +704,9 @@ function TranscriptAndAudio({
  * The regrade request, its refusals and its confirmation, held in one place.
  *
  * The control and the notices sit in two different parts of the panel — the
- * button at the end of the tab rail, the notices under it where both tabs can
- * see them — so the state machine lives here and each part reads it. There is
- * one dialog, and it is rendered with the notices.
+ * button on the Graders line, the notices under the tab rail where both tabs
+ * can see them — so the state machine lives here and each part reads it. There
+ * is one dialog, and it is rendered with the notices.
  */
 function useRegradeRequest({
   evidence,
@@ -1038,7 +1040,7 @@ export function RunScenarioWorkbench({
           selected simulation's heading across the fold. The count is a quiet
           annotation on the word rather than a fact of its own at the far end.
         */}
-        <header className="border-b border-border px-4 pt-5 pb-3">
+        <header className="flex min-h-(--topbar-height) items-center border-b border-border px-4">
           <h2 className="m-0 text-base font-medium text-foreground">
             Simulations{" "}
             <span className="text-sm font-normal tabular-nums text-faint">
@@ -1075,7 +1077,7 @@ export function RunScenarioWorkbench({
       <div className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-background max-[900px]:overflow-visible">
         {displayedSelected === null ? null : (
           <header
-            className="flex min-w-0 items-center border-b border-border bg-surface px-5 py-4 max-[40rem]:px-4"
+            className="flex min-h-(--topbar-height) min-w-0 items-center border-b border-border bg-surface px-5 max-[40rem]:px-4"
             data-slot="selected-simulation-header"
           >
             {/*

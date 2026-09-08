@@ -493,8 +493,8 @@ describe("one run after suites", () => {
       name: /^Simulations/u,
     });
     expect(listHead.textContent).toBe("Simulations · 1");
-    expect(listHead.parentElement?.className).toContain("pt-5");
-    expect(listHead.parentElement?.className).toContain("pb-3");
+    expect(listHead.parentElement?.className).toContain("min-h-(--topbar-height)");
+    expect(listHead.parentElement?.className).not.toContain("pt-5");
     expect(screen.queryByText("1 simulation")).toBeNull();
     expect(within(simulationList).queryByLabelText("Search simulations")).toBeNull();
     expect(within(simulationList).queryByRole("searchbox")).toBeNull();
@@ -636,7 +636,7 @@ describe("one run after suites", () => {
     );
     expect(selectedHeader?.textContent).toBe("Books service");
     expect(selectedHeader?.querySelector('[data-slot="state-mark"]')).toBeNull();
-    expect(selectedHeader?.className).toContain("py-4");
+    expect(selectedHeader?.className).toContain("min-h-(--topbar-height)");
     expect(
       within(selectedHeader as HTMLElement).getByRole("heading", {
         name: "Books service",
@@ -889,7 +889,9 @@ describe("one run after suites", () => {
     render(<RunDetailPage />);
 
     const panel = await screen.findByRole("tabpanel", { name: "Results summary" });
-    const mark = within(panel).getByAltText("Egma");
+    const mark = panel.querySelector('[data-slot="waiting-mark"]') as HTMLElement;
+    expect(mark).not.toBeNull();
+    expect(mark.getAttribute("alt")).toBe("");
     expect(mark.getAttribute("src")).toBe("/brand/egma-mark-light.svg");
     expect(mark.getAttribute("data-slot")).toBe("waiting-mark");
     expect(mark.getAttribute("data-motion")).toBe("pulse");
@@ -914,7 +916,6 @@ describe("one run after suites", () => {
     render(<RunDetailPage />);
 
     const settled = await screen.findByRole("region", { name: "Grader results" });
-    expect(within(settled).queryByAltText("Egma")).toBeNull();
     expect(document.querySelector('[data-slot="waiting-mark"]')).toBeNull();
   });
 
