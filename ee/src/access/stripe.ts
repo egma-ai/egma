@@ -179,13 +179,15 @@ export async function applyStripeEvent(
   const fact = delivery.fact;
   if (fact === undefined) return { applied: true, effect: "ignored" };
   try {
-    return await fencedDatabase().transaction(async (tx) => {
-      // The network read is inside this lock, so snapshots cannot apply in reverse.
-      if (fact.kind === "subscription") {
-        await tx.execute(
-          sql`select pg_advisory_xact_lock(hashtextextended(${`egma:stripe-subscription:${fact.customerId}`}::text, 0))`,
+    if (fact.kind === "subscription") {
+      if (readCanonical === undefined)
+        throw new Error(
+          "subscription delivery requires a current Stripe customer read",
         );
-      }
+      await refreshStripeCustomer(fact.customerId, readCanonical, at);
+      return { applied: true, effect: "plan_changed" };
+    }
+    return await fencedDatabase().transaction(async (tx) => {
       const [account] = await tx
         .select({
           id: cloudBillingAccount.id,
@@ -201,19 +203,7 @@ export async function applyStripeEvent(
         throw new Error(
           `Stripe customer ${fact.customerId} has no billing account`,
         );
-      if (fact.kind === "purchased_credit")
-        return creditFrom(tx, account, fact);
-      if (readCanonical === undefined)
-        throw new Error(
-          "subscription delivery requires a current Stripe customer read",
-        );
-      const current = await readCanonical(
-        fact.customerId,
-        account.planCode === "pro",
-        account.stripeSubscriptionId,
-      );
-      await applyCanonical(tx, account, current, at);
-      return { applied: true, effect: "plan_changed" };
+      return creditFrom(tx, account, fact);
     });
   } catch (fault) {
     await markStripeCustomerFailed(fact.customerId).catch(
@@ -226,6 +216,58 @@ export async function applyStripeEvent(
     );
     throw fault;
   }
+}
+
+/** Refresh the current organization's subscription after an authorized action. */
+export async function refreshStripeSubscription(
+  auth: AuthContext,
+  read: (
+    customerId: string,
+    needsHobbyTransition: boolean,
+    previousSubscriptionId: string | null,
+  ) => Promise<CanonicalSubscription>,
+  at: Date = new Date(),
+): Promise<CanonicalSubscription> {
+  const { account } = await accountForBillingAction(auth);
+  if (account.stripeCustomerId === null)
+    throw new Error("Stripe subscription refresh requires a linked customer");
+  return refreshStripeCustomer(account.stripeCustomerId, read, at);
+}
+
+/** Actions and webhooks read current Stripe state under the same customer lock. */
+async function refreshStripeCustomer(
+  customerId: string,
+  read: (
+    customerId: string,
+    needsHobbyTransition: boolean,
+    previousSubscriptionId: string | null,
+  ) => Promise<CanonicalSubscription>,
+  at: Date = new Date(),
+): Promise<CanonicalSubscription> {
+  return fencedDatabase().transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`egma:stripe-subscription:${customerId}`}::text, 0))`,
+    );
+    const [account] = await tx
+      .select({
+        id: cloudBillingAccount.id,
+        planCode: cloudBillingAccount.planCode,
+        periodAnchor: cloudBillingAccount.periodAnchor,
+        stripeSubscriptionId: cloudBillingAccount.stripeSubscriptionId,
+      })
+      .from(cloudBillingAccount)
+      .where(eq(cloudBillingAccount.stripeCustomerId, customerId))
+      .limit(1);
+    if (account === undefined)
+      throw new Error(`Stripe customer ${customerId} has no billing account`);
+    const current = await read(
+      customerId,
+      account.planCode === "pro",
+      account.stripeSubscriptionId,
+    );
+    await applyCanonical(tx, account, current, at);
+    return current;
+  });
 }
 
 async function applyCanonical(
@@ -270,6 +312,7 @@ async function applyCanonical(
       stripeSubscriptionRefreshedAt: at,
       stripePeriodStartedAt: current.periodStartedAt,
       stripePeriodEndsAt: current.periodEndsAt,
+      stripeCancelAt: pro ? current.cancelAt : null,
       periodAnchor,
       updatedAt: at,
     })

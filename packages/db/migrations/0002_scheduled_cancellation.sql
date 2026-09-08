@@ -1,0 +1,1 @@
+ALTER TABLE "cloud_billing_account" ADD COLUMN "stripe_cancel_at" timestamp with time zone;

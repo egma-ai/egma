@@ -228,6 +228,7 @@ type BillingAnswer = {
     allowances: { kind: string; unit: string; allowed: number | null }[];
   };
   balanceMicros: number;
+  scheduledDowngradeAt: string | null;
   periodStartedAt: string;
   resetsAt: string;
   mayManageBilling: boolean;
@@ -254,6 +255,7 @@ describe("what the Billing section reads", () => {
     expect(read.plan.name).toBe("Hobby");
     expect(read.plan.feeMicros).toBe(0);
     expect(read.balanceMicros).toBe(WELCOME_CREDIT_MICROS);
+    expect(read.scheduledDowngradeAt).toBeNull();
     expect(read.mayManageBilling).toBe(true);
     expect(read.plan.allowances).toEqual([
       { kind: "chat_simulations", unit: "simulations", allowed: 500, used: 0, overageMicrosPerMinute: 0 },
@@ -263,6 +265,21 @@ describe("what the Billing section reads", () => {
     // The month is the organization's own, counted from the day it was made.
     expect(read.periodStartedAt).toBe(PERIOD.startedAt.toISOString());
     expect(read.resetsAt).toBe(PERIOD.resetsAt.toISOString());
+  });
+
+  it("reads the saved scheduled end without requiring Stripe for the overview", async () => {
+    await aBillingDeployment("cloud_billing_scheduled_end");
+    const acme = await aCustomerWithARun("ada@acme.example", "Acme");
+    await api.database.sql(
+      "update cloud_billing_account set plan_code = 'pro', stripe_cancel_at = $2 where organization_id = $1",
+      [acme.customer.organizationId, PERIOD.resetsAt],
+    );
+    const answer = await ask(api.app, "GET", "/api/organization/billing", acme.organizationKey);
+    expect(answer.statusCode).toBe(200);
+    const read = answer.body as unknown as BillingAnswer;
+    expect(read.scheduledDowngradeAt).toBe(PERIOD.resetsAt.toISOString());
+    expect(read.balanceMicros).toBe(WELCOME_CREDIT_MICROS);
+    expect(read.ledger.entries).toHaveLength(1);
   });
 
   it("reads the account the credential names, and no other", async () => {

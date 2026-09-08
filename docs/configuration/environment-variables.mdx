@@ -521,10 +521,14 @@ you your own numbers.
 
 Setting it turns on plans, monthly allowances and a prepaid inference balance
 for every organization on the deployment. Each organization starts on the free
-Hobby plan, receives a one-time welcome credit, and pauses new work when one of
-its allowances is spent or its balance reaches zero — with a message that names
-what is spent and when it comes back. A Billing section appears under Settings
-→ Organization.
+Hobby plan and receives a one-time welcome credit. When billing is healthy,
+new work pauses if a Hobby allowance is spent or a required provider must use
+the deployment's key and the inference balance is exhausted. A saved organization
+key funds its provider independently. Pro voice usage can continue past its
+included minutes at the overage rate. Already admitted work finishes, and
+billing failures do not stop customer jobs. **Settings → Usage and billing**
+shows usage, the balance and payment actions; refusal messages link to the
+setting that can resolve the block.
 
 Nothing about that is Egma Cloud's alone. The same key gives the same billing
 on any deployment, which is what makes it a hosted service rather than a
@@ -562,6 +566,28 @@ Second, add a webhook endpoint in Stripe pointing at
 `customer.subscription.deleted`. Put its signing secret in
 `EGMA_STRIPE_WEBHOOK_SECRET` and restart. Until you do, the endpoint answers
 404 and no payment reaches a balance.
+
+### Updating pricing
+
+Edit plan fees, allowances and overage rates in `ee/src/plans.json`, then deploy
+the updated configuration. The API loads plan values at startup and retries a
+failed initialization; it does not rewrite them on each settlement interval.
+Direct database edits are not the pricing workflow.
+
+After changing a Pro fee, included voice allowance or overage rate, rerun
+`pnpm --filter @egma/ee stripe:setup` from that release with the deployment's
+`DATABASE_URL` and `EGMA_STRIPE_SECRET_KEY`. The command creates changed Stripe
+prices, moves their lookup keys and saves the identifiers used by new Pro
+Checkouts. A plan deployment alone does not update those Stripe prices.
+
+The setup command does not update existing subscriptions. Their invoices keep
+the prices they already use, while Egma's plan display reads the deployed plan
+values. Applying a changed plan to existing subscribers therefore needs a
+separate rollout decision; rerunning setup does not complete that change.
+
+Model rates are in `packages/db/src/models/rate-card.json`. Add a new entry with
+a new effective date and deploy it. Keep prior entries: stored usage keeps its
+original price references. Model rate changes do not require Stripe setup.
 
 ---
 

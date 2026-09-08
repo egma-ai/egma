@@ -186,6 +186,7 @@ export async function billingRoutes(
         })),
       },
       balanceMicros: account.balanceMicros,
+      scheduledDowngradeAt: account.stripeCancelAt?.toISOString() ?? null,
       periodStartedAt: period.startedAt.toISOString(),
       resetsAt: period.resetsAt.toISOString(),
       mayManageBilling,

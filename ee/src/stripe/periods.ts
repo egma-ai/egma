@@ -72,6 +72,7 @@ export async function currentSubscription(
       periodAnchor: null,
       periodStartedAt: null,
       periodEndsAt: null,
+      cancelAt: null,
       hobbyStartedAt: null,
     };
   const statuses: readonly string[] = [
@@ -108,6 +109,13 @@ export async function currentSubscription(
     periodAnchor: instant(selected.billing_cycle_anchor),
     periodStartedAt: instant(first[0]),
     periodEndsAt: instant(first[1]),
+    cancelAt: isPaying(selected.status)
+      ? selected.cancel_at !== null
+        ? instant(selected.cancel_at)
+        : selected.cancel_at_period_end
+          ? instant(first[1])
+          : null
+      : null,
     hobbyStartedAt: needsHobbyTransition
       ? await hobbyTransitionAt(
           gateway,

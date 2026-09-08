@@ -51,6 +51,7 @@ export function BillingActionsRow({
     );
 
   const onPro = account.plan.code === "pro";
+  const downgradeScheduled = account.scheduledDowngradeAt !== null;
 
   /**
    * Follow Stripe where it says to go, or keep the refusal.
@@ -90,12 +91,7 @@ export function BillingActionsRow({
     const answer = await downgradeAtPeriodEnd();
     setBusy(null);
     if (answer.status === "ready") {
-      setSaid(
-        answer.value.endsAt === null
-          ? "Pro will stop at the end of this period."
-          : `Pro stops on ${asListInstant(answer.value.endsAt)}. Everything it ` +
-              "includes stays available until then.",
-      );
+      onRefresh();
       return;
     }
     setSaid(
@@ -141,7 +137,18 @@ export function BillingActionsRow({
             ? "Opening Stripe…"
             : "Manage payment and invoices"}
         </Button>
-        {onPro ? (
+        {onPro && downgradeScheduled ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="ml-auto"
+            disabled={busy !== null}
+            onClick={() => void follow("portal", openPaymentPortal)}
+          >
+            Keep Pro in Stripe
+          </Button>
+        ) : onPro ? (
           <Button
             type="button"
             variant="ghost"

@@ -134,6 +134,8 @@ export const cloudBillingAccount = pgTable(
     stripeSubscriptionRefreshedAt: moment("stripe_subscription_refreshed_at"),
     stripePeriodStartedAt: moment("stripe_period_started_at"),
     stripePeriodEndsAt: moment("stripe_period_ends_at"),
+    /** Scheduled Pro end from the current Stripe subscription, cleared on undo. */
+    stripeCancelAt: moment("stripe_cancel_at"),
     stripeFailedAt: moment("stripe_failed_at"),
     stripeFailureVersion: bigint("stripe_failure_version", { mode: "number" }).notNull().default(0),
     /** Usage before this immutable boundary is excluded. */

@@ -377,10 +377,37 @@ it("confirms a downgrade and reports its actual scheduled date", async () => {
     requests.some((request) => request.path === "/api/billing/downgrade"),
   ).toBe(false);
   const dialog = screen.getByRole("dialog");
+  responses["/api/organization/billing"] = {
+    status: 200,
+    body: { ...PRO, scheduledDowngradeAt: PRO.resetsAt },
+  };
   fireEvent.click(
     within(dialog).getByRole("button", { name: "Stop Pro on Oct 15, 2026" }),
   );
-  expect(await screen.findByText(/Pro stops on Oct 15, 2026/)).toBeTruthy();
+  expect((await screen.findByText(/Pro stops on/)).textContent).toBe(
+    "Pro stops on Oct 15, 2026. Everything it includes stays available until then.",
+  );
+  expect(screen.queryByRole("button", { name: "Downgrade at period end" })).toBeNull();
+});
+it("reads a scheduled downgrade after reload and clears it after Portal undo", async () => {
+  open({ ...PRO, scheduledDowngradeAt: PRO.resetsAt });
+  expect(await screen.findByText(/Pro stops on/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Downgrade at period end" })).toBeNull();
+  responses["/api/billing/portal"] = {
+    status: 200,
+    body: { url: "https://billing.stripe.com/test" },
+  };
+  fireEvent.click(screen.getByRole("button", { name: "Keep Pro in Stripe" }));
+  await waitFor(() => expect(window.location.assign).toHaveBeenCalledWith("https://billing.stripe.com/test"));
+  responses["/api/organization/billing"] = { status: 200, body: PRO };
+  fireEvent(window, new Event("pageshow"));
+  expect(await screen.findByRole("button", { name: "Downgrade at period end" })).toBeTruthy();
+  expect(screen.queryByText(/Pro stops on/)).toBeNull();
+});
+it("lets a member read the scheduled date without exposing plan actions", async () => {
+  open({ ...PRO, mayManageBilling: false, scheduledDowngradeAt: PRO.resetsAt }, "member");
+  expect(await screen.findByText(/Pro stops on/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Keep Pro in Stripe" })).toBeNull();
 });
 it("opens the existing payment portal action", async () => {
   open(PRO);

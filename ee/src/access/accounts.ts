@@ -41,6 +41,7 @@ export type BillingAccount = {
   readonly stripeCustomerId: string | null;
   readonly stripeSubscriptionId: string | null;
   readonly stripeSubscriptionStatus: string | null;
+  readonly stripeCancelAt: Date | null;
   readonly stripeFailedAt: Date | null;
   readonly stripeFailureVersion: number;
   readonly stripePaymentsReady: boolean;
@@ -57,6 +58,7 @@ const ACCOUNT_COLUMNS = {
   stripeCustomerId: cloudBillingAccount.stripeCustomerId,
   stripeSubscriptionId: cloudBillingAccount.stripeSubscriptionId,
   stripeSubscriptionStatus: cloudBillingAccount.stripeSubscriptionStatus,
+  stripeCancelAt: cloudBillingAccount.stripeCancelAt,
   stripeFailedAt: cloudBillingAccount.stripeFailedAt,
   stripeFailureVersion: cloudBillingAccount.stripeFailureVersion,
   balanceMicros: cloudBillingAccount.balanceMicros,

@@ -18,7 +18,7 @@ import {
 } from "./support/database.ts";
 
 const BASELINE = "0000_baseline.sql";
-const CURRENT_MIGRATIONS = [BASELINE, "0001_provider_keys.sql"];
+const CURRENT_MIGRATIONS = [BASELINE, "0001_provider_keys.sql", "0002_scheduled_cancellation.sql"];
 let database: EmptyDatabase;
 let store: SingleConnection;
 let directory: string;
@@ -35,7 +35,7 @@ afterEach(async () => {
 });
 
 describe("the fresh Postgres baseline", () => {
-  it("installs the baseline and provider keys and keeps organization data on repeated boot", async () => {
+  it("installs the current migrations and keeps organization data on repeated boot", async () => {
     expect((await readMigrations()).map((migration) => migration.name)).toEqual(
       CURRENT_MIGRATIONS,
     );
@@ -72,13 +72,38 @@ describe("the fresh Postgres baseline", () => {
       [id],
     );
     expect(await runMigrations(database.url)).toEqual({
-      applied: ["0001_provider_keys.sql"],
+      applied: ["0001_provider_keys.sql", "0002_scheduled_cancellation.sql"],
       alreadyApplied: [BASELINE],
     });
     expect((await store.sql("select id,name from organization")).rows).toEqual([
       { id, name: "Before keys" },
     ]);
     expect((await store.sql("select * from provider_key")).rows).toEqual([]);
+  });
+
+  it("adds the scheduled end after provider keys without rewriting applied history", async () => {
+    for (const name of [BASELINE, "0001_provider_keys.sql"]) {
+      await writeFile(
+        path.join(directory, name),
+        await readFile(path.join(MIGRATIONS_DIRECTORY, name), "utf8"),
+      );
+    }
+    await runMigrations(database.url, directory);
+    const id = newId("org");
+    await store.sql(
+      "insert into organization (id,name,slug) values ($1,'Preserved candidate','preserved-candidate')",
+      [id],
+    );
+    expect(await runMigrations(database.url)).toEqual({
+      applied: ["0002_scheduled_cancellation.sql"],
+      alreadyApplied: [BASELINE, "0001_provider_keys.sql"],
+    });
+    expect((await store.sql("select id,name from organization")).rows).toEqual([
+      { id, name: "Preserved candidate" },
+    ]);
+    expect((await store.sql(
+      "select is_nullable from information_schema.columns where table_name = 'cloud_billing_account' and column_name = 'stripe_cancel_at'",
+    )).rows).toEqual([{ is_nullable: "YES" }]);
   });
 
   it("applies once when API instances boot concurrently", async () => {

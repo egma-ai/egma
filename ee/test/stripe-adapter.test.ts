@@ -56,6 +56,7 @@ async function account(who = acme) {
     stripe_subscription_refreshed_at: Date | null;
     stripe_period_started_at: Date | null;
     stripe_period_ends_at: Date | null;
+    stripe_cancel_at: Date | null;
   }>("select * from cloud_billing_account where organization_id = $1", [
     who.organizationId,
   ]);
@@ -88,6 +89,7 @@ const active: CanonicalSubscription = {
   periodStartedAt: PERIOD,
   periodEndsAt: RESET,
   hobbyStartedAt: null,
+  cancelAt: null,
 };
 const canceled: CanonicalSubscription = {
   ...active,
@@ -96,6 +98,23 @@ const canceled: CanonicalSubscription = {
 };
 
 describe("verified Stripe domain facts", () => {
+  it("persists scheduled Pro cancellation and clears it when Stripe confirms undo", async () => {
+    const before = await account();
+    await applyStripeEvent(trigger, PERIOD, async () => ({ ...active, cancelAt: RESET }));
+    expect(await account()).toMatchObject({
+      plan_code: "pro",
+      stripe_cancel_at: RESET,
+      period_anchor: PERIOD,
+      balance_micros: before.balance_micros,
+    });
+    await applyStripeEvent(trigger, RESET, async () => active);
+    expect(await account()).toMatchObject({
+      plan_code: "pro",
+      stripe_cancel_at: null,
+      period_anchor: PERIOD,
+      balance_micros: before.balance_micros,
+    });
+  });
   it("credits one paid Checkout Session once across concurrent distinct event IDs", async () => {
     const results = await Promise.all([
       applyStripeEvent(credit("cs_one")),

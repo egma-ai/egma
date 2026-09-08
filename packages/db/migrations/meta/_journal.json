@@ -15,6 +15,13 @@
       "when": 1788835912535,
       "tag": "0001_provider_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788839167086,
+      "tag": "0002_scheduled_cancellation",
+      "breakpoints": true
     }
   ]
 }

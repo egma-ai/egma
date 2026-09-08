@@ -363,6 +363,7 @@ describe("durable period meter progress", () => {
             periodStartedAt: null,
             periodEndsAt: null,
             hobbyStartedAt: null,
+            cancelAt: null,
           },
         }),
         AT,
@@ -901,6 +902,7 @@ describe("durable period meter progress", () => {
           periodStartedAt: null,
           periodEndsAt: null,
           hobbyStartedAt: null,
+          cancelAt: null,
         }),
       );
       expect(await progress.recovered(version, latest, AT)).toBe(false);
@@ -929,6 +931,7 @@ describe("durable period meter progress", () => {
         periodStartedAt: null,
         periodEndsAt: null,
         hobbyStartedAt: null,
+        cancelAt: null,
       },
     };
     await visit(async (progress) => {
@@ -972,6 +975,7 @@ describe("durable period meter progress", () => {
             periodStartedAt: null,
             periodEndsAt: null,
             hobbyStartedAt: null,
+            cancelAt: null,
           },
         }),
         AT,

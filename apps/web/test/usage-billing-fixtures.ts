@@ -44,6 +44,7 @@ export const HOBBY: BillingAccount = {
     })),
   },
   balanceMicros: 4_250_000,
+  scheduledDowngradeAt: null,
   periodStartedAt: USAGE.periodStartedAt,
   usageStartedAt: "2026-09-18T08:00:00.000Z",
   resetsAt: USAGE.resetsAt,

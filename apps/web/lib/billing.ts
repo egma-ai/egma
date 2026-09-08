@@ -36,6 +36,7 @@ export type BillingLedgerPage = {
 export type BillingAccount = {
   readonly plan: BillingPlan;
   readonly balanceMicros: number;
+  readonly scheduledDowngradeAt: string | null;
   readonly periodStartedAt: string;
   readonly usageStartedAt: string;
   readonly resetsAt: string;

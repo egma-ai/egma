@@ -29,6 +29,7 @@ export { seedCloudPlans, type CloudPlan, type SeededPlans } from "./plans.ts";
 export {
   accountForBillingAction,
   applyStripeEvent,
+  refreshStripeSubscription,
   resolveStripeCustomer,
   recoverUnlinkedStripeAccounts,
   recordStripeOperationFailure,

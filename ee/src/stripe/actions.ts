@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 
 import { listProjects, type AuthContext } from "@egma/db";
-import type Stripe from "stripe";
 
 import {
   accountForBillingAction,
+  refreshStripeSubscription,
   resolveStripeCustomer,
   recordStripeOperationFailure,
   type BillingActor,
@@ -12,7 +12,7 @@ import {
 import { stripeAttemptKey, stripeCustomerKey } from "../idempotency.ts";
 import { centsFromMicros, isPaying } from "./facts.ts";
 import { isEgmaStripeFailure, type StripeGateway } from "./gateway.ts";
-import { stripeCustomerIds } from "./periods.ts";
+import { currentSubscription, stripeCustomerIds } from "./periods.ts";
 
 /**
  * The four things an organization admin does with Stripe: buy credit, move to
@@ -24,12 +24,9 @@ import { stripeCustomerIds } from "./periods.ts";
  * this deployment out of the part of the problem that has a compliance regime
  * attached to it.
  *
- * **Nothing here changes a plan.** Pressing Upgrade opens a Checkout page; the
- * plan moves when Stripe says the subscription exists, through the webhook. A
- * button that set the plan itself would be a plan that could be on while the
- * payment failed, and a customer's plan and their invoice would disagree with
- * nobody to arbitrate. The one write these make to Egma's own rows is the
- * Stripe customer id, which is a name and not a state.
+ * Upgrade opens Checkout; only current Stripe facts change the local plan.
+ * Scheduling a downgrade refreshes those facts before answering, so its end
+ * date is available when the billing page reloads.
  *
  * **Every write to Stripe carries an idempotency key.** A customer's key is
  * the organization, forever, because two admins pressing a button together
@@ -326,9 +323,8 @@ export type ScheduledDowngrade = {
  *
  * **Nothing is cancelled now, and that is the rule.** The customer paid for
  * the month they are in, so `cancel_at_period_end` is set and Stripe ends the
- * subscription when the period does — at which point the deleted webhook puts
- * the organization back on Hobby with its own creation date as the anchor
- * again.
+ * subscription when the period does. The actual transition to Hobby starts
+ * a new full allowance month anchored at that transition time.
  */
 export async function scheduleDowngrade(
   gateway: StripeGateway,
@@ -339,32 +335,26 @@ export async function scheduleDowngrade(
     requireWebhook(gateway, actor.account.stripePaymentsReady);
     const subscriptionId = actor.account.stripeSubscriptionId;
     const status = actor.account.stripeSubscriptionStatus;
-    if (subscriptionId === null || status === null || !isPaying(status)) {
+    const customerId = actor.account.stripeCustomerId;
+    if (subscriptionId === null || customerId === null || status === null || !isPaying(status)) {
       throw new BillingStateError(
         "This organization has no Pro subscription to stop. It is on the " +
           "Hobby plan already.",
       );
     }
 
-    const subscription = await gateway.api.subscriptions.update(
+    await gateway.api.subscriptions.update(
       subscriptionId,
       { cancel_at_period_end: true },
       { idempotencyKey: stripeAttemptKey("downgrade", randomUUID()) },
     );
-    return { endsAt: endOfPeriodOf(subscription) };
+    const current = await refreshStripeSubscription(
+      auth,
+      (id, needsHobbyTransition, previousSubscriptionId) =>
+        currentSubscription(gateway, id, needsHobbyTransition, previousSubscriptionId),
+    );
+    return { endsAt: current.cancelAt };
   });
-}
-
-/** When the subscription's current period runs out, as its items state it. */
-function endOfPeriodOf(subscription: Stripe.Subscription): Date | null {
-  for (const item of subscription.items.data) {
-    if (item.current_period_end != null) {
-      return new Date(item.current_period_end * 1_000);
-    }
-  }
-  return subscription.cancel_at === null
-    ? null
-    : new Date(subscription.cancel_at * 1_000);
 }
 
 /**

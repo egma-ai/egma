@@ -24,6 +24,7 @@ export type CanonicalSubscription = {
   readonly periodAnchor: Date | null;
   readonly periodStartedAt: Date | null;
   readonly periodEndsAt: Date | null;
+  readonly cancelAt: Date | null;
   readonly hobbyStartedAt: Date | null;
 };
 

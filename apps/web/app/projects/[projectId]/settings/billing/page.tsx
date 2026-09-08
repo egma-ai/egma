@@ -11,6 +11,7 @@ import {
   type BillingAccount,
 } from "@/lib/billing";
 import { readPeriodUsage, type PeriodUsage } from "@/lib/organization-usage";
+import { asListInstant } from "@/lib/instants";
 import { BillingActionsRow } from "@/ui/billing";
 import {
   BillingHistory,
@@ -157,6 +158,15 @@ function UsageAndBillingBody({ projectId }: { readonly projectId: string }) {
                       ]}
                     />
                   </Card>
+                  {account.scheduledDowngradeAt === null ? null : (
+                    <p className="m-0 text-sm text-muted-foreground" role="status">
+                      Pro stops on{" "}
+                      <time className="tabular-nums" dateTime={account.scheduledDowngradeAt}>
+                        {asListInstant(account.scheduledDowngradeAt)}
+                      </time>
+                      . Everything it includes stays available until then.
+                    </p>
+                  )}
                   {account.mayManageBilling ? (
                     <BillingActionsRow
                       account={account}
