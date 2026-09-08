@@ -17,6 +17,8 @@ PYTHON_SDK = ROOT / "sdks/python"
 # Rejection below the telemetry floor, minimum support, minor boundaries,
 # the customer pin, and the highest reviewed release.
 JS_VERSIONS = ("1.5.0", "1.5.5", "1.6.0", "1.6.4", "1.7.0", "1.7.1")
+# Keep the previously locked version and the releases between the floor and lock.
+PYTHON_INTERMEDIATE_VERSIONS = ("1.6.9", "1.7.0", "1.7.1")
 LIVE_TESTS = ("test_live_room_detection.py", "test_live_mockable.py")
 
 
@@ -34,7 +36,8 @@ def python_versions():
     locked = next(
         item["version"] for item in lock["package"] if item["name"] == "livekit-agents"
     )
-    return tuple(dict.fromkeys((floor[1], locked))), project["dependency-groups"]["dev"]
+    versions = tuple(dict.fromkeys((floor[1], *PYTHON_INTERMEDIATE_VERSIONS, locked)))
+    return versions, project["dependency-groups"]["dev"]
 
 
 def run(command, log, *, cwd=ROOT):
@@ -173,25 +176,26 @@ def main():
         if not parallel_checks(versions, check, directory):
             return 1
         if args.language == "python":
-            # The existing real-room fixture owns one fixed server port. Run it
-            # once, on the locked version, after both core suites have finished.
-            print("Running Python live tests once on the locked version", flush=True)
-            locked_dir = directory / versions[-1]
-            run(
-                [
-                    str(locked_dir / "venv/bin/python"),
-                    "-m",
-                    "pytest",
-                    "-c",
-                    str(PYTHON_SDK / "pyproject.toml"),
-                    "-q",
-                    "-o",
-                    f"cache_dir={locked_dir / 'pytest-cache'}",
-                    *(str(PYTHON_SDK / "tests" / name) for name in LIVE_TESTS),
-                ],
-                None,
-                cwd=locked_dir,
-            )
+            # The real-room fixture owns one fixed server port, so test the
+            # versions sequentially after their core suites.
+            for version in versions:
+                print(f"Running Python live tests on LiveKit {version}", flush=True)
+                version_dir = directory / version
+                run(
+                    [
+                        str(version_dir / "venv/bin/python"),
+                        "-m",
+                        "pytest",
+                        "-c",
+                        str(PYTHON_SDK / "pyproject.toml"),
+                        "-q",
+                        "-o",
+                        f"cache_dir={version_dir / 'pytest-cache'}",
+                        *(str(PYTHON_SDK / "tests" / name) for name in LIVE_TESTS),
+                    ],
+                    None,
+                    cwd=version_dir,
+                )
     return 0
 
 

@@ -12,20 +12,18 @@ implementations. Match observed calls to mock answers by tool name; this adapter
 does not compare returned values to the submitted answer. Keep non-speech
 platform messages in platform_notes, outside the persona's transcript.
 
-Wire assumptions require live validation; the local stub cannot prove them:
-- POST /agent-playground-completion/{agent_id} and its messages field.
-- Acceptance of tool_mocks and current_component_id.
-- New-messages-only replies and agent_ended.
-- Returned variable names and whether they contain a delta or the full set.
-See the opt-in live text-mode tests before relying on these assumptions.
+Request fields follow Retell's published playground contract:
+https://docs.retellai.com/api-references/agent-playground-completion
+Version is a query parameter. The local stub checks request shape; live tests
+check provider behavior.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
-from urllib.parse import quote
+from typing import Any, Literal, Required, TypedDict
+from urllib.parse import quote, urlencode
 
 import aiohttp
 
@@ -44,7 +42,7 @@ COMPLETION_PATH = "/agent-playground-completion"
 """Where the completion answers, before the agent's own id. Named here so a
 refusal can say it, and so one live correction is one edit."""
 
-MATCH_ANYTHING = "any"
+MATCH_ANYTHING: Literal["any"] = "any"
 """How a native mock is matched: by tool name, whatever the arguments were.
 
 Egma's own rule, said in Retell's word for it. A mock tool never reads a
@@ -52,6 +50,27 @@ call's arguments — wrong arguments are caught by grading, not by matching,
 because the arguments are on the record either way — so any other rule
 would be egma answering for a tool sometimes, which is not a thing the
 record could honestly say."""
+
+# Request fields: https://docs.retellai.com/api-references/agent-playground-completion
+class MatchAny(TypedDict):
+    type: Literal["any"]
+
+
+class PlaygroundToolMock(TypedDict):
+    tool_name: str
+    input_match_rule: MatchAny
+    output: str
+    result: bool
+
+
+class PlaygroundBody(TypedDict, total=False):
+    messages: Required[list[dict[str, Any]]]
+    dynamic_variables: dict[str, str]
+    tool_mocks: list[PlaygroundToolMock]
+    current_node_id: str
+    component_id: str
+    current_state: str
+
 
 TIMEOUT_SECONDS = 60.0
 """The most one completion may take. Generous because it waits on the
@@ -80,16 +99,14 @@ a simulation that slept through it would report a shorter exchange than the
 test asked for — the very thing the bounded retry exists to prevent. Past
 this the honest answer is to fail naming the throttle."""
 
-RESUME_KEYS = ("current_node_id", "current_component_id", "current_state")
+RESUME_KEYS = ("current_node_id", "component_id", "current_state")
 """Where the engine had got to, in the platform's own names. Threaded and
 never read: which of them a given agent uses is the agent's business, and a
 plug that decided would be a plug with an opinion about somebody else's
 engine."""
 
-VARIABLE_KEYS = ("retell_llm_dynamic_variables", "dynamic_variables")
-"""What a reply may call the variables as they now stand. Two names because
-the outbound one is well attested and the inbound one is not; the first
-present wins, and a live run settles which it is."""
+VARIABLE_KEYS = ("dynamic_variables", "retell_llm_dynamic_variables")
+"""Prefer the documented field; accept the legacy response spelling."""
 
 AGENT_ROLE = "agent"
 USER_ROLE = "user"
@@ -190,10 +207,10 @@ class RetellTextMode:
             mock_tools if isinstance(mock_tools, MockToolSeam) else MockToolSeam()
         )
         answers = self._mock_tools.answers()
-        self._mocks = [
+        self._mocks: list[PlaygroundToolMock] = [
             {
                 "tool_name": answer.tool_name,
-                "input_match_rule": MATCH_ANYTHING,
+                "input_match_rule": {"type": MATCH_ANYTHING},
                 "output": answer.served,
                 # Retell serves the answer either way; this is how it is
                 # told to hand the agent a failure rather than a value.
@@ -270,16 +287,14 @@ class RetellTextMode:
 
     # -- The one request this plug makes, and how it is read ------------------
 
-    def _asked(self) -> dict[str, Any]:
+    def _asked(self) -> PlaygroundBody:
         """Build a request with history, supplied version, current variables, mock
         tools,
         and resume state. Omit absent values rather than sending empty placeholders.
         """
-        asked: dict[str, Any] = {"messages": list(self._history)}
-        if self._agent_version is not None:
-            asked["agent_version"] = self._agent_version
+        asked: PlaygroundBody = {"messages": list(self._history)}
         if self._variables:
-            asked["retell_llm_dynamic_variables"] = self._variables
+            asked["dynamic_variables"] = self._variables
         if self._mocks:
             asked["tool_mocks"] = self._mocks
         asked.update(self._resume)
@@ -410,6 +425,8 @@ class RetellTextMode:
             raise PlugError("the retell text-mode plug was used outside its lifecycle")
 
         url = f"{self._base_url}{self.completion_path}"
+        if self._agent_version is not None:
+            url += "?" + urlencode({"version": self._agent_version})
         attempts = 0
         while True:
             status, body, asked_for = await self._attempt(session, url, payload)
@@ -535,7 +552,7 @@ def _ended(answered: dict, messages: list) -> bool:
     messages is the agent saying it in the way a Retell agent ends any
     exchange, and a reply carrying one without the flag still ended.
     """
-    if answered.get("agent_ended") is True:
+    if answered.get("call_ended") is True:
         return True
     return any(
         isinstance(message, dict)

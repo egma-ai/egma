@@ -324,7 +324,11 @@ importers:
         specifier: ^3.887.0
         version: 3.1114.0
 
-  packages/retell: {}
+  packages/retell:
+    dependencies:
+      retell-sdk:
+        specifier: 5.64.0
+        version: 5.64.0
 
   packages/simulation-contract:
     dependencies:
@@ -3991,6 +3995,9 @@ packages:
   ret@0.5.0:
     resolution: {integrity: sha512-I1XxrZSQ+oErkRR4jYbAyEEu2I0avBvvMM5JN+6EBprOGRCs63ENqZ3vjavq8fBw2+62G5LF5XelKwuJpcvcxw==}
     engines: {node: '>=10'}
+
+  retell-sdk@5.64.0:
+    resolution: {integrity: sha512-3hlnpqBROOpaYeAJ2pcUIdkn3Ce+sIZpy4FpLmPE3I7DaGgXAn/5Q8Z7fIspsmSZHdHFQmNsHc+cz+dDYp/AcQ==}
 
   reusify@1.1.0:
     resolution: {integrity: sha512-g6QUff04oZpHs0eG5p83rFLhHeV00ug/Yf9nZM6fLeUrPguBTkTQOdpAWWspMh55TZfVQDPaN3NQJfbVRAxdIw==}
@@ -8075,6 +8082,8 @@ snapshots:
   resolve-pkg-maps@1.0.0: {}
 
   ret@0.5.0: {}
+
+  retell-sdk@5.64.0: {}
 
   reusify@1.1.0: {}
 

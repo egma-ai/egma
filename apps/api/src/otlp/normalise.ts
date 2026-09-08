@@ -116,6 +116,7 @@ const LIVEKIT_KINDS: Readonly<Record<string, string>> = {
   llm_fallback_adapter: "model",
   llm_request: "model",
   llm_request_run: "model",
+  realtime_inference: "model",
   tts_node: "tts",
   tts_stream_adapter: "tts",
   tts_fallback_adapter: "tts",

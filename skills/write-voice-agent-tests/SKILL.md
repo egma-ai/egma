@@ -54,7 +54,8 @@ D. Mock tools
   - To create a mock tool, use the exact tool name supplied to the agent and the same response shape that the real tool returns. A Mock Tool contains exactly one of the following in its result json that will be supplied to the agent during simulation
     - `answer` for a successful result
     - `error` for a failed/erronous result
-  - For livekit agents, you will need to setup the agent with egma sdk in order to use mock tools. egma has support for livekit-agents python and js/ts with dedicated sdks. Refer [Egma livekit python sdk](https://docs.egma.ai/integrations/python-sdk) or [Egma livekit js sdk](https://docs.egma.ai/integrations/javascript-sdk) for info on how to setup the agent code to listen for mock tools.
+  - If egma tests are being written in this repo for the first time - err on the side of writing mocks for write tools. If the agent has only read tools, mock atleast one read tool. If the agent has no tools, you can skip writing mocks. 
+  - For livekit agents, you will need to setup the agent with egma sdk in order to use mock tools. egma has support for livekit-agents python and js/ts with dedicated sdks. Refer [Egma livekit python package](https://pypi.org/project/egma/) or [Egma livekit js sdk](https://www.npmjs.com/package/@egma/livekit) for info on how to setup the agent code to listen for mock tools.
 
 E. Session initiation data
   - Many agents need per-session context and certain dynamic variables supplied before they speak even a single word - such as an organisation name which they represent, tenant ID, or some other agent configuration needed for the agent to do its job properly in production. Egma provides a way to supply this data for each simulation so that it is as close to the agent's production behavior as possible. 
