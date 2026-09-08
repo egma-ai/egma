@@ -132,7 +132,11 @@ async function requestSimulationGrade(claim: SimulationClaim): Promise<string> {
   return traceId;
 }
 
-async function appendSuccess(claim: GradingClaim): Promise<void> {
+/** One grade for the claim's single grader. A null score is a graded error. */
+async function appendScore(
+  claim: GradingClaim,
+  score: number | null,
+): Promise<void> {
   const entry = claim.entries[0];
   if (entry === undefined) throw new Error(`${claim.id} has no grader`);
   await appendGrades(claim.auth, [{
@@ -144,12 +148,18 @@ async function appendSuccess(claim: GradingClaim): Promise<void> {
     graderDefinitionId: entry.graderDefinitionId,
     graderDefinitionVersion: entry.graderDefinitionVersion,
     parameterValues: entry.parameterValues,
-    score: 1,
-    details: { rationale: "met" },
+    score,
+    details: score === null
+      ? { error: "the judge did not answer" }
+      : { rationale: "read" },
     graderPassThreshold: entry.graderPassThreshold,
     gradingSequence: claim.sequenceBase + claim.attempts,
     gradedAtMicroseconds: BigInt(Date.now()) * 1_000n,
   }]);
+}
+
+async function appendSuccess(claim: GradingClaim): Promise<void> {
+  await appendScore(claim, 1);
 }
 
 beforeAll(async () => {
@@ -230,6 +240,7 @@ describe("run grading progress", () => {
       simulationId: claim.id,
       state: "pending",
       combinedScore: null,
+      tally: { passed: 0, failed: 0, errored: 0, selected: 1 },
     })));
 
     const firstTrace = await requestSimulationGrade(claims[0]!);
@@ -249,11 +260,13 @@ describe("run grading progress", () => {
         simulationId: claims[0]!.id,
         state: "complete",
         combinedScore: 1,
+        tally: { passed: 1, failed: 0, errored: 0, selected: 1 },
       },
       {
         simulationId: claims[1]!.id,
         state: "pending",
         combinedScore: null,
+        tally: { passed: 0, failed: 0, errored: 0, selected: 1 },
       },
     ]);
 
@@ -280,13 +293,204 @@ describe("run grading progress", () => {
         simulationId: claims[0]!.id,
         state: "complete",
         combinedScore: 1,
+        tally: { passed: 1, failed: 0, errored: 0, selected: 1 },
       },
       {
+        // An abandoned job that appended nothing: the plan still selects one
+        // grader and no current grade counts against it.
         simulationId: claims[1]!.id,
         state: "error",
         combinedScore: null,
+        tally: { passed: 0, failed: 0, errored: 0, selected: 1 },
       },
     ]);
+  });
+
+  it("counts each current grade of a simulation against its frozen plan", async () => {
+    const created = await createAgent(auth, {
+      agentPlatform: "retell",
+      name: "Tally desk",
+      connection: {
+        agentPlatform: "retell",
+        connectionType: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
+        modality: "chat",
+        config: { retellAgentId: "agent_in_retell_tally" },
+        credentials: { apiKey: "retell-tally-secret-A1B2C3D4" },
+      },
+    });
+    const callers = await Promise.all(
+      ["Ada", "Ben", "Cara", "Dee"].map((name) =>
+        createPersona(auth, {
+          name,
+          identityName: `${name} Marsh`,
+          personality: "Patient",
+          language: "en-US",
+        })),
+    );
+    const suite = await createTestSuite(auth, { name: "Tally" });
+    await createTest(auth, {
+      suiteId: suite.id,
+      name: "Confirm Friday",
+      scenario: "Book an appointment on Friday.",
+      expectedBehaviors: ["confirms Friday"],
+      personaIds: callers.map((caller) => caller.id),
+    });
+    const run = await startRun(auth, {
+      suiteId: suite.id,
+      agentId: created.id,
+      connectionId: created.connection?.id ?? "",
+    });
+    const claims = await ownClaims(run.id);
+    expect(claims).toHaveLength(4);
+    for (const claim of claims) {
+      await startSimulation(auth, claim.id, SIMULATOR);
+      await completeSimulation(auth, claim.id, SIMULATOR, {
+        endingReason: "agent_ended",
+      });
+    }
+    const [passing, failing, erroring, waiting] = claims as readonly [
+      SimulationClaim,
+      SimulationClaim,
+      SimulationClaim,
+      SimulationClaim,
+    ];
+
+    const stateOf = async (claim: SimulationClaim) => {
+      const [state] = await readSimulationGradingStates(auth, [{
+        simulationId: claim.id,
+        runId: claim.runId,
+      }]);
+      return state;
+    };
+    const gradeOnce = async (claim: SimulationClaim, score: number | null) => {
+      const traceId = await requestSimulationGrade(claim);
+      const job = await gradingClaim(traceId);
+      await appendScore(job, score);
+      await finishGradingJob(job.auth, job.id, job.claimedBy);
+    };
+
+    // The seeded grader passes at 1, so a whole score passes and a zero fails.
+    await gradeOnce(passing, 1);
+    await expect(stateOf(passing)).resolves.toEqual({
+      simulationId: passing.id,
+      state: "complete",
+      combinedScore: 1,
+      tally: { passed: 1, failed: 0, errored: 0, selected: 1 },
+    });
+
+    await gradeOnce(failing, 0);
+    await expect(stateOf(failing)).resolves.toEqual({
+      simulationId: failing.id,
+      state: "complete",
+      combinedScore: 0,
+      tally: { passed: 0, failed: 1, errored: 0, selected: 1 },
+    });
+
+    // A graded error is a result the tally counts, not missing work.
+    await gradeOnce(erroring, null);
+    await expect(stateOf(erroring)).resolves.toEqual({
+      simulationId: erroring.id,
+      state: "error",
+      combinedScore: null,
+      tally: { passed: 0, failed: 0, errored: 1, selected: 1 },
+    });
+
+    // Work still waiting reads no grade, so the tally names the plan alone.
+    const waitingTrace = await requestSimulationGrade(waiting);
+    await expect(stateOf(waiting)).resolves.toEqual({
+      simulationId: waiting.id,
+      state: "pending",
+      combinedScore: null,
+      tally: { passed: 0, failed: 0, errored: 0, selected: 1 },
+    });
+    const held = await gradingClaim(waitingTrace);
+    await expect(stateOf(waiting)).resolves.toEqual({
+      simulationId: waiting.id,
+      state: "running",
+      combinedScore: null,
+      tally: { passed: 0, failed: 0, errored: 0, selected: 1 },
+    });
+    await appendSuccess(held);
+    await finishGradingJob(held.auth, held.id, held.claimedBy);
+  });
+
+  it("has no tally where the plan selects no grader", async () => {
+    const { rows } = await database.sql<{ id: string; scope: unknown }>(
+      "select id, scope from project_grader where project_id = $1",
+      [projectId],
+    );
+    const grader = rows[0];
+    if (grader === undefined) throw new Error("the project has no grader");
+    await database.sql(
+      "update project_grader set scope = $2::jsonb where id = $1",
+      [grader.id, JSON.stringify({ simulations: [], production: null })],
+    );
+    try {
+      const created = await createAgent(auth, {
+        agentPlatform: "retell",
+        name: "Ungraded desk",
+        connection: {
+          agentPlatform: "retell",
+          connectionType: "retell_chat_api",
+          accessVariant: "retell_chat_api.api_key",
+          modality: "chat",
+          config: { retellAgentId: "agent_in_retell_ungraded" },
+          credentials: { apiKey: "retell-ungraded-secret-A1B2C3D4" },
+        },
+      });
+      const caller = await createPersona(auth, {
+        name: "Eve",
+        identityName: "Eve Nakamura",
+        personality: "Direct",
+        language: "en-US",
+      });
+      const suite = await createTestSuite(auth, { name: "Ungraded" });
+      await createTest(auth, {
+        suiteId: suite.id,
+        name: "Ask the hours",
+        scenario: "Ask when the desk opens.",
+        expectedBehaviors: ["states the opening time"],
+        personaIds: [caller.id],
+      });
+      const run = await startRun(auth, {
+        suiteId: suite.id,
+        agentId: created.id,
+        connectionId: created.connection?.id ?? "",
+      });
+      const [claim] = await ownClaims(run.id);
+      if (claim === undefined) throw new Error(`${run.id} has no simulation`);
+      await startSimulation(auth, claim.id, SIMULATOR);
+
+      // Before the conversation ends there is no grading state at all.
+      await expect(readSimulationGradingStates(auth, [{
+        simulationId: claim.id,
+        runId: claim.runId,
+      }])).resolves.toEqual([{
+        simulationId: claim.id,
+        state: null,
+        combinedScore: null,
+        tally: null,
+      }]);
+
+      await completeSimulation(auth, claim.id, SIMULATOR, {
+        endingReason: "agent_ended",
+      });
+      await expect(readSimulationGradingStates(auth, [{
+        simulationId: claim.id,
+        runId: claim.runId,
+      }])).resolves.toEqual([{
+        simulationId: claim.id,
+        state: "not_requested",
+        combinedScore: null,
+        tally: null,
+      }]);
+    } finally {
+      await database.sql(
+        "update project_grader set scope = $2::jsonb where id = $1",
+        [grader.id, JSON.stringify(grader.scope)],
+      );
+    }
   });
 
   it("freezes the provider span time when it precedes the simulation clock", async () => {

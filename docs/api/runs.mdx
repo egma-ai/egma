@@ -93,6 +93,11 @@ embed every simulation.
   The selected connection.
 </ResponseField>
 
+<ResponseField name="connectionName" type="string | null">
+  The connection's current name. A rename also changes this value on old runs.
+  It is `null` when the connection no longer exists.
+</ResponseField>
+
 <ResponseField name="expectedSimulationCount" type="integer">
   The number of test and persona combinations planned for this run.
 </ResponseField>
@@ -192,6 +197,14 @@ Simulation status is `queued`, `claimed`, `running`, `completed`, `failed`, or
 `not_requested`, `pending`, `running`, `complete`, or `error`. It is `null` when
 the simulation has not produced a completed trace, including after execution
 fails or is canceled.
+
+`gradeTally` counts the current grades against the frozen plan: `selected` is
+the number of project graders the plan holds, and `passed`, `failed`, and
+`errored` count the current grade of each of them. Grading still owed is
+counted by none of the three, so the three sum to `selected` only when every
+selected grader has a result. It is `null` when there is no grading state to
+count: the simulation produced no completed trace, or its plan selects no
+grader.
 
 ## Get a simulation and its grades
 
