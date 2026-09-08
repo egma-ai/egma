@@ -477,7 +477,7 @@ jobs:
         if: steps.decide.outputs.platform == 'true' && env.REPLACE_PRODUCTION == 'true'
         run: |
           set -euo pipefail
-          for _ in $(seq 1 180); do
+          for _ in $(seq 1 540); do
             identity=$(curl -fsS "$DEPLOYMENT_HEALTH_URL" 2>/dev/null || true)
             if jq -e --arg sha "$GITHUB_SHA" \
               '.status == "ok" and .releaseSha == $sha' <<<"$identity" >/dev/null 2>&1; then
@@ -486,7 +486,7 @@ jobs:
             fi
             sleep 10
           done
-          echo "Deployment did not report release $GITHUB_SHA within 30 minutes." >&2
+          echo "Deployment did not report release $GITHUB_SHA within 90 minutes." >&2
           exit 1
 
       - name: Yield when a newer merge owns the web deployment
