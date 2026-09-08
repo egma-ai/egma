@@ -8,11 +8,9 @@ import type { Answer } from "@/lib/api";
 import {
   readBillingAccount,
   moneyLabel,
-  feeLabel,
   type BillingAccount,
 } from "@/lib/billing";
 import { readPeriodUsage, type PeriodUsage } from "@/lib/organization-usage";
-import { asListInstant } from "@/lib/instants";
 import { BillingActionsRow } from "@/ui/billing";
 import {
   BillingHistory,
@@ -149,26 +147,11 @@ function UsageAndBillingBody({ projectId }: { readonly projectId: string }) {
                       facts={[
                         { label: "Plan", value: account.plan.name },
                         {
-                          label: "Plan fee",
-                          value: <span className="tabular-nums">{feeLabel(account.plan)}</span>,
-                        },
-                        {
                           label: "Inference balance",
                           value: (
                             <span className="tabular-nums">
                               {moneyLabel(account.balanceMicros)}
                             </span>
-                          ),
-                        },
-                        {
-                          label: "Next reset",
-                          value: (
-                            <time
-                              dateTime={account.resetsAt}
-                              className="tabular-nums"
-                            >
-                              {asListInstant(account.resetsAt)}
-                            </time>
                           ),
                         },
                       ]}
