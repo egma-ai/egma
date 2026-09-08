@@ -35,7 +35,7 @@ repository. Read its startup code, prompts, and tools. Connect it to my Egma
 project and show me the agent and connection to use for a test run.
 ```
 
-Egma supports [Retell](/guides/retell) and [LiveKit](/guides/livekit). Have the provider credentials available in your terminal or deployment secret store. Keep secret values out of prompts and test files.
+Egma supports [LiveKit](/guides/livekit) and [Retell](/guides/retell). Have the provider credentials available in your terminal or deployment secret store. Keep secret values out of prompts and test files.
 
 For LiveKit, follow the [Python SDK](/tools/livekit-python-sdk) or [JavaScript SDK](/tools/livekit-javascript-sdk) instructions. Every simulation needs `await simulation(agent, ctx, session)` in the worker, including tests without mocks. Set the worker's `EGMA_URL` and project-scoped `EGMA_API_KEY`. For production monitoring, also call `monitor(ctx)` at the start of the job entrypoint and deploy the worker before checking for conversations in Egma.
 

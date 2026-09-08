@@ -17,16 +17,16 @@ Use Python 3.11 or newer and `livekit-agents>=1.6.6,<1.9`.
 <CodeGroup>
 
 ```bash uv
-uv add 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'
+uv add egma
 ```
 
 ```bash pip
-pip install 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'
+pip install egma
 ```
 
 </CodeGroup>
 
-Keep the resolved source revision in your dependency lock file. The SDK also requires `openai>=2,<3`; let your package manager resolve that range with your LiveKit dependencies.
+Keep the resolved package version in your dependency lock file. The SDK also requires `openai>=2,<3`; let your package manager resolve that range with your LiveKit dependencies.
 
 ## Configure Egma
 

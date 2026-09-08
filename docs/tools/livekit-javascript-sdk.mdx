@@ -9,27 +9,13 @@ Use `simulation` for every LiveKit simulation, including tests without mocks. Yo
 
 ## Install
 
-Build the current SDK from the Egma repository, then install its package in your agent repository. Use Git, Node.js 24 or newer for the source build, and pnpm 10.24.0:
+Use Node.js 22 or newer. Install the published package in your voice agent’s repository:
 
 ```bash
-npm install --global pnpm@10.24.0
+npm install @egma/livekit
 ```
 
-Run the following from your agent repository. The source checkout is temporary; the built package and source revision stay in `vendor/`:
-
-```bash
-EGMA_SDK_SOURCE="$(mktemp -d)"
-git clone --depth 1 https://github.com/egma-ai/egma.git "$EGMA_SDK_SOURCE"
-pnpm --dir "$EGMA_SDK_SOURCE" --filter egma --filter @egma/livekit install --frozen-lockfile
-pnpm --dir "$EGMA_SDK_SOURCE" --filter @egma/livekit build
-pnpm --dir "$EGMA_SDK_SOURCE/sdks/livekit-js" pack --out "$EGMA_SDK_SOURCE/egma-livekit.tgz"
-mkdir -p vendor
-cp "$EGMA_SDK_SOURCE/egma-livekit.tgz" vendor/egma-livekit.tgz
-git -C "$EGMA_SDK_SOURCE" rev-parse HEAD > vendor/egma-livekit.commit
-npm install ./vendor/egma-livekit.tgz
-```
-
-Keep the tarball, recorded source revision, and dependency lock file in Git so CI installs the same SDK. The installed package runs on Node.js 22 or newer.
+Keep your dependency lock file in Git so your team and CI use the same version.
 
 | Function | Supported `@livekit/agents` versions |
 | --- | --- |

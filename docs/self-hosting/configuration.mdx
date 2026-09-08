@@ -88,7 +88,7 @@ Keep direct application ports `3100` and `3101` private through your server's ne
 
 From another machine, verify that you can sign in at the public instance URL, run a test, and play its recording. Retell must be able to reach the instance URL for mock-tool callbacks. LiveKit workers must be able to reach it to send simulation and monitoring traces.
 
-Install the [Python SDK](/tools/livekit-python-sdk) or [JavaScript SDK](/tools/livekit-javascript-sdk) in each LiveKit worker. Call `monitor(ctx)` first in its job entrypoint for production monitoring, and `await simulation(agent, ctx, session)` before starting a simulation session. The simulation call is required even when a test has no mocks. Keep the worker's source dependency current when updating the platform.
+Install the [Python SDK](/tools/livekit-python-sdk) or [JavaScript SDK](/tools/livekit-javascript-sdk) in each LiveKit worker. Call `monitor(ctx)` first in its job entrypoint for production monitoring, and `await simulation(agent, ctx, session)` before starting a simulation session. The simulation call is required even when a test has no mocks. Keep the worker's SDK dependency current when updating the platform.
 
 ### Ports
 
