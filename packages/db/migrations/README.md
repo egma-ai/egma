@@ -13,9 +13,9 @@ During this pre-launch baseline reset, rebuild disposable development databases
 that used a different baseline. The application does not convert or erase an
 existing database, and its migration checksum checks remain enabled.
 
-Every migration ledger starts at this exact baseline. A build refuses unknown
-rows without that marker. With it, an older build may ignore rows appended by a
-newer build so a normal additive rollback can still boot.
+Every migration ledger starts at this exact baseline. A build refuses changed
+checksums and any recorded migration it does not contain. Run a build that
+contains the database's complete migration history.
 
 One rule keeps every deploy and every rollback safe, and it binds both
 stores — the Postgres files here and the ClickHouse files in
