@@ -1,4 +1,3 @@
-import ProjectSettingsPage from "../page.tsx";
+import ProjectSettingsPage from "./project-settings-page.tsx";
 
-/** The project form keeps its own address while Settings opens organization-wide work. */
 export default ProjectSettingsPage;

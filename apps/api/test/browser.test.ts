@@ -284,12 +284,12 @@ describe("adding a colleague, with no mail configured", () => {
     "hands the link to the inviter, and following it lands the colleague inside",
     async () => {
       await openPeopleSettings(page);
-      expect(await page.getByText("Invite somebody").count()).toBe(0);
+      expect(await page.getByText("Invite team members").count()).toBe(0);
       // People and invitations are two views of this settings page. The tab
       // keeps that navigation clear without making either view look like a
       // form choice.
       await page.getByRole("tab", { name: "Invitations" }).click();
-      await page.waitForSelector("text=Invite somebody");
+      await page.waitForSelector("text=Invite team members");
 
       await page.fill("#invite-email", "bob@acme.example");
       await page.selectOption("#invite-role", "viewer");
@@ -869,7 +869,9 @@ describe("what a project recorded in production", () => {
       // project like every other product page and the selector stays on screen
       // throughout it. Its own navigation is what separates the settings that
       // belong to this project from the ones that belong to the organization.
-      await page.waitForURL(new RegExp(`/projects/${project}/settings$`));
+      await page.waitForURL(
+        new RegExp(`/projects/${project}/settings/organization$`),
+      );
       await page
         .getByRole("navigation", { name: "Settings" })
         .getByRole("link", { name: "People" })
@@ -2285,12 +2287,16 @@ describe("the project grader library", () => {
         .poll(() => details.innerText(), { timeout: 30_000 })
         .toContain("Turn response latency");
       expect(await details.innerText()).toContain(
-        "Maximum response time (p90): 3 seconds by default",
+        "Maximum acceptable response latency: 3 seconds by default",
       );
       await details.getByRole("button", { name: "Use in project" }).click();
       await details.getByLabel("Grades simulations").click();
       await details.getByLabel("All simulations").click();
-      await details.getByLabel("Maximum response time (p90)").fill("2.5");
+      await details
+        .getByRole("spinbutton", {
+          name: "Maximum acceptable response latency*",
+        })
+        .fill("2.5");
       await details.getByRole("button", { name: "Use in project" }).click();
 
       await page.getByText("Grader added to Active graders.").waitFor();
@@ -2309,7 +2315,9 @@ describe("the project grader library", () => {
       });
       expect(
         await activeLatencyDetails
-          .getByLabel("Maximum response time (p90)")
+          .getByRole("spinbutton", {
+            name: "Maximum acceptable response latency*",
+          })
           .inputValue(),
       ).toBe("2.5");
       await activeLatencyDetails.getByRole("button", { name: "Cancel" }).click();
@@ -3211,7 +3219,9 @@ describe("the complete product, walked in order in a second project", () => {
       const thresholdEditor = walk.getByRole("dialog", {
         name: "Expected behaviors",
       });
-      await thresholdEditor.getByLabel("Pass threshold").fill("0.62");
+      await thresholdEditor
+        .getByRole("spinbutton", { name: "Pass threshold*" })
+        .fill("0.62");
       await thresholdEditor.getByRole("button", { name: "Save changes" }).click();
       await walk.waitForSelector("text=Grader changes saved.");
       await expect
@@ -3495,7 +3505,7 @@ describe("the complete product, walked in order in a second project", () => {
         'section[aria-labelledby="run-evidence-conversation"]',
       );
       expect(await emptyConversation.innerText()).toMatch(
-        /Conversation\s+-\s+No conversation recorded/u,
+        /Conversation\s+No conversation recorded/u,
       );
       expect(await walk.locator("audio").count()).toBe(0);
     },
@@ -3768,7 +3778,8 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "Settings",
         address: at("settings"),
-        says: "Save project",
+        lands: at("settings", "organization"),
+        says: "Save organization",
       },
       {
         what: "People",
@@ -3781,9 +3792,9 @@ describe("the complete product, walked in order in a second project", () => {
         says: "Create a key",
       },
       {
-        what: "Organization",
-        address: at("settings", "organization"),
-        says: "Save organization",
+        what: "Project Settings",
+        address: at("settings", "project"),
+        says: "Save project",
       },
     ];
   }
@@ -5141,9 +5152,13 @@ describe("project grader model settings", () => {
       await create.getByLabel("Passes when").fill("The agent thanks the caller.");
       await create.getByLabel("Fails when").fill("The agent is rude.");
       await create.getByLabel("Language model").selectOption("openai/gpt-4o-mini");
-      await create.getByLabel("Pass threshold").fill("2");
+      await create
+        .getByRole("spinbutton", { name: "Pass threshold*" })
+        .fill("2");
       expect(await create.getByRole("button", { name: "Create grader" }).isDisabled()).toBe(true);
-      await create.getByLabel("Pass threshold").fill("1");
+      await create
+        .getByRole("spinbutton", { name: "Pass threshold*" })
+        .fill("1");
       await create.getByRole("button", { name: "Create grader" }).click();
       await create.waitFor({ state: "hidden" });
       const customRow = proof.locator("table").getByRole("row").filter({ hasText: "Model proof grader" });

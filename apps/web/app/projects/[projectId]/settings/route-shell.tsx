@@ -17,7 +17,6 @@ const SETTINGS_PAGE: Record<SettingsSection, { readonly title: string }> = {
 };
 
 function sectionAt(pathname: string): SettingsSection {
-  if (pathname.endsWith("/settings")) return "project";
   if (pathname.endsWith("/billing")) return "billing";
   if (pathname.endsWith("/provider-api-keys")) return "provider-api-keys";
   if (pathname.endsWith("/people")) return "people";
