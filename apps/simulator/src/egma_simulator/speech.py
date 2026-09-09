@@ -17,6 +17,7 @@ import sys
 import urllib.parse
 from array import array
 from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from functools import cache
 from typing import Any
@@ -601,17 +602,29 @@ def _ears(
     return leg, connected
 
 
-def _daytona_deepgram_connect(
+@asynccontextmanager
+async def _daytona_deepgram_connect(
     url: str, extra_headers: dict[str, str] | None = None
-) -> Any:
+) -> AsyncGenerator[Any, None]:
     """Open Deepgram through Daytona's proxy with credentials in headers."""
+    from deepgram.core.api_error import ApiError
     from websockets.asyncio.client import connect
+    from websockets.exceptions import InvalidStatus
 
-    return connect(
-        url,
-        additional_headers=extra_headers,
-        proxy=True,
-    )
+    try:
+        async with connect(
+            url,
+            additional_headers=extra_headers,
+            proxy=True,
+        ) as protocol:
+            yield protocol
+    except InvalidStatus as fault:
+        if fault.response.status_code not in {401, 403}:
+            raise
+        raise ApiError(
+            status_code=fault.response.status_code,
+            body="Websocket initialized with invalid credentials.",
+        ) from fault
 
 
 def _connection_opened_by(leg: FrameProcessor) -> asyncio.Event:

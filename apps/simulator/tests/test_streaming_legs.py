@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -157,7 +158,7 @@ def test_cartesia_stt_receives_the_pinned_model(
     assert connected is not None
 
 
-def test_daytona_deepgram_sends_its_key_through_the_environment_proxy(
+async def test_daytona_deepgram_sends_its_key_through_the_environment_proxy(
     monkeypatch: pytest.MonkeyPatch,
 ):
     from deepgram.listen.v1 import client as deepgram_listen_client
@@ -171,9 +172,18 @@ def test_daytona_deepgram_sends_its_key_through_the_environment_proxy(
     )
     calls: list[tuple[str, dict[str, Any]]] = []
 
-    def connect(url: str, **kwargs: Any) -> object:
+    protocol = object()
+
+    class Connected:
+        async def __aenter__(self) -> object:
+            return protocol
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    def connect(url: str, **kwargs: Any) -> Connected:
         calls.append((url, kwargs))
-        return object()
+        return Connected()
 
     monkeypatch.setattr(websocket_client, "connect", connect)
     _ears(
@@ -189,12 +199,11 @@ def test_daytona_deepgram_sends_its_key_through_the_environment_proxy(
         _daytona_deepgram_connect
     )
     connector = deepgram_listen_client.websockets_client_connect
-    connector(
+    async with connector(
         "wss://api.deepgram.com/v1/listen",
-        extra_headers={
-            "Authorization": "Token dtn_secret_deepgram_under_test",
-        },
-    )
+        extra_headers={"Authorization": "Token dtn_secret_deepgram_under_test"},
+    ) as connected:
+        assert connected is protocol
     assert calls == [
         (
             "wss://api.deepgram.com/v1/listen",
@@ -206,6 +215,37 @@ def test_daytona_deepgram_sends_its_key_through_the_environment_proxy(
             },
         )
     ]
+
+
+async def test_daytona_deepgram_redacts_modern_auth_failure(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from deepgram.core.api_error import ApiError
+    from websockets.asyncio import client as websocket_client
+    from websockets.exceptions import InvalidStatus
+
+    class Rejected:
+        async def __aenter__(self) -> object:
+            raise InvalidStatus(SimpleNamespace(status_code=401))
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr(
+        websocket_client, "connect", lambda *_args, **_kwargs: Rejected()
+    )
+    placeholder = "dtn_secret_deepgram_under_test"
+
+    with pytest.raises(ApiError) as caught:
+        async with _daytona_deepgram_connect(
+            "wss://api.deepgram.com/v1/listen",
+            extra_headers={"Authorization": f"Token {placeholder}"},
+        ):
+            pass
+
+    assert caught.value.status_code == 401
+    assert caught.value.headers is None
+    assert placeholder not in str(caught.value)
 
 
 def test_non_daytona_deepgram_keeps_the_sdk_connector(
