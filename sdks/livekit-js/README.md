@@ -18,7 +18,7 @@ For a repo using pnpm:
 pnpm add @egma/livekit@latest
 ```
 
-The SDK needs Node.js 22 or newer. Both `simulation` and `monitor` require `@livekit/agents>=1.5.5 <2`, even though the package's peer range starts at 1.5.0. Check compatibility with the worker's existing dependencies before upgrading and keep the resolved versions in the repo's lockfile.
+The SDK needs Node.js 22 or newer. Both `simulation` and `monitor` require `@livekit/agents>=1.5.5 <2`. Check compatibility with the worker's existing dependencies before upgrading and keep the resolved versions in the repo's lockfile.
 
 ## 2. Setup the worker's environment
 

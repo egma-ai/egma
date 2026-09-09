@@ -98,10 +98,19 @@ describe("LiveKit Agents 1.7 trace attributes", () => {
       { kind: "turn:agent", text: "You are booked." },
     ]);
     expect(first.spans[0]?.spanId).not.toBe(inputOnly.spanId);
+    expect(first.spans[0]).toMatchObject({
+      startedAtMicroseconds: START / 1_000n,
+      durationNanoseconds: 0n,
+    });
     expect(first.spans[1]?.spanId).toBe(inputOnly.spanId);
-    expect(first.spans[1]).toMatchObject({ kind: "other", text: "" });
+    expect(first.spans[1]).toMatchObject({
+      kind: "other",
+      text: "",
+      startedAtMicroseconds: START / 1_000n,
+      durationNanoseconds: 1_000_000_000n,
+    });
     expect(first.spans[0]?.payload).toContain(
-      '"egma.projection":{"source":"lk.pii.user_input"}',
+      '"egma.projection":{"source":"lk.pii.user_input","duration":"unmeasured"}',
     );
     expect(first.spans[0]?.payload).toContain('"name":"agent_turn"');
     expect(first.spans.map(({ spanId }) => spanId)).toEqual(

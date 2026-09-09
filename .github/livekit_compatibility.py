@@ -14,9 +14,9 @@ from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON_SDK = ROOT / "sdks/python"
-# Rejection below the telemetry floor, minimum support, minor boundaries,
-# the customer pin, and the highest reviewed release.
-JS_VERSIONS = ("1.5.0", "1.5.5", "1.6.0", "1.6.4", "1.7.0", "1.7.1")
+# Minimum support, minor boundaries, the customer pin, and the highest
+# reviewed release.
+JS_VERSIONS = ("1.5.5", "1.6.0", "1.6.4", "1.7.0", "1.7.1")
 # Keep the previously locked version and the releases between the floor and lock.
 PYTHON_INTERMEDIATE_VERSIONS = ("1.6.9", "1.7.0", "1.7.1")
 LIVE_TESTS = ("test_live_room_detection.py", "test_live_mockable.py")

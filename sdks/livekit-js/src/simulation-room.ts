@@ -548,11 +548,10 @@ function installLifecycle({
     console.info(
       `Egma: simulation ${JSON.stringify(roomName)} ${why}; closing its AgentSession.`,
     );
-    void session.close().catch((error: unknown) => {
-      console.warn(
-        `Egma: simulation ${JSON.stringify(roomName)} could not close its AgentSession after ${why}. ${messageOf(error)}`,
-      );
-    });
+    // LiveKit's guarded shutdown coalesces this lifecycle signal with its own
+    // RoomIO participant-disconnect handler. Calling close() directly here can
+    // run two teardown paths at once and lose the final session span.
+    session.shutdown({ drain: true });
   };
 
   const participantDisconnected = (participant: {

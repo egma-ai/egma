@@ -618,15 +618,16 @@ describe("egma.simulation", () => {
       identity: "somebody-else",
     });
     const oneSession = session();
-    const close = vi.spyOn(oneSession, "close").mockResolvedValue();
+    const shutdown = vi.spyOn(oneSession, "shutdown");
 
     await simulation(agent, asJobContext(ctx), oneSession);
     ctx.room.depart("somebody-else");
     await Promise.resolve();
-    expect(close).not.toHaveBeenCalled();
+    expect(shutdown).not.toHaveBeenCalled();
 
     ctx.room.depart("egma-persona-sim_129_departure");
-    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(shutdown).toHaveBeenCalledOnce();
+    expect(shutdown).toHaveBeenCalledWith({ drain: true });
 
     await ctx.shutdownCallbacks.at(-1)!();
     expect(ctx.room.eventNames()).toEqual([]);
@@ -636,14 +637,41 @@ describe("egma.simulation", () => {
     const agent = agentWithTool("check_calendar", async () => "real");
     const ctx = context("egma-sim-sim_129_room_loss");
     const oneSession = session();
-    const close = vi.spyOn(oneSession, "close").mockResolvedValue();
+    const shutdown = vi.spyOn(oneSession, "shutdown");
 
     await simulation(agent, asJobContext(ctx), oneSession);
     ctx.room.disconnect();
 
-    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+    expect(shutdown).toHaveBeenCalledOnce();
+    expect(shutdown).toHaveBeenCalledWith({ drain: true });
     await ctx.shutdownCallbacks.at(-1)!();
     expect(ctx.room.eventNames()).toEqual([]);
+  });
+
+  it("shares LiveKit's guarded shutdown when the caller departure reaches both listeners", async () => {
+    const agent = agentWithTool("check_calendar", async () => "real");
+    const ctx = context("egma-sim-sim_129_native_close");
+    const oneSession = session();
+    const closed: unknown[] = [];
+
+    await simulation(agent, asJobContext(ctx), oneSession);
+    const exported = whatEgmaExports();
+    await oneSession.start({ agent });
+    oneSession.on(voice.AgentSessionEventTypes.Close, (event) => {
+      closed.push(event);
+    });
+    ctx.room.on("participantDisconnected", () => {
+      (oneSession as unknown as {
+        _closeSoon(options: { reason: string }): void;
+      })._closeSoon({ reason: "participant_disconnected" });
+    });
+
+    ctx.room.depart("egma-persona");
+
+    await vi.waitFor(() => expect(closed).toHaveLength(1), { timeout: 5_000 });
+    expect(
+      exported.getFinishedSpans().filter(({ name }) => name === "agent_session"),
+    ).toHaveLength(1);
   });
 
   it("refuses a second claimant that arrives as the selected persona is returned", async () => {

@@ -155,7 +155,7 @@ function callerInputSpanId(traceId: string, spanId: string): string {
 /** Mark a derived row while retaining the complete decoded native payload. */
 function callerInputPayload(payload: string): string {
   return (
-    `{"egma.projection":{"source":"lk.pii.user_input"},` +
+    `{"egma.projection":{"source":"lk.pii.user_input","duration":"unmeasured"},` +
     payload.slice(1)
   );
 }
@@ -782,6 +782,9 @@ export function normaliseOtlpExport(
           const caller: NewSpan = {
             ...normalised,
             spanId: callerInputSpanId(traceId, spanId),
+            // LiveKit timestamps acceptance on the agent turn. Its duration
+            // includes response work and is not a caller-input duration.
+            durationNanoseconds: 0n,
             kind: "turn:human",
             text: callerInput,
             payload: callerInputPayload(payload),
