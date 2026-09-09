@@ -713,8 +713,13 @@ describe("the transcript time rail", () => {
       />,
     );
 
-    expect(screen.getByText("-")).toBeTruthy();
     expect(screen.getByText("No conversation recorded")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "This simulation finished without a recorded conversation or tool calls.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText("-")).toBeNull();
     expect(screen.queryByText("Nothing was said")).toBeNull();
     expect(
       screen.queryByText("Egma filed no spoken turns for this simulation."),
