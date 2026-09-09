@@ -532,7 +532,20 @@ def wait_for_agent_spans(
         ):
             return records
         time.sleep(0.1)
-    raise AssertionError("the SDK sent no attributed OTLP spans within 30s")
+    observed_counts: dict[str, int] = {}
+    for record in records:
+        name = str(record.get("name", "<missing>"))
+        observed_counts[name] = observed_counts.get(name, 0) + 1
+    observed_names = set(observed_counts)
+    missing_names = sorted(required_names - observed_names)
+    mismatched_references = sum(
+        record.get("provider_reference") != provider_reference for record in records
+    )
+    raise AssertionError(
+        "the SDK did not send all required attributed OTLP spans within 30s; "
+        f"missing names: {missing_names}; observed counts: {observed_counts}; "
+        f"provider-reference mismatches: {mismatched_references}"
+    )
 
 
 def assert_no_secret_in_artifacts(directory: Path) -> None:
@@ -906,6 +919,9 @@ def run_workbench_case(
         agent_spans = wait_for_agent_spans(
             otlp_records, provider_reference, required_names
         )
+        # The final customer evidence must arrive while the worker still owns
+        # the job. A process exit is not a completion protocol.
+        worker.require_running()
         caller_inputs = [
             record["attributes"].get(
                 "lk.pii.user_input"
@@ -959,6 +975,7 @@ def run_workbench_case(
             "mock_call": True,
             "mock_call_count": len(successful_mock_calls),
             "sdk_span_count": len(agent_spans),
+            "worker_alive_after_final_evidence": True,
             "provider_reference": provider_reference,
         }
         (directory / f"{language}-{modality}-proof-summary.json").write_text(

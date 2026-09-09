@@ -1,7 +1,6 @@
 import { loadIngestionSettings } from "@egma/ingestion";
 import { spawn, type ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -27,10 +26,11 @@ import {
   type ObjectStorage,
 } from "./support/object-storage.ts";
 import { NEUTRAL_PERSON } from "./support/traces.ts";
+import { openBrowser } from "./support/browser.ts";
 
 /**
  * Run the shipped Python simulator against the API, Postgres, ClickHouse,
- * and a local Retell chat counterpart, then grade its stored evidence with
+ * and a local Retell text-mode counterpart, then grade its stored evidence with
  * the real grader service and a scripted judge. No live provider is involved.
  *
  * Hold the terminal report at the API while checking evidence visibility;
@@ -45,6 +45,9 @@ const SIMULATOR_DIRECTORY = path.join(
   API_DIRECTORY,
   "../simulator",
 );
+const SIMULATOR_PYTHON = path.join(SIMULATOR_DIRECTORY, ".venv/bin/python");
+const LIVE_PROVIDER = process.env["SIMULATION_E2E_LIVE"] === "1";
+const LIVE_MODEL_KEY = process.env["LIVEKIT_E2E_OPENAI_API_KEY"]?.trim() ?? "";
 
 /** The token the instance support configures on the API's side. */
 const SERVICE_TOKEN = "egma_st_held-by-this-test-suite-alone";
@@ -60,24 +63,43 @@ const REFUSED_KEY = "retell-secret-NOBODY0000000";
  * passes this read, then the conversation endpoint refuses it, as can happen
  * when a provider credential is revoked between preflight and dispatch.
  */
-const RETELL_CHAT_PREFLIGHT: typeof fetch = async (input) => {
+const RETELL_TEXT_MODE_PREFLIGHT: typeof fetch = async (input) => {
   const url = String(input);
-  if (!url.includes("/v2/list-agents")) {
-    throw new Error(`unexpected Retell preflight read: ${url}`);
+  if (url.includes("/v2/list-phone-numbers")) {
+    return new Response(JSON.stringify({ items: [], has_more: false }), {
+      status: 200,
+    });
   }
-  return new Response(
-    JSON.stringify({
-      items: [
-        {
-          agent_id: "agent_under_test",
-          agent_name: "Front desk",
-          channel: "chat",
-        },
-      ],
+  if (url.includes("/get-agent/")) {
+    return new Response(JSON.stringify({
+      agent_id: "agent_under_test",
+      version: 7,
+      is_published: true,
+      response_engine: {
+        type: "conversation-flow",
+        conversation_flow_id: "flow_under_test",
+        version: 7,
+      },
+    }), { status: 200 });
+  }
+  if (url.includes("/get-conversation-flow/")) {
+    return new Response(JSON.stringify({
+      conversation_flow_id: "flow_under_test",
+      version: 7,
+      nodes: [],
+    }), { status: 200 });
+  }
+  if (url.includes("/v2/list-agents")) {
+    return new Response(JSON.stringify({
+      items: [{
+        agent_id: "agent_under_test",
+        agent_name: "Front desk",
+        channel: "voice",
+      }],
       has_more: false,
-    }),
-    { status: 200 },
-  );
+    }), { status: 200 });
+  }
+  throw new Error(`unexpected Retell preflight read: ${url}`);
 };
 
 /**
@@ -123,11 +145,8 @@ async function waitForSignal(
 }
 
 /**
- * A Retell-shaped chat platform on loopback: the three endpoints the shipped
- * plug speaks — create-chat, create-chat-completion, end-chat — with
- * Retell's own field names, bearer-key auth, and a scripted agent behind
- * them. Strict where the platform is: a wrong key answers 401, which is the
- * failed pass's whole way in.
+ * A Retell-shaped text-mode platform on loopback, with Retell's field names,
+ * bearer-key auth, full-history requests, and a scripted agent behind it.
  */
 class RetellCounterpart {
   private server: http.Server | undefined;
@@ -136,8 +155,6 @@ class RetellCounterpart {
     "Done: you are moved to Wednesday at half past two.",
   ];
 
-  /** Reply cursor per chat, so two exchanges cannot eat each other's script. */
-  private readonly delivered = new Map<string, number>();
   /**
    * Hold the first agent answer so the pass can inspect a stable, live
    * Simulation. Earlier evidence has flushed, but the conversation cannot
@@ -186,44 +203,24 @@ class RetellCounterpart {
     }
 
     const url = request.url ?? "";
-    if (request.method === "POST" && url === "/create-chat") {
-      const chatId = `chat_${randomUUID().replaceAll("-", "").slice(0, 10)}`;
-      this.delivered.set(chatId, 0);
-      send(201, {
-        chat_id: chatId,
-        message_with_tool_calls: [
-          { role: "agent", content: "Lakeside Dental, how can I help?" },
-        ],
-      });
-      return;
-    }
-    if (request.method === "POST" && url === "/create-chat-completion") {
-      const { chat_id: chatId } = JSON.parse(body) as { chat_id?: string };
-      const turn = chatId === undefined ? undefined : this.delivered.get(chatId);
-      if (chatId === undefined || turn === undefined) {
-        send(422, { error: "no such chat" });
-        return;
-      }
+    if (request.method === "POST" && url.startsWith("/agent-playground-completion/")) {
+      const asked = JSON.parse(body) as { messages?: unknown[] };
+      const turn = Math.max(0, Math.floor((asked.messages?.length ?? 0) / 2));
       const reply = this.replies[turn];
       if (reply === undefined) {
         send(422, { error: "the script ran dry" });
         return;
       }
       const answer = (): void => {
-        this.delivered.set(chatId, turn + 1);
         send(200, { messages: [{ role: "agent", content: reply }] });
       };
-      if (turn === 0 && !this.hasHeldFirstCompletion) {
+      if (turn === 1 && !this.hasHeldFirstCompletion) {
         this.hasHeldFirstCompletion = true;
         this.firstCompletionArrived.open();
         void this.firstCompletionCanAnswer.opened.then(answer);
         return;
       }
       answer();
-      return;
-    }
-    if (request.method === "PATCH" && url.startsWith("/end-chat/")) {
-      send(200, {});
       return;
     }
     send(404, { error: `nothing at ${url}` });
@@ -259,14 +256,14 @@ describe("the Retell-shaped counterpart", () => {
     await server.start();
     try {
       const response = await fetch(
-        `http://127.0.0.1:${server.port}/create-chat`,
+        `http://127.0.0.1:${server.port}/agent-playground-completion/agent_under_test`,
         {
           method: "POST",
           headers: {
             authorization: `Bearer ${COUNTERPART_KEY}`,
             "content-type": "application/json",
           },
-          body: JSON.stringify({ agent_id: "agent_under_test" }),
+          body: JSON.stringify({ messages: [] }),
         },
       );
       await response.body?.cancel();
@@ -292,7 +289,7 @@ const THE_BEHAVIOR = "confirms the new time back before finishing";
  * shown a transcript egma assembled out of the spans the simulator streamed,
  * and the turn it pointed at is the turn holding these words.
  */
-const THE_PHRASE = "Wednesday afternoon";
+const THE_PHRASE = "Wednesday at half past two";
 
 /**
  * The pass needs somewhere for evidence to become durable, because the whole of
@@ -352,6 +349,7 @@ async function call(
  */
 async function signedUpKey(): Promise<{
   key: string;
+  cookie: string;
   userId: string;
   organizationId: string;
   projectId: string;
@@ -378,6 +376,7 @@ async function signedUpKey(): Promise<{
   expect(minted.status, JSON.stringify(minted.body)).toBe(201);
   return {
     key: String(minted.body.secret),
+    cookie,
     userId: landed.userId,
     organizationId: landed.organization.id,
     projectId: landed.project.id,
@@ -597,9 +596,12 @@ beforeAll(async () => {
   // The trace store gets its schema here, because this pass reads the
   // conversation back out of it rather than only off the row.
   instance = await startInstance("simulator_pass", {
-    web: false,
+    web: LIVE_PROVIDER,
     traces: true,
-    retellFetch: RETELL_CHAT_PREFLIGHT,
+    ...(LIVE_PROVIDER && LIVE_MODEL_KEY !== ""
+      ? { providerKeys: { openai: LIVE_MODEL_KEY } }
+      : {}),
+    retellFetch: RETELL_TEXT_MODE_PREFLIGHT,
     ...(storage.available ? { ingestStore: storage.ingestStore } : {}),
     beforeApiListen(api) {
       api.addHook("preHandler", async (request) => {
@@ -650,7 +652,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
     async () => {
       const { key, userId, organizationId, projectId } = await signedUpKey();
 
-      // The agent and the way to reach it — a retell chat connection whose
+      // The agent and the way to reach it — a Retell text-mode connection whose
       // key the counterpart accepts, and a second whose key it refuses.
       const registered = await call("POST", "/v1/agents", {
         key,
@@ -659,8 +661,8 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           name: "Front desk",
           connection: {
             agentPlatform: "retell",
-            connectionType: "retell_chat_api",
-            accessVariant: "retell_chat_api.api_key",
+            connectionType: "retell_text_mode",
+            accessVariant: "retell_text_mode.api_key",
             modality: "chat",
             config: { retellAgentId: "agent_under_test" },
             credentials: { apiKey: COUNTERPART_KEY },
@@ -675,8 +677,8 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         key,
         body: {
           agentPlatform: "retell",
-          connectionType: "retell_chat_api",
-          accessVariant: "retell_chat_api.api_key",
+          connectionType: "retell_text_mode",
+          accessVariant: "retell_text_mode.api_key",
           modality: "chat",
           config: { retellAgentId: "agent_under_test" },
           credentials: { apiKey: REFUSED_KEY },
@@ -915,8 +917,8 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       // Greeting, the scenario's one sentence, the scripted answer, and the
       // persona's goodbye: four turns, counted by the simulator itself.
       expect(row.turn_count).toBe(4);
-      // Retell's own id for the exchange, echoed off the counterpart.
-      expect(String(row.provider_reference)).toMatch(/^chat_/);
+      // Text mode creates no retained provider-side conversation identifier.
+      expect(row.provider_reference).toBe(null);
       const startedAt = new Date(String(row.started_at));
       const endedAt = new Date(String(row.ended_at));
       expect(startedAt.getTime()).toBeLessThanOrEqual(endedAt.getTime());
@@ -942,14 +944,17 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           .filter((span) => span.name.endsWith("_turn"))
           .map((span) => [span.name, span.text]),
       ).toEqual([
-        ["agent_turn", "Lakeside Dental, how can I help?"],
+        [
+          "agent_turn",
+          "Of course — we have Tuesday and Wednesday afternoon free next week.",
+        ],
         [
           "human_turn",
           "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
         ],
         [
           "agent_turn",
-          "Of course — we have Tuesday and Wednesday afternoon free next week.",
+          "Done: you are moved to Wednesday at half past two.",
         ],
         ["human_turn", "That covers everything I needed. Thank you, goodbye."],
       ]);
@@ -1061,6 +1066,60 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         turns: 4,
       });
 
+      // Read the same durable evidence through the public route used by the
+      // product. Raw store rows alone do not prove the customer can retrieve
+      // the conversation or its finished grade.
+      const publicResult = await call(
+        "GET",
+        `/v1/simulations/${conducted.simulationId}`,
+        { key },
+      );
+      expect(publicResult.status, JSON.stringify(publicResult.body)).toBe(200);
+      expect(publicResult.body).toMatchObject({
+        id: conducted.simulationId,
+        status: "completed",
+        gradingState: "complete",
+        combinedScore: 1,
+        providerReference: null,
+        connectionSnapshot: {
+          agentPlatform: "retell",
+          connectionType: "retell_text_mode",
+          accessVariant: "retell_text_mode.api_key",
+          modality: "chat",
+        },
+      });
+      const publicTranscript = publicResult.body.transcript as {
+        turns?: Array<{ name?: string; text?: string; pov?: string }>;
+      };
+      expect(
+        publicTranscript.turns?.map((turn) => [
+          turn.name,
+          turn.text,
+          turn.pov,
+        ]),
+      ).toEqual([
+        [
+          "agent_turn",
+          "Of course — we have Tuesday and Wednesday afternoon free next week.",
+          "persona",
+        ],
+        [
+          "human_turn",
+          "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
+          "persona",
+        ],
+        [
+          "agent_turn",
+          "Done: you are moved to Wednesday at half past two.",
+          "persona",
+        ],
+        [
+          "human_turn",
+          "That covers everything I needed. Thank you, goodbye.",
+          "persona",
+        ],
+      ]);
+
       // And the row it was all filed against holds no conversation, because
       // the table has nowhere left to put one. Asked of the schema rather
       // than of a row: a column nobody writes is not the same fact as a
@@ -1073,6 +1132,263 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             and column_name in ('transcript', 'events', 'metrics')`,
       );
       expect(gone).toEqual([]);
+    },
+  );
+
+  it.skipIf(!LIVE_PROVIDER)(
+    "runs a packaged Python LiveKit chat through storage, public reads, and grading",
+    { timeout: 420_000 },
+    async () => {
+      if (LIVE_MODEL_KEY === "") {
+        throw new Error("LIVEKIT_E2E_OPENAI_API_KEY is required for the live provider case");
+      }
+      const { key, cookie, userId, organizationId, projectId } = await signedUpKey();
+      const expectedBehavior =
+        "reports that Tuesday is full and Thursday morning is the next opening after checking availability";
+      const providerDirectory = path.join(scratch, "python-livekit-provider");
+      const readyPath = path.join(providerDirectory, "ready.json");
+      const provider = spawn(
+        SIMULATOR_PYTHON,
+        [path.join(import.meta.dirname, "../../../fixtures/simulation-e2e/livekit_provider.py")],
+        {
+          cwd: path.join(import.meta.dirname, "../../.."),
+          env: {
+            ...process.env,
+            SIMULATION_E2E_API_ORIGIN: instance.origin,
+            SIMULATION_E2E_PROJECT_KEY: key,
+            SIMULATION_E2E_PROVIDER_DIR: providerDirectory,
+            SIMULATION_E2E_PROVIDER_READY: readyPath,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let providerSaid = "";
+      provider.stdout?.on("data", (piece: Buffer) => {
+        providerSaid += piece.toString("utf8");
+      });
+      provider.stderr?.on("data", (piece: Buffer) => {
+        providerSaid += piece.toString("utf8");
+      });
+      let liveSimulator: ChildProcess | undefined;
+      let liveGrader: Service | undefined;
+      try {
+        const readyBy = Date.now() + 180_000;
+        let ready: {
+          url: string;
+          apiKey: string;
+          apiSecret: string;
+          agentName: string;
+          artifact: { file: string; sha256: string; version: string };
+        } | undefined;
+        while (ready === undefined && Date.now() <= readyBy) {
+          if (provider.exitCode !== null) {
+            throw new Error(`LiveKit provider exited early:\n${providerSaid}`);
+          }
+          try {
+            ready = JSON.parse(await readFile(readyPath, "utf8")) as typeof ready;
+          } catch {
+            await new Promise((resume) => setTimeout(resume, 100));
+          }
+        }
+        if (ready === undefined) {
+          throw new Error(`LiveKit provider did not become ready:\n${providerSaid}`);
+        }
+
+        const registered = await call("POST", "/v1/agents", {
+          key,
+          body: {
+            agentPlatform: "livekit",
+            name: "Packaged Python appointment agent",
+            connection: {
+              agentPlatform: "livekit",
+              connectionType: "livekit_room",
+              accessVariant: "livekit_room.project_credentials",
+              modality: "chat",
+              config: { url: ready.url, agentName: ready.agentName },
+              credentials: {
+                apiKey: ready.apiKey,
+                apiSecret: ready.apiSecret,
+              },
+            },
+          },
+        });
+        expect(registered.status, JSON.stringify(registered.body)).toBe(201);
+        const agentId = (registered.body.agent as { id: string }).id;
+        const connectionId = (registered.body.connection as { id: string }).id;
+        const auth: AuthContext = {
+          userId,
+          organizationId,
+          projectId,
+          role: "member",
+          via: "session",
+        };
+        await createPersona(auth, { name: "Impatient Rita", ...NEUTRAL_PERSON });
+        const suite = await call("POST", "/v1/test-suites", {
+          key,
+          body: { name: "Packaged LiveKit appointment" },
+        });
+        expect(suite.status, JSON.stringify(suite.body)).toBe(201);
+        const suiteId = String(suite.body.id);
+        const pushed = await call("POST", "/v1/tests", {
+          key,
+          body: {
+            suiteId,
+            name: "Finds the mocked opening",
+            scenario: "Ask whether Tuesday has an appointment available.",
+            expectedBehaviors: [expectedBehavior],
+            personas: ["Impatient Rita"],
+            mockTools: [{
+              toolName: "check_availability",
+              answer: {
+                answer: "Tuesday is completely full. The next opening is Thursday morning.",
+              },
+            }],
+          },
+        });
+        expect(pushed.status, JSON.stringify(pushed.body)).toBe(201);
+
+        liveSimulator = spawn(
+          "uv",
+          ["run", "--frozen", "python", "-m", "egma_simulator"],
+          {
+            cwd: SIMULATOR_DIRECTORY,
+            env: {
+              ...process.env,
+              EGMA_SIMULATOR_CONTROL_PLANE_URL: instance.origin,
+              EGMA_SIMULATOR_SERVICE_TOKEN: SERVICE_TOKEN,
+              EGMA_SIMULATOR_CLAIMANT: "livekit-python-chat-simulator",
+              EGMA_SIMULATOR_CLAIM_WAIT_SECONDS: "2",
+              EGMA_SIMULATOR_HEARTBEAT_SECONDS: "1",
+              EGMA_SIMULATOR_WAL_DIR: path.join(scratch, "livekit-python-wal"),
+              EGMA_SIMULATOR_BLOB_DIR: path.join(scratch, "livekit-python-blobs"),
+            },
+            stdio: ["ignore", "pipe", "pipe"],
+          },
+        );
+        liveSimulator.stdout?.on("data", (piece: Buffer) => {
+          simulatorSaid += piece.toString("utf8");
+        });
+        liveSimulator.stderr?.on("data", (piece: Buffer) => {
+          simulatorSaid += piece.toString("utf8");
+        });
+        liveGrader = startService({
+          config: {
+            ingestion: loadIngestionSettings({}, { role: "ingest" }),
+            databaseUrl: "",
+            clickhouseUrl: "",
+            claimant: "livekit-python-chat-grader",
+            stripeSecretKey: undefined,
+            capacity: 1,
+            concurrencyCap: undefined,
+            heartbeatSeconds: 1,
+            leaseSeconds: 3_600,
+            sweepSeconds: 1,
+            logLevel: "ERROR",
+          },
+          log: makeLog("ERROR", "livekit-python-chat-grader"),
+          providerCredentials: {
+            async load() {
+              return { openai: LIVE_MODEL_KEY };
+            },
+          },
+        });
+        const started = await call("POST", "/v1/runs", {
+          key,
+          body: { suiteId, agentId, connectionId },
+        });
+        expect(started.status, JSON.stringify(started.body)).toBe(201);
+        const runId = String(started.body.id);
+        const page = await call("GET", `/v1/runs/${runId}/simulations?pageSize=1`, {
+          key,
+        });
+        const simulation = (page.body.simulations as Array<{ id: string }>)[0];
+        expect(simulation).toBeDefined();
+        const simulationId = simulation!.id;
+        expect(await waitForTerminal(simulationId, 120_000)).toBe("completed");
+        await instance.drainEvidence();
+        const grade = await gradesOn(auth, simulationId, runId, 1, 60_000);
+        expect(grade[0]?.result).toBe("passed");
+        expect(grade[0]?.score).toBe(1);
+        const detail = await call("GET", `/v1/simulations/${simulationId}`, { key });
+        expect(detail.status, JSON.stringify(detail.body)).toBe(200);
+        expect(detail.body).toMatchObject({
+          status: "completed",
+          gradingState: "complete",
+          agentPovComplete: true,
+        });
+        const transcript = detail.body.transcript as {
+          turns?: Array<{ kind?: string; text?: string; pov?: string }>;
+        };
+        const turns = transcript.turns ?? [];
+        expect(turns.length).toBeGreaterThanOrEqual(2);
+        expect(turns[0]).toMatchObject({ kind: "turn:human", pov: "agent" });
+        expect(turns.some((turn) =>
+          turn.kind === "turn:human" && turn.text?.toLowerCase().includes("tuesday")
+        )).toBe(true);
+        expect(turns.some((turn) =>
+          turn.kind === "turn:agent" && turn.text?.toLowerCase().includes("thursday")
+        )).toBe(true);
+        expect(turns.every((turn, index) =>
+          index === 0 || turn.kind !== turns[index - 1]?.kind
+        )).toBe(true);
+        expect(JSON.stringify(detail.body).toLowerCase()).toContain(
+          "tuesday is completely full. the next opening is thursday morning.",
+        );
+
+        const browser = await openBrowser();
+        try {
+          const context = await browser.newContext();
+          await context.addCookies([{
+            name: cookie.slice(0, cookie.indexOf("=")),
+            value: cookie.slice(cookie.indexOf("=") + 1),
+            url: instance.origin,
+          }]);
+          const page = await context.newPage();
+          await page.goto(
+            `${instance.origin}/projects/${projectId}/runs/${runId}/simulations/${simulationId}`,
+          );
+          await page.getByRole("heading", { name: "Grades", exact: true }).waitFor();
+          const main = await page.locator("main").innerText();
+          expect(main).toContain("Graders passed");
+          expect(main).toMatch(/1\/1/u);
+          expect(main).toContain("Passed");
+          expect(main).toContain("User");
+          expect(main).toContain("Agent");
+          expect(main.toLowerCase()).toContain("tuesday");
+          expect(main.toLowerCase()).toContain("thursday");
+          expect(main).toContain("Packaged Python appointment agent");
+          expect(main).not.toContain("LiveKit transcript unavailable");
+        } finally {
+          await browser.close();
+        }
+
+        const proofDirectory = path.join(
+          import.meta.dirname,
+          "../../../.proofs/simulation-e2e",
+        );
+        await mkdir(proofDirectory, { recursive: true });
+        await writeFile(
+          path.join(proofDirectory, "python-chat-project-credentials.json"),
+          JSON.stringify({
+            caseId: "livekit-python-chat-project-credentials-mocked",
+            commitSha: process.env["GITHUB_SHA"] ?? "local-working-tree",
+            artifact: ready.artifact,
+            outcomes: {
+              simulation: "completed",
+              publicRead: true,
+              agentPovComplete: true,
+              grade: "passed",
+              browser: { human: true, agent: true, source: true, grade: true },
+            },
+          }, null, 2) + "\n",
+          { encoding: "utf8", mode: 0o600 },
+        );
+      } finally {
+        liveSimulator?.kill("SIGTERM");
+        liveGrader?.stop();
+        await liveGrader?.finished;
+        provider.kill("SIGTERM");
+      }
     },
   );
 });

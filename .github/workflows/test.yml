@@ -394,6 +394,79 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  simulation-e2e-python-chat:
+    name: Simulation to grade (Python LiveKit chat)
+    if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'workflow_dispatch' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+        with:
+          version: "0.11.33"
+
+      - name: Make the native build toolchain available
+        run: ./.github/native-toolchain.sh
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the web API client
+        run: pnpm --filter @egma/platform-api build
+
+      - name: Start PostgreSQL and ClickHouse
+        run: pnpm db:up
+
+      - name: Sync the shipped simulator
+        working-directory: apps/simulator
+        run: uv sync --frozen
+
+      - name: Require the trusted model credential
+        env:
+          LIVEKIT_E2E_OPENAI_API_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
+        run: |
+          if [ -z "$LIVEKIT_E2E_OPENAI_API_KEY" ]; then
+            echo "LIVEKIT_E2E_OPENAI_API_KEY is required for the simulation-to-grade proof." >&2
+            exit 1
+          fi
+
+      - name: Report the browser
+        run: google-chrome --version
+
+      - name: Warm the object-store image
+        run: docker pull "$(awk '/^  minio:/{found=1} found && /image:/{print $2; exit}' docker-compose.yml)"
+
+      - name: Run Python chat from simulation through browser-visible grade
+        env:
+          EGMA_REQUIRE_OBJECT_STORAGE: "1"
+          LIVEKIT_E2E_OPENAI_API_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
+          SIMULATION_E2E_LIVE: "1"
+        run: >-
+          pnpm exec vitest run --project fast
+          apps/api/test/simulator-conversation.test.ts
+          --testNamePattern "runs a packaged Python LiveKit chat"
+
+      - name: Upload redacted proof manifest
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: simulation-e2e-python-chat-${{ github.sha }}
+          path: .proofs/simulation-e2e/*.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
   deploy:
     name: Deploy
     needs: [checks, fast, browser, simulator, livekit-python-compatibility, livekit-js-compatibility, fixture, livekit-e2e]

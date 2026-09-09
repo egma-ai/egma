@@ -89,6 +89,12 @@ export type InstanceOptions = {
   readonly ingestStore?: IngestionStore;
   /** Deployment credential required by flows that exercise the phone adapter. */
   readonly carrierRoute?: Config["carrierRoute"];
+  /** Real provider keys for an explicit live-provider fixture. */
+  readonly providerKeys?: {
+    readonly openai?: string;
+    readonly deepgram?: string;
+    readonly cartesia?: string;
+  };
   /**
    * Every raw HTTP request, before Fastify or authentication can refuse it.
    * Test evidence only: this listener changes no production server.
@@ -210,9 +216,12 @@ export async function startInstance(
       // A self-host test deployment with one explicit key per provider
       // account. They are nonsense and never reach a provider. Claim tests
       // still exercise the real selection-to-credential path.
-      EGMA_OPENAI_API_KEY: "openai-key-held-by-this-test-instance",
-      EGMA_DEEPGRAM_API_KEY: "deepgram-key-held-by-this-test-instance",
-      EGMA_CARTESIA_API_KEY: "cartesia-key-held-by-this-test-instance",
+      EGMA_OPENAI_API_KEY:
+        options.providerKeys?.openai ?? "openai-key-held-by-this-test-instance",
+      EGMA_DEEPGRAM_API_KEY:
+        options.providerKeys?.deepgram ?? "deepgram-key-held-by-this-test-instance",
+      EGMA_CARTESIA_API_KEY:
+        options.providerKeys?.cartesia ?? "cartesia-key-held-by-this-test-instance",
     }),
     ...(options.blob === undefined ? {} : { blob: options.blob }),
     ...(options.carrierRoute === undefined
