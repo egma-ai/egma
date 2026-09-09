@@ -1,0 +1,210 @@
+---
+title: "LiveKit JavaScript SDK"
+---
+
+The `@egma/livekit` package works with JavaScript and TypeScript workers. `simulation` reports the agent's tools, installs test mocks, and sends the agent's trace to its simulation record. `monitor` sends production traces to **Monitoring**.
+
+Use `simulation` for every LiveKit simulation, including tests without mocks. You can call both functions in one worker; each acts only in its own kind of room. First connect the worker through [LiveKit](/guides/livekit).
+
+## Install
+
+Use Node.js 22 or newer. Install the published package in your voice agent’s repository:
+
+```bash
+npm install @egma/livekit
+```
+
+Keep your dependency lock file in Git so your team and CI use the same version.
+
+| Function | Supported `@livekit/agents` versions |
+| --- | --- |
+| `simulation` | `>=1.5.5 <2` |
+| `monitor` | `>=1.5.5 <2` |
+
+Both functions export spans, so the package requires `1.5.5`, the first LiveKit Agents JS release with the public mock-tool hook and OpenTelemetry fan-out bridge. Calling either function on an older version gives a direct version error. You do not need to pin to `1.6.4`.
+
+## Configure Egma
+
+Create a project-scoped API key in **Settings → API keys**, or run `egma project api-key create --name "LiveKit worker"` from an initialized agent repository.
+
+Set these values in the worker's deployment environment:
+
+| Variable | Value |
+| --- | --- |
+| `EGMA_URL` | `https://app.egma.ai`, or the public URL of your own Egma instance. |
+| `EGMA_API_KEY` | The project API key you created. Use the same project as the simulation connection. |
+
+Keep the key in your deployment's secret store. The URL must be reachable from the worker. For a remote or containerized worker, use your server's reachable address instead of `localhost`. Both simulations and monitoring need these settings.
+
+## Add the SDK to your worker
+
+Call `monitor(ctx)` first in the job entrypoint. Call `await simulation(agent, ctx, session)` after creating the agent and session, before `session.start`.
+
+Set the [Egma variables](#configure-egma) before running the worker. This example defines the complete entrypoint for a small receptionist. It uses LiveKit's model inference settings and Zod for the tool schema:
+
+```bash
+npm install zod
+```
+
+```typescript
+import { simulation, monitor } from "@egma/livekit";
+import { type JobContext, llm, voice } from "@livekit/agents";
+import { z } from "zod";
+
+export async function entrypoint(ctx: JobContext) {
+  monitor(ctx);
+
+  const openingHours = llm.tool({
+    name: "opening_hours",
+    description: "Get the practice's opening hours.",
+    parameters: z.object({}),
+    execute: async () => "Monday to Friday, 9 AM to 5 PM.",
+  });
+  const agent = new voice.Agent({
+    instructions:
+      "You are a dental receptionist. Use opening_hours when asked " +
+      "when the practice is open. Keep your answers brief.",
+    tools: [openingHours],
+  });
+  const session = new voice.AgentSession({
+    stt: "deepgram/nova-3:en",
+    llm: "openai/gpt-4.1-mini",
+    tts: "cartesia/sonic-3",
+  });
+
+  await simulation(agent, ctx, session);
+
+  const chat = ctx.job.room?.name?.startsWith("egma-sim-chat-") ?? false;
+  await session.start({
+    agent,
+    room: ctx.room,
+    ...(chat
+      ? {
+          inputOptions: { audioEnabled: false },
+          outputOptions: {
+            audioEnabled: false,
+            syncTranscription: false,
+          },
+        }
+      : {}),
+  });
+}
+```
+
+Use this entrypoint in your existing LiveKit worker registration. Keep the worker's dispatch name equal to the name in your Egma connection. For an existing agent, preserve its models and tools and add the two SDK calls at the same points.
+
+## Monitor production
+
+Use the [configured Egma URL and project key](#configure-egma), deploy the worker, and make a production call. Open **Monitoring** in the key's project. LiveKit sends its own traces; you do not need to turn on a second monitoring setting in Egma.
+
+The helper exports OTLP/HTTP protobuf batches to `/v1/traces` and flushes the last batch when the job stops. It keeps LiveKit Cloud observability enabled.
+
+The `egma-sim-` room prefix is reserved for simulations. `monitor` skips those rooms; `simulation` exports their traces to the simulation record. Use another prefix when your system creates production rooms.
+
+### Existing OpenTelemetry setup
+
+Call `monitor` before you install custom tracing when possible. The helper adds to a compatible existing provider. It does not replace an incompatible provider.
+
+If another integration already owns the provider, pass `existingTelemetry` with that provider and a `registerSpanProcessor` callback. The callback must add the Egma processor to a mutable processor group inside that same provider, such as LiveKit's `telemetry.FanoutSpanProcessor`.
+
+OpenTelemetry JS 2.x cannot add a processor directly to an already-created provider. If your existing provider has no way to add one, change its setup to include that processor group before registering it.
+
+### If no conversation appears
+
+Check the worker's deployment and OpenTelemetry logs. Confirm that the key is scoped to the correct project and has write access. Check that the worker can reach `EGMA_URL`. An organization-wide key cannot ingest traces.
+
+Missing settings, invalid settings, an unsupported LiveKit version, or a conflicting tracer provider cause a direct setup error. Network failures happen in the worker; Egma can show a conversation only after its trace arrives. Restart the worker after changing the Egma settings or tracing setup.
+
+## Mock tool responses
+
+Use the exact registered tool name in the test. For the example above:
+
+````markdown
+## Mock tools
+
+### opening_hours
+
+```json
+{
+  "answer": "The practice is closed on Monday. It opens Tuesday at 9 AM."
+}
+```
+````
+
+Each mock contains one `answer` or `error`. In a simulation room, `simulation` sets up trace export, connects if needed, sends the agent's tool names and schemas to Egma, and installs the mocks selected by the test. It follows agent handoffs in the same session.
+
+The function sends the agent's own conversation trace to Egma even when a test has no mocks. The simulation transcript includes the agent's turns and tool calls, including real tools. Calls answered by a mock are marked `mocked`. Simulation spans are batched every second and flushed when the session closes and when the job stops.
+
+| Situation | Behavior |
+| --- | --- |
+| Production room | No connection, exporter, messages, or tool wrappers are added. |
+| A simulation tool named in the test | Egma supplies the authored response. |
+| A tool with no matching mock | The real tool runs. |
+| The room ends before Egma accepts the initial tool report | `simulation` throws `NotReported`; the session does not start. |
+| Egma cannot be reached during a mocked tool call | The call throws `ToolError`; the real tool does not run. |
+| Egma receives a tool call and refuses it | The tool raises `ToolError`; the real implementation does not run. |
+
+<Warning>
+  Tools without a matching mock still run their real implementations. Use a test account or sandbox for tools that can make real changes, and confirm that mock names match your registered tools.
+</Warning>
+
+Call `simulation` once for the initial agent. LiveKit keeps its JavaScript mock-tool state at process level, and the exporter is bound to the job's room. Egma rejects a second overlapping session or another job in the same process. Keep the normal LiveKit arrangement of one job per child process. Cleanup runs when the session closes or the job stops.
+
+The function has no total startup deadline. It waits while the simulation room is active; individual token requests and hello attempts keep their transport timeouts. A permanent refusal, room disconnect, or Egma participant departure ends startup. Do not catch `NotReported` and start the session anyway. Check the room connection, Egma's participant, and the installed SDK when it occurs. Missing settings or an incompatible tracing setup throw a plain `Error` instead. Without the SDK report, Egma fails the LiveKit simulation.
+
+Check the simulation's tool calls to confirm the mock matched. See [Mock tool responses](/guides/mock-tool-responses).
+
+After your normal `session.start` returns, LiveKit publishes its native agent state. Egma waits for an initialized state before sending the first simulated input. This wait uses the simulation's configured duration. You do not need another readiness callback.
+
+When that simulation ends, Egma finishes pending output and its exact participant leaves the room. The SDK closes the `AgentSession` you supplied, which completes LiveKit's native session trace, flushes the final evidence, and releases entrypoint code that is waiting for session close. An abrupt room disconnect closes the session as well. These listeners are installed only after the Egma participant accepts the tool report in a simulation room.
+
+## Test in chat mode
+
+For a chat connection, keep the `egma-sim-chat-` branch shown in the example. It disables audio input and output and turns off speech-synchronized transcription. Also keep independent audio publishers off in that branch.
+
+Other room names use your normal voice settings. Egma stops a chat simulation if the worker publishes audio.
+
+## Read test startup data
+
+Add the values your agent needs at startup to a test:
+
+````markdown
+## Env
+
+```json
+{
+  "job_dispatch_metadata": {
+    "clinic_name": "Maple Street Dental"
+  }
+}
+```
+````
+
+Read them in your entrypoint:
+
+```typescript
+const world = JSON.parse(ctx.job.metadata || "{}");
+const clinicName = world.clinic_name ?? "Maple Street Dental";
+```
+
+Egma sends `job_dispatch_metadata` as a compact JSON string. It adds no Egma keys and leaves room metadata empty. The SDK detects simulations from the room name.
+
+## Function reference
+
+| Function | Parameters and result |
+| --- | --- |
+| `monitor(ctx, options?)` | Takes a LiveKit `JobContext` and optional `MonitorOptions`. Returns `void`. |
+| `await simulation(agent, ctx, session, options?)` | Takes the initial `voice.Agent`, `JobContext`, `voice.AgentSession`, and optional `SimulationOptions`. Returns `Promise<void>`. |
+| `NotReported` | Exported error thrown when the simulation cannot complete its initial report to Egma. |
+
+`MonitorOptions` and `SimulationOptions` accept the same settings:
+
+| Option | Use |
+| --- | --- |
+| `endpoint` | Override `EGMA_URL`. Use an HTTP or HTTPS Egma URL. |
+| `apiKey` | Override `EGMA_API_KEY` with a project API key. |
+| `existingTelemetry` | An `ExistingTelemetry` object for an existing tracer provider. |
+
+`ExistingTelemetry` contains `provider` and `registerSpanProcessor`. It can also supply `createCloudSpanProcessor` to customize how the LiveKit Cloud processor is created. The package exports both option types.
+
+Each function returns before reading settings in the room type it does not handle. The active function still needs `EGMA_URL` and `EGMA_API_KEY`, so a worker used only for simulations needs both settings too. Use a separate worker process for each LiveKit job.

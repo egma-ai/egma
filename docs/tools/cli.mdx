@@ -1,0 +1,287 @@
+---
+title: "CLI"
+---
+
+The `egma-cli` package installs the `egma` command. Use it from the repository that contains your voice agent.
+
+## Install
+
+Install Node.js 22 or newer, then run:
+
+```bash
+npm install --global egma-cli
+egma --help
+```
+
+Run the same install command to update the CLI. If you use a coding agent, install the [Egma skills](/tools/skills) too.
+
+## Sign in and initialize
+
+```bash
+egma login
+egma init
+```
+
+`login` opens a browser for approval. Select the project that this terminal will use. Outside an initialized repository, the default instance is `https://app.egma.ai`.
+
+For self-hosted Egma, give both commands your instance URL:
+
+```bash
+egma login --url http://localhost:3101
+egma init --url http://localhost:3101
+```
+
+`init` connects the repository to an existing project and pulls its agents, connections, suites, and tests. It creates `egma/config.yaml` and `egma/tests/`. It does not create a project.
+
+If your credential can access several projects, `init` lists their IDs. Run `egma init --project` with the ID you want. A login already scoped to a project does not take `--project`.
+
+Running `init` again for the same project refreshes the repository. A repository already connected to another project is left unchanged.
+
+## Connect an agent
+
+An agent identifies your LiveKit worker or Retell agent in Egma. A connection tells Egma how to reach it for a simulation. Register the agent, then add a connection.
+
+<Tabs>
+  <Tab title="Retell">
+    Make your Retell API key available as `EGMA_RETELL_API_KEY` in the terminal. List the available Retell agents, then register the one you want to test in Egma:
+
+    ```bash
+    egma agent connection options --platform retell
+    egma agent register --platform retell --name "Receptionist"
+    ```
+
+    Set `EGMA_AGENT_ID` to the Egma ID printed by `register` and `RETELL_AGENT_ID` to the provider ID from the options list. Add a chat connection:
+
+    ```bash
+    egma agent connection add \
+      --agent "$EGMA_AGENT_ID" \
+      --access retell-api-key \
+      --modality chat \
+      --retell-agent "$RETELL_AGENT_ID"
+    ```
+
+    The first connection saves the Retell agent ID and credential in Egma. Later setup can reuse them. For the other Retell connection choices, see [Retell](/guides/retell).
+  </Tab>
+  <Tab title="LiveKit">
+    Make your LiveKit project credentials available as `EGMA_LIVEKIT_API_KEY` and `EGMA_LIVEKIT_API_SECRET` in the terminal. Set `LIVEKIT_URL` to your project's WebSocket URL.
+
+    ```bash
+    egma agent connection options --platform livekit
+    egma agent register --platform livekit --name "Receptionist"
+    ```
+
+    Set `EGMA_AGENT_ID` to the ID printed by `register`. In this example, the LiveKit worker registers with the dispatch name `receptionist`:
+
+    ```bash
+    egma agent connection add \
+      --agent "$EGMA_AGENT_ID" \
+      --access livekit-project-credentials \
+      --modality voice \
+      --livekit-url "$LIVEKIT_URL" \
+      --livekit-agent-name receptionist
+    ```
+
+    The worker must be running and registered with that name. Install the [Python SDK](/tools/livekit-python-sdk) or [JavaScript SDK](/tools/livekit-javascript-sdk), set the worker's `EGMA_URL` and project-scoped `EGMA_API_KEY`, and call `await simulation(agent, ctx, session)` before its session starts. This is required for every LiveKit simulation, including tests without mocks. See [LiveKit](/guides/livekit) for connection and worker setup.
+  </Tab>
+</Tabs>
+
+The connection command prints its Egma connection ID and refreshes `egma/config.yaml`. Use those IDs when you start a run. Add `--name` to give a connection a display name.
+
+## Create a suite and a test
+
+```bash
+egma persona list
+egma suite create appointment-booking --name "Appointment booking"
+```
+
+Each direct directory under `egma/tests/` is one suite. The CLI writes its `suite.yaml` with the suite ID and name. Create `egma/tests/appointment-booking/no-availability.md`:
+
+````markdown
+---
+format: 5
+name: No appointments available
+personas:
+  - name: Everyday caller
+---
+
+## Scenario
+
+Call the receptionist to book a dental appointment on Monday morning.
+You can also come on Tuesday if Monday is full.
+
+## Expected behaviors
+
+1. The agent checks availability before offering an appointment.
+2. The agent says that Monday has no available appointments.
+3. The agent asks whether Tuesday would work instead.
+
+## Mock tools
+
+### check_availability
+
+```json
+{
+  "answer": {
+    "slots": []
+  }
+}
+```
+````
+
+Use a persona name from `egma persona list`. Match each mock name and response shape to your agent's real tool. This example assumes `check_availability` returns an object with a `slots` array. LiveKit simulations require the [Python](/tools/livekit-python-sdk) or [JavaScript](/tools/livekit-javascript-sdk) hook.
+
+Tools without a matching mock run their real implementations. Their calls are still recorded from the agent's point of view. A call answered by a test mock is marked `mocked` in the transcript.
+
+### Test file fields
+
+| Field or section | Use |
+| --- | --- |
+| `format` | Required. The current format is `5`. |
+| `name` | Optional display name. Defaults to the file name. |
+| `description` | Optional short description. |
+| `personas` | One or more persona names or mappings with `id` and/or `name`. An ambiguous name requires an ID. |
+| `version`, `identity_revision` | Written during sync. Keep these values on existing tests; omit them on a new test. |
+| `## Scenario` | The situation that the persona acts out. |
+| `## Expected behaviors` | A numbered list of observable requirements. At least one is required. |
+| `## Mock tools` | Optional tool names with one JSON response each. Each response contains exactly one of `answer` or `error`. |
+| `## Env` | Optional JSON with startup data for the selected platform. |
+
+For Retell startup data, add:
+
+````markdown
+## Env
+
+```json
+{
+  "retell_dynamic_variables": {
+    "clinic_name": "Maple Street Dental"
+  }
+}
+```
+````
+
+For LiveKit, use `job_dispatch_metadata` instead. The worker reads that value as JSON from `ctx.job.metadata`. Put only the field your platform uses in the test. See [Write a test](/guides/write-a-test) for test design and [Personas](/guides/personas) for persona selection.
+
+Test files select personas. Model and voice settings belong to the project
+and are edited in **Personas**. First use saves the persona's default settings;
+all tests selecting that persona share the saved values. `pull` and `push`
+keep the selection in the file without copying those settings into it.
+
+## Sync with Egma
+
+```bash
+egma push
+egma pull
+```
+
+`push` validates the repository and submits all its suites and tests as one update. If validation or a remote conflict prevents the update, no part of that remote change is applied. A successful push writes the saved IDs and versions back to your files.
+
+`pull` refreshes remote content and keeps local drafts, including locally edited tests. Read its report for files it kept. If a push reports a conflict, pull the current state, reconcile the changes it identifies, and push again.
+
+Use the CLI to delete a synced test or suite:
+
+```bash
+egma test delete appointment-booking/no-availability.md
+egma suite delete appointment-booking
+```
+
+These commands remove the remote resource before removing local files. If Egma refuses the deletion, the local files stay. You can remove an unpushed test draft directly from your repository.
+
+## Start a run
+
+Set `EGMA_AGENT_ID` and `EGMA_CONNECTION_ID` to the IDs in `egma/config.yaml`:
+
+```bash
+egma run create appointment-booking \
+  --agent "$EGMA_AGENT_ID" \
+  --connection "$EGMA_CONNECTION_ID" \
+  --name "Release check"
+```
+
+This command pushes the repository first, then starts one run of the complete suite against the selected connection. A failed push prevents the run from starting.
+
+Open the printed results URL. The command returns after the run starts; its success exit code does not mean the simulations have finished or passed. See [Start and follow a run](/guides/start-and-follow-a-run).
+
+To cancel a run, set `EGMA_RUN_ID` to its ID and run:
+
+```bash
+egma run cancel "$EGMA_RUN_ID"
+```
+
+## Set up monitoring
+
+For an agent already connected to Retell:
+
+```bash
+egma agent monitoring setup --agent "$EGMA_AGENT_ID" --platform retell
+```
+
+The command reuses the agent's saved Retell identity and credential. For a new monitoring-only agent, also pass `--retell-agent` and supply `EGMA_RETELL_API_KEY`. Stop Retell monitoring with:
+
+```bash
+egma agent monitoring stop --agent "$EGMA_AGENT_ID" --platform retell
+```
+
+For LiveKit, add the monitoring hook to your worker using the [Python SDK](/tools/livekit-python-sdk#monitor-production) or [JavaScript SDK](/tools/livekit-javascript-sdk#monitor-production). The CLI's LiveKit monitoring commands return setup guidance and exit with code `1`; they do not change the worker.
+
+## Use the CLI in CI
+
+Create a key for the repository's project:
+
+```bash
+egma project api-key create --name "CI"
+```
+
+The key is shown once and is not saved by this command. Store it in your CI secret store as `EGMA_API_KEY`. Commit `egma/config.yaml`, suite files, and tests; keep credentials out of Git.
+
+The CLI uses `EGMA_API_KEY` when it is set, so CI does not need browser login. Use [Automate tests in CI](/guides/automate-tests-in-ci) to wait for completion and make a release decision with the API.
+
+## Command reference
+
+Append `--help` to any command to see its arguments and options. Use `--cwd` to run a command against another repository.
+
+| Command | Action |
+| --- | --- |
+| `egma login` | Approve and save a login for an Egma instance. |
+| `egma logout` | Revoke the saved device-login key for one instance and remove the saved login. |
+| `egma init` | Connect this repository to a project and pull its state. |
+| `egma pull` | Refresh remote suites, tests, agents, and connections. |
+| `egma push` | Submit the repository's suites and tests as one update. |
+| `egma agent register` | Create an agent identity in the project. |
+| `egma agent connection options` | List connection methods and provider options. |
+| `egma agent connection add` | Add a connection to an existing agent. |
+| `egma agent monitoring setup` | Set up Retell monitoring; show SDK guidance for LiveKit. |
+| `egma agent monitoring stop` | Stop Retell monitoring; show SDK guidance for LiveKit. |
+| `egma project api-key create` | Create a project key and print it once. |
+| `egma persona list` | List shared personas and this project's custom persona names and IDs. |
+| `egma suite create` | Create a remote suite and its local directory. |
+| `egma suite delete` | Delete a suite and its local directory. |
+| `egma test delete` | Delete a test and its local file. |
+| `egma run create` | Push, then start the selected suite. |
+| `egma run cancel` | Request cancellation of a run. |
+| `egma self-host up` | Start Egma from an [Egma source checkout](/self-hosting/get-started). |
+
+### Credentials and repository settings
+
+| Setting | Where it belongs |
+| --- | --- |
+| Instance URL, project, agent and connection IDs | `egma/config.yaml`, currently format `4`. These are not credentials. |
+| Saved browser-approved login | Machine-local `~/.egma/credentials`. Set `EGMA_HOME` to change that directory. |
+| `EGMA_API_KEY` | Your terminal or CI secret store. Takes precedence over a saved login. |
+| `EGMA_RETELL_API_KEY` | Terminal environment for Retell connection or monitoring setup. |
+| `EGMA_LIVEKIT_API_KEY`, `EGMA_LIVEKIT_API_SECRET` | Terminal environment for LiveKit project-credential setup. |
+| `EGMA_LIVEKIT_TOKEN_ENDPOINT_HEADERS` | Required JSON object of authentication headers when adding a LiveKit token-endpoint connection. |
+
+Connection setup also accepts provider credentials as JSON through `--credentials-stdin`. It uses a stored provider credential first; otherwise, standard input takes precedence over environment values. Run `egma agent connection add --help` for the supported fields.
+
+Only `login`, `logout`, and `init` accept `--url`. Other repository commands use the origin in `egma/config.yaml`. `logout` does not remove this folder or revoke a key supplied through `EGMA_API_KEY`.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | The requested action completed or was already satisfied. |
+| `1` | The action was refused or remains incomplete. Read the message. |
+| `130` | The command was interrupted. |
+
+The CLI has no JSON output mode or command that waits for a run's grades. Use the [API reference](/api/overview) for scripts that need structured results.

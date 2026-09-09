@@ -1,0 +1,239 @@
+---
+title: "Automate tests in CI"
+---
+
+Use the CLI to push test files and the API to start and inspect a run.
+`egma run create` returns after starting the run; its exit code is not a
+test result.
+
+This example uses one policy: **every simulation must complete, and
+every grader selected for it must pass**. Flagged missing agent evidence,
+missing grades, grading errors, cancellation, execution failures, and timeouts
+fail the CI job. This is the policy in the example, not an overall verdict
+assigned by Egma.
+
+## Prepare the CI job
+
+Set up a [supported agent connection](/tools/cli#connect-an-agent), create a suite, and
+commit `egma/config.yaml`, its `suite.yaml`, and your test files. Configure the
+graders you want to enforce before running CI.
+
+From your signed-in repository, create a project API key:
+
+```bash
+egma project api-key create --name "CI"
+```
+
+Store the returned secret in your CI secret store as `EGMA_API_KEY`. Set these
+job variables:
+
+| Variable | Value |
+| --- | --- |
+| `EGMA_URL` | Your Egma instance URL, matching `platform.origin` in `egma/config.yaml`. |
+| `EGMA_API_KEY` | The project API key from your CI secret store. |
+| `EGMA_SUITE_ID` | The ID in the suite's `suite.yaml`. |
+| `EGMA_AGENT_ID` | The agent ID in `egma/config.yaml`. |
+| `EGMA_CONNECTION_ID` | The connection ID for that agent. |
+| `EGMA_CI_RUN_KEY` | A unique label for this CI run attempt, used in the run name. |
+
+Use Node.js 22 or later and install the [CLI](/tools/cli) in the job. Run this
+job only on trusted changes that can access your secret and test connection.
+Serialize jobs that push to the same Egma project so they do not replace each
+other's test content.
+
+## Save the runner
+
+Save this as `scripts/egma-ci.mjs`. It uses Node's built-in `fetch`, follows all
+pages, and pins the suite's test versions when creating the run.
+
+```javascript scripts/egma-ci.mjs
+import { setTimeout as sleep } from "node:timers/promises";
+
+function required(name) {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`Set ${name}.`);
+  return value;
+}
+
+const origin = required("EGMA_URL");
+const key = required("EGMA_API_KEY");
+const suiteId = required("EGMA_SUITE_ID");
+const agentId = required("EGMA_AGENT_ID");
+const connectionId = required("EGMA_CONNECTION_ID");
+const runLabel = required("EGMA_CI_RUN_KEY");
+const deadline = Date.now() + 15 * 60 * 1000;
+const headers = {
+  Authorization: `Bearer ${key}`,
+  "Content-Type": "application/json",
+};
+
+async function request(path, { method = "GET", body } = {}) {
+  // Only reads are retried; repeating creation can start another run.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error("Timed out waiting for Egma.");
+    let response;
+    try {
+      response = await fetch(new URL(path, origin), {
+        method,
+        headers,
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(Math.min(30_000, remaining)),
+      });
+    } catch (error) {
+      if (method !== "GET" || attempt === 2) throw error;
+      await sleep(1000 * (attempt + 1));
+      continue;
+    }
+    if (response.ok) return response.json();
+    if (method !== "GET" || ![429, 500, 502, 503, 504].includes(response.status) || attempt === 2) {
+      throw new Error(`${method} ${path}: HTTP ${response.status}`);
+    }
+    const retryAfter = Number(response.headers.get("retry-after"));
+    const wait = Number.isFinite(retryAfter) && retryAfter > 0
+      ? retryAfter * 1000
+      : 1000 * (attempt + 1);
+    if (Date.now() + wait >= deadline) throw new Error("Timed out waiting for Egma.");
+    await sleep(wait);
+  }
+}
+
+async function allPages(path, field) {
+  const items = [];
+  let pageToken;
+  do {
+    const url = new URL(path, origin);
+    url.searchParams.set("pageSize", "200");
+    if (pageToken) url.searchParams.set("pageToken", pageToken);
+    const page = await request(url.pathname + url.search);
+    items.push(...page[field]);
+    pageToken = page.nextPageToken;
+  } while (pageToken);
+  return items;
+}
+
+function checkSimulation(simulation) {
+  if (simulation.status !== "completed" || simulation.gradingState !== "complete") {
+    throw new Error(`${simulation.id}: execution or grading did not complete.`);
+  }
+  if (simulation.agentPovComplete !== true || simulation.agentPovIncomplete !== false) {
+    throw new Error(`${simulation.id}: agent evidence is missing or unknown.`);
+  }
+  const plan = simulation.gradingPlan?.items;
+  if (!plan?.length) throw new Error(`${simulation.id}: no selected graders.`);
+  for (const item of plan) {
+    const grade = simulation.grades.find(
+      (value) => value.projectGraderId === item.projectGraderId,
+    );
+    const matchesPlan = grade &&
+      grade.graderDefinitionId === item.graderDefinitionId &&
+      grade.graderDefinitionVersion === item.graderDefinitionVersion &&
+      grade.passThreshold === item.passThreshold;
+    if (!matchesPlan || grade.result !== "passed" ||
+        typeof grade.score !== "number" || grade.score < item.passThreshold) {
+      throw new Error(`${simulation.id}: ${item.graderName} did not pass.`);
+    }
+  }
+}
+
+let run;
+let creationRequested = false;
+try {
+  const tests = await allPages(
+    `/v1/tests?suiteId=${encodeURIComponent(suiteId)}`, "tests",
+  );
+  if (!tests.length) throw new Error("The suite has no tests.");
+  creationRequested = true;
+  run = await request("/v1/runs", {
+    method: "POST",
+    body: {
+      suiteId, agentId, connectionId,
+      name: `CI ${runLabel}`,
+      expectedTestVersions: tests.map((test) => ({
+        testId: test.id, versionId: test.versionId,
+      })),
+    },
+  });
+  console.log(`Run ${run.id}: ${run.resultsUrl}`);
+  for (;;) {
+    run = await request(`/v1/runs/${encodeURIComponent(run.id)}`);
+    if (run.status === "canceled") throw new Error("The run was canceled.");
+    if (run.status === "completed") {
+      const simulations = await allPages(
+        `/v1/runs/${encodeURIComponent(run.id)}/simulations`, "simulations",
+      );
+      if (simulations.length !== run.expectedSimulationCount || !simulations.length) {
+        throw new Error("The run is missing simulations.");
+      }
+      if (simulations.some((one) => one.status !== "completed")) {
+        throw new Error("At least one simulation failed or was canceled.");
+      }
+      const waiting = simulations.some(
+        (one) => ["pending", "running"].includes(one.gradingState),
+      );
+      if (!waiting) {
+        for (const one of simulations) {
+          checkSimulation(await request(`/v1/simulations/${encodeURIComponent(one.id)}`));
+        }
+        console.log(`CI policy passed for ${simulations.length} simulations.`);
+        break;
+      }
+    }
+    await sleep(5000);
+  }
+} catch (error) {
+  console.error(error.message);
+  process.exitCode = 1;
+  if (run && !["completed", "canceled"].includes(run.status)) {
+    try {
+      const response = await fetch(
+        new URL(`/v1/runs/${encodeURIComponent(run.id)}/cancel`, origin),
+        { method: "POST", headers, signal: AbortSignal.timeout(10_000) },
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      console.error(`Canceled run ${run.id}.`);
+    } catch {
+      console.error(`Could not confirm cancellation. Check run ${run.id}.`);
+    }
+  }
+  if (!run && creationRequested) {
+    console.error("If creation lost its response, check Runs before submitting again. Repeating creation starts another run.");
+  }
+}
+```
+
+## Run it
+
+After your CI system supplies the variables above, execute these commands from
+the repository root. Stop the job if either command fails:
+
+```bash
+set -e
+egma push
+node scripts/egma-ci.mjs
+```
+
+The API creates the run from the saved suite. `expectedTestVersions` makes run
+creation fail if that suite changes between the snapshot and creation. A run
+keeps its grader plan and thresholds, so the script checks those frozen values
+against the latest grades.
+
+The runner requires `agentPovComplete` to be `true` and `agentPovIncomplete` to be `false`. This checks for a final agent record without a degradation flag. It does not prove that the current grades used late evidence. If evidence arrives after grading,
+[regrade the simulation](/guides/configure-graders#regrade-a-simulation) before
+using its grades to make a release decision.
+
+## Handle a failed job
+
+Open the printed results URL. For a failed grade, inspect its rationale and
+transcript. For an execution failure, inspect the simulation's failure reason.
+For a grading error, fix the cause before starting a new CI run or
+[regrading the existing simulation](/guides/configure-graders#regrade-a-simulation).
+
+The runner waits for up to 15 minutes, with a short extra window to request
+cancellation if execution is still active. If your CI system kills the process
+first, cancel the run from its results page or with `egma run cancel`.
+
+Use a new `EGMA_CI_RUN_KEY` label for a new CI attempt. The label is not an idempotency key. The runner does not retry run creation. If the response is lost, check Runs before submitting again because each accepted request creates another run.
+
+The [API reference](/api/overview) documents the complete request and response
+contracts. This runner does not use the combined score as a release decision.

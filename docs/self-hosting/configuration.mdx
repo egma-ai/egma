@@ -1,0 +1,394 @@
+---
+title: "Configuration"
+---
+
+Set deployment settings in `.env` at the root of your Egma platform checkout. Apply changes with:
+
+```bash
+egma self-host up
+```
+
+Docker Compose resolves `.env` values and any environment variables exported by the shell. Exported values take precedence, so remove an old shell override if a change to `.env` has no effect. Wrap values that contain `$` in single quotes in `.env`.
+
+## Where settings belong
+
+| Location | Contents |
+| --- | --- |
+| Platform checkout `.env` | Model-provider keys, public URLs, email, and deployment overrides you choose. |
+| `.egma-platform/platform.env` | Internal credentials generated and preserved by `egma self-host up`. |
+| `docker-compose.yml` | Default service wiring, ports, volumes, and process settings. |
+| Agent repository `egma/config.yaml` | The Egma instance URL, project, agent, and connection IDs. No credentials. |
+| Your LiveKit worker's environment | `EGMA_URL` and the project-scoped `EGMA_API_KEY` used to send simulation and production traces. |
+
+Supply LiveKit and Retell connection credentials when you connect an agent. Egma stores them encrypted. They are separate from the model credentials that let your instance run personas and graders.
+
+## Model providers
+
+Project persona settings select the language model, speech-to-text model, text-to-speech model, and voice. Project grader settings select the model used for LLM grading. Environment variables provide access to those selected providers; they do not change the selection. Runs save their selections before workers start, so queued work and retries use the same settings.
+
+| Variable | Used for |
+| --- | --- |
+| `EGMA_OPENAI_API_KEY` | OpenAI language, speech, and grader models. |
+| `EGMA_CARTESIA_API_KEY` | Cartesia speech models selected by a persona. |
+| `EGMA_DEEPGRAM_API_KEY` | Deepgram speech-to-text selected by a persona. |
+
+The built-in persona uses OpenAI and Cartesia. A chat simulation needs its language-model provider; voice simulations also need the selected speech providers. Ensure your provider account can use the selected models.
+
+Add the required keys to `.env`, then run `egma self-host up`. These deployment credentials are not stored in PostgreSQL. The simulator receives the credentials needed for the work it claims.
+
+<Accordion title="Use a provider bundle from AWS Secrets Manager">
+  The API and grader can read a provider bundle from AWS Secrets Manager. Set both `EGMA_PROVIDER_CREDENTIALS_SECRET_ID` and `EGMA_PROVIDER_CREDENTIALS_REGION`. The secret must contain a JSON object whose optional key fields are `openai_api_key`, `deepgram_api_key`, and `cartesia_api_key`.
+
+  This selects the secret as the provider source instead of the direct environment values. Give the API and grader processes AWS credentials that can read it. The current bundle is fetched for each work item, so a rotated secret applies to subsequent work. Setting only one selector prevents startup.
+</Accordion>
+
+Keys saved in [Settings → Provider API Keys](/configuration/provider-api-keys) take precedence for their organization. Deployment keys or the provider bundle supply providers without an organization key; the bundle is fetched only when a work item needs it.
+
+## Public URLs and networking
+
+Egma uses two browser-facing URLs:
+
+| Variable | Default | Use |
+| --- | --- | --- |
+| `EGMA_BASE_URL` | `http://localhost:3101` | The public instance URL used for the web app, sign-in, results links, API access, and callbacks. |
+| `EGMA_BLOB_PUBLIC_URL` | `http://localhost:9000` | The URL where a browser can fetch recordings from object storage. |
+
+Both are origins: scheme, hostname, and optional port. Do not include a path, credentials, or a query string. If the instance uses HTTPS, the recording URL must use HTTPS too.
+
+The web app forwards `/api/auth/*`, the other account routes, `/mock-tools/*`, `/openapi.json`, and `/v1/*` to the API. Route the complete public instance hostname to the web app on port `3101`. Keep its internal `EGMA_API_ORIGIN` at `http://api:3100` for the bundled Compose stack.
+
+### Example with HTTPS
+
+This example runs [Caddy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy) on the same host as Egma. Replace the two example hostnames with domains you control and point their DNS records at the server. Allow the proxy to receive HTTP and HTTPS traffic.
+
+Set these values in `.env`:
+
+```dotenv
+EGMA_BASE_URL=https://egma.example.com
+EGMA_BLOB_PUBLIC_URL=https://recordings.example.com
+EGMA_TRUST_PROXY=true
+```
+
+Use this Caddyfile:
+
+```text
+egma.example.com {
+    reverse_proxy 127.0.0.1:3101
+}
+
+recordings.example.com {
+    reverse_proxy 127.0.0.1:9000
+}
+```
+
+Load the Caddy configuration and run `egma self-host up`. The recording proxy must preserve the original host and request path because both are used in signed recording URLs.
+
+Keep direct application ports `3100` and `3101` private through your server's network controls. Leave the database and MinIO binds on loopback when the proxy runs on the same host. Enable `EGMA_TRUST_PROXY` only behind a proxy you control, with direct access to the API restricted.
+
+From another machine, verify that you can sign in at the public instance URL, run a test, and play its recording. Retell must be able to reach the instance URL for mock-tool callbacks. LiveKit workers must be able to reach it to send simulation and monitoring traces.
+
+Install the [Python SDK](/tools/livekit-python-sdk) or [JavaScript SDK](/tools/livekit-javascript-sdk) in each LiveKit worker. Call `monitor(ctx)` first in its job entrypoint for production monitoring, and `await simulation(agent, ctx, session)` before starting a simulation session. The simulation call is required even when a test has no mocks. Keep the worker's SDK dependency current when updating the platform.
+
+### Ports
+
+Change ports only when needed. If you change the web or object-store port, also change its public URL.
+
+| Variable | Default | Service |
+| --- | --- | --- |
+| `EGMA_WEB_PORT` | `3101` | Web app and public routes. |
+| `EGMA_API_PORT` | `3100` | Direct API port. |
+| `POSTGRES_PORT` | `5433` | PostgreSQL. |
+| `CLICKHOUSE_PORT` | `8124` | ClickHouse HTTP. |
+| `EGMA_S3_PORT` | `9000` | MinIO S3 API. |
+
+`POSTGRES_BIND`, `CLICKHOUSE_BIND`, `EGMA_S3_BIND`, and `EGMA_LIVEKIT_BIND` default to `127.0.0.1`. PostgreSQL and ClickHouse have local development passwords in Compose. Change those passwords and restrict network access before widening either database bind.
+
+For a browser on another machine, `localhost` points at that machine. Use a public or private network address reachable by every intended user and worker.
+
+## Authentication and email
+
+With `EGMA_SINGLE_ORGANIZATION=true`, the first account claims the instance and becomes its admin. Open signup then closes. An admin invites other users from **Settings → People**. Set the value to `false` only if the deployment is intended to let people create separate organizations.
+
+| Role | Access |
+| --- | --- |
+| Viewer | Read project settings, traces, and results. |
+| Member | Also create and change project resources, run tests, and send production traces. |
+| Admin | Also invite or remove people and manage roles. |
+
+For email delivery, set `EGMA_SMTP_URL` to your SMTP or SMTPS connection URL and `EGMA_MAIL_FROM` to the sender name and address. The SMTP URL contains your mail credentials; keep it private. If you omit the sender, Egma uses `Egma <egma@YOUR_INSTANCE_HOSTNAME>`.
+
+| SMTP setting | Signup | Invitations | Password resets |
+| --- | --- | --- | --- |
+| Not set | Email verification is not required. | The admin receives a link to share. | Reset emails are not delivered. |
+| Configured | Email verification is required. | Egma emails the invitation. | Egma emails the reset link. |
+
+Reset links are not printed to platform logs. Configure SMTP before users depend on email-based account recovery. After configuration, create an invitation and confirm that the message arrives.
+
+API clients send an Egma key as a bearer token. Use a project-scoped key with write access for LiveKit monitoring. Create it through **Settings → API keys** or the [CLI](/tools/cli#use-the-cli-in-ci).
+
+`EGMA_RATE_LIMIT_PER_MINUTE` defaults to `600` authenticated requests per organization per API process. Keys in one organization share that process's budget.
+
+## Storage
+
+The bundled stack keeps project data in PostgreSQL, traces in ClickHouse, and objects in MinIO. It uses Docker volumes so replacing a container does not remove those files.
+
+MinIO has separate buckets for recordings and incoming production evidence. Incoming evidence is accepted into the ingestion bucket before it is written to ClickHouse; processed objects are then removed from that bucket. A single-host store depends on that host and its disks.
+
+### Bundled object storage
+
+| Variable | Default | Use |
+| --- | --- | --- |
+| `EGMA_S3_BUCKET` | `egma-recordings` | Simulation recordings bucket. |
+| `EGMA_S3_REGION` | Empty | Signing region; leave empty for bundled MinIO. |
+| `EGMA_INGEST_BUCKET` | `egma-ingestion` | Incoming production evidence bucket. |
+| `EGMA_INGEST_ENDPOINT` | `http://minio:9000` | Object-store address reached from inside the API container. |
+| `EGMA_INGEST_REGION` | `EGMA_S3_REGION` | Signing region for the ingestion bucket. |
+
+The public recording URL must identify this store from the browser's network. The ingestion endpoint must identify it from the API's network. They can point at the same store through different addresses.
+
+### External S3-compatible storage
+
+Create the buckets and credentials in your object store first. The bundled initialization job creates buckets in MinIO only.
+
+For recordings, configure both upload and playback:
+
+| Purpose | Settings |
+| --- | --- |
+| Simulator upload | `EGMA_SIMULATOR_S3_ENDPOINT`, `EGMA_SIMULATOR_S3_BUCKET`, `EGMA_SIMULATOR_S3_REGION`, `EGMA_SIMULATOR_S3_ACCESS_KEY_ID`, `EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY`, and the optional `EGMA_SIMULATOR_S3_SESSION_TOKEN` paired with temporary credentials. |
+| Browser playback | `EGMA_BLOB_PUBLIC_URL`, `EGMA_BLOB_BUCKET`, `EGMA_BLOB_REGION`, `EGMA_BLOB_ACCESS_KEY_ID`, `EGMA_BLOB_SECRET_ACCESS_KEY`. |
+
+Upload and playback must use the same recording bucket and region. The playback credential needs object-read permission; the uploader needs object-write permission. Use a browser-reachable storage origin for `EGMA_BLOB_PUBLIC_URL`, without a bucket path. Egma adds the bucket and object key when it signs the URL.
+
+For production evidence, set `EGMA_INGEST_ENDPOINT`, `EGMA_INGEST_BUCKET`, `EGMA_INGEST_REGION`, `EGMA_INGEST_ACCESS_KEY_ID`, and `EGMA_INGEST_SECRET_ACCESS_KEY`. Give that credential permission to put, list, read, and delete the ingestion bucket's `pending/` objects. Its endpoint must contain only a scheme, hostname, and optional port.
+
+Amazon S3 endpoints require the correct region. An absent or mismatched region can prevent startup or produce invalid request signatures. After changing storage, check a new voice recording and a new production conversation.
+
+## Generated credentials
+
+`egma self-host up` writes these internal values to `.egma-platform/platform.env`. Do not replace them with sample values in `.env`.
+
+| Variables | Purpose |
+| --- | --- |
+| `EGMA_ENCRYPTION_KEY` | Encrypts stored connection and organization provider credentials. The API and grader share this key. |
+| `EGMA_AUTH_SECRET` | Signs browser sessions. |
+| `EGMA_SIMULATOR_SERVICE_TOKEN` | Authenticates internal workers to the API. |
+| `EGMA_S3_ACCESS_KEY_ID`, `EGMA_S3_SECRET_ACCESS_KEY` | Bundled MinIO root credentials and default recording uploads. |
+| `EGMA_S3_READ_ACCESS_KEY_ID`, `EGMA_S3_READ_SECRET_ACCESS_KEY` | Read-only recording access. |
+| `EGMA_S3_INGEST_ACCESS_KEY_ID`, `EGMA_S3_INGEST_SECRET_ACCESS_KEY` | Ingestion bucket access. |
+| `EGMA_LIVEKIT_API_KEY`, `EGMA_LIVEKIT_API_SECRET` | Authentication between bundled LiveKit, its SIP gateway, and the simulator. |
+
+The file also records `EGMA_BASE_URL`. An explicit value in your operator environment updates the recorded address on the next start.
+
+Preserve the private file with PostgreSQL data. The CLI refuses to create replacement credentials when the file is missing and an existing database volume is present. If a complete set of internal credentials is stored in `.env`, the CLI can record those credentials without changing their values.
+
+## Retell phone simulations
+
+Retell chat and API-based voice connections do not need a carrier route. To call a Retell phone number from a self-hosted instance, configure all four values below. Leave all four unset otherwise.
+
+| Variable | Value |
+| --- | --- |
+| `EGMA_PHONE_TRUNK_ADDRESS` | SIP trunk hostname, without `sip://`, a path, or credentials. |
+| `EGMA_PHONE_SOURCE_NUMBER` | A source number attached to the trunk, in E.164 format. |
+| `EGMA_PHONE_TRUNK_USERNAME` | The trunk's SIP username. |
+| `EGMA_PHONE_TRUNK_PASSWORD` | Its SIP password. |
+
+For Twilio, use the termination trunk hostname and the credential-list username and password. These are different from an Account SID and Auth Token. A partial bundle is refused during startup.
+
+The bundled SIP gateway defaults to port `5060` over TCP and UDP, and RTP ports `10000` through `10020` over UDP. Set `EGMA_LIVEKIT_SIP_PORT`, `EGMA_LIVEKIT_SIP_RTP_PORT_START`, and `EGMA_LIVEKIT_SIP_RTP_PORT_END` if your route needs different ports. The gateway must be reachable by the carrier on its signaling and media ports.
+
+`EGMA_LIVEKIT_SIP_USE_EXTERNAL_IP` defaults to `true`. For a fixed public IP or one-to-one NAT, set `EGMA_LIVEKIT_SIP_EXTERNAL_IP` to the public address and configure matching port forwarding. An HTTP reverse proxy does not carry SIP or RTP traffic. Use the [Retell guide](/guides/retell) to add the phone-number connection after the route is configured.
+
+## Advanced settings
+
+The bundled values are sufficient for a local installation. Change these when you need different capacity or replace an internal service.
+
+<AccordionGroup>
+  <Accordion title="Service connections and capacity">
+    | Setting | Default or use |
+    | --- | --- |
+    | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | Each defaults to `egma`; Compose builds the API's `DATABASE_URL` from them. |
+    | `CLICKHOUSE_USER`, `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_DB` | Each defaults to `egma`; Compose builds `CLICKHOUSE_URL` from them. |
+    | `EGMA_API_ORIGIN` | Internal API origin used when building the web image. Compose uses `http://api:3100`. |
+    | `EGMA_SIMULATOR_CONTROL_PLANE_URL` | API URL the simulator uses to claim work and report results. Compose uses `http://api:3100`; set an HTTP or HTTPS URL when launching the simulator directly. |
+    | `EGMA_SIMULATOR_CAPACITY` | Concurrent simulations per simulator process; default `2`. |
+    | `EGMA_GRADER_CAPACITY` | Concurrent grading jobs per grader process; default `4`. |
+    | `EGMA_SIMULATOR_LIVEKIT_URL`, `EGMA_SIMULATOR_LIVEKIT_API_KEY`, `EGMA_SIMULATOR_LIVEKIT_API_SECRET` | Replace the bundled media server used by the simulator. These do not configure the customer's LiveKit connection. |
+    | `EGMA_SIMULATOR_LIVEKIT_ROOM_NAME`, `EGMA_SIMULATOR_LIVEKIT_ROOM_TOKEN`, `EGMA_SIMULATOR_LIVEKIT_API_TOKEN` | Optional deployment-scoped room name, participant token, and room-admin and SIP token. Set all three together; they replace the simulator's LiveKit API key and secret for that one room. |
+    | `EGMA_LIVEKIT_ADVERTISE_IP` | Address the bundled media server advertises to clients outside Compose. |
+    | `EGMA_ROLE` | API ingestion role: `all` by default; `ingest` or `drain` for a split deployment. |
+
+    Direct `DATABASE_URL` and `CLICKHOUSE_URL` values configure a directly launched API process. The bundled Compose file supplies its own values; use a Compose override if you replace those databases.
+  </Accordion>
+  <Accordion title="Ingestion limits">
+    | Variable | Default |
+    | --- | --- |
+    | `EGMA_INGESTION_LOG_DIR` | `/var/lib/egma/ingestion` in Compose. |
+    | `EGMA_INGESTION_LOG_MAX_BYTES` | `536870912`. |
+    | `EGMA_INGESTION_LOG_MAX_RECORDS` | `200000`. |
+    | `EGMA_INGESTION_FLUSH_MILLISECONDS` | `500`. |
+    | `EGMA_INGESTION_SEGMENT_MAX_BYTES` | `8388608`. |
+    | `EGMA_INGESTION_SEGMENT_MAX_RECORDS` | `5000`. |
+    | `EGMA_INGESTION_REQUEST_TIMEOUT_MILLISECONDS` | `10000`. |
+    | `EGMA_INGESTION_SCAN_INTERVAL_MILLISECONDS` | `30000`. |
+
+    Keep the ingestion log directory on persistent storage when you change its path.
+  </Accordion>
+  <Accordion title="Worker timing and logs">
+    | Variable | Default |
+    | --- | --- |
+    | `EGMA_SIMULATOR_HEARTBEAT_SECONDS` | `5`. |
+    | `EGMA_SIMULATOR_CLAIM_WAIT_SECONDS` | `30`. |
+    | `EGMA_SIMULATOR_REPORT_DEADLINE_SECONDS` | `120`. |
+    | `EGMA_GRADER_HEARTBEAT_SECONDS` | `15`. |
+    | `EGMA_GRADER_LEASE_SECONDS` | `120`. |
+    | `EGMA_GRADER_SWEEP_SECONDS` | `30`. |
+    | `EGMA_SIMULATOR_LOG_LEVEL`, `EGMA_GRADER_LOG_LEVEL` | `INFO`. |
+    | `EGMA_LIVEKIT_LOG_LEVEL` | `info`. |
+
+    `EGMA_SIMULATOR_CLAIMANT` and `EGMA_GRADER_CLAIMANT` override the process identities. Compose keeps the simulator's report log in its named volume. A directly launched simulator can set `EGMA_SIMULATOR_WAL_DIR` and use `EGMA_SIMULATOR_BLOB_DIR` for local recordings when no S3 endpoint is set.
+  </Accordion>
+  <Accordion title="Local contributor workbench">
+    The optional `docker-compose.workbench.yml` overlay runs a fixture control plane for local simulator development. `EGMA_WORKBENCH_PORT` sets its host port; the default is `8085`, bound to `127.0.0.1`. The overlay sets `EGMA_SIMULATOR_CONTROL_PLANE_URL` to `http://workbench:8085` inside the Compose network.
+
+    Keep the workbench on loopback because its fixture routes have no authentication. The normal self-hosted setup uses the real API and does not start this service.
+  </Accordion>
+  <Accordion title="Egma platform telemetry">
+    Egma's own platform telemetry is off by default. It is separate from the customer traces collected through monitoring.
+
+    Set `EGMA_TELEMETRY=on` to enable it. `EGMA_TELEMETRY_OTLP_ENDPOINT` selects the API and grader telemetry destination. `EGMA_POSTHOG_KEY` and `EGMA_POSTHOG_HOST` configure browser analytics and crash reporting. Rebuild through `egma self-host up` after changing browser telemetry settings.
+  </Accordion>
+</AccordionGroup>
+
+## Optional billing
+
+<ParamField path="EGMA_STRIPE_SECRET_KEY" type="string">
+  The Stripe secret key that selects a billing adapter. Leave it empty unless
+  you charge the people who use your deployment.
+</ParamField>
+
+<ParamField path="EGMA_STRIPE_WEBHOOK_SECRET" type="string">
+  The signing secret of the Stripe webhook endpoint you point at
+  `/api/billing/stripe/webhook`. Paid billing actions become available only
+  after this signing secret is configured.
+</ParamField>
+
+Egma records every provider request, chat simulation, web-call minute, and
+phone minute on every deployment, regardless of who pays. Without a Stripe
+secret key, charging is off. There are no plans or billing limits, allowances
+are unlimited, and the usage page shows your usage.
+
+Setting the key enables plans, monthly allowances, and a prepaid inference
+balance for every organization on the deployment. Each organization starts
+on the free Hobby plan with a one-time welcome credit.
+
+When billing is healthy, new work pauses if a Hobby allowance is spent. It
+also pauses if a required provider must use the deployment's key and the
+inference balance is exhausted. A saved organization key pays for its provider
+independently. Pro voice usage can continue past its included minutes at the
+overage rate. Work already admitted finishes, and billing failures do not stop
+customer jobs.
+
+Open **Settings → Usage and billing** to see usage, the balance, and payment
+actions. Refusal messages link to the setting that can resolve the block.
+This billing setup works the same way on Egma Cloud and self-hosted deployments.
+
+### Setting Stripe up
+
+First, create the Stripe objects needed to sell your deployment's paid plan:
+
+```bash
+DATABASE_URL=... EGMA_STRIPE_SECRET_KEY=... \
+  pnpm --filter @egma/ee stripe:setup
+```
+
+The command checks for existing objects before creating them, so you can run
+it again. It creates two billing meters, the paid product, its monthly fee
+price, and two tiered metered prices. The first tier covers the included
+allowance; the second sets the overage price. The command saves their
+identifiers in the plan row.
+It refuses a live key unless you set `EGMA_STRIPE_SETUP_ALLOW_LIVE=1`.
+
+Supply your business address to set your Stripe Tax head office and activate
+Stripe Tax. Provide the whole address as JSON in
+`EGMA_STRIPE_HEAD_OFFICE`, or the separate variables
+`EGMA_STRIPE_HEAD_OFFICE_LINE1`, `…_LINE2`, `…_CITY`, `…_STATE`,
+`…_POSTAL_CODE` and `…_COUNTRY`. If you omit the address, the command reports
+that it is missing and completes the other steps. Only the setup command reads
+these variables; they are not deployment settings.
+
+Second, add a webhook endpoint in Stripe pointing at
+`https://your-deployment/api/billing/stripe/webhook`, subscribed to
+`checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+`customer.subscription.created`, `customer.subscription.updated` and
+`customer.subscription.deleted`. Put its signing secret in
+`EGMA_STRIPE_WEBHOOK_SECRET` and restart. Until you do, the endpoint returns
+404 and payments do not credit an inference balance.
+
+### Updating pricing
+
+Edit plan fees, allowances and overage rates in `ee/src/plans.json`, then deploy
+the updated configuration. The API loads plan values at startup and retries a
+failed initialization; it does not rewrite them on each settlement interval.
+Direct database edits are not the pricing workflow.
+
+After changing a Pro fee, included voice allowance or overage rate, rerun
+`pnpm --filter @egma/ee stripe:setup` from that release with the deployment's
+`DATABASE_URL` and `EGMA_STRIPE_SECRET_KEY`. The command creates changed Stripe
+prices, moves their lookup keys and saves the identifiers used by new Pro
+Checkouts. A plan deployment alone does not update those Stripe prices.
+
+The setup command does not update existing subscriptions. Their invoices keep
+the prices they already use, while Egma's plan display reads the deployed plan
+values. Applying a changed plan to existing subscribers therefore needs a
+separate rollout decision; rerunning setup does not complete that change.
+
+Model rates are in `packages/db/src/models/rate-card.json`. Add a new entry with
+a new effective date and deploy it. Keep prior entries: stored usage keeps its
+original price references. Model rate changes do not require Stripe setup.
+
+
+## Worker limits
+
+| Variable | Purpose |
+| --- | --- |
+| `EGMA_SIMULATOR_MODE` | `persistent` by default; `one-shot` claims once |
+| `EGMA_SIMULATOR_MODALITIES` | Comma-separated `voice,chat`; unset accepts both in persistent mode and voice only in one-shot mode |
+| `EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS` | One-shot process deadline from claim through teardown; default 900; unused in persistent mode |
+| `EGMA_SIMULATOR_THREAD_POOL_WORKERS` | Native thread pool size; defaults to 1 in one-shot mode and leaves persistent-mode pools unchanged |
+| `EGMA_GRADING_CONCURRENCY_CAP` | Optional deployment-wide cap shared by all grader workers; unset by default. One job grades one simulation or trace with all its attached graders. Separate from simulation caps. |
+| `EGMA_GRADER_INGESTION_LOG_DIR` | Persistent paid-usage log; default `/var/lib/egma/grader-ingestion`. Mount a separate writable volume here. The grader does not use the API ingestion log directory. |
+
+`EGMA_VOICE_SIMULATION_CONCURRENCY_CAP` and `EGMA_CHAT_SIMULATION_CONCURRENCY_CAP` set separate deployment-wide caps on claimed or running simulations. Leave them empty for no cap. `EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS` sets provider caps as JSON, such as `{"cartesia":2,"deepgram":150}`. Work that exceeds a cap stays queued; providers absent from the JSON are uncapped. Grader workers refill each freed slot without waiting for other jobs.
+
+### Egma Cloud voice fleet
+
+These settings select the hosted Daytona launcher. They are injected by the cloud
+task definition and do not belong in a self-hosted `.env` or Compose file.
+Without `EGMA_VOICE_FLEET_LAUNCHER`, the API does not load Daytona or STS code.
+
+| Variable | Purpose |
+|---|---|
+| `EGMA_VOICE_FLEET_LAUNCHER` | Must be `daytona` to enable hosted voice launches |
+| `DAYTONA_API_KEY` | Daytona control token; loaded into the API from AWS Secrets Manager |
+| `DAYTONA_SNAPSHOT_ID` | Immutable simulator snapshot for the deployed public commit |
+| `DAYTONA_SANDBOX_TTL_MINUTES` | Abandoned-sandbox cleanup limit; default 30 |
+| `DAYTONA_SERVICE_TOKEN_SECRET` | Daytona organization secret mounted as `EGMA_SIMULATOR_SERVICE_TOKEN` |
+| `DAYTONA_SANDBOX_SECRETS` | JSON map from supported provider environment names to Daytona organization secret names |
+| `EGMA_DAYTONA_RECORDING_ROLE_ARN` | Recording-only AWS role assumed after a sandbox claims one simulation |
+| `EGMA_DAYTONA_RECORDING_BUCKET_ARN` | Recording bucket ARN used to restrict that role session to the claimed simulation's recording |
+| `EGMA_SIMULATOR_RUNTIME` | Hosted claimant marker; `daytona` when present |
+| `EGMA_RELEASE_SHA` | Lowercase 40-character public commit SHA exposed by `/health` after deployment |
+
+The launcher gives every sandbox the shared OpenTelemetry service name
+`egma-voice-simulator` and stable release, snapshot, and runtime resource
+attributes. Daytona supplies the sandbox ID as `service.instance.id`. A sandbox
+claims work after it starts, so the API exports an
+`egma.daytona.sandbox.assigned` span that maps `daytona.sandbox.id` to
+`egma.simulation_id`. In PostHog, that mapping joins one simulation to the
+sandbox lifecycle and resource telemetry; the simulation ID is not a dynamic
+resource attribute on each Daytona metric.
+
+Daytona workers receive their room and recording authority in the claimed work
+order, so the launcher does not set the simulator's LiveKit or S3 credential
+variables on the sandbox. The release workflow checks `releaseSha` before it
+ships the web app.

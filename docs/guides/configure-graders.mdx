@@ -1,0 +1,87 @@
+---
+title: "Configure graders"
+---
+
+Open **Graders**, select **Active graders**, and open the grader's menu. Select
+**Edit** to change its project settings.
+
+## Choose the scope
+
+For a grader with editable scope, enable either or both sources:
+
+- **Grades simulations**: choose **All simulations**, or **Selected test
+  suites and tests**. A suite selection includes its tests in future runs.
+- **Grades production**: set **Production sample** from `1` through `100`
+  percent. Use `100` to select every eligible production conversation.
+
+Production sampling selects a stable percentage of eligible traces. Small
+groups of conversations can have a different percentage.
+
+Overlapping simulation selections do not run the same project grader twice.
+A grader also needs to support the conversation's modality. A trace outside
+its scope or modality gets no grade from that grader.
+
+**Expected behaviors** has fixed scope: all simulations and no production
+conversations.
+
+## Set the threshold and settings
+
+Set **Pass threshold** between `0` and `1`. The grader passes when its score is
+at least that threshold. Keep the threshold at `1` for a binary rule when you
+want a failed check to fail the grader.
+
+Some graders have extra settings. For example, **Response latency** has a
+maximum response time in milliseconds. These settings control how it computes
+the score; the pass threshold controls how that score becomes an individual
+result.
+
+For an LLM grader, choose **Language model** from the supported choices.
+This includes **Expected behaviors**. Each project saves its own model and
+settings. Saving them does not create a grader definition version.
+
+Egma saves defaults when you first use a grader. Compatible updates to an
+Egma-provided definition apply to future work and preserve your saved model,
+settings, scope, and threshold. A custom clone is independent of its source.
+
+Save your settings, then start a new run. A simulation keeps the grader selection,
+definition versions, settings, and pass thresholds captured for its run.
+Changes apply to future work.
+
+Production grading saves its selection when the conversation is selected for
+grading. Later policy changes do not change that work or its retries.
+
+## Regrade a simulation
+
+Use regrading to run the original grading work again for the same completed
+simulation. This can recover from a temporary grading failure or include agent
+evidence that arrived after the first grading attempt.
+
+1. Open a completed simulation from **Runs**.
+2. Select **Regrade**.
+3. Confirm **Regrade simulation** and wait for grading to finish.
+
+Regrading uses the whole original grader selection, with its frozen definitions,
+settings, and thresholds. It does not call the agent again and does not apply
+your latest project policy. Start a new run to test a changed agent, test,
+persona, or grading policy.
+
+Regrading reads the evidence currently stored for that conversation. If agent
+spans arrived late, the new attempt can use them. Existing grades do not change
+when those spans arrive.
+
+Earlier grades remain in the history. The API returns the latest grade from
+each project grader in `grades`, and all attempts in `gradeHistory`.
+
+Each grade's `parameterValues` records the settings used for that attempt,
+including its model or numeric settings. Both successful and errored grades
+keep these values; they contain no credentials.
+
+## Remove an optional grader
+
+Open the grader's menu in **Active graders** and select **Remove grader**.
+This stops selecting it for future project work. It does not remove the grades
+or frozen plans from earlier simulations. Expected behaviors cannot be removed.
+
+## Bring your own provider keys
+
+Add your keys in [Settings → Provider API Keys](/configuration/provider-api-keys). Provider keys and model choices are separate settings. Your keys also apply to predefined personas and model graders. Code graders do not make model calls.

@@ -50,7 +50,10 @@ export const gradeSchema = {
     projectGraderId: stringIdSchema,
     graderDefinitionId: stringIdSchema,
     graderDefinitionVersion: { type: "integer", minimum: 1 },
-    parameterValues: { type: "object", additionalProperties: true },
+    parameterValues: {
+      type: "object", additionalProperties: true,
+      description: "The model or numeric settings used for this grading attempt. Retained for successful and errored grades, including after temporary jobs are removed. Contains no credentials.",
+    },
     graderName: stringSchema,
     score: nullable(normalizedScoreSchema),
     details: gradeDetailsSchema,
@@ -77,9 +80,18 @@ export const gradeSchema = {
 } as const;
 
 export const gradeProjectionProperties = {
-  grades: arrayOf(gradeSchema),
-  gradeHistory: arrayOf(gradeSchema),
-  combinedScore: nullable(normalizedScoreSchema),
+  grades: {
+    ...arrayOf(gradeSchema),
+    description: "The current result for each selected grader. Each grade has its own score, frozen threshold, result, and supporting details.",
+  },
+  gradeHistory: {
+    ...arrayOf(gradeSchema),
+    description: "Recorded grade results, including previous grading attempts. Regrading preserves this history.",
+  },
+  combinedScore: {
+    ...nullable(normalizedScoreSchema),
+    description: "Display-only arithmetic mean when every selected grader has a current score. Null while a required score is missing or errored. This is not an overall pass/fail result.",
+  },
 } as const;
 
 export const gradeProjectionRequired = [

@@ -42,7 +42,8 @@ const commonWriteRefusals = {
 export const graderLibraryOperations = {
   getGraderForm: defineOperation({
     operationId: "getGraderForm", method: "GET", path: "/v1/grader-form",
-    summary: "Get supported grader models and first-use defaults", tag: "Graders", security: "credentialed",
+    summary: "Get grader model choices", tag: "Graders", security: "credentialed",
+    description: "Read supported provider/model pairs and default settings before creating or configuring an LLM grader.",
     request: { query: projectQuery },
     responses: {
       200: { description: "Supported grader model pairs and the default LLM contract.", schema: {
@@ -61,6 +62,8 @@ export const graderLibraryOperations = {
     method: "GET",
     path: "/v1/grader-library",
     summary: "List the grader library for a project",
+    description:
+      "Includes Egma's built-in graders and custom graders owned by this project. activeProjectGraderId identifies a definition already in use by this project; null means it can be added.",
     tag: "Graders",
     security: "credentialed",
     request: {
@@ -92,6 +95,8 @@ export const graderLibraryOperations = {
     method: "GET",
     path: "/v1/grader-library/{graderDefinitionId}",
     summary: "Get one grader library entry",
+    description:
+      "Read the current definition or request an exact definitionVersion from historical grade evidence. Setting definitions describe the values needed when adding the grader to a project.",
     tag: "Graders",
     security: "credentialed",
     request: { params: definitionParams, query: definitionReadQuery },
@@ -109,6 +114,8 @@ export const graderLibraryOperations = {
     method: "POST",
     path: "/v1/grader-library/{graderDefinitionId}/use",
     summary: "Use a grader in the current project",
+    description:
+      "Adds an available definition with this project's scope, settings, and pass threshold. These settings apply to future work; adding a grader does not change earlier simulation plans. A definition can be active only once per project. The example settings are for Response latency.",
     tag: "Graders",
     security: "credentialed",
     request: {
@@ -116,9 +123,29 @@ export const graderLibraryOperations = {
       query: projectQuery,
       body: {
         type: "object",
-        properties: projectGraderPolicyInputProperties,
+        properties: {
+          scope: {
+            ...projectGraderPolicyInputProperties.scope,
+            description:
+              "Select all simulations, particular test suites or tests, and/or a production sample from 1 through 100 percent. production: null disables production grading.",
+          },
+          settings: {
+            ...projectGraderPolicyInputProperties.settings,
+            description:
+              "Complete values for the definition's settingDefinitions. Omit settings to save the declared defaults on first use. LLM graders use llm_provider and llm_model; Response latency uses maximum_response_time_ms.",
+          },
+          passThreshold: {
+            ...projectGraderPolicyInputProperties.passThreshold,
+            description: "The minimum score for this grader's individual result to pass.",
+          },
+        },
         required: ["scope", "passThreshold"],
         additionalProperties: false,
+        examples: [{
+          scope: { simulations: [{ kind: "all" }], production: null },
+          settings: { maximum_response_time_ms: 3000 },
+          passThreshold: 1,
+        }],
       },
       bodyRequired: true,
     },
@@ -137,9 +164,7 @@ export const graderLibraryOperations = {
     path: "/v1/grader-library/custom",
     summary: "Create and use a custom LLM grader",
     description:
-      "Creates a project-owned LLM core and complete project model settings in one write. " +
-      "The server compiles the three instruction fields into one immutable prompt. " +
-      "Omitted settings use the current contract defaults once, at creation.",
+      "Create a custom LLM grader owned by this project. Set its instructions, model, scope, and pass threshold. Omit settings to save the declared model defaults at creation.",
     tag: "Graders",
     security: "credentialed",
     request: {
@@ -149,12 +174,32 @@ export const graderLibraryOperations = {
         properties: {
           name: stringSchema,
           description: nullable(stringSchema),
-          gradingInstructions: stringSchema,
-          passesWhen: stringSchema,
-          failsWhen: stringSchema,
-          settings: projectGraderPolicyInputProperties.settings,
-          scope: projectGraderPolicyInputProperties.scope,
-          passThreshold: projectGraderPolicyInputProperties.passThreshold,
+          gradingInstructions: {
+            ...stringSchema,
+            description: "One rule to decide and the conversation evidence to inspect.",
+          },
+          passesWhen: {
+            ...stringSchema,
+            description:
+              "The evidence that makes the rule pass. Include how to handle a conversation where the checked action never occurs.",
+          },
+          failsWhen: {
+            ...stringSchema,
+            description: "The evidence that makes the rule fail.",
+          },
+          settings: {
+            ...projectGraderPolicyInputProperties.settings,
+            description: "A complete llm_provider and llm_model pair from Get grader model choices. Omit settings to use the declared defaults.",
+          },
+          scope: {
+            ...projectGraderPolicyInputProperties.scope,
+            description:
+              "The future simulations and/or production sample this project should grade.",
+          },
+          passThreshold: {
+            ...projectGraderPolicyInputProperties.passThreshold,
+            description: "The minimum score for this grader's individual result to pass.",
+          },
         },
         required: [
           "name",
@@ -165,6 +210,17 @@ export const graderLibraryOperations = {
           "passThreshold",
         ],
         additionalProperties: false,
+        examples: [{
+          name: "Appointment recap",
+          gradingInstructions:
+            "Decide whether the agent repeats the chosen appointment date and time and asks the caller to confirm them. Use the transcript.",
+          passesWhen:
+            "The agent repeats the chosen date and time and asks for confirmation. If no appointment is chosen, the rule is met.",
+          failsWhen:
+            "An appointment is chosen and the agent ends the conversation without repeating both its date and time and asking for confirmation.",
+          scope: { simulations: [{ kind: "all" }], production: null },
+          passThreshold: 1,
+        }],
       },
       bodyRequired: true,
     },
@@ -187,7 +243,8 @@ export const graderLibraryOperations = {
 
   cloneGrader: defineOperation({
     operationId: "cloneGrader", method: "POST", path: "/v1/grader-library/{graderDefinitionId}/clone",
-    summary: "Clone the current LLM core into this project", tag: "Graders", security: "credentialed",
+    summary: "Clone a grader", tag: "Graders", security: "credentialed",
+    description: "Copy the current LLM definition and this project's effective settings into an independent custom grader. Historical versions and code graders cannot be cloned. The clone receives no source updates.",
     request: {
       params: definitionParams, query: projectQuery, bodyRequired: true,
       body: { type: "object", properties: { name: stringSchema, description: nullable(stringSchema) }, required: ["name"], additionalProperties: false },
@@ -201,7 +258,8 @@ export const graderLibraryOperations = {
   }),
   updateGraderDefinition: defineOperation({
     operationId: "updateGraderDefinition", method: "PATCH", path: "/v1/grader-library/{graderDefinitionId}",
-    summary: "Edit the current custom grader core or live display metadata", tag: "Graders", security: "credentialed",
+    summary: "Update grader instructions", tag: "Graders", security: "credentialed",
+    description: "Edit the current custom definition's prompt or display labels. Send its definitionVersion as baseDefinitionVersion. A changed prompt creates a version; label edits do not. Egma-owned definitions are read-only.",
     request: {
       params: definitionParams, query: projectQuery, bodyRequired: true,
       body: {

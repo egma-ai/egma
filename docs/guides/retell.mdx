@@ -1,0 +1,200 @@
+---
+title: "Connect a Retell agent"
+sidebarTitle: "Retell"
+---
+
+You need a Retell agent, a Retell API key that can access it, and an initialized
+Egma project in your repository. Complete [CLI sign-in](/tools/cli#sign-in-and-initialize)
+first.
+
+Start with a text connection to check conversation behavior, or a web-call
+connection to test voice. Both connect directly to your Retell agent.
+
+## 1. Find the Retell agent
+
+Load your Retell API key into the `EGMA_RETELL_API_KEY` environment variable
+from your secret store. If your repository already loads `RETELL_API_KEY`, use:
+
+```bash
+export EGMA_RETELL_API_KEY="$RETELL_API_KEY"
+egma agent connection options --platform retell
+```
+
+The command lists available Retell agent IDs and supported connection options.
+Set `RETELL_AGENT_ID` to the exact ID of the agent you want to test. Do not use
+a display name in its place.
+
+For a key supplied by another process, add `--credentials-stdin`. The CLI
+accepts a JSON object with an `apiKey` field through standard input. Do not put
+the key in a command-line argument or commit it to `egma/config.yaml`.
+
+## 2. Register the agent in Egma
+
+Check `egma/config.yaml` first. If it already contains the agent, use that Egma
+agent ID. Otherwise, register it with a name that identifies it in Egma:
+
+```bash
+egma agent register --platform retell --name "Front desk"
+```
+
+Set `EGMA_AGENT_ID` to the Egma ID printed by the command. Registration creates
+the Egma record; the next step connects it to Retell.
+
+## 3. Add a connection
+
+<Tabs>
+  <Tab title="Text">
+    Text mode tests the conversation logic without sending audio through the
+    speech stack. It supports Retell-managed LLM and conversation-flow agents.
+    Retell custom-LLM agents do not support this mode.
+
+    ```bash
+    egma agent connection add \
+      --agent "$EGMA_AGENT_ID" \
+      --access retell-api-key \
+      --modality chat \
+      --retell-agent "$RETELL_AGENT_ID" \
+      --name "Retell text"
+    ```
+  </Tab>
+  <Tab title="Web call">
+    A web-call simulation sends and receives audio over the internet. It does
+    not need a phone number.
+
+    ```bash
+    egma agent connection add \
+      --agent "$EGMA_AGENT_ID" \
+      --access retell-api-key \
+      --modality voice \
+      --retell-agent "$RETELL_AGENT_ID" \
+      --name "Retell web call"
+    ```
+  </Tab>
+</Tabs>
+
+The first connection binds the Egma agent to the selected Retell agent and
+stores its credentials. Later connections for that Egma agent reuse the stored
+Retell ID and key. Supplying a different Retell ID does not change the binding.
+
+To inspect an existing binding's available connections, run:
+
+```bash
+egma agent connection options --platform retell --agent "$EGMA_AGENT_ID"
+```
+
+Keep the new connection ID and use it as `EGMA_CONNECTION_ID` in the
+[CLI run command](/tools/cli#start-a-run).
+
+### Choose the version to test
+
+Egma resolves the Retell agent version once when a run starts. It follows an
+explicit version or environment-tag binding on a phone number routed to the
+agent. Otherwise, it uses the latest published version. Publish the version
+you want tested before running; an unpublished draft is not selected by
+default.
+
+## Pass data to a test
+
+If the agent normally receives dynamic variables, put their test values in
+the test's `## Env` section:
+
+````markdown
+## Env
+
+```json
+{
+  "retell_dynamic_variables": {
+    "clinic_name": "Oak Street Clinic",
+    "caller_name": "Alex Morgan"
+  }
+}
+```
+````
+
+Use the exact variable names that the agent reads. Values must be strings.
+Do not use names starting with `egma_`; that prefix is reserved. Egma passes
+these variables to text and web-call simulations.
+
+## Mock tool responses
+
+Add a [Mock tools section](/guides/mock-tool-responses) to a test to return a
+controlled response for a selected custom tool. Use the exact tool name and
+the response shape your agent expects. Retell integrations do not need an
+Egma SDK in your backend for this.
+
+Only the tools named in the test are mocked. Other tools still run against
+their real backend. Retell's built-in actions, such as call transfer, SMS,
+digit pressing, and built-in booking, are not replaced by custom-tool mocks.
+These mocks do not replace MCP tools either.
+
+<Warning>
+  Web-call runs with mock tools create a temporary Retell agent version.
+  During that run, this version is **Latest Created**. Keep real phone numbers
+  and environment tags pinned to a serving version or **Latest Published**.
+  An unset phone-number version also uses **Latest Created**. Egma does not
+  change your production routing for you.
+</Warning>
+
+## Test through a Retell phone number
+
+Use this option when you need to test the agent through its deployed Retell
+phone route. Set `RETELL_PHONE_NUMBER` to the E.164 number returned for the
+selected agent by `egma agent connection options`, then add the connection:
+
+```bash
+egma agent connection add \
+  --agent "$EGMA_AGENT_ID" \
+  --access retell-phone-number \
+  --modality voice \
+  --retell-agent "$RETELL_AGENT_ID" \
+  --retell-phone-number "$RETELL_PHONE_NUMBER" \
+  --name "Retell phone"
+```
+
+This places a real phone call when you start a run. Phone simulations use your
+deployed phone route and its normal backend. They do not support test mock
+tools or `retell_dynamic_variables`. Use a web-call connection when you need
+those controls.
+
+For self-hosted Egma, configure the Retell phone prerequisites in
+[Self-hosting configuration](/self-hosting/configuration) before starting a
+phone run.
+
+## Read the simulation's evidence
+
+After a web or phone call ends, Egma reads its call record from Retell and
+adds it to the simulation. The transcript includes the tool calls Retell
+recorded, including calls to your real backend. Calls answered by a test mock
+are marked **mocked**. The voice recording captures what the simulated caller
+heard.
+
+Retell text mode has no stored call record for Egma to import. Egma records the
+complete API exchange it conducted, including the tool results Retell returns.
+Retell does not provide a separate native agent trace for text mode.
+
+If the agent's record is incomplete, check that the ended call is available
+in Retell. Once missing evidence arrives in Egma, you can
+[regrade the simulation](/guides/configure-graders#regrade-a-simulation).
+
+## Enable production monitoring
+
+For an agent you connected above, reuse its stored Retell credentials:
+
+```bash
+egma agent monitoring setup --agent "$EGMA_AGENT_ID" --platform retell
+```
+
+Open **Monitoring** in Egma to inspect imported calls. Monitoring belongs to
+the agent, so it does not need a simulation connection or test suite. See
+[Set up monitoring](/guides/set-up-monitoring#retell) for a monitoring-only
+setup and result checks.
+
+## If a simulation cannot reach the agent
+
+- Check that you selected the **Egma** agent and connection IDs from
+  `egma/config.yaml` in the run command.
+- Run connection discovery for that Egma agent to check the Retell binding.
+- For text mode, confirm that Retell manages the agent's LLM or conversation
+  flow. Use a web call for a custom-LLM agent.
+- Check any required dynamic variables and backend access. A connected agent
+  can still fail if its startup context is missing.

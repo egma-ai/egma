@@ -25,7 +25,13 @@ export type TraceSpan = {
     toolName: string;
     toolArguments: string;
     toolResult: string;
+    /**
+     * Whose account this span records: agent for the agent’s own turns and tools, or persona for Egma’s caller. Read the agent spans for one transcript; combining both repeats the conversation.
+     */
     pov: 'persona' | 'agent';
+    /**
+     * Present when a mock with this toolName answered the call. Read from the simulation’s pinned test version. Absent on ordinary tool calls and production traces.
+     */
     toolProvenance?: 'mocked';
     spans: Array<TraceSpan>;
 };
@@ -203,14 +209,29 @@ export type PutProviderKeyResponse = PutProviderKeyResponses[keyof PutProviderKe
 
 export type DiscoverAgentsData = {
     body: {
+        /**
+         * Provider to query. Agent discovery currently supports Retell.
+         */
         agentPlatform: 'retell';
+        /**
+         * Retell account credential for this discovery request. Omit it when using agentId to reuse a saved key.
+         */
         credentials?: {
+            /**
+             * Retell API key with access to the agents you want to list.
+             */
             apiKey: string;
         };
+        /**
+         * Existing Egma agent whose stored Retell key should be used. Omit credentials when supplying this field.
+         */
         agentId?: string;
     };
     path?: never;
     query?: {
+        /**
+         * Project to act in. A project-scoped API key already identifies its project.
+         */
         projectId?: string;
     };
     url: '/v1/agents:discover';
@@ -263,6 +284,9 @@ export type DiscoverAgentsResponses = {
                 accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164';
                 modality: 'chat' | 'voice';
                 productLabel: string;
+                /**
+                 * Confirmed non-secret settings for this candidate. Copy these with its connection type, access variant, and modality when creating the connection.
+                 */
                 config: {
                     [key: string]: string;
                 };
@@ -309,19 +333,40 @@ export type ListConnectionOptionsResponses = {
             topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
             simulatorAdapter: boolean;
             fields: Array<{
+                /**
+                 * Property name to include in the connection request's config object.
+                 */
                 key: string;
                 label: string;
                 kind: 'text' | 'url' | 'e164' | 'json';
+                /**
+                 * Whether this config field must be supplied for the selected option.
+                 */
                 required: boolean;
                 help: string;
+                /**
+                 * Whether provider credentials are needed before the setup flow can resolve choices for this field.
+                 */
                 afterCredentials: boolean;
             }>;
+            /**
+             * Whether the connection stores credentials for this access variant. Retell phone setup can still need an agent-level provider key to confirm the phone route.
+             */
             credentialRule: 'required' | 'forbidden' | 'optional';
             credentialHelp: string;
             credentialFields: Array<{
+                /**
+                 * Property name in the connection request's credentials object.
+                 */
                 field: string;
                 label: string;
+                /**
+                 * Input type. JSON credential values such as headers are encoded as strings containing JSON.
+                 */
                 kind: 'secret' | 'json';
+                /**
+                 * Whether this credential field is required for the selected option.
+                 */
                 required: boolean;
                 help: string;
             }>;
@@ -421,23 +466,53 @@ export type ListAgentsResponse = ListAgentsResponses[keyof ListAgentsResponses];
 
 export type RegisterAgentData = {
     body: {
+        /**
+         * Display name for the agent in Egma.
+         */
         name: string;
+        /**
+         * The product or framework that runs your agent.
+         */
         agentPlatform: 'retell' | 'livekit';
+        /**
+         * Choose one supported agentPlatform, connectionType, accessVariant, and modality from List supported connection options. Its fields describe config and its credentialFields describe credentials. Egma validates the complete combination before saving it.
+         */
         connection?: {
+            /**
+             * Optional connection display name. If omitted, Egma chooses the next available numbered name.
+             */
             name?: string;
             agentPlatform: 'retell' | 'livekit' | null;
+            /**
+             * Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room connections can use voice or chat.
+             */
             connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+            /**
+             * Credential method for the connection type, copied from the same catalog entry.
+             */
             accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            /**
+             * How simulations communicate with the agent. Use a modality offered by the selected catalog entry.
+             */
             modality: 'voice' | 'chat';
+            /**
+             * Optional label identifying the environment this connection reaches.
+             */
             environment?: string;
+            /**
+             * Non-secret settings for the selected access variant. Use only its catalog fields. Retell API variants use retellAgentId; a Retell phone connection uses phoneNumber. LiveKit project credentials use url and agentName. LiveKit token endpoints use tokenEndpoint and agentName; tokenEndpoint must be a public HTTPS URL. agentName must match the name registered by your LiveKit worker. When platformAgentId is supplied for a Retell API variant, Egma derives and confirms retellAgentId from that selection.
+             */
             config?: {
                 [key: string]: unknown;
             };
+            /**
+             * Secret fields for the selected access variant. Retell uses apiKey. LiveKit project credentials use apiKey and apiSecret. A LiveKit token endpoint requires headers: a JSON-encoded string containing a non-empty object of header names to string values. For an additional Retell connection, platformAgentId can reuse the agent's saved Retell key when credentials are omitted. For a Retell phone connection, the key confirms provider identity and is held on the agent; the phone connection itself stores no key. Responses return credential presence and hints, never the secret values.
+             */
             credentials?: {
                 [key: string]: unknown;
             };
             /**
-             * The platform's own id for the agent this connection reaches, as agents:discover listed it. Required for a Retell phone connection. Egma confirms it against Retell with the key in credentials, or with the key already sealed on the agent, immediately before the connection is written, so a number that has stopped answering for that agent is refused rather than stored. One Egma agent binds to one platform agent: a second, different one is refused by name.
+             * Retell's agent ID from Discover agents, not an Egma agent ID. Supply it with the selected candidate to confirm the provider agent and save its identity on the Egma agent. Required for Retell phone connections. Egma uses credentials.apiKey or the key already saved on that agent. A different Retell identity on the same Egma agent is refused. Do not send this together with agentPlatformSelection.
              */
             platformAgentId?: string;
             /**
@@ -457,6 +532,9 @@ export type RegisterAgentData = {
     };
     path?: never;
     query?: {
+        /**
+         * Project to act in. A project-scoped API key already identifies its project.
+         */
         projectId?: string;
     };
     url: '/v1/agents';
@@ -597,6 +675,9 @@ export type RegisterAgentResponse = RegisterAgentResponses[keyof RegisterAgentRe
 export type GetAgentData = {
     body?: never;
     path: {
+        /**
+         * The Egma agent ID returned by Register an agent or List agents.
+         */
         agentId: string;
     };
     query?: {
@@ -685,9 +766,15 @@ export type UpdateAgentData = {
         name?: string;
     };
     path: {
+        /**
+         * The Egma agent ID returned by Register an agent or List agents.
+         */
         agentId: string;
     };
     query?: {
+        /**
+         * Project to act in. A project-scoped API key already identifies its project.
+         */
         projectId?: string;
     };
     url: '/v1/agents/{agentId}';
@@ -758,21 +845,45 @@ export type UpdateAgentResponses = {
 export type UpdateAgentResponse = UpdateAgentResponses[keyof UpdateAgentResponses];
 
 export type AddConnectionData = {
+    /**
+     * Choose one supported agentPlatform, connectionType, accessVariant, and modality from List supported connection options. Its fields describe config and its credentialFields describe credentials. Egma validates the complete combination before saving it.
+     */
     body: {
+        /**
+         * Optional connection display name. If omitted, Egma chooses the next available numbered name.
+         */
         name?: string;
         agentPlatform: 'retell' | 'livekit' | null;
+        /**
+         * Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room connections can use voice or chat.
+         */
         connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+        /**
+         * Credential method for the connection type, copied from the same catalog entry.
+         */
         accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+        /**
+         * How simulations communicate with the agent. Use a modality offered by the selected catalog entry.
+         */
         modality: 'voice' | 'chat';
+        /**
+         * Optional label identifying the environment this connection reaches.
+         */
         environment?: string;
+        /**
+         * Non-secret settings for the selected access variant. Use only its catalog fields. Retell API variants use retellAgentId; a Retell phone connection uses phoneNumber. LiveKit project credentials use url and agentName. LiveKit token endpoints use tokenEndpoint and agentName; tokenEndpoint must be a public HTTPS URL. agentName must match the name registered by your LiveKit worker. When platformAgentId is supplied for a Retell API variant, Egma derives and confirms retellAgentId from that selection.
+         */
         config?: {
             [key: string]: unknown;
         };
+        /**
+         * Secret fields for the selected access variant. Retell uses apiKey. LiveKit project credentials use apiKey and apiSecret. A LiveKit token endpoint requires headers: a JSON-encoded string containing a non-empty object of header names to string values. For an additional Retell connection, platformAgentId can reuse the agent's saved Retell key when credentials are omitted. For a Retell phone connection, the key confirms provider identity and is held on the agent; the phone connection itself stores no key. Responses return credential presence and hints, never the secret values.
+         */
         credentials?: {
             [key: string]: unknown;
         };
         /**
-         * The platform's own id for the agent this connection reaches, as agents:discover listed it. Required for a Retell phone connection. Egma confirms it against Retell with the key in credentials, or with the key already sealed on the agent, immediately before the connection is written, so a number that has stopped answering for that agent is refused rather than stored. One Egma agent binds to one platform agent: a second, different one is refused by name.
+         * Retell's agent ID from Discover agents, not an Egma agent ID. Supply it with the selected candidate to confirm the provider agent and save its identity on the Egma agent. Required for Retell phone connections. Egma uses credentials.apiKey or the key already saved on that agent. A different Retell identity on the same Egma agent is refused. Do not send this together with agentPlatformSelection.
          */
         platformAgentId?: string;
         /**
@@ -790,9 +901,15 @@ export type AddConnectionData = {
         };
     };
     path: {
+        /**
+         * The Egma agent ID returned by Register an agent or List agents.
+         */
         agentId: string;
     };
     query?: {
+        /**
+         * Project to act in. A project-scoped API key already identifies its project.
+         */
         projectId?: string;
     };
     url: '/v1/agents/{agentId}/connections';
@@ -872,9 +989,15 @@ export type ArchiveAgentData = {
         [key: string]: never;
     };
     path: {
+        /**
+         * The Egma agent ID returned by Register an agent or List agents.
+         */
         agentId: string;
     };
     query?: {
+        /**
+         * Project to act in. A project-scoped API key already identifies its project.
+         */
         projectId?: string;
     };
     url: '/v1/agents/{agentId}/archive';
@@ -951,9 +1074,15 @@ export type RestoreAgentData = {
         name?: string;
     };
     path: {
+        /**
+         * The Egma agent ID returned by Register an agent or List agents.
+         */
         agentId: string;
     };
     query?: {
+        /**
+         * Project to act in. A project-scoped API key already identifies its project.
+         */
         projectId?: string;
     };
     url: '/v1/agents/{agentId}/restore';
@@ -1030,6 +1159,9 @@ export type GetConnectionData = {
         connectionId: string;
     };
     query?: {
+        /**
+         * Project to act in. A project-scoped API key already identifies its project.
+         */
         projectId?: string;
     };
     url: '/v1/agents/{agentId}/connections/{connectionId}';
@@ -1108,6 +1240,9 @@ export type UpdateConnectionData = {
         connectionId: string;
     };
     query?: {
+        /**
+         * Project to act in. A project-scoped API key already identifies its project.
+         */
         projectId?: string;
     };
     url: '/v1/agents/{agentId}/connections/{connectionId}';
@@ -1191,6 +1326,9 @@ export type ArchiveConnectionData = {
         connectionId: string;
     };
     query?: {
+        /**
+         * Project to act in. A project-scoped API key already identifies its project.
+         */
         projectId?: string;
     };
     url: '/v1/agents/{agentId}/connections/{connectionId}/archive';
@@ -1283,6 +1421,9 @@ export type RestoreConnectionData = {
         connectionId: string;
     };
     query?: {
+        /**
+         * Project to act in. A project-scoped API key already identifies its project.
+         */
         projectId?: string;
     };
     url: '/v1/agents/{agentId}/connections/{connectionId}/restore';
@@ -1812,6 +1953,9 @@ export type UpdateGraderDefinitionResponse = UpdateGraderDefinitionResponses[key
 
 export type UseGraderInProjectData = {
     body: {
+        /**
+         * Select all simulations, particular test suites or tests, and/or a production sample from 1 through 100 percent. production: null disables production grading.
+         */
         scope: {
             simulations: Array<{
                 kind: 'all';
@@ -1826,9 +1970,15 @@ export type UseGraderInProjectData = {
                 samplePercent: number;
             } | null;
         };
+        /**
+         * Complete values for the definition's settingDefinitions. Omit settings to save the declared defaults on first use. LLM graders use llm_provider and llm_model; Response latency uses maximum_response_time_ms.
+         */
         settings?: {
             [key: string]: unknown;
         };
+        /**
+         * The minimum score for this grader's individual result to pass.
+         */
         passThreshold: number;
     };
     path: {
@@ -1917,12 +2067,27 @@ export type CreateCustomGraderData = {
     body: {
         name: string;
         description?: string | null;
+        /**
+         * One rule to decide and the conversation evidence to inspect.
+         */
         gradingInstructions: string;
+        /**
+         * The evidence that makes the rule pass. Include how to handle a conversation where the checked action never occurs.
+         */
         passesWhen: string;
+        /**
+         * The evidence that makes the rule fail.
+         */
         failsWhen: string;
+        /**
+         * A complete llm_provider and llm_model pair from Get grader model choices. Omit settings to use the declared defaults.
+         */
         settings?: {
             [key: string]: unknown;
         };
+        /**
+         * The future simulations and/or production sample this project should grade.
+         */
         scope: {
             simulations: Array<{
                 kind: 'all';
@@ -1937,6 +2102,9 @@ export type CreateCustomGraderData = {
                 samplePercent: number;
             } | null;
         };
+        /**
+         * The minimum score for this grader's individual result to pass.
+         */
         passThreshold: number;
     };
     path?: never;
@@ -2289,6 +2457,9 @@ export type RemoveGraderResponse = RemoveGraderResponses[keyof RemoveGraderRespo
 
 export type UpdateGraderData = {
     body: {
+        /**
+         * Simulation selectors and an optional production sample. Only graders with scopeEditable set to true accept scope changes.
+         */
         scope?: {
             simulations: Array<{
                 kind: 'all';
@@ -2303,9 +2474,15 @@ export type UpdateGraderData = {
                 samplePercent: number;
             } | null;
         };
+        /**
+         * Complete values for the definition's settingDefinitions. LLM graders use llm_provider and llm_model. Response latency uses maximum_response_time_ms, a positive integer in milliseconds. These settings belong to this project and do not create a definition version.
+         */
         settings?: {
             [key: string]: unknown;
         };
+        /**
+         * This grader passes when its score is at least this value. There is no overall run pass threshold.
+         */
         passThreshold?: number;
     };
     path: {
@@ -2947,6 +3124,9 @@ export type UpdateOrganizationResponse = UpdateOrganizationResponses[keyof Updat
 export type UsePersonaData = {
     body?: {
         projectId?: string;
+        /**
+         * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+         */
         models?: {
             llm: {
                 provider: string;
@@ -2959,7 +3139,13 @@ export type UsePersonaData = {
             tts: {
                 provider: string;
                 model: string;
+                /**
+                 * A voice identifier supported by the selected text-to-speech provider.
+                 */
                 voiceId: string;
+                /**
+                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                 */
                 speed: number;
             };
         };
@@ -3015,8 +3201,17 @@ export type UsePersonaResponses = {
         description: string | null;
         version: number;
         versionId: string;
+        /**
+         * The human name the caller gives the agent, separate from the library name.
+         */
         identityName: string;
+        /**
+         * How the caller behaves and speaks. Put the situation and goal in the test scenario.
+         */
         personality: string;
+        /**
+         * The caller's language, such as en-US.
+         */
         language: string;
         parameterContract: Array<{
             key: string;
@@ -3027,8 +3222,14 @@ export type UsePersonaResponses = {
             minimum: number | null;
             maximum: number | null;
         }>;
+        /**
+         * This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.
+         */
         settings: {
             id: string;
+            /**
+             * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+             */
             models: {
                 llm: {
                     provider: string;
@@ -3041,7 +3242,13 @@ export type UsePersonaResponses = {
                 tts: {
                     provider: string;
                     model: string;
+                    /**
+                     * A voice identifier supported by the selected text-to-speech provider.
+                     */
                     voiceId: string;
+                    /**
+                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     */
                     speed: number;
                 };
             };
@@ -3109,8 +3316,17 @@ export type ListPersonasResponses = {
             description: string | null;
             version: number;
             versionId: string;
+            /**
+             * The human name the caller gives the agent, separate from the library name.
+             */
             identityName: string;
+            /**
+             * How the caller behaves and speaks. Put the situation and goal in the test scenario.
+             */
             personality: string;
+            /**
+             * The caller's language, such as en-US.
+             */
             language: string;
             parameterContract: Array<{
                 key: string;
@@ -3121,8 +3337,14 @@ export type ListPersonasResponses = {
                 minimum: number | null;
                 maximum: number | null;
             }>;
+            /**
+             * This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.
+             */
             settings: {
                 id: string;
+                /**
+                 * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+                 */
                 models: {
                     llm: {
                         provider: string;
@@ -3135,7 +3357,13 @@ export type ListPersonasResponses = {
                     tts: {
                         provider: string;
                         model: string;
+                        /**
+                         * A voice identifier supported by the selected text-to-speech provider.
+                         */
                         voiceId: string;
+                        /**
+                         * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                         */
                         speed: number;
                     };
                 };
@@ -3156,11 +3384,26 @@ export type ListPersonasResponse = ListPersonasResponses[keyof ListPersonasRespo
 export type CreatePersonaData = {
     body: {
         projectId?: string;
+        /**
+         * Your team's label in the persona library. The caller does not speak this label.
+         */
         name: string;
         description?: string;
+        /**
+         * The human name the caller gives the agent, separate from the library name.
+         */
         identityName: string;
+        /**
+         * How the caller behaves and speaks. Put the situation and goal in the test scenario.
+         */
         personality: string;
+        /**
+         * The caller's language, such as en-US.
+         */
         language: string;
+        /**
+         * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+         */
         models?: {
             llm: {
                 provider: string;
@@ -3173,7 +3416,13 @@ export type CreatePersonaData = {
             tts: {
                 provider: string;
                 model: string;
+                /**
+                 * A voice identifier supported by the selected text-to-speech provider.
+                 */
                 voiceId: string;
+                /**
+                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                 */
                 speed: number;
             };
         };
@@ -3227,8 +3476,17 @@ export type CreatePersonaResponses = {
         description: string | null;
         version: number;
         versionId: string;
+        /**
+         * The human name the caller gives the agent, separate from the library name.
+         */
         identityName: string;
+        /**
+         * How the caller behaves and speaks. Put the situation and goal in the test scenario.
+         */
         personality: string;
+        /**
+         * The caller's language, such as en-US.
+         */
         language: string;
         parameterContract: Array<{
             key: string;
@@ -3239,8 +3497,14 @@ export type CreatePersonaResponses = {
             minimum: number | null;
             maximum: number | null;
         }>;
+        /**
+         * This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.
+         */
         settings: {
             id: string;
+            /**
+             * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+             */
             models: {
                 llm: {
                     provider: string;
@@ -3253,7 +3517,13 @@ export type CreatePersonaResponses = {
                 tts: {
                     provider: string;
                     model: string;
+                    /**
+                     * A voice identifier supported by the selected text-to-speech provider.
+                     */
                     voiceId: string;
+                    /**
+                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     */
                     speed: number;
                 };
             };
@@ -3320,6 +3590,9 @@ export type GetPersonaFormResponses = {
             modelLabel?: string;
             recommendedVoiceId?: string;
         }>;
+        /**
+         * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+         */
         recommendedModels: {
             llm: {
                 provider: string;
@@ -3332,7 +3605,13 @@ export type GetPersonaFormResponses = {
             tts: {
                 provider: string;
                 model: string;
+                /**
+                 * A voice identifier supported by the selected text-to-speech provider.
+                 */
                 voiceId: string;
+                /**
+                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                 */
                 speed: number;
             };
         };
@@ -3449,8 +3728,17 @@ export type GetPersonaResponses = {
         description: string | null;
         version: number;
         versionId: string;
+        /**
+         * The human name the caller gives the agent, separate from the library name.
+         */
         identityName: string;
+        /**
+         * How the caller behaves and speaks. Put the situation and goal in the test scenario.
+         */
         personality: string;
+        /**
+         * The caller's language, such as en-US.
+         */
         language: string;
         parameterContract: Array<{
             key: string;
@@ -3461,8 +3749,14 @@ export type GetPersonaResponses = {
             minimum: number | null;
             maximum: number | null;
         }>;
+        /**
+         * This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.
+         */
         settings: {
             id: string;
+            /**
+             * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+             */
             models: {
                 llm: {
                     provider: string;
@@ -3475,7 +3769,13 @@ export type GetPersonaResponses = {
                 tts: {
                     provider: string;
                     model: string;
+                    /**
+                     * A voice identifier supported by the selected text-to-speech provider.
+                     */
                     voiceId: string;
+                    /**
+                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     */
                     speed: number;
                 };
             };
@@ -3494,11 +3794,26 @@ export type GetPersonaResponse = GetPersonaResponses[keyof GetPersonaResponses];
 export type UpdatePersonaData = {
     body?: {
         projectId?: string;
+        /**
+         * Your team's label in the persona library. The caller does not speak this label.
+         */
         name?: string;
         description?: string | null;
+        /**
+         * The human name the caller gives the agent, separate from the library name.
+         */
         identityName?: string;
+        /**
+         * How the caller behaves and speaks. Put the situation and goal in the test scenario.
+         */
         personality?: string;
+        /**
+         * The caller's language, such as en-US.
+         */
         language?: string;
+        /**
+         * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+         */
         models?: {
             llm: {
                 provider: string;
@@ -3511,10 +3826,19 @@ export type UpdatePersonaData = {
             tts: {
                 provider: string;
                 model: string;
+                /**
+                 * A voice identifier supported by the selected text-to-speech provider.
+                 */
                 voiceId: string;
+                /**
+                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                 */
                 speed: number;
             };
         };
+        /**
+         * The current versionId from Get a persona. Required when editing identityName, personality, or language. A stale value returns 409 version_conflict.
+         */
         expectedVersionId?: string;
     };
     path: {
@@ -3568,8 +3892,17 @@ export type UpdatePersonaResponses = {
         description: string | null;
         version: number;
         versionId: string;
+        /**
+         * The human name the caller gives the agent, separate from the library name.
+         */
         identityName: string;
+        /**
+         * How the caller behaves and speaks. Put the situation and goal in the test scenario.
+         */
         personality: string;
+        /**
+         * The caller's language, such as en-US.
+         */
         language: string;
         parameterContract: Array<{
             key: string;
@@ -3580,8 +3913,14 @@ export type UpdatePersonaResponses = {
             minimum: number | null;
             maximum: number | null;
         }>;
+        /**
+         * This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.
+         */
         settings: {
             id: string;
+            /**
+             * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+             */
             models: {
                 llm: {
                     provider: string;
@@ -3594,7 +3933,13 @@ export type UpdatePersonaResponses = {
                 tts: {
                     provider: string;
                     model: string;
+                    /**
+                     * A voice identifier supported by the selected text-to-speech provider.
+                     */
                     voiceId: string;
+                    /**
+                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     */
                     speed: number;
                 };
             };
@@ -3660,8 +4005,17 @@ export type ListPersonaVersionsResponses = {
             id: string;
             personaId: string;
             version: number;
+            /**
+             * The human name the caller gives the agent, separate from the library name.
+             */
             identityName: string;
+            /**
+             * How the caller behaves and speaks. Put the situation and goal in the test scenario.
+             */
             personality: string;
+            /**
+             * The caller's language, such as en-US.
+             */
             language: string;
             parameterContract: Array<{
                 key: string;
@@ -3782,8 +4136,17 @@ export type GetPersonaVersionResponses = {
         id: string;
         personaId: string;
         version: number;
+        /**
+         * The human name the caller gives the agent, separate from the library name.
+         */
         identityName: string;
+        /**
+         * How the caller behaves and speaks. Put the situation and goal in the test scenario.
+         */
         personality: string;
+        /**
+         * The caller's language, such as en-US.
+         */
         language: string;
         parameterContract: Array<{
             key: string;
@@ -3855,8 +4218,17 @@ export type ForkPersonaResponses = {
         description: string | null;
         version: number;
         versionId: string;
+        /**
+         * The human name the caller gives the agent, separate from the library name.
+         */
         identityName: string;
+        /**
+         * How the caller behaves and speaks. Put the situation and goal in the test scenario.
+         */
         personality: string;
+        /**
+         * The caller's language, such as en-US.
+         */
         language: string;
         parameterContract: Array<{
             key: string;
@@ -3867,8 +4239,14 @@ export type ForkPersonaResponses = {
             minimum: number | null;
             maximum: number | null;
         }>;
+        /**
+         * This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.
+         */
         settings: {
             id: string;
+            /**
+             * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+             */
             models: {
                 llm: {
                     provider: string;
@@ -3881,7 +4259,13 @@ export type ForkPersonaResponses = {
                 tts: {
                     provider: string;
                     model: string;
+                    /**
+                     * A voice identifier supported by the selected text-to-speech provider.
+                     */
                     voiceId: string;
+                    /**
+                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     */
                     speed: number;
                 };
             };
@@ -4173,6 +4557,9 @@ export type ApplyRepositoryChangeSetData = {
             scenario: string;
             expectedBehaviors: Array<string>;
             personas: Array<string>;
+            /**
+             * One named tool's fixed response for this test. Supply exactly one of answer or error. Tools without a mock run normally.
+             */
             mockTools: Array<{
                 tool: string;
                 answer: unknown;
@@ -4183,9 +4570,15 @@ export type ApplyRepositoryChangeSetData = {
                 error: string;
             }>;
             env: {
+                /**
+                 * String values supplied to the Retell agent before the conversation. Variable names beginning with egma_ are reserved.
+                 */
                 retell_dynamic_variables?: {
                     [key: string]: string;
                 };
+                /**
+                 * Context delivered to the LiveKit worker in ctx.job.metadata.
+                 */
                 job_dispatch_metadata?: {
                     [key: string]: unknown;
                 };
@@ -4252,6 +4645,9 @@ export type ApplyRepositoryChangeSetResponses = {
                     name: string;
                     archivedAt: string | null;
                 }>;
+                /**
+                 * One named tool's fixed response for this test. Supply exactly one of answer or error. Tools without a mock run normally.
+                 */
                 mockTools: Array<{
                     tool: string;
                     answer: unknown;
@@ -4262,9 +4658,15 @@ export type ApplyRepositoryChangeSetResponses = {
                     error: string;
                 }>;
                 env: {
+                    /**
+                     * String values supplied to the Retell agent before the conversation. Variable names beginning with egma_ are reserved.
+                     */
                     retell_dynamic_variables?: {
                         [key: string]: string;
                     };
+                    /**
+                     * Context delivered to the LiveKit worker in ctx.job.metadata.
+                     */
                     job_dispatch_metadata?: {
                         [key: string]: unknown;
                     };
@@ -4288,6 +4690,9 @@ export type ListRunsData = {
         agentId?: string;
         connectionId?: string;
         testId?: string;
+        /**
+         * Simulation execution status. A completed run can contain failed simulations, and grading may still be in progress.
+         */
         status?: 'pending' | 'running' | 'completed' | 'canceled';
         since?: string;
         until?: string;
@@ -4338,6 +4743,9 @@ export type ListRunsResponses = {
             suiteName: string;
             suiteDeleted: boolean;
             name: string | null;
+            /**
+             * Simulation execution status. A completed run can contain failed simulations, and grading may still be in progress.
+             */
             status: 'pending' | 'running' | 'completed' | 'canceled';
             agentId: string;
             connectionId: string;
@@ -4349,6 +4757,9 @@ export type ListRunsResponses = {
             productLabel: string;
             environment: string | null;
             agentVersion: number | null;
+            /**
+             * Number of test-and-persona combinations captured when the run started.
+             */
             expectedSimulationCount: number;
             completedCount: number | null;
             failedCount: number | null;
@@ -4361,9 +4772,21 @@ export type ListRunsResponses = {
                 failed: number;
                 canceled: number;
             };
+            /**
+             * Simulations whose execution completed, failed, or was canceled.
+             */
             finishedCount: number;
+            /**
+             * Simulations eligible for grading under the run's frozen grader selection.
+             */
             gradableCount: number;
+            /**
+             * Gradable simulations whose grading is complete or errored. This is not a count of passed simulations.
+             */
             gradedCount: number;
+            /**
+             * Open this URL in a browser to follow the run and inspect its results.
+             */
             resultsUrl: string;
             createdAt: string;
             startedAt: string | null;
@@ -4377,17 +4800,41 @@ export type ListRunsResponse = ListRunsResponses[keyof ListRunsResponses];
 
 export type CreateRunData = {
     body: {
+        /**
+         * The active, non-empty test suite to execute in full. It must belong to the selected project.
+         */
         suiteId: string;
+        /**
+         * The Egma agent to test, not its Retell provider ID or LiveKit dispatch name.
+         */
         agentId: string;
+        /**
+         * An active connection on that agent in the same project. Its modality determines whether simulations use voice or chat.
+         */
         connectionId: string;
+        /**
+         * Optional display name for the run.
+         */
         name?: string;
+        /**
+         * Optional exact list of the suite's test IDs and current version IDs. Each test and version must appear once. The request is refused if the suite membership or any version changed. Omit this field to use the current suite.
+         */
         expectedTestVersions?: Array<{
+            /**
+             * The test identity to check.
+             */
             testId: string;
+            /**
+             * The current test version expected at run creation.
+             */
             versionId: string;
         }>;
     };
     path?: never;
     query?: {
+        /**
+         * Project to act in. A project-scoped API key already identifies its project.
+         */
         projectId?: string;
     };
     url: '/v1/runs';
@@ -4432,7 +4879,7 @@ export type CreateRunError = CreateRunErrors[keyof CreateRunErrors];
 
 export type CreateRunResponses = {
     /**
-     * The bounded header for the new run.
+     * The run header for a new request or an idempotent replay. The run may still be executing or grading.
      */
     201: {
         id: string;
@@ -4441,6 +4888,9 @@ export type CreateRunResponses = {
         suiteName: string;
         suiteDeleted: boolean;
         name: string | null;
+        /**
+         * Simulation execution status. A completed run can contain failed simulations, and grading may still be in progress.
+         */
         status: 'pending' | 'running' | 'completed' | 'canceled';
         agentId: string;
         connectionId: string;
@@ -4452,6 +4902,9 @@ export type CreateRunResponses = {
         productLabel: string;
         environment: string | null;
         agentVersion: number | null;
+        /**
+         * Number of test-and-persona combinations captured when the run started.
+         */
         expectedSimulationCount: number;
         completedCount: number | null;
         failedCount: number | null;
@@ -4464,9 +4917,21 @@ export type CreateRunResponses = {
             failed: number;
             canceled: number;
         };
+        /**
+         * Simulations whose execution completed, failed, or was canceled.
+         */
         finishedCount: number;
+        /**
+         * Simulations eligible for grading under the run's frozen grader selection.
+         */
         gradableCount: number;
+        /**
+         * Gradable simulations whose grading is complete or errored. This is not a count of passed simulations.
+         */
         gradedCount: number;
+        /**
+         * Open this URL in a browser to follow the run and inspect its results.
+         */
         resultsUrl: string;
         createdAt: string;
         startedAt: string | null;
@@ -4479,9 +4944,15 @@ export type CreateRunResponse = CreateRunResponses[keyof CreateRunResponses];
 export type GetRunData = {
     body?: never;
     path: {
+        /**
+         * Run ID returned by Create a run or List runs.
+         */
         runId: string;
     };
     query?: {
+        /**
+         * Project to act in. A project-scoped API key already identifies its project.
+         */
         projectId?: string;
     };
     url: '/v1/runs/{runId}';
@@ -4527,6 +4998,9 @@ export type GetRunResponses = {
         suiteName: string;
         suiteDeleted: boolean;
         name: string | null;
+        /**
+         * Simulation execution status. A completed run can contain failed simulations, and grading may still be in progress.
+         */
         status: 'pending' | 'running' | 'completed' | 'canceled';
         agentId: string;
         connectionId: string;
@@ -4538,6 +5012,9 @@ export type GetRunResponses = {
         productLabel: string;
         environment: string | null;
         agentVersion: number | null;
+        /**
+         * Number of test-and-persona combinations captured when the run started.
+         */
         expectedSimulationCount: number;
         completedCount: number | null;
         failedCount: number | null;
@@ -4550,9 +5027,21 @@ export type GetRunResponses = {
             failed: number;
             canceled: number;
         };
+        /**
+         * Simulations whose execution completed, failed, or was canceled.
+         */
         finishedCount: number;
+        /**
+         * Simulations eligible for grading under the run's frozen grader selection.
+         */
         gradableCount: number;
+        /**
+         * Gradable simulations whose grading is complete or errored. This is not a count of passed simulations.
+         */
         gradedCount: number;
+        /**
+         * Open this URL in a browser to follow the run and inspect its results.
+         */
         resultsUrl: string;
         createdAt: string;
         startedAt: string | null;
@@ -4599,6 +5088,9 @@ export type GetRunResponse = GetRunResponses[keyof GetRunResponses];
 export type ListRunSimulationsData = {
     body?: never;
     path: {
+        /**
+         * Run ID returned by Create a run or List runs.
+         */
         runId: string;
     };
     query?: {
@@ -4677,10 +5169,19 @@ export type ListRunSimulationsResponse = ListRunSimulationsResponses[keyof ListR
 export type ListRunEventsData = {
     body?: never;
     path: {
+        /**
+         * Run ID returned by Create a run or List runs.
+         */
         runId: string;
     };
     query?: {
+        /**
+         * Project to act in. A project-scoped API key already identifies its project.
+         */
         projectId?: string;
+        /**
+         * Return events with a sequence greater than this value. Use zero or omit it for the first page; use the previous response's next value to continue.
+         */
         after?: number;
     };
     url: '/v1/runs/{runId}/events';
@@ -4724,6 +5225,9 @@ export type ListRunEventsResponses = {
             seq: number;
             at: string;
             kind: 'run';
+            /**
+             * Simulation execution status. A completed run can contain failed simulations, and grading may still be in progress.
+             */
             status: 'pending' | 'running' | 'completed' | 'canceled';
         } | {
             seq: number;
@@ -4736,8 +5240,17 @@ export type ListRunEventsResponses = {
             reason: 'persona_concluded' | 'agent_ended' | 'limit_reached' | 'agent_never_joined' | 'not_answered' | 'capacity' | 'simulator_error' | 'orphaned' | 'dispatch_failed' | 'provider_key_unavailable' | null;
             executionFailure: string | null;
         }>;
+        /**
+         * Cursor to send as after on the next request. An empty page returns the same cursor.
+         */
         next: number;
+        /**
+         * This page includes all execution events available when it was read. More events or grades may arrive later.
+         */
         caughtUp: boolean;
+        /**
+         * Execution finished, no execution events remain in the backlog, and every gradable simulation has complete or errored grading. Inspect individual grades to decide whether the run meets your requirements.
+         */
         done: boolean;
     };
 };
@@ -4747,9 +5260,15 @@ export type ListRunEventsResponse = ListRunEventsResponses[keyof ListRunEventsRe
 export type CancelRunData = {
     body?: never;
     path: {
+        /**
+         * Run ID returned by Create a run or List runs.
+         */
         runId: string;
     };
     query?: {
+        /**
+         * Project to act in. A project-scoped API key already identifies its project.
+         */
         projectId?: string;
     };
     url: '/v1/runs/{runId}/cancel';
@@ -4799,6 +5318,9 @@ export type CancelRunResponses = {
         suiteName: string;
         suiteDeleted: boolean;
         name: string | null;
+        /**
+         * Simulation execution status. A completed run can contain failed simulations, and grading may still be in progress.
+         */
         status: 'pending' | 'running' | 'completed' | 'canceled';
         agentId: string;
         connectionId: string;
@@ -4810,6 +5332,9 @@ export type CancelRunResponses = {
         productLabel: string;
         environment: string | null;
         agentVersion: number | null;
+        /**
+         * Number of test-and-persona combinations captured when the run started.
+         */
         expectedSimulationCount: number;
         completedCount: number | null;
         failedCount: number | null;
@@ -4822,9 +5347,21 @@ export type CancelRunResponses = {
             failed: number;
             canceled: number;
         };
+        /**
+         * Simulations whose execution completed, failed, or was canceled.
+         */
         finishedCount: number;
+        /**
+         * Simulations eligible for grading under the run's frozen grader selection.
+         */
         gradableCount: number;
+        /**
+         * Gradable simulations whose grading is complete or errored. This is not a count of passed simulations.
+         */
         gradedCount: number;
+        /**
+         * Open this URL in a browser to follow the run and inspect its results.
+         */
         resultsUrl: string;
         createdAt: string;
         startedAt: string | null;
@@ -4837,6 +5374,9 @@ export type CancelRunResponse = CancelRunResponses[keyof CancelRunResponses];
 export type GetSimulationData = {
     body?: never;
     path: {
+        /**
+         * Simulation ID returned by List simulations in a run.
+         */
         simulationId: string;
     };
     query?: {
@@ -4872,7 +5412,7 @@ export type GetSimulationError = GetSimulationErrors[keyof GetSimulationErrors];
 
 export type GetSimulationResponses = {
     /**
-     * The simulation and all of its evidence.
+     * The simulation and its available evidence. Check spansTruncated before treating the returned span tree as complete.
      */
     200: {
         id: string;
@@ -4890,10 +5430,16 @@ export type GetSimulationResponses = {
             error: 'evidence_collection_error';
             message: string;
         } | null;
+        /**
+         * The current result for each selected grader. Each grade has its own score, frozen threshold, result, and supporting details.
+         */
         grades: Array<{
             projectGraderId: string;
             graderDefinitionId: string;
             graderDefinitionVersion: number;
+            /**
+             * The model or numeric settings used for this grading attempt. Retained for successful and errored grades, including after temporary jobs are removed. Contains no credentials.
+             */
             parameterValues: {
                 [key: string]: unknown;
             };
@@ -4917,10 +5463,16 @@ export type GetSimulationResponses = {
             result: 'passed' | 'failed' | 'errored';
             gradedAt: string;
         }>;
+        /**
+         * Recorded grade results, including previous grading attempts. Regrading preserves this history.
+         */
         gradeHistory: Array<{
             projectGraderId: string;
             graderDefinitionId: string;
             graderDefinitionVersion: number;
+            /**
+             * The model or numeric settings used for this grading attempt. Retained for successful and errored grades, including after temporary jobs are removed. Contains no credentials.
+             */
             parameterValues: {
                 [key: string]: unknown;
             };
@@ -4944,6 +5496,9 @@ export type GetSimulationResponses = {
             result: 'passed' | 'failed' | 'errored';
             gradedAt: string;
         }>;
+        /**
+         * Display-only arithmetic mean when every selected grader has a current score. Null while a required score is missing or errored. This is not an overall pass/fail result.
+         */
         combinedScore: number | null;
         reason: string | null;
         executionFailure: string | null;
@@ -4963,10 +5518,19 @@ export type GetSimulationResponses = {
             humanTurnCount?: number;
             agentTurnCount?: number;
         };
+        /**
+         * Observed facts about the conversation, such as latency and duration. Metrics are separate from grader results.
+         */
         metrics: Array<{
+            /**
+             * Metric identifier. turn_response_latency measures the wait from the end of the caller's turn to the agent's reply. For voice simulations, it runs from the end of the caller's played audio, including trailing padding, to the arrival of the agent's audio. first_response_latency measures the wait from conversation start to the first reply. Both use milliseconds.
+             */
             measure: string;
             unit: string;
             derived: boolean;
+            /**
+             * The source of these measurements: agent for the agent's own evidence, or persona for Egma's simulated caller. The samples and summary values describe only this source.
+             */
             pov: 'persona' | 'agent';
             reportedBy?: string;
             samples: Array<number>;
@@ -4975,6 +5539,9 @@ export type GetSimulationResponses = {
             p50: number;
             p90: number;
             partial: boolean;
+            /**
+             * The same metric measured from the other side of a simulation. Keep its samples separate from the primary series. Absent when only one side measured the conversation, including production traces.
+             */
             otherPov?: {
                 pov: 'persona' | 'agent';
                 derived: boolean;
@@ -5028,6 +5595,9 @@ export type GetSimulationResponses = {
                 passThreshold: number;
             }>;
         } | null;
+        /**
+         * The conversation and tool evidence available for this simulation. Null when no trace is available.
+         */
         transcript: {
             traceId: string;
             startedAt: string;
@@ -5042,6 +5612,9 @@ export type GetSimulationResponses = {
             erroredSpanCount: number;
             turns: Array<TraceSpan>;
             spans: Array<TraceSpan>;
+            /**
+             * True when the response's span limit prevented the complete trace tree from being returned.
+             */
             spansTruncated: boolean;
         } | null;
     };
@@ -5052,6 +5625,9 @@ export type GetSimulationResponse = GetSimulationResponses[keyof GetSimulationRe
 export type RegradeSimulationData = {
     body?: never;
     path: {
+        /**
+         * Simulation ID returned by List simulations in a run.
+         */
         simulationId: string;
     };
     query?: {
@@ -5095,11 +5671,20 @@ export type RegradeSimulationError = RegradeSimulationErrors[keyof RegradeSimula
 
 export type RegradeSimulationResponses = {
     /**
-     * The grading work that was requested.
+     * The grading request was accepted. The response does not wait for new grades.
      */
     200: {
+        /**
+         * The simulation whose existing trace will be graded.
+         */
         simulationId: string;
+        /**
+         * 1 if an existing finished grading job was reopened; 0 otherwise. A newly created job can also return 0.
+         */
         reopened: number;
+        /**
+         * 1 if grading was already pending or claimed, so no duplicate job was created; 0 otherwise.
+         */
         alreadyWaiting: number;
     };
 };
@@ -5166,6 +5751,9 @@ export type ListTestSuitesResponse = ListTestSuitesResponses[keyof ListTestSuite
 
 export type CreateTestSuiteData = {
     body: {
+        /**
+         * The suite's display name. Its stable ID identifies it across renames.
+         */
         name: string;
     };
     path?: never;
@@ -5333,6 +5921,9 @@ export type GetTestSuiteResponse = GetTestSuiteResponses[keyof GetTestSuiteRespo
 
 export type UpdateTestSuiteData = {
     body: {
+        /**
+         * The suite's display name. Its stable ID identifies it across renames.
+         */
         name: string;
     };
     path: {
@@ -5397,6 +5988,9 @@ export type ListTestsData = {
     path?: never;
     query: {
         projectId?: string;
+        /**
+         * The test suite to read. Tests are listed one suite at a time.
+         */
         suiteId: string;
         pageToken?: string;
         pageSize?: number;
@@ -5453,6 +6047,9 @@ export type ListTestsResponses = {
                 name: string;
                 archivedAt: string | null;
             }>;
+            /**
+             * One named tool's fixed response for this test. Supply exactly one of answer or error. Tools without a mock run normally.
+             */
             mockTools: Array<{
                 tool: string;
                 answer: unknown;
@@ -5463,9 +6060,15 @@ export type ListTestsResponses = {
                 error: string;
             }>;
             env: {
+                /**
+                 * String values supplied to the Retell agent before the conversation. Variable names beginning with egma_ are reserved.
+                 */
                 retell_dynamic_variables?: {
                     [key: string]: string;
                 };
+                /**
+                 * Context delivered to the LiveKit worker in ctx.job.metadata.
+                 */
                 job_dispatch_metadata?: {
                     [key: string]: unknown;
                 };
@@ -5482,12 +6085,27 @@ export type ListTestsResponse = ListTestsResponses[keyof ListTestsResponses];
 
 export type CreateTestData = {
     body: {
+        /**
+         * An existing active test suite in the current project.
+         */
         suiteId: string;
         name: string;
         description?: string | null;
+        /**
+         * The situation and goal the synthetic caller acts out.
+         */
         scenario: string;
+        /**
+         * Statements checked independently against the completed conversation. Include at least one non-empty statement.
+         */
         expectedBehaviors: Array<string>;
+        /**
+         * At least one available persona ID or unambiguous current name. Each selected persona creates one simulation for this test in a run.
+         */
         personas: Array<string>;
+        /**
+         * One named tool's fixed response for this test. Supply exactly one of answer or error. Tools without a mock run normally.
+         */
         mockTools?: Array<{
             tool: string;
             answer: unknown;
@@ -5497,10 +6115,19 @@ export type CreateTestData = {
             answer?: never;
             error: string;
         }>;
+        /**
+         * Non-secret startup context for the agent's provider. Omit to keep existing context on update, or send null to clear it.
+         */
         env?: {
+            /**
+             * String values supplied to the Retell agent before the conversation. Variable names beginning with egma_ are reserved.
+             */
             retell_dynamic_variables?: {
                 [key: string]: string;
             };
+            /**
+             * Context delivered to the LiveKit worker in ctx.job.metadata.
+             */
             job_dispatch_metadata?: {
                 [key: string]: unknown;
             };
@@ -5565,6 +6192,9 @@ export type CreateTestResponses = {
             name: string;
             archivedAt: string | null;
         }>;
+        /**
+         * One named tool's fixed response for this test. Supply exactly one of answer or error. Tools without a mock run normally.
+         */
         mockTools: Array<{
             tool: string;
             answer: unknown;
@@ -5575,9 +6205,15 @@ export type CreateTestResponses = {
             error: string;
         }>;
         env: {
+            /**
+             * String values supplied to the Retell agent before the conversation. Variable names beginning with egma_ are reserved.
+             */
             retell_dynamic_variables?: {
                 [key: string]: string;
             };
+            /**
+             * Context delivered to the LiveKit worker in ctx.job.metadata.
+             */
             job_dispatch_metadata?: {
                 [key: string]: unknown;
             };
@@ -5648,6 +6284,9 @@ export type GetTestVersionResponses = {
             name: string;
             archivedAt: string | null;
         }>;
+        /**
+         * One named tool's fixed response for this test. Supply exactly one of answer or error. Tools without a mock run normally.
+         */
         mockTools: Array<{
             tool: string;
             answer: unknown;
@@ -5658,9 +6297,15 @@ export type GetTestVersionResponses = {
             error: string;
         }>;
         env: {
+            /**
+             * String values supplied to the Retell agent before the conversation. Variable names beginning with egma_ are reserved.
+             */
             retell_dynamic_variables?: {
                 [key: string]: string;
             };
+            /**
+             * Context delivered to the LiveKit worker in ctx.job.metadata.
+             */
             job_dispatch_metadata?: {
                 [key: string]: unknown;
             };
@@ -5794,6 +6439,9 @@ export type GetTestResponses = {
             name: string;
             archivedAt: string | null;
         }>;
+        /**
+         * One named tool's fixed response for this test. Supply exactly one of answer or error. Tools without a mock run normally.
+         */
         mockTools: Array<{
             tool: string;
             answer: unknown;
@@ -5804,9 +6452,15 @@ export type GetTestResponses = {
             error: string;
         }>;
         env: {
+            /**
+             * String values supplied to the Retell agent before the conversation. Variable names beginning with egma_ are reserved.
+             */
             retell_dynamic_variables?: {
                 [key: string]: string;
             };
+            /**
+             * Context delivered to the LiveKit worker in ctx.job.metadata.
+             */
             job_dispatch_metadata?: {
                 [key: string]: unknown;
             };
@@ -5823,9 +6477,21 @@ export type UpdateTestData = {
     body?: {
         name?: string;
         description?: string | null;
+        /**
+         * The situation and goal the synthetic caller acts out.
+         */
         scenario?: string;
+        /**
+         * Statements checked independently against the completed conversation. Include at least one non-empty statement.
+         */
         expectedBehaviors?: Array<string>;
+        /**
+         * At least one available persona ID or unambiguous current name. Each selected persona creates one simulation for this test in a run.
+         */
         personas?: Array<string>;
+        /**
+         * One named tool's fixed response for this test. Supply exactly one of answer or error. Tools without a mock run normally.
+         */
         mockTools?: Array<{
             tool: string;
             answer: unknown;
@@ -5835,15 +6501,30 @@ export type UpdateTestData = {
             answer?: never;
             error: string;
         }>;
+        /**
+         * Non-secret startup context for the agent's provider. Omit to keep existing context on update, or send null to clear it.
+         */
         env?: {
+            /**
+             * String values supplied to the Retell agent before the conversation. Variable names beginning with egma_ are reserved.
+             */
             retell_dynamic_variables?: {
                 [key: string]: string;
             };
+            /**
+             * Context delivered to the LiveKit worker in ctx.job.metadata.
+             */
             job_dispatch_metadata?: {
                 [key: string]: unknown;
             };
         } | null;
+        /**
+         * The versionId returned by the test read. Required when changing scenario, expectedBehaviors, personas, mockTools, or env; a stale value returns 409.
+         */
         expectedVersionId?: string;
+        /**
+         * The revision returned by the test read. Supply it to reject an update if the test's live identity changed since that read.
+         */
         expectedRevision?: string;
     };
     path: {
@@ -5916,6 +6597,9 @@ export type UpdateTestResponses = {
             name: string;
             archivedAt: string | null;
         }>;
+        /**
+         * One named tool's fixed response for this test. Supply exactly one of answer or error. Tools without a mock run normally.
+         */
         mockTools: Array<{
             tool: string;
             answer: unknown;
@@ -5926,9 +6610,15 @@ export type UpdateTestResponses = {
             error: string;
         }>;
         env: {
+            /**
+             * String values supplied to the Retell agent before the conversation. Variable names beginning with egma_ are reserved.
+             */
             retell_dynamic_variables?: {
                 [key: string]: string;
             };
+            /**
+             * Context delivered to the LiveKit worker in ctx.job.metadata.
+             */
             job_dispatch_metadata?: {
                 [key: string]: unknown;
             };
@@ -6002,6 +6692,9 @@ export type ListTestVersionsResponses = {
                 name: string;
                 archivedAt: string | null;
             }>;
+            /**
+             * One named tool's fixed response for this test. Supply exactly one of answer or error. Tools without a mock run normally.
+             */
             mockTools: Array<{
                 tool: string;
                 answer: unknown;
@@ -6012,9 +6705,15 @@ export type ListTestVersionsResponses = {
                 error: string;
             }>;
             env: {
+                /**
+                 * String values supplied to the Retell agent before the conversation. Variable names beginning with egma_ are reserved.
+                 */
                 retell_dynamic_variables?: {
                     [key: string]: string;
                 };
+                /**
+                 * Context delivered to the LiveKit worker in ctx.job.metadata.
+                 */
                 job_dispatch_metadata?: {
                     [key: string]: unknown;
                 };
@@ -6080,6 +6779,9 @@ export type ListTracesResponses = {
             toolSpanCount: number;
             erroredSpanCount: number;
             source: 'simulation' | 'production';
+            /**
+             * The trace's primary source: agent for the agent's own evidence, or persona for Egma's simulated caller. A simulation can contain spans from both sources; each span has its own pov.
+             */
             pov: 'persona' | 'agent';
             environment: string;
             connectionType: string;
@@ -6160,6 +6862,9 @@ export type GetTraceResponses = {
             toolSpanCount: number;
             erroredSpanCount: number;
             source: 'simulation' | 'production';
+            /**
+             * The trace's primary source: agent for the agent's own evidence, or persona for Egma's simulated caller. A simulation can contain spans from both sources; each span has its own pov.
+             */
             pov: 'persona' | 'agent';
             environment: string;
             connectionType: string;
@@ -6175,9 +6880,15 @@ export type GetTraceResponses = {
         spans: Array<TraceSpan>;
         spansTruncated: boolean;
         metrics: Array<{
+            /**
+             * Metric identifier. turn_response_latency measures the wait from the end of the caller's turn to the agent's reply. For voice simulations, it runs from the end of the caller's played audio, including trailing padding, to the arrival of the agent's audio. first_response_latency measures the wait from conversation start to the first reply. Both use milliseconds.
+             */
             measure: string;
             unit: string;
             derived: boolean;
+            /**
+             * The source of these measurements: agent for the agent's own evidence, or persona for Egma's simulated caller. The samples and summary values describe only this source.
+             */
             pov: 'persona' | 'agent';
             reportedBy?: string;
             samples: Array<number>;
@@ -6186,6 +6897,9 @@ export type GetTraceResponses = {
             p50: number;
             p90: number;
             partial: boolean;
+            /**
+             * The same metric measured from the other side of a simulation. Keep its samples separate from the primary series. Absent when only one side measured the conversation, including production traces.
+             */
             otherPov?: {
                 pov: 'persona' | 'agent';
                 derived: boolean;
@@ -6201,10 +6915,16 @@ export type GetTraceResponses = {
             error: 'allowance_spent' | 'providers_unfunded';
             message: string;
         } | null;
+        /**
+         * The current result for each selected grader. Each grade has its own score, frozen threshold, result, and supporting details.
+         */
         grades: Array<{
             projectGraderId: string;
             graderDefinitionId: string;
             graderDefinitionVersion: number;
+            /**
+             * The model or numeric settings used for this grading attempt. Retained for successful and errored grades, including after temporary jobs are removed. Contains no credentials.
+             */
             parameterValues: {
                 [key: string]: unknown;
             };
@@ -6228,10 +6948,16 @@ export type GetTraceResponses = {
             result: 'passed' | 'failed' | 'errored';
             gradedAt: string;
         }>;
+        /**
+         * Recorded grade results, including previous grading attempts. Regrading preserves this history.
+         */
         gradeHistory: Array<{
             projectGraderId: string;
             graderDefinitionId: string;
             graderDefinitionVersion: number;
+            /**
+             * The model or numeric settings used for this grading attempt. Retained for successful and errored grades, including after temporary jobs are removed. Contains no credentials.
+             */
             parameterValues: {
                 [key: string]: unknown;
             };
@@ -6255,6 +6981,9 @@ export type GetTraceResponses = {
             result: 'passed' | 'failed' | 'errored';
             gradedAt: string;
         }>;
+        /**
+         * Display-only arithmetic mean when every selected grader has a current score. Null while a required score is missing or errored. This is not an overall pass/fail result.
+         */
         combinedScore: number | null;
     };
 };

@@ -41,7 +41,10 @@ const transcriptSchema = {
     erroredSpanCount: integerSchema,
     turns: arrayOf(traceSpanReference),
     spans: arrayOf(traceSpanReference),
-    spansTruncated: booleanSchema,
+    spansTruncated: {
+      ...booleanSchema,
+      description: "True when the response's span limit prevented the complete trace tree from being returned.",
+    },
   },
   required: [
     "traceId",
@@ -80,6 +83,7 @@ const planItemSchema = {
 
 const gradingPlanSchema = {
   type: "object",
+  description: "The grader definitions, versions, and pass thresholds frozen when the run started. Regrading uses this selection.",
   properties: {
     capturedAt: dateTimeSchema,
     items: arrayOf(planItemSchema),
@@ -136,7 +140,10 @@ const simulationSchema = {
       },
       additionalProperties: false,
     },
-    metrics: arrayOf(metricSchema),
+    metrics: {
+      ...arrayOf(metricSchema),
+      description: "Observed facts about the conversation, such as latency and duration. Metrics are separate from grader results.",
+    },
     test: {
       type: "object",
       properties: {
@@ -227,7 +234,10 @@ const simulationSchema = {
       additionalProperties: false,
     },
     gradingPlan: nullable(gradingPlanSchema),
-    transcript: nullable(transcriptSchema),
+    transcript: {
+      ...nullable(transcriptSchema),
+      description: "The conversation and tool evidence available for this simulation. Null when no trace is available.",
+    },
   },
   required: [
     "id",
@@ -263,7 +273,11 @@ const simulationSchema = {
   additionalProperties: false,
 } as const;
 
-const simulationParams = parameters({ simulationId: stringIdSchema }, [
+const simulationParams = parameters({ simulationId: {
+  ...stringIdSchema,
+  description: "Simulation ID returned by List simulations in a run.",
+  examples: ["sim_01M0E4J0BBE1FVDVTZ1BSS5C97"],
+} }, [
   "simulationId",
 ]);
 const projectQuery = parameters({ projectId: stringIdSchema });
@@ -274,12 +288,14 @@ export const simulationOperations = {
     method: "GET",
     path: "/v1/simulations/{simulationId}",
     summary: "Get a simulation",
+    description:
+      "Read a simulation’s test, persona, connection, metrics, transcript, and grades. Execution status and gradingState are separate: a completed simulation may still be grading.",
     tag: "Simulations",
     security: "credentialed",
     request: { params: simulationParams, query: projectQuery },
     responses: {
       200: {
-        description: "The simulation and all of its evidence.",
+        description: "The simulation and its available evidence. Check spansTruncated before treating the returned span tree as complete.",
         schema: simulationSchema,
       },
       400: refusalResponse,
@@ -295,6 +311,8 @@ export const simulationOperations = {
     method: "POST",
     path: "/v1/simulations/{simulationId}/regrade",
     summary: "Regrade a simulation",
+    description:
+      "Grade a completed simulation again with its original grader selection and recorded evidence. Later grader settings do not apply. Send no body, then follow gradingState with Get a simulation.",
     tag: "Simulations",
     security: "credentialed",
     request: {
@@ -303,16 +321,27 @@ export const simulationOperations = {
     },
     responses: {
       200: {
-        description: "The grading work that was requested.",
+        description: "The grading request was accepted. The response does not wait for new grades.",
         schema: {
           type: "object",
           properties: {
-            simulationId: stringIdSchema,
-            reopened: integerSchema,
-            alreadyWaiting: integerSchema,
+            simulationId: { ...stringIdSchema, description: "The simulation whose existing trace will be graded." },
+            reopened: {
+              ...integerSchema,
+              description: "1 if an existing finished grading job was reopened; 0 otherwise. A newly created job can also return 0.",
+            },
+            alreadyWaiting: {
+              ...integerSchema,
+              description: "1 if grading was already pending or claimed, so no duplicate job was created; 0 otherwise.",
+            },
           },
           required: ["simulationId", "reopened", "alreadyWaiting"],
           additionalProperties: false,
+          examples: [{
+            simulationId: "sim_01M0E4J0BBE1FVDVTZ1BSS5C97",
+            reopened: 1,
+            alreadyWaiting: 0,
+          }],
         },
       },
       400: refusalResponse,

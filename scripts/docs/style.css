@@ -1,0 +1,14 @@
+body { font-family: var(--sans) !important; font-weight: 400; }
+button, input, select, textarea, a, pre, code, [class*="rounded"] { border-radius: 0 !important; }
+input[type="radio"] { border-radius: 50% !important; }
+h1, h2, h3, h4, strong, b, [class*="font-semibold"], [class*="font-bold"] { font-weight: 500 !important; }
+#page-title { font-size: var(--text-heading-sm); line-height: var(--line-heading); letter-spacing: var(--tracking-heading-sm); }
+.nav-logo { height: var(--control-lg) !important; width: var(--control-lg) !important; object-fit: contain; }
+#topbar-cta-button { background: var(--action-wash) !important; color: var(--action) !important; border: 1px solid var(--border) !important; }
+#navbar a.group[href="https://app.egma.ai"] { border: 1px solid var(--border); }
+#navbar a.group[href="https://app.egma.ai"] > span.absolute { background: var(--action-wash) !important; }
+#navbar a.group[href="https://app.egma.ai"] span, #navbar a.group[href="https://app.egma.ai"] svg { color: var(--action) !important; }
+#sidebar h3, #sidebar-content h3 { text-transform: none !important; }
+button:focus-visible, a:focus-visible, summary:focus-visible { outline: var(--active-edge-width) solid var(--focus); outline-offset: var(--space-1); }
+@media (pointer: coarse) { button, #navbar a, #sidebar a, #sidebar-content a, #mobile-nav a, #mobile-nav button { min-height: var(--tap-target); } }
+@layer base { #content-container .code-block-background, #content-container .code-block-fade-overlay { border-radius: 0 !important; } }

@@ -90,8 +90,12 @@ const povSeriesSchema = {
 
 export const metricSchema = {
   type: "object",
+  description: "One metric from one side of the conversation. Simulation metrics prefer the persona's series when available. Production traces use the agent's evidence. A second series stays separate in otherPov.",
   properties: {
-    measure: { type: "string" },
+    measure: {
+      type: "string",
+      description: "Metric identifier. turn_response_latency measures the wait from the end of the caller's turn to the agent's reply. For voice simulations, it runs from the end of the caller's played audio, including trailing padding, to the arrival of the agent's audio. first_response_latency measures the wait from conversation start to the first reply. Both use milliseconds.",
+    },
     unit: { type: "string" },
     derived: { type: "boolean" },
     /**
@@ -101,7 +105,11 @@ export const metricSchema = {
      * whose conversation it describes, which is the fact that decides whether
      * two numbers may be compared at all.
      */
-    pov: { type: "string", enum: ["persona", "agent"] },
+    pov: {
+      type: "string",
+      enum: ["persona", "agent"],
+      description: "The source of these measurements: agent for the agent's own evidence, or persona for Egma's simulated caller. The samples and summary values describe only this source.",
+    },
     reportedBy: { type: "string" },
     samples: { type: "array", items: { type: "number" } },
     spanIds: { type: "array", items: { type: "string" } },
@@ -115,7 +123,10 @@ export const metricSchema = {
      * to it: two units, each saying which POV took it. Absent on every
      * conversation only one POV measured, which is every production trace.
      */
-    otherPov: povSeriesSchema,
+    otherPov: {
+      ...povSeriesSchema,
+      description: "The same metric measured from the other side of a simulation. Keep its samples separate from the primary series. Absent when only one side measured the conversation, including production traces.",
+    },
   },
   required: [
     "measure",

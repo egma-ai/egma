@@ -1,0 +1,187 @@
+---
+title: "Set up monitoring"
+---
+
+LiveKit monitoring sends conversation evidence from your worker through the
+Egma SDK. Retell monitoring imports completed calls with the Retell API.
+You do not need a test suite or a simulation run for either setup.
+
+## Retell
+
+Retell monitoring imports calls from Retell voice agents. It does not import
+text-only Retell conversations.
+
+### Connect the agent
+
+Complete [CLI sign-in](/tools/cli#sign-in-and-initialize) and check
+`egma/config.yaml` for the agent. If it is not registered, run:
+
+```bash
+egma agent register --platform retell --name "Front desk"
+```
+
+Set `EGMA_AGENT_ID` to that Egma agent ID. If you have already added a
+[Retell connection](/guides/retell), use its stored provider ID and key:
+
+```bash
+egma agent monitoring setup --agent "$EGMA_AGENT_ID" --platform retell
+```
+
+For a monitoring-only setup, load the Retell key into `EGMA_RETELL_API_KEY`.
+Discover the provider ID, set `RETELL_AGENT_ID` to the selected ID, then enable
+monitoring:
+
+```bash
+egma agent connection options --platform retell
+
+egma agent monitoring setup \
+  --agent "$EGMA_AGENT_ID" \
+  --platform retell \
+  --retell-agent "$RETELL_AGENT_ID"
+```
+
+You can supply the key through standard input with `--credentials-stdin`
+instead. It accepts a JSON object with an `apiKey` field.
+
+Setup stores the Retell binding and starts importing calls. It does not create
+a simulation connection. One Egma agent monitors one Retell agent; reuse the
+existing binding instead of registering the same Retell agent again.
+
+### Verify an imported call
+
+The first setup imports available completed calls from the previous 30 days.
+Egma checks for new completed calls about every 30 seconds while monitoring
+is enabled. Allow time for Retell to finalize a call and for the import to finish.
+
+Open **Monitoring** in your Egma project. Find a recent call from the agent,
+open its trace, and check the transcript against that call. If nothing appears:
+
+- Confirm that the call belongs to the Retell agent ID you selected.
+- Check that the call has ended and is available in Retell's history.
+- Open **Agents**, select the agent, and check that **Production monitoring**
+  is **Active**. Its last-received time shows whether a call has arrived.
+- If setup failed, resolve the authorization or provider error that the CLI
+  returned before retrying.
+
+To stop future imports, run:
+
+```bash
+egma agent monitoring stop --agent "$EGMA_AGENT_ID" --platform retell
+```
+
+Previously imported conversations stay available in Egma.
+
+## LiveKit
+
+### Create an Egma project key
+
+In your initialized agent repository, run:
+
+```bash
+egma project api-key create --name "LiveKit monitoring"
+```
+
+Copy the key when the CLI prints it. The CLI shows it once and does not save
+it. You can also create a key in **Settings → API keys**.
+
+Add these environment variables to the worker through your normal deployment
+secret store:
+
+| Variable | Value |
+| --- | --- |
+| `EGMA_URL` | `https://app.egma.ai` for hosted Egma, or the public URL of your self-hosted instance. |
+| `EGMA_API_KEY` | The project API key you just created. |
+
+The worker must be able to reach `EGMA_URL`. `localhost` refers to the worker's
+own machine or container, so use a reachable address for a remote deployment.
+
+### Add the monitoring hook
+
+<Tabs>
+  <Tab title="Python">
+    Install the [LiveKit Python SDK](/tools/livekit-python-sdk):
+
+    ```bash
+    uv add 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'
+    ```
+
+    Add this import to the file that defines your job entrypoint:
+
+    ```python
+    from egma import monitor
+    ```
+
+    Make this the first statement inside the entrypoint, before `ctx.connect`
+    or `AgentSession.start`:
+
+    ```python
+    monitor(ctx)
+    ```
+
+    This requires Python 3.11 or newer and `livekit-agents>=1.6.6,<1.9`.
+  </Tab>
+  <Tab title="JavaScript">
+    Install the [LiveKit JavaScript SDK](/tools/livekit-javascript-sdk):
+
+    ```bash
+    npm install @egma/livekit
+    ```
+
+    Add this import to your worker:
+
+    ```typescript
+    import { monitor } from "@egma/livekit";
+    ```
+
+    Call the hook at the start of the job entrypoint, before starting the
+    `AgentSession`:
+
+    ```typescript
+    monitor(ctx);
+    ```
+
+    Monitoring requires Node.js 22 or newer and `@livekit/agents>=1.5.5 <2`.
+  </Tab>
+</Tabs>
+
+Apply the code and environment variables to the worker that handles real
+conversations, then restart or redeploy that worker. The hook adds Egma export
+alongside a compatible existing OpenTelemetry setup, including LiveKit Cloud
+observability. It sends spans in batches and flushes the final batch when the
+job ends.
+
+The hook ignores rooms whose names start with `egma-sim-`, so your tests do not
+also appear as production conversations. The separate `simulation` hook sends
+those rooms' evidence to their simulation records. Use both hooks when the
+same worker handles testing and production; both use the same Egma settings.
+Keep the `egma-sim-` prefix reserved when naming your own production rooms.
+
+### Verify a conversation
+
+Complete one normal conversation with the updated worker, then open
+**Monitoring** in the project that owns the API key. Open the new trace and
+check its transcript and timing.
+
+There is no LiveKit monitoring switch to enable in Egma. The first received
+trace confirms that the worker can send evidence to Egma. If no conversation
+appears, check the worker's OpenTelemetry logs, the project key, and network
+access to `EGMA_URL`.
+
+To stop this worker from sending new production evidence, remove its `monitor`
+call and restart the worker. Existing conversations stay in Egma. Keep
+`simulation` if the worker still handles Egma tests.
+
+## Read transcripts and grades
+
+The **Monitoring** table shows the agent, time, duration, p90 turn latency,
+and trace ID when those values are available. Select a trace to open its
+details and inspect the transcript, metrics, and grades.
+
+To grade incoming conversations, [configure graders](/guides/configure-graders)
+with production scope and the sample percentage you want. A missing grade can
+mean the conversation was outside that scope or sample, is still processing,
+or could not be graded. Check its grading state before treating it as a pass.
+
+Each grade has its own score and threshold. A combined score summarizes the
+selected grades; it does not decide an overall pass or fail. See
+[Scores and thresholds](/guides/scores-and-thresholds).

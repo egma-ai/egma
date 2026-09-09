@@ -63,7 +63,7 @@ def repository_root() -> Path:
 
 ROOT = repository_root()
 COMPOSE_FILES = sorted(ROOT.glob("docker-compose*.yml"))
-ENVIRONMENT_REFERENCE = ROOT / "docs/configuration/environment-variables.mdx"
+ENVIRONMENT_REFERENCE = ROOT / "docs/self-hosting/configuration.mdx"
 
 
 def variables_read_by_the_code() -> set[str]:
