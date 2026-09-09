@@ -1316,7 +1316,7 @@ describe("one source of execution truth", () => {
     const daytonaClaimRuntime = vi.fn<DaytonaClaimRuntime>(
       async (_claimant, _simulationId, signal) => {
         receivedSignal?.(signal);
-        await new Promise<never>((_resolve, reject) => {
+        return await new Promise<never>((_resolve, reject) => {
           signal.addEventListener("abort", () => reject(signal.reason), {
             once: true,
           });
