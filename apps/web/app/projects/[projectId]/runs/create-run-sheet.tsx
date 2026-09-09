@@ -631,17 +631,14 @@ export function CreateRunSheet({
             {formContent()}
           </SheetBody>
           {role === null ? null : (
-            <SheetFooter className="h-[calc(var(--control-lg)+var(--space-7))] justify-end border-t border-border bg-surface px-6 py-4">
-              <Button
-                type="button"
-                size="lg"
-                variant="secondary"
-                className="px-4"
-                disabled={starting}
-                onClick={close}
-              >
-                Cancel
-              </Button>
+            <SheetFooter
+              className="h-[calc(var(--control-lg)+var(--space-7))] border-t border-border bg-surface px-6 py-4"
+              secondary={
+                <Button type="button" size="lg" variant="secondary" className="px-4" disabled={starting} onClick={close}>
+                  Cancel
+                </Button>
+              }
+            >
               <Button
                 type="submit"
                 size="lg"

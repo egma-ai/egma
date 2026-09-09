@@ -14,18 +14,17 @@ import {
   UsageAllowances,
 } from "@/ui/usage-and-billing";
 import { Failure, Loading } from "@/ui/page-state";
-import { SettingsLayout } from "@/ui/settings-nav";
-import { AppShell, PageBody, PageHeader, ProductPage } from "@/ui/shell";
+import { SettingsPageShell, useSettingsRouteShell } from "../route-shell.tsx";
 
 export default function UsageAndBillingPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  return (
-    <AppShell>
-      <Suspense fallback={<Loading what="usage and billing" />}>
-        <UsageAndBillingBody projectId={projectId} />
-      </Suspense>
-    </AppShell>
+  const sharedShell = useSettingsRouteShell();
+  const body = (
+    <Suspense fallback={<Loading what="usage and billing" />}>
+      <UsageAndBillingBody projectId={projectId} />
+    </Suspense>
   );
+  return sharedShell ? body : <SettingsPageShell section="billing">{body}</SettingsPageShell>;
 }
 
 function UsageAndBillingBody({ projectId }: { readonly projectId: string }) {
@@ -84,26 +83,22 @@ function UsageAndBillingBody({ projectId }: { readonly projectId: string }) {
             : "Checkout closed. Your current billing details are shown below.";
 
   return (
-    <ProductPage viewport>
-      <PageHeader title="Usage and billing" />
-      <PageBody>
-        <SettingsLayout projectId={projectId} current="billing">
-          <div className="flex justify-end">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={refresh}
-              busy={reading}
-              disabled={reading || actionBusy}
-            >
-              Refresh
-            </Button>
-          </div>
+    <>
           {returned ? (
-            <p className="m-0 text-sm text-muted-foreground" role="status">
-              {returnMessage}
-            </p>
+            <div className="flex items-center gap-3">
+              <p className="m-0 text-sm text-muted-foreground" role="status">
+                {returnMessage}
+              </p>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={refresh}
+                disabled={reading || actionBusy}
+              >
+                Check again
+              </Button>
+            </div>
           ) : null}
           {billing === undefined ? (
             <Loading what="usage and billing" />
@@ -147,8 +142,6 @@ function UsageAndBillingBody({ projectId }: { readonly projectId: string }) {
               )}
             </>
           )}
-        </SettingsLayout>
-      </PageBody>
-    </ProductPage>
+    </>
   );
 }

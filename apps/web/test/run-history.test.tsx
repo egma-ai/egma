@@ -658,6 +658,70 @@ describe("one run after suites", () => {
     ).toBe(true);
   });
 
+  it("moves the selected simulation from queued results to live transcript and back to results", async () => {
+      routed.pathname = "/projects/prj_1/runs/run_1";
+      const active = runDetail({
+        status: "running",
+        finishedAt: null,
+        gradableCount: 0,
+        gradedCount: 0,
+        simulationCounts: { ...NO_SIMULATIONS, queued: 1 },
+      });
+      const queued = simulation({
+        status: "queued",
+        gradingState: null,
+        gradeTally: null,
+        combinedScore: null,
+        startedAt: null,
+        endedAt: null,
+      });
+      answers({
+        ...detailStubs(
+          active,
+          { status: 200, body: { simulations: [queued], nextPageToken: null } },
+          [
+            { status: 200, body: simulationEvidence({ status: "queued", gradingState: null, startedAt: null, endedAt: null }) },
+            { status: 200, body: simulationEvidence({ status: "running", gradingState: null, endedAt: null }) },
+            { status: 200, body: simulationEvidence({ status: "running", gradingState: null, endedAt: null }) },
+            { status: 200, body: simulationEvidence({ status: "completed", gradingState: "pending" }) },
+            { status: 200, body: simulationEvidence({ status: "completed", gradingState: "complete" }) },
+          ],
+        ),
+        "/v1/runs/run_1/events": "never",
+      });
+      render(<RunDetailPage />);
+
+      expect((await screen.findByRole("tab", { name: "Results summary" })).getAttribute("data-state")).toBe("active");
+
+      await waitFor(() => {
+        expect(screen.getByRole("tab", { name: "Transcript" }).getAttribute("data-state")).toBe("active");
+      }, { timeout: 3500 });
+
+      fireEvent.click(screen.getByRole("tab", { name: "Results summary" }));
+      expect(screen.getByRole("tab", { name: "Results summary" }).getAttribute("data-state")).toBe("active");
+
+      // A refresh in the same running phase keeps the manual Results choice.
+      await waitFor(() => {
+        expect(sent.filter((request) => request.path === "/v1/simulations/sim_1").length).toBeGreaterThanOrEqual(3);
+        expect(screen.getByRole("tab", { name: "Results summary" }).getAttribute("data-state")).toBe("active");
+      }, { timeout: 3500 });
+
+      // Completion begins the results phase even while its graders are pending.
+      fireEvent.click(screen.getByRole("tab", { name: "Transcript" }));
+      expect(screen.getByRole("tab", { name: "Transcript" }).getAttribute("data-state")).toBe("active");
+      await waitFor(() => {
+        expect(sent.filter((request) => request.path === "/v1/simulations/sim_1").length).toBeGreaterThanOrEqual(4);
+        expect(screen.getByText("Grading in progress")).toBeTruthy();
+        expect(screen.getByRole("tab", { name: "Results summary" }).getAttribute("data-state")).toBe("active");
+      }, { timeout: 3500 });
+
+      await waitFor(() => {
+        expect(sent.filter((request) => request.path === "/v1/simulations/sim_1").length).toBeGreaterThanOrEqual(5);
+        expect(screen.queryByText("Grading in progress")).toBeNull();
+        expect(screen.getByRole("tab", { name: "Results summary" }).getAttribute("data-state")).toBe("active");
+      }, { timeout: 3500 });
+  });
+
   it("keeps expected behaviors visible while grading is still running", async () => {
     routed.pathname = "/projects/prj_1/runs/run_1";
     answers(
@@ -1019,6 +1083,9 @@ describe("one run after suites", () => {
     );
     render(<RunDetailPage />);
 
+    const transcript = await screen.findByRole("tab", { name: "Transcript" });
+    expect(transcript.getAttribute("data-state")).toBe("active");
+    fireEvent.click(screen.getByRole("tab", { name: "Results summary" }));
     const panel = await screen.findByRole("tabpanel", { name: "Results summary" });
     const mark = panel.querySelector('[data-slot="waiting-mark"]') as HTMLElement;
     expect(mark).not.toBeNull();
@@ -1162,6 +1229,10 @@ describe("one run after suites", () => {
     expect(screen.queryByText(/capabilit/u)).toBeNull();
 
     const summary = screen.getByRole("region", { name: "Simulation summary" });
+    const executionFailure = screen.getByRole("alert");
+    expect(
+      executionFailure.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(within(summary).getAllByText("-")).toHaveLength(2);
     expect(within(summary).queryByText("Not available")).toBeNull();
     expect(within(summary).getAllByText("Not recorded")).toHaveLength(2);
@@ -1175,12 +1246,12 @@ describe("one run after suites", () => {
     });
     const conversation = conversationHeading.closest("section");
     expect(conversation).not.toBeNull();
-    expect(within(conversation!).getByText("-")).toBeTruthy();
     expect(within(conversation!).getByText("No conversation recorded")).toBeTruthy();
-    expect(within(conversation!).queryByText("Nothing was said")).toBeNull();
     expect(
-      within(conversation!).queryByText("Egma filed no spoken turns for this simulation."),
-    ).toBeNull();
+      within(conversation!).getByText(
+        "This simulation finished without a recorded conversation or tool calls.",
+      ),
+    ).toBeTruthy();
   });
 
   it("does not expose a raw failure reason when older evidence has no detail", async () => {
@@ -2729,7 +2800,10 @@ describe("one run after suites", () => {
     expect(runningSquare?.getAttribute("data-motion")).toBe("pulse");
     expect(document.querySelector('[data-slot="run-status"]')).toBeNull();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Cancel run" }));
+    const cancelButton = await screen.findByRole("button", { name: "Cancel run" });
+    expect(cancelButton.closest('[data-slot="page-topbar"]')).not.toBeNull();
+    expect(document.querySelector('[data-slot="page-toolbar"]')).toBeNull();
+    fireEvent.click(cancelButton);
     const dialog = await screen.findByRole("dialog", { name: "Cancel run “Release check”?" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel run" }));
     await waitFor(() => {

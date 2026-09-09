@@ -39,18 +39,12 @@ import {
   ListInstant,
 } from "../../../../../ui/relative-time.tsx";
 import { Section } from "../../../../../ui/section.tsx";
-import { SettingsLayout } from "../../../../../ui/settings-nav.tsx";
 import {
   useOrganizationRead,
   useUnsavedChanges,
 } from "../../../../../ui/settings-read.ts";
-import {
-  AppShell,
-  PageBody,
-  PageHeader,
-  ProductPage,
-  useShellSession,
-} from "../../../../../ui/shell.tsx";
+import { useShellSession } from "../../../../../ui/shell.tsx";
+import { SettingsPageShell, useSettingsRouteShell } from "../route-shell.tsx";
 
 /**
  * Display a newly minted API secret once; later reads expose only its hint
@@ -60,11 +54,9 @@ import {
  */
 export default function ApiKeysSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  return (
-    <AppShell>
-      <ApiKeys projectId={projectId} />
-    </AppShell>
-  );
+  const sharedShell = useSettingsRouteShell();
+  const body = <ApiKeys projectId={projectId} />;
+  return sharedShell ? body : <SettingsPageShell section="keys">{body}</SettingsPageShell>;
 }
 
 const WHOLE_ORGANIZATION = "";
@@ -307,10 +299,7 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
       : "Copy and dismiss the key above before you create another one.";
 
   return (
-    <ProductPage viewport>
-      <PageHeader title="API keys" />
-      <PageBody>
-        <SettingsLayout projectId={projectId} current="keys">
+    <>
           {refused === null ? null : <Refused message={refused.message} />}
 
           {minted === null ? null : (
@@ -330,10 +319,7 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
             />
           ) : (
             <>
-              <Section
-                title="Create a key"
-                lead="Every role may create, list and revoke their own keys."
-              >
+              <Section title="Create a key">
                 <Form onSubmit={() => void mint()}>
                   <FormRow>
                     <Field label="Name" htmlFor="key-name">
@@ -423,9 +409,6 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
               rotate is one you cannot keep safe.
             </Help>
           ) : null}
-        </SettingsLayout>
-      </PageBody>
-
       {confirmingRevoke === null ? null : (
         <Dialog
           title={`Revoke API key “${confirmingRevoke.name ?? confirmingRevoke.looksLike}”?`}
@@ -466,6 +449,6 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
           )}
         </Dialog>
       )}
-    </ProductPage>
+    </>
   );
 }

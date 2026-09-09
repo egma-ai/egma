@@ -775,10 +775,10 @@ describe("the project Graders surface", () => {
       ),
     ).toBeTruthy();
     expect(within(details).getByText("Turn response latency")).toBeTruthy();
-    expect(within(details).queryByLabelText("Maximum response time (p90)")).toBeNull();
+    expect(within(details).queryByLabelText("Maximum acceptable response latency")).toBeNull();
     fireEvent.click(within(details).getByRole("button", { name: "Use in project" }));
 
-    const maximum = within(details).getByLabelText("Maximum response time (p90)");
+    const maximum = within(details).getByLabelText("Maximum acceptable response latency");
     expect((maximum as HTMLInputElement).value).toBe("3");
     fireEvent.change(maximum, { target: { value: "2.5" } });
     fireEvent.click(within(details).getByRole("button", { name: "Use in project" }));
@@ -788,7 +788,7 @@ describe("the project Graders surface", () => {
         method: "POST",
         path: "/v1/grader-library/grl_latency/use?projectId=prj_1",
         body: {
-          scope: { simulations: [], production: null },
+          scope: { simulations: [{ kind: "all" }], production: null },
           settings: { maximum_response_time_ms: 2_500 },
           passThreshold: 1,
         },
@@ -862,6 +862,17 @@ describe("the project Graders surface", () => {
       const field = within(sheet).getByLabelText(starred);
       expect(field.getAttribute("aria-required"), starred).toBe("true");
     }
+    expect(
+      within(sheet).getByText("A value between 0 and 1."),
+    ).toBeTruthy();
+    const thresholdHelp = within(sheet).getByRole("button", {
+      name: "What does pass threshold mean?",
+    });
+    const thresholdHeading = thresholdHelp.closest("p");
+    if (thresholdHeading === null) {
+      throw new Error("The threshold help must sit in the section heading.");
+    }
+    expect(thresholdHeading.textContent).toContain("Pass threshold");
 
     /*
      * The score mapping is an annotation beside each label, not part of it:
@@ -895,16 +906,16 @@ describe("the project Graders surface", () => {
       ),
     ).toBeNull();
     expect(
-      within(sheet).getByText(
+      within(sheet).queryByText(
         "From 0 to 1. A simulation passes this grader at or above this score.",
       ),
-    ).toBeTruthy();
+    ).toBeNull();
 
     /*
      * And the order, which is the sheet's argument rather than a layout
      * detail: the framing line before anything is asked for, the evidence
      * sentence above the three boxes it governs, and the boundary drawn
-     * before the threshold and the scope that apply it. Presence alone would
+     * before the scope, settings, and threshold that apply it. Presence alone would
      * let a later edit shuffle these and stay green.
      */
     const pinned = [
@@ -933,8 +944,10 @@ describe("the project Graders surface", () => {
       ],
       ["Passes when*", within(sheet).getByLabelText("Passes when*")],
       ["Fails when*", within(sheet).getByLabelText("Fails when*")],
-      ["Pass threshold*", within(sheet).getByLabelText("Pass threshold*")],
       ["Scope", within(sheet).getByText("Scope")],
+      ["Settings", within(sheet).getByText("Settings")],
+      ["Pass threshold", thresholdHeading],
+      ["Pass threshold*", within(sheet).getByLabelText("Pass threshold*")],
     ] as const;
     const rendered = [...pinned].sort(([, one], [, next]) => {
       const follows =
@@ -978,13 +991,8 @@ describe("the project Graders surface", () => {
   });
 
   /**
-   * The notice a grader change leaves behind stays until somebody clears it.
-   *
-   * It carries no timer on purpose: a line that removed itself after a few
-   * seconds would be gone before a person who looked away could read it. So the
-   * way out is a control, and the control is the product's own icon button with
-   * the dismiss label `ui/feedback.tsx` already uses. One control serves all
-   * four of the page's messages, because `refreshAll` writes them all here.
+   * A successful write uses the shared notification surface rather than taking
+   * vertical space above the graders table.
    */
   it("lets a person dismiss the notice a grader change leaves behind", async () => {
     apiAnswers(answersThatCreateAGrader());
@@ -1002,7 +1010,7 @@ describe("the project Graders surface", () => {
     );
 
     const said = "Custom grader created and added to Active graders.";
-    expect(await screen.findByText(said)).toBeTruthy();
+    expect((await screen.findByText(said)).closest('[data-slot="toast"]')).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: `Dismiss ${said}` }));
     expect(screen.queryByText(said)).toBeNull();
   });
@@ -1492,7 +1500,7 @@ describe("the project Graders surface", () => {
         "Review this grader before choosing it for the project.",
       ),
     ).toBeTruthy();
-    expect(within(sheet).getByText("Available")).toBeTruthy();
+    expect(within(sheet).queryByText("Project use")).toBeNull();
     const close = within(sheet).getAllByRole("button", { name: "Close" }).at(-1);
     if (close === undefined) throw new Error("the sheet has no close button");
     fireEvent.click(close);
@@ -1508,7 +1516,7 @@ describe("the project Graders surface", () => {
       within(sheet).getByText("Choose how this project will use the grader."),
     ).toBeTruthy();
     expect(
-      within(sheet).getByLabelText("Maximum response time (p90)"),
+      within(sheet).getByLabelText("Maximum acceptable response latency"),
     ).toBeTruthy();
   });
 });
@@ -1524,14 +1532,14 @@ const REVIEW_CORE: GraderLibraryEntry = {
 };
 
 describe("grader review regressions", () => {
-  it("treats a fetched old core as read-only when the library row missed another editor's version", async () => {
+  it("treats a fetched old core as read-only without offering a version picker", async () => {
     const current = { ...REVIEW_CORE, definitionVersion: 2, currentDefinitionVersion: 2, gradingInstructions: "The version two instruction." };
     const { asked } = apiAnswers({
       ...standardAnswers("admin", [EXPECTED], [REVIEW_CORE]),
-      "GET /v1/grader-library/grl_review": [
-        { status: 200, body: { ...REVIEW_CORE, currentDefinitionVersion: 2 } },
-        { status: 200, body: current },
-      ],
+      "GET /v1/grader-library/grl_review": {
+        status: 200,
+        body: { ...REVIEW_CORE, currentDefinitionVersion: 2 },
+      },
     });
     render(<GradersPage />);
     fireEvent.click(await screen.findByRole("tab", { name: "Grader library" }));
@@ -1541,11 +1549,18 @@ describe("grader review regressions", () => {
     for (const name of ["Edit core", "Clone grader", "Use in project"]) {
       expect(within(sheet).queryByRole("button", { name })).toBeNull();
     }
-    expect(within(sheet).getByRole("option", { name: "v1 · Read-only" })).toBeTruthy();
-    fireEvent.change(within(sheet).getByLabelText("Core version"), { target: { value: "2" } });
-    await within(sheet).findByText("The version two instruction.");
-    fireEvent.click(within(sheet).getByRole("button", { name: "Edit core" }));
-    expect((within(sheet).getByLabelText("Grading instructions*") as HTMLTextAreaElement).value).toBe(current.gradingInstructions);
+    expect(within(sheet).queryByLabelText("Core version")).toBeNull();
+    expect(within(sheet).queryByText(current.gradingInstructions)).toBeNull();
+    await waitFor(() => {
+      const request = asked.find(
+        (one) => one.path.startsWith("/v1/grader-library/grl_review?"),
+      );
+      expect(
+        new URL(request?.path ?? "", "http://egma.test").searchParams.get(
+          "definitionVersion",
+        ),
+      ).toBeNull();
+    });
     expect(asked.filter((one) => one.method === "PATCH")).toEqual([]);
   });
 

@@ -13,9 +13,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RootPage from "../app/page.tsx";
 import NewProjectPage from "../app/new-project/page.tsx";
 import ApiKeysPage from "../app/projects/[projectId]/settings/keys/page.tsx";
+import SettingsRouteLayout from "../app/projects/[projectId]/settings/layout.tsx";
 import OrganizationSettingsPage from "../app/projects/[projectId]/settings/organization/page.tsx";
 import PeoplePage from "../app/projects/[projectId]/settings/people/page.tsx";
-import ProjectSettingsPage from "../app/projects/[projectId]/settings/page.tsx";
+import ProjectSettingsPage from "../app/projects/[projectId]/settings/project/page.tsx";
 import type { Me } from "../lib/me.ts";
 import { REPLAY_PRIVATE_ATTRIBUTE } from "../lib/replay-privacy.ts";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
@@ -228,7 +229,28 @@ const ORGANIZATION_WIDE: readonly {
 ];
 
 describe("the Settings navigation", () => {
-  it("says which settings belong to the project and which to the organization", async () => {
+  it("keeps the settings rail mounted while a sibling route changes", () => {
+    const view = render(
+      <SettingsRouteLayout>
+        <p>Organization content</p>
+      </SettingsRouteLayout>,
+    );
+    const rail = screen.getByRole("navigation", { name: "Settings" });
+
+    routed.pathname = "/projects/prj_1/settings/billing";
+    view.rerender(
+      <SettingsRouteLayout>
+        <p>Billing content</p>
+      </SettingsRouteLayout>,
+    );
+
+    expect(screen.getByRole("navigation", { name: "Settings" })).toBe(rail);
+    expect(
+      screen.getByRole("link", { name: "Usage and Billing" }).getAttribute("aria-current"),
+    ).toBe("page");
+  });
+
+  it("lists organization settings first in the agreed order, then project settings", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
       "/v1/projects/prj_1": { status: 200, body: PROJECT },
@@ -236,10 +258,22 @@ describe("the Settings navigation", () => {
     render(<ProjectSettingsPage />);
 
     const nav = await screen.findByRole("navigation", { name: "Settings" });
-    expect(nav.textContent).toContain("This project");
-    expect(nav.textContent).toContain("Organization");
-    expect(within(nav).getByRole("group", { name: "This project" })).toBeTruthy();
-    expect(within(nav).getByRole("group", { name: "Organization" })).toBeTruthy();
+    expect(within(nav).getAllByRole("group")).toEqual([
+      within(nav).getByRole("group", { name: "Organization" }),
+      within(nav).getByRole("group", { name: "Project" }),
+    ]);
+    expect(
+      within(nav)
+        .getAllByRole("link")
+        .map((link) => link.textContent),
+    ).toEqual([
+      "Organization Settings",
+      "Usage and Billing",
+      "Provider API Keys",
+      "People",
+      "API Keys",
+      "Project Settings",
+    ]);
     expect(within(nav).queryByRole("link", { name: "Judge" })).toBeNull();
 
     // Every address carries the project, including the organization-wide ones:
@@ -247,6 +281,11 @@ describe("the Settings navigation", () => {
     // inside the product shell for the selector to be there at all.
     const people = within(nav).getByRole("link", { name: "People" });
     expect(people.getAttribute("href")).toBe("/projects/prj_1/settings/people");
+    expect(
+      within(nav)
+        .getByRole("link", { name: "Project Settings" })
+        .getAttribute("href"),
+    ).toBe("/projects/prj_1/settings/project");
 
     // The navigation and the state it controls share one stable frame. The
     // frame is present before the read settles and does not move when the form
@@ -402,7 +441,7 @@ describe("project settings", () => {
 
     expect(await screen.findByRole("button", { name: "Saving…" })).toBeTruthy();
     const settings = screen.getByRole("navigation", { name: "Settings" });
-    const judge = within(settings).getByRole("link", { name: "Organization" });
+    const judge = within(settings).getByRole("link", { name: "Organization Settings" });
     const click = new MouseEvent("click", {
       bubbles: true,
       cancelable: true,
@@ -431,7 +470,7 @@ describe("project settings", () => {
     });
     fireEvent(
       within(screen.getByRole("navigation", { name: "Settings" }))
-        .getByRole("link", { name: "Organization" }),
+        .getByRole("link", { name: "Organization Settings" }),
       clickWhileConfirming,
     );
     expect(clickWhileConfirming.defaultPrevented).toBe(true);
@@ -455,7 +494,7 @@ describe("project settings", () => {
     });
     fireEvent(
       within(screen.getByRole("navigation", { name: "Settings" }))
-        .getByRole("link", { name: "Organization" }),
+        .getByRole("link", { name: "Organization Settings" }),
       clickAfterFailure,
     );
     expect(clickAfterFailure.defaultPrevented).toBe(true);
@@ -501,7 +540,7 @@ describe("project settings", () => {
     });
 
     const settings = screen.getByRole("navigation", { name: "Settings" });
-    const judge = within(settings).getByRole("link", { name: "Organization" });
+    const judge = within(settings).getByRole("link", { name: "Organization Settings" });
     const click = new MouseEvent("click", {
       bubbles: true,
       cancelable: true,
@@ -902,7 +941,7 @@ describe("organization settings", () => {
     await screen.findByDisplayValue(ORGANIZATION.name);
     const save = screen.getByRole("button", { name: "Save organization" });
     expect(save.hasAttribute("disabled")).toBe(true);
-    fireEvent.change(screen.getByLabelText("Name"), {
+    fireEvent.change(screen.getByLabelText("Organization name"), {
       target: { value: "Acme Voice" },
     });
     expect(save.hasAttribute("disabled")).toBe(false);
@@ -923,7 +962,7 @@ describe("organization settings", () => {
       name: "Save organization",
     });
     expect(savedButton.hasAttribute("disabled")).toBe(true);
-    fireEvent.change(screen.getByLabelText("Name"), {
+    fireEvent.change(screen.getByLabelText("Organization name"), {
       target: { value: "Acme Voice Labs" },
     });
     expect(screen.queryByText("Saved.")).toBeNull();
@@ -981,7 +1020,7 @@ describe("organization settings", () => {
     });
     fireEvent(
       within(screen.getByRole("navigation", { name: "Settings" }))
-        .getByRole("link", { name: "Organization" }),
+        .getByRole("link", { name: "Organization Settings" }),
       clickWhileConfirming,
     );
     expect(clickWhileConfirming.defaultPrevented).toBe(true);
@@ -1010,7 +1049,7 @@ describe("organization settings", () => {
     });
     fireEvent(
       within(screen.getByRole("navigation", { name: "Settings" }))
-        .getByRole("link", { name: "Organization" }),
+        .getByRole("link", { name: "Organization Settings" }),
       clickAfterFailure,
     );
     expect(clickAfterFailure.defaultPrevented).toBe(true);
@@ -1027,7 +1066,7 @@ describe("organization settings", () => {
     await act(async () => {
       finishRetry({ status: 200, body: renamed });
     });
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+    expect((screen.getByLabelText("Organization name") as HTMLInputElement).value).toBe(
       "Acme Voice Labs",
     );
     expect(
@@ -1043,7 +1082,7 @@ describe("organization settings", () => {
     async (role) => {
       open(role, { ...ORGANIZATION, mayManageOrganization: false });
 
-      const name = (await screen.findByLabelText("Name")) as HTMLInputElement;
+      const name = (await screen.findByLabelText("Organization name")) as HTMLInputElement;
       await waitFor(() => {
         expect(name.value).toBe("Acme");
       });
@@ -1061,25 +1100,11 @@ describe("organization settings", () => {
     },
   );
 
-  /**
-   * A hint nothing points at is a hint only a sighted reader ever gets.
-   *
-   * `Field` hands its hint id through React context, and only the CSS Modules
-   * input ever read it. The base input reads nothing it is not given, so the
-   * field writes the sentence and the `aria-describedby` in one place. It is
-   * asserted rather than assumed because the wiring could be dropped without
-   * the page looking any different.
-   */
-  it("names the hint under the field that has one", async () => {
+  it("labels the field without the removed storage hint", async () => {
     open("admin", ORGANIZATION);
 
-    const nameHint = await screen.findByText(
-      /breaks no link and no invitation/,
-    );
-    expect(nameHint.id).not.toBe("");
-    expect(screen.getByLabelText("Name").getAttribute("aria-describedby")).toBe(
-      nameHint.id,
-    );
+    expect(await screen.findByLabelText("Organization name")).toBeTruthy();
+    expect(screen.queryByText(/What Egma calls your organization/)).toBeNull();
   });
 });
 
@@ -1171,6 +1196,16 @@ describe("people and invitations", () => {
     expect(
       sent.find((one) => one.url.includes("/v1/members/usr_2/role"))?.body,
     ).toEqual({ role: "member" });
+  });
+
+  it("calls the invitation section Invite team members", async () => {
+    open();
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
+    expect(
+      await screen.findByRole("heading", { name: "Invite team members" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Invite somebody" })).toBeNull();
   });
 
   /**

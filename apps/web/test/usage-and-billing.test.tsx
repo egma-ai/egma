@@ -116,7 +116,7 @@ it("puts all billing facts on the named settings page and uses the activation bo
   const nav = screen.getByRole("navigation", { name: "Settings" });
   expect(
     within(nav)
-      .getByRole("link", { name: "Usage and billing" })
+      .getByRole("link", { name: "Usage and Billing" })
       .getAttribute("aria-current"),
   ).toBe("page");
 });
@@ -267,7 +267,7 @@ it("loads another ledger page without losing history when a retry is needed", as
       ?.address.searchParams.get("cursor"),
   ).toBe("older/+page");
 });
-it("checks current history after a bought return without claiming a successful payment", async () => {
+it("keeps checkout-return facts visible and refreshes them from the billing controls", async () => {
   routed.search = "credit=bought";
   open();
   expect(
@@ -296,7 +296,7 @@ it("checks current history after a bought return without claiming a successful p
       },
     },
   };
-  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  fireEvent.click(screen.getByRole("button", { name: "Check again" }));
   expect(await screen.findByText("$29.25")).toBeTruthy();
   expect(screen.getByText("Credit purchase")).toBeTruthy();
 });
@@ -309,6 +309,7 @@ it("does not upgrade the displayed plan merely from a return parameter", async (
     ),
   ).toBeTruthy();
   expect(screen.getByText("Hobby")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
 });
 it("says checkout closed on cancellation while showing actual account facts", async () => {
   routed.search = "credit=cancelled";
@@ -366,7 +367,7 @@ it("validates a custom amount before opening checkout", async () => {
     "https://checkout.stripe.com/test",
   );
 });
-it("blocks duplicate upgrade actions and refresh while their result is pending", async () => {
+it("blocks duplicate upgrade actions while their result is pending", async () => {
   open();
   let resolve!: (fact: ResponseFact) => void;
   responses["/api/billing/upgrade"] = () =>
@@ -381,10 +382,6 @@ it("blocks duplicate upgrade actions and refresh while their result is pending",
   ).toBeTruthy();
   expect(
     (screen.getByRole("button", { name: "Buy credit" }) as HTMLButtonElement)
-      .disabled,
-  ).toBe(true);
-  expect(
-    (screen.getByRole("button", { name: "Refresh" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
   resolve({
@@ -472,7 +469,7 @@ it("keeps usage out of the organization name form", async () => {
   setup();
   routed.pathname = "/projects/prj_1/settings/organization";
   render(<OrganizationSettingsPage />);
-  expect(await screen.findByLabelText("Name")).toBeTruthy();
+  expect(await screen.findByLabelText("Organization name")).toBeTruthy();
   expect(
     requests.some((request) => request.path.startsWith("/api/organization/")),
   ).toBe(false);

@@ -197,13 +197,16 @@ const CELL = "border-r border-b border-border p-0 align-top last:border-r-0";
  * The narrower icon-only action token would clip the heading.
  */
 const ACTION =
-  "w-(--table-action-labelled-width) border-b border-border p-0 text-center align-top";
+  "w-(--table-action-labelled-width) border-b border-border p-0 text-center align-middle";
 /**
  * Reuse shared table padding and edge tokens because this grid does not
  * render through the standard table component.
  */
 const PAD = `${LANE_X} py-(--row-padding-y)`;
 const TEXT = "text-sm leading-(--line-caption) text-foreground";
+/** Stored rows reserve two caption lines, then clamp their display to that space. */
+const VIEW_ROW = "flex min-h-(--topbar-height) min-w-0 items-center overflow-hidden";
+const VIEW_TEXT = "block min-w-0 line-clamp-2";
 /** The same quiet line a summary is drawn in, which `None` is one of. */
 const CELL_QUIET = "text-sm leading-(--line-caption) text-faint";
 /*
@@ -736,7 +739,7 @@ function BehaviorLines({
   readonly onCommit: () => void;
   readonly onCancel: () => void;
 }) {
-  const lines = useRef<(HTMLInputElement | null)[]>([]);
+  const lines = useRef<(HTMLTextAreaElement | null)[]>([]);
   /**
    * Which line the caret is owed, and it is always a line that just moved.
    *
@@ -764,10 +767,11 @@ function BehaviorLines({
           <span className="flex-none text-sm tabular-nums text-foreground">
             {at + 1}.
           </span>
-          <input
-            className={QUIET_INPUT}
+          <textarea
+            className={cn(QUIET_INPUT, "field-sizing-content min-h-5")}
             aria-label={`Expected behavior ${String(at + 1)}`}
             value={behavior}
+            rows={1}
             autoComplete="off"
             ref={(node) => {
               lines.current[at] = node;
@@ -904,7 +908,7 @@ function CellBody({
         }}
       />
     ) : (
-      <span className={TEXT}>{draft.name}</span>
+      <span className={cn(TEXT, VIEW_TEXT)}>{draft.name}</span>
     );
   }
 
@@ -930,7 +934,7 @@ function CellBody({
         }}
       />
     ) : (
-      <span className={TEXT}>{draft.scenario}</span>
+      <span className={cn(TEXT, VIEW_TEXT)}>{draft.scenario}</span>
     );
   }
 
@@ -943,13 +947,11 @@ function CellBody({
         onCancel={onCancel}
       />
     ) : (
-      <div className="flex flex-col gap-0.5">
-        {draft.expectedBehaviors.map((behavior, at) => (
-          <span className={TEXT} key={`behavior-${String(at)}`}>
-            <span className="tabular-nums text-foreground">{at + 1}.</span> {behavior}
-          </span>
-        ))}
-      </div>
+      <span className={cn(TEXT, VIEW_TEXT)}>
+        {draft.expectedBehaviors
+          .map((behavior, at) => `${String(at + 1)}. ${behavior}`)
+          .join(" · ")}
+      </span>
     );
   }
 
@@ -963,7 +965,9 @@ function CellBody({
         onCancel();
       }}
     >
-      <span className={TEXT}>{personaNames(draft.personas, known)}</span>
+      <span className={cn(TEXT, VIEW_TEXT)}>
+        {personaNames(draft.personas, known)}
+      </span>
       {woken ? (
         <PersonaPicker
           projectId={projectId}
@@ -1732,6 +1736,7 @@ export function TestsGrid(props: GridProps) {
           <button
             className={cn(
               PAD,
+              VIEW_ROW,
               /*
                * Named, the way every other group in the product is: an
                * unnamed one is claimed by whatever group wraps this cell next,
@@ -1758,7 +1763,7 @@ export function TestsGrid(props: GridProps) {
             <JsonSummary field={field} test={test} offer="reached" />
           </button>
         ) : (
-          <div className={PAD}>
+          <div className={cn(PAD, VIEW_ROW)}>
             <JsonSummary field={field} test={test} offer="never" />
           </div>
         )}
@@ -1794,7 +1799,13 @@ export function TestsGrid(props: GridProps) {
             : undefined
         }
       >
-        <div className={cn(PAD, !woken && mayAuthor && "cursor-text")}>
+        <div
+          className={cn(
+            PAD,
+            !woken && VIEW_ROW,
+            !woken && mayAuthor && "cursor-text",
+          )}
+        >
           <CellBody
             field={field}
             woken={woken}
@@ -2045,7 +2056,7 @@ export function TestsGrid(props: GridProps) {
            */}
           {tests.map((test) => (
             <Fragment key={test.id}>
-              <tr>
+              <tr data-test-row={test.id}>
                 {COLUMNS.map((column) => cell(test, column.field))}
                 {rowMenu(test)}
               </tr>
@@ -2106,9 +2117,6 @@ export function TestsGrid(props: GridProps) {
             size="lg"
             disabled={!mayAuthor || missing !== null || entrySaving}
             busy={entrySaving}
-            // The sentence beside it is the reason it cannot fire, so the
-            // button names it rather than leaving a screen reader to find it.
-            aria-describedby="entry-row-state"
             {...(why === undefined ? {} : { why })}
             onClick={() => void write()}
           >
@@ -2123,13 +2131,6 @@ export function TestsGrid(props: GridProps) {
           >
             Cancel
           </Button>
-          <p
-            className="m-0 text-sm text-muted-foreground"
-            id="entry-row-state"
-            role="status"
-          >
-            {missing ?? "Not saved yet."}
-          </p>
         </Arriving>
       )}
 

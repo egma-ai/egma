@@ -1,6 +1,5 @@
 "use client";
 
-import { XIcon } from "lucide-react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -48,6 +47,7 @@ import {
 } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
 import { DestructiveItem, RowMenu } from "../../../../ui/row-menu.tsx";
+import { Toast } from "../../../../ui/feedback.tsx";
 import {
   AppShell,
   PageBody,
@@ -662,36 +662,6 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
           }
         />
         <PageBody>
-          {said === null ? null : (
-            /*
-             * The notice stays until it is dismissed. No timer, on purpose: a
-             * line that removes itself is gone before a person who looked away
-             * could read it. The way out is the same dismiss control the
-             * product's feedback banner uses, and one control serves all four
-             * of this page's messages because refreshAll writes them all here.
-             */
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <p className="m-0 text-sm text-success" role="status">
-                {said}
-              </p>
-              <button
-                className={cn(
-                  "grid size-(--control-sm) shrink-0 cursor-pointer place-items-center p-0",
-                  "rounded-button border-0 bg-transparent text-muted-foreground",
-                  "transition-transform duration-(--duration-press) ease-out",
-                  "pointer-hover:bg-surface-soft pointer-hover:text-foreground",
-                  "[&:active:not(:focus-visible)]:scale-97",
-                  "motion-reduce:transition-none",
-                  "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
-                )}
-                type="button"
-                aria-label={`Dismiss ${said}`}
-                onClick={() => setSaid(null)}
-              >
-                <XIcon className="size-4" />
-              </button>
-            </div>
-          )}
           <TabsContent value="active">{activePanel()}</TabsContent>
           <TabsContent value="library">{libraryPanel()}</TabsContent>
         </PageBody>
@@ -750,6 +720,11 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
           }}
         />
       )}
+      <Toast
+        open={said !== null}
+        title={said ?? ""}
+        onDismiss={() => setSaid(null)}
+      />
     </ProductPage>
   );
 }

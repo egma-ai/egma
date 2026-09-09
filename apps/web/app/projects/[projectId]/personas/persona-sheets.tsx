@@ -347,7 +347,13 @@ export function CreatePersonaSheet({
             onChange={setModels}
           />
         </SheetBody>
-        <SheetFooter>
+        <SheetFooter
+          secondary={
+            <Button type="button" size="lg" variant="secondary" disabled={saving} onClick={leave}>
+              Cancel
+            </Button>
+          }
+        >
           <Button
             type="submit"
             size="lg"
@@ -356,15 +362,6 @@ export function CreatePersonaSheet({
             {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
           >
             {saving ? "Creating…" : "Create persona"}
-          </Button>
-          <Button
-            type="button"
-            size="lg"
-            variant="secondary"
-            disabled={saving}
-            onClick={leave}
-          >
-            Cancel
           </Button>
         </SheetFooter>
       </form>
@@ -846,7 +843,19 @@ export function PersonaSheet({
     const why = mayAuthor || whyNot === undefined ? {} : { why: whyNot };
     if (settingsReady) {
       return (
-        <SheetFooter>
+        <SheetFooter
+          secondary={
+            <Button
+              type="button"
+              size="lg"
+              variant="secondary"
+              disabled={saving}
+              onClick={editing ? leaveEditor : leave}
+            >
+              Cancel
+            </Button>
+          }
+        >
           <Button
             type="submit"
             size="lg"
@@ -855,15 +864,6 @@ export function PersonaSheet({
             {...why}
           >
             {saving ? "Saving…" : saved && !changed ? "Saved" : one.settings === null ? "Use persona" : "Save changes"}
-          </Button>
-          <Button
-            type="button"
-            size="lg"
-            variant="secondary"
-            disabled={saving}
-            onClick={editing ? leaveEditor : leave}
-          >
-            Cancel
           </Button>
         </SheetFooter>
       );
