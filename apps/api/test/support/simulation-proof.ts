@@ -238,6 +238,7 @@ export async function assertEvidencePage(
     readonly agentIncludes: string;
     readonly recording: boolean;
     readonly sourceLabel: string;
+    readonly gradeResult: "passed" | "failed";
   },
 ): Promise<void> {
   const results = page.getByRole("tab", { name: "Results summary", exact: true });
@@ -245,7 +246,9 @@ export async function assertEvidencePage(
   await results.click();
   const resultPanel = page.getByRole("tabpanel");
   await expect.poll(() => resultPanel.innerText()).toContain("Graders");
-  expect(await resultPanel.innerText()).toContain("Passed");
+  expect(await resultPanel.innerText()).toContain(
+    expected.gradeResult === "passed" ? "Passed" : "Failed",
+  );
 
   const transcript = page.getByRole("tab", {
     name: expected.recording ? "Transcript & audio" : "Transcript",
@@ -284,4 +287,36 @@ export async function assertEvidencePage(
       noError: true,
     });
   }
+}
+
+export function assertValidGrade(
+  stored: {
+    readonly result: "passed" | "failed" | "errored";
+    readonly score: number | null;
+    readonly graderPassThreshold: number;
+    readonly details: Readonly<Record<string, unknown>>;
+  },
+  publicEvidence: Record<string, unknown>,
+): { readonly result: "passed" | "failed"; readonly score: number } {
+  expect(["passed", "failed"]).toContain(stored.result);
+  expect(stored.details.error).toBeUndefined();
+  expect(typeof stored.score).toBe("number");
+  const score = stored.score as number;
+  expect(Number.isFinite(score)).toBe(true);
+  expect(score).toBeGreaterThanOrEqual(0);
+  expect(score).toBeLessThanOrEqual(1);
+  expect(Number.isFinite(stored.graderPassThreshold)).toBe(true);
+  expect(stored.graderPassThreshold).toBeGreaterThanOrEqual(0);
+  expect(stored.graderPassThreshold).toBeLessThanOrEqual(1);
+  expect(stored.result).toBe(
+    score >= stored.graderPassThreshold ? "passed" : "failed",
+  );
+  const publicGrades = publicEvidence.grades as Array<Record<string, unknown>>;
+  expect(publicGrades).toHaveLength(1);
+  expect(publicGrades[0]).toMatchObject({
+    result: stored.result,
+    score,
+    passThreshold: stored.graderPassThreshold,
+  });
+  return { result: stored.result as "passed" | "failed", score };
 }

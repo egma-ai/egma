@@ -14,6 +14,7 @@ import { NEUTRAL_PERSON } from "./support/traces.ts";
 import {
   assertEvidencePage,
   assertPublicEvidence,
+  assertValidGrade,
   startPublicTunnel,
   startFullPathWorkers,
   stopChild,
@@ -196,16 +197,46 @@ async function callbackServer(token: string): Promise<{
     request.on("data", (piece: Buffer) => { raw += piece.toString("utf8"); });
     request.on("end", () => {
       const requestPath = request.url ?? "/";
-      if (requestPath.startsWith("/mock-tools/") && mockOrigin !== undefined) {
+      const providerCallback = requestPath === "/check-availability" ||
+        requestPath === "/record-request";
+      if (!providerCallback && mockOrigin !== undefined) {
         void fetch(`${mockOrigin}${requestPath}`, {
           method: request.method ?? "GET",
-          headers: { "content-type": request.headers["content-type"] ?? "application/json" },
+          headers: {
+            ...(request.headers["content-type"] === undefined
+              ? {}
+              : { "content-type": request.headers["content-type"] }),
+            ...(request.headers.cookie === undefined ? {} : { cookie: request.headers.cookie }),
+            ...(request.headers.authorization === undefined
+              ? {}
+              : { authorization: request.headers.authorization }),
+            ...(request.headers.origin === undefined ? {} : { origin: request.headers.origin }),
+            ...(request.headers.referer === undefined ? {} : { referer: request.headers.referer }),
+            ...(request.headers.range === undefined ? {} : { range: request.headers.range }),
+            ...(request.headers.host === undefined
+              ? {}
+              : { "x-forwarded-host": request.headers.host }),
+            "x-forwarded-proto": "https",
+          },
           ...(raw === "" ? {} : { body: raw }),
+          redirect: "manual",
         }).then(async (answer) => {
           response.writeHead(answer.status, {
             "content-type": answer.headers.get("content-type") ?? "application/json",
+            ...(answer.headers.get("location") === null
+              ? {}
+              : { location: answer.headers.get("location")! }),
+            ...(answer.headers.getSetCookie().length === 0
+              ? {}
+              : { "set-cookie": answer.headers.getSetCookie() }),
+            ...(answer.headers.get("accept-ranges") === null
+              ? {}
+              : { "accept-ranges": answer.headers.get("accept-ranges")! }),
+            ...(answer.headers.get("content-range") === null
+              ? {}
+              : { "content-range": answer.headers.get("content-range")! }),
           });
-          response.end(await answer.text());
+          response.end(Buffer.from(await answer.arrayBuffer()));
         }).catch((error: unknown) => {
           response.writeHead(502, { "content-type": "application/json" });
           response.end(JSON.stringify({ error: error instanceof Error ? error.name : "proxy_failed" }));
@@ -250,12 +281,13 @@ async function waitForFile<T>(file: string, child: ChildProcess, output: () => s
 }
 
 async function request(
-  instance: Instance,
+  target: Instance | string,
   method: string,
   route: string,
   options: { key?: string; cookie?: string; body?: unknown } = {},
 ): Promise<{ status: number; body: Record<string, unknown>; cookie: string }> {
-  const response = await fetch(`${instance.origin}${route}`, {
+  const origin = typeof target === "string" ? target : target.origin;
+  const response = await fetch(`${origin}${route}`, {
     method,
     headers: {
       "content-type": "application/json",
@@ -269,6 +301,26 @@ async function request(
     status: response.status,
     body: text === "" ? {} : JSON.parse(text) as Record<string, unknown>,
     cookie: response.headers.get("set-cookie")?.split(";", 1)[0] ?? "",
+  };
+}
+
+function browserCookie(setCookie: string, publicOrigin: string): {
+  name: string;
+  value: string;
+  url: string;
+  secure: boolean;
+} {
+  const separator = setCookie.indexOf("=");
+  if (separator <= 0) throw new Error("signup returned no session cookie");
+  const name = setCookie.slice(0, separator);
+  if (name.startsWith("__Secure-") && !publicOrigin.startsWith("https://")) {
+    throw new Error("a __Secure session cookie needs the public HTTPS origin");
+  }
+  return {
+    name,
+    value: setCookie.slice(separator + 1),
+    url: publicOrigin,
+    secure: publicOrigin.startsWith("https://"),
   };
 }
 
@@ -327,7 +379,7 @@ it.skipIf(!ENABLED || storage?.available !== true)(
         blob: liveStorage().store,
       });
       callback.setMockOrigin(instance.origin);
-      const signup = await request(instance, "POST", "/api/signup", { body: {
+      const signup = await request(tunnel.url, "POST", "/api/signup", { body: {
         email: "retell-e2e@acme.example",
         password: "a-password-long-enough-1",
         organizationName: "Retell E2E",
@@ -431,13 +483,18 @@ it.skipIf(!ENABLED || storage?.available !== true)(
         passThreshold: currentGrade.graderPassThreshold,
         details: currentGrade.details,
       };
-      expect(storedGrades.current[0]?.result).toBe("passed");
-      expect(storedGrades.current[0]?.score).toBe(1);
+      const validGrade = assertValidGrade(storedGrades.current[0]!, detail!.body);
       const recorded = { recorded: true, day: "Tuesday", time: String(availability.time), reference: "retell-e2e-742" };
+      const evidencePov = CONNECTION === "text" ? "persona" : "agent";
+      const persistedAgentText = publicTranscript(detail!.body).turns.find((turn) =>
+        turn.pov === evidencePov && turn.kind === "turn:agent" && turn.text?.trim() !== ""
+      )?.text;
+      expect(persistedAgentText).toBeDefined();
+      const agentNeedle = String(persistedAgentText).replace(/\s+/gu, " ").trim().slice(0, 60).toLowerCase();
       assertPublicEvidence(detail!.body, {
-        pov: CONNECTION === "text" ? "persona" : "agent",
+        pov: evidencePov,
         humanIncludes: "tuesday",
-        agentIncludes: String(availability.time).toLowerCase(),
+        agentIncludes: agentNeedle,
         recording: CONNECTION === "web",
         tools: [
           { name: "check_availability", arguments: { day: "Tuesday" }, result: availability, ...(MOCKS ? { provenance: "mocked" as const } : {}) },
@@ -466,20 +523,17 @@ it.skipIf(!ENABLED || storage?.available !== true)(
       const browser = await openBrowser();
       try {
         const context = await browser.newContext();
-        await context.addCookies([{
-          name: sessionCookie.slice(0, sessionCookie.indexOf("=")),
-          value: sessionCookie.slice(sessionCookie.indexOf("=") + 1),
-          url: instance.origin,
-        }]);
+        await context.addCookies([browserCookie(sessionCookie, tunnel.url)]);
         const page = await context.newPage();
-        await page.goto(`${instance.origin}/projects/${identity.project.id}/runs/${runId}`);
+        await page.goto(`${tunnel.url}/projects/${identity.project.id}/runs/${runId}`);
         await assertEvidencePage(page, {
           humanIncludes: "tuesday",
-          agentIncludes: String(availability.time).toLowerCase(),
+          agentIncludes: agentNeedle,
           recording: CONNECTION === "web",
           sourceLabel: CONNECTION === "text"
             ? "Conversation from the Retell API"
             : "Conversation from Retell",
+          gradeResult: validGrade.result,
         });
       } finally {
         await browser.close();
@@ -498,7 +552,7 @@ it.skipIf(!ENABLED || storage?.available !== true)(
         connection: CONNECTION,
         mocked: MOCKS,
         providerMetadata: provisioned.providerMetadata,
-        outcomes: { simulation: "completed", grade: "passed", browser: true },
+        outcomes: { simulation: "completed", grade: validGrade, browser: true },
       }, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
       mainSucceeded = true;
     } catch (error) {

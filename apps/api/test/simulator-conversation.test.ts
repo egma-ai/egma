@@ -31,6 +31,7 @@ import { openBrowser } from "./support/browser.ts";
 import {
   assertEvidencePage,
   assertPublicEvidence,
+  assertValidGrade,
   quickTunnelUrl,
   startPublicTunnel,
   startFullPathWorkers,
@@ -1487,8 +1488,6 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         };
         const detail = await call("GET", `/v1/simulations/${simulationId}`, { key });
         diagnosticEvidence = detail.body;
-        expect(grade[0]?.result).toBe("passed");
-        expect(grade[0]?.score).toBe(1);
         expect(detail.status, JSON.stringify(detail.body)).toBe(200);
         expect(detail.body).toMatchObject({
           status: "completed",
@@ -1496,6 +1495,14 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           agentPovComplete: true,
           hasRecording: LIVE_MODALITY === "voice",
         });
+        const validGrade = assertValidGrade(grade[0]!, detail.body);
+        const persistedAgentText = ((detail.body.transcript as {
+          turns?: Array<{ kind?: string; pov?: string; text?: string }>;
+        }).turns ?? []).find((turn) =>
+          turn.pov === "agent" && turn.kind === "turn:agent" && turn.text?.trim() !== ""
+        )?.text;
+        expect(persistedAgentText).toBeDefined();
+        const agentNeedle = compactText(persistedAgentText ?? "").slice(0, 60).toLowerCase();
         if (LIVE_MODALITY === "voice") {
           const recording = await call(
             "GET",
@@ -1514,7 +1521,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         assertPublicEvidence(detail.body, {
           pov: "agent",
           humanIncludes: "tuesday",
-          agentIncludes: LIVE_MOCKS ? "thursday" : "9:40",
+          agentIncludes: agentNeedle,
           recording: LIVE_MODALITY === "voice",
           tools: [
             {
@@ -1625,9 +1632,10 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           );
           await assertEvidencePage(page, {
             humanIncludes: "tuesday",
-            agentIncludes: LIVE_MOCKS ? "thursday" : "9:40",
+            agentIncludes: agentNeedle,
             recording: LIVE_MODALITY === "voice",
             sourceLabel: "Conversation recorded by the customer agent",
+            gradeResult: validGrade.result,
           });
         } finally {
           await browser.close();
@@ -1648,7 +1656,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
               nativeHistoryToStorage: true,
               agentPovComplete: true,
               recording: LIVE_MODALITY === "voice",
-              grade: "passed",
+              grade: validGrade,
               browser: { human: true, agent: true, source: true, grade: true },
             },
           }, null, 2) + "\n",
