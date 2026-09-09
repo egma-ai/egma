@@ -108,6 +108,8 @@ describe("Daytona voice credentials", () => {
   });
 
   it("labels the claimed sandbox before returning per-simulation authority", async () => {
+    const assignmentOrder: string[] = [];
+    const recordAssignment = vi.fn(() => { assignmentOrder.push("telemetry"); });
     const sandbox = {
       id: "sandbox-1",
       labels: {
@@ -117,7 +119,10 @@ describe("Daytona voice credentials", () => {
         "egma.runtime_id": "runtime-1",
       },
       process: { getEntrypointSession: vi.fn(async () => ({ commands: [] })) },
-      setLabels: vi.fn(async (labels: Record<string, string>) => labels),
+      setLabels: vi.fn(async (labels: Record<string, string>) => {
+        assignmentOrder.push("labels");
+        return labels;
+      }),
     };
     const client = {
       get: vi.fn(async () => sandbox),
@@ -125,6 +130,7 @@ describe("Daytona voice credentials", () => {
     const assign = daytonaClaimRuntime(settings, {
       client,
       assumeRole: temporaryStorage,
+      recordAssignment,
     });
 
     const runtime = await assign("egma-voice-runtime-1", "sim_123");
@@ -155,6 +161,14 @@ describe("Daytona voice credentials", () => {
     expect(temporaryStorage).toHaveBeenLastCalledWith(expect.objectContaining({
       policy: expect.stringContaining("arn:aws:s3:::recordings/sim_123/dual-channel.wav"),
     }));
+    expect(assignmentOrder).toEqual(["labels", "telemetry"]);
+    expect(recordAssignment).toHaveBeenCalledWith({
+      simulationId: "sim_123",
+      sandboxId: "sandbox-1",
+      releaseSha: "a".repeat(40),
+      snapshotId: "snapshot-exact",
+      runtimeId: "runtime-1",
+    });
   });
 
   it("rejects claimants outside the exact active fleet before issuing authority", async () => {
@@ -266,6 +280,13 @@ describe("Daytona voice fleet", () => {
     });
     expect(request).not.toHaveProperty("ephemeral");
     expect(request.envVars).toMatchObject({
+      DAYTONA_SANDBOX_OTEL_SERVICE_NAME: "egma-voice-simulator",
+      DAYTONA_SANDBOX_OTEL_EXTRA_LABELS: [
+        "egma.runtime=voice-simulator",
+        `egma.release_sha=${"a".repeat(40)}`,
+        "egma.snapshot_id=snapshot-exact",
+        "egma.runtime_id=runtime-1",
+      ].join(","),
       EGMA_SIMULATOR_RUNTIME: "daytona",
       EGMA_SIMULATOR_MODE: "one-shot",
       EGMA_SIMULATOR_MODALITIES: "voice",

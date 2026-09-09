@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { trace } from "@opentelemetry/api";
 import type { DaytonaVoiceFleetSettings, VoiceFleet, VoiceFleetLog, VoiceFleetTask } from "./voice-fleet.ts";
 import {
   awsRecordingRole,
@@ -40,6 +41,8 @@ export type DaytonaClaimRuntime = (
 ) => Promise<DaytonaVoiceRuntime>;
 
 const FLEET_LABELS = { "egma.runtime": "voice-simulator" };
+const DAYTONA_OTEL_SERVICE_NAME = "egma-voice-simulator";
+const assignmentTracer = trace.getTracer("egma-api.daytona-voice-fleet");
 const TERMINAL_STATES = new Set([
   "stopped",
   "paused",
@@ -50,6 +53,37 @@ const TERMINAL_STATES = new Set([
   "destroyed",
 ]);
 const ABSENCE_CONFIRMATIONS = 3;
+
+type DaytonaAssignment = {
+  readonly simulationId: string;
+  readonly sandboxId: string;
+  readonly releaseSha: string;
+  readonly snapshotId: string;
+  readonly runtimeId: string;
+};
+
+function recordDaytonaAssignment(assignment: DaytonaAssignment): void {
+  assignmentTracer.startSpan("egma.daytona.sandbox.assigned", {
+    attributes: {
+      "otel.event.name": "egma.daytona.sandbox.assigned",
+      "egma.simulation_id": assignment.simulationId,
+      "daytona.sandbox.id": assignment.sandboxId,
+      "egma.release_sha": assignment.releaseSha,
+      "egma.snapshot_id": assignment.snapshotId,
+      "egma.runtime_id": assignment.runtimeId,
+      ...FLEET_LABELS,
+    },
+  }).end();
+}
+
+function daytonaOtelLabels(settings: DaytonaVoiceFleetSettings, runtimeId: string): string {
+  return [
+    ...Object.entries(FLEET_LABELS),
+    ["egma.release_sha", settings.releaseSha],
+    ["egma.snapshot_id", settings.snapshot],
+    ["egma.runtime_id", runtimeId],
+  ].map(([key, value]) => `${key}=${value}`).join(",");
+}
 
 function isNotFound(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
@@ -129,6 +163,8 @@ export function daytonaVoiceFleet(
         "egma.runtime_id": runtimeId,
       },
       envVars: {
+        DAYTONA_SANDBOX_OTEL_SERVICE_NAME: DAYTONA_OTEL_SERVICE_NAME,
+        DAYTONA_SANDBOX_OTEL_EXTRA_LABELS: daytonaOtelLabels(settings, runtimeId),
         EGMA_RELEASE_SHA: settings.releaseSha,
         EGMA_SIMULATOR_RUNTIME: "daytona",
         EGMA_SIMULATOR_MODE: "one-shot",
@@ -176,9 +212,11 @@ export function daytonaClaimRuntime(
   options: {
     readonly client: DaytonaClient;
     readonly assumeRole?: AssumeRecordingRole;
+    readonly recordAssignment?: (assignment: DaytonaAssignment) => void;
   },
 ): DaytonaClaimRuntime {
   const assumeRole = options.assumeRole ?? awsRecordingRole();
+  const recordAssignment = options.recordAssignment ?? recordDaytonaAssignment;
   return async (claimant, simulationId) => {
     const sandbox = await options.client.get(claimant);
     const labels = sandbox.labels ?? {};
@@ -202,6 +240,13 @@ export function daytonaClaimRuntime(
     await sandbox.setLabels({
       ...labels,
       "egma.simulation_id": simulationId,
+    });
+    recordAssignment({
+      simulationId,
+      sandboxId: sandbox.id,
+      releaseSha: settings.releaseSha,
+      snapshotId: settings.snapshot,
+      runtimeId,
     });
     return runtime;
   };

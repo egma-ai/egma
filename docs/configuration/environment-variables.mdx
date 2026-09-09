@@ -508,6 +508,15 @@ Without `EGMA_VOICE_FLEET_LAUNCHER`, the API does not load Daytona or STS code.
 | `EGMA_DAYTONA_RECORDING_BUCKET_ARN` | Recording bucket ARN used to restrict that role session to the claimed simulation's recording |
 | `EGMA_RELEASE_SHA` | Lowercase 40-character public commit SHA exposed by `/health` after deployment |
 
+The launcher gives every sandbox the shared OpenTelemetry service name
+`egma-voice-simulator` and stable release, snapshot, and runtime resource
+attributes. Daytona supplies the sandbox ID as `service.instance.id`. A sandbox
+claims work after it starts, so the API exports an
+`egma.daytona.sandbox.assigned` span that maps `daytona.sandbox.id` to
+`egma.simulation_id`. In PostHog, that mapping joins one simulation to the
+sandbox lifecycle and resource telemetry; the simulation ID is not a dynamic
+resource attribute on each Daytona metric.
+
 The release workflow checks `releaseSha` before it ships the web app.
 
 ---
