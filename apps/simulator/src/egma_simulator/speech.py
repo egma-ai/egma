@@ -72,6 +72,12 @@ CARTESIA_SPEED_RANGE = (0.6, 1.5)
 A speed outside this range is refused. The adapter never changes the value
 selected by the pinned TTS model."""
 
+OPENAI_REALTIME_PROXY_OPEN_SECONDS = 30.0
+"""How long a proxied OpenAI Realtime socket may take to open."""
+
+OPENAI_REALTIME_PROXY_READY_SECONDS = 45.0
+"""How long proxied OpenAI Realtime may take to become ready."""
+
 LISTENING_READY_SECONDS = 15.0
 """How long a listening leg may take to become able to hear.
 
@@ -437,6 +443,9 @@ class SpeechLegs:
     voice: PersonaVoice
     """The exact voice pinned by this work order's TTS selection."""
 
+    listening_ready_seconds: float = LISTENING_READY_SECONDS
+    """How long the listening leg may take to become ready."""
+
     listening: Callable[[], Awaitable[None]] | None = None
     """Waits until the listening leg can hear, for a leg that connects."""
 
@@ -448,11 +457,13 @@ class SpeechLegs:
         if self.listening is None:
             return
         try:
-            await asyncio.wait_for(self.listening(), timeout=LISTENING_READY_SECONDS)
+            await asyncio.wait_for(
+                self.listening(), timeout=self.listening_ready_seconds
+            )
         except TimeoutError as never_ready:
             raise SpeechFault(
                 "the listening leg did not connect within "
-                f"{LISTENING_READY_SECONDS:.0f}s; nothing said would have been "
+                f"{self.listening_ready_seconds:.0f}s; nothing said would have been "
                 "heard"
             ) from never_ready
 
@@ -480,6 +491,11 @@ def build_legs(providers: SpeechProviders, *, voice: PersonaVoice) -> SpeechLegs
         stt=listening_leg,
         tts=speaking,
         voice=spoken_with,
+        listening_ready_seconds=(
+            OPENAI_REALTIME_PROXY_READY_SECONDS
+            if providers.stt == "openai_realtime" and providers.use_environment_proxy
+            else LISTENING_READY_SECONDS
+        ),
         listening=listening,
         closers=closers,
     )
@@ -818,6 +834,12 @@ def _openai_realtime_ears(
 
     class OpenAIRealtimeSTTService(PipecatOpenAIRealtimeSTTService):
         """Pipecat's realtime service with the live model's current wire shape."""
+
+        async def _websocket_connect(self, uri: str, **kwargs: Any) -> Any:
+            if providers.use_environment_proxy:
+                kwargs.setdefault("proxy", True)
+                kwargs.setdefault("open_timeout", OPENAI_REALTIME_PROXY_OPEN_SECONDS)
+            return await super()._websocket_connect(uri, **kwargs)
 
         async def _handle_transcription_completed(self, evt: dict) -> None:
             """Keep what the provider says the transcription cost.

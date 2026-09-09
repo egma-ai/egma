@@ -11,12 +11,16 @@ import pytest
 from egma_simulator.contract import spec_validator
 from egma_simulator.speech import (
     CARTESIA_SPEED_RANGE,
+    LISTENING_READY_SECONDS,
+    OPENAI_REALTIME_PROXY_OPEN_SECONDS,
+    OPENAI_REALTIME_PROXY_READY_SECONDS,
     PersonaVoice,
     SpeechFault,
     SpeechProviders,
     _daytona_deepgram_connect,
     _ears,
     _mouth,
+    build_legs,
 )
 
 A_KEY = "sk-only-this-test-holds-this-one"
@@ -349,6 +353,60 @@ def test_openai_realtime_receives_the_pinned_model(
     assert calls[0]["settings"].model == "gpt-live-transcribe"
     assert calls[0]["turn_detection"] is False
     assert connected is not None
+
+
+async def test_proxied_openai_realtime_has_a_longer_opening_deadline(monkeypatch):
+    from pipecat.services.websocket_service import WebsocketService
+
+    calls: list[dict[str, Any]] = []
+
+    async def connect(_service: object, _uri: str, **kwargs: Any) -> object:
+        calls.append(kwargs)
+        return object()
+
+    monkeypatch.setattr(WebsocketService, "_websocket_connect", connect)
+    legs = build_legs(
+        SpeechProviders(
+            stt="openai_realtime",
+            stt_key="dtn_secret_openai_under_test",
+            stt_model="gpt-live-transcribe",
+            use_environment_proxy=True,
+        ),
+        voice=PersonaVoice(voice_id="scripted", provider=None, speed=None),
+    )
+
+    await legs.stt._websocket_connect("wss://api.openai.com/v1/realtime")
+
+    assert calls == [
+        {"proxy": True, "open_timeout": OPENAI_REALTIME_PROXY_OPEN_SECONDS}
+    ]
+    assert legs.listening_ready_seconds == OPENAI_REALTIME_PROXY_READY_SECONDS
+    assert OPENAI_REALTIME_PROXY_READY_SECONDS > OPENAI_REALTIME_PROXY_OPEN_SECONDS
+
+
+async def test_direct_openai_realtime_keeps_the_library_opening_deadline(monkeypatch):
+    from pipecat.services.websocket_service import WebsocketService
+
+    calls: list[dict[str, Any]] = []
+
+    async def connect(_service: object, _uri: str, **kwargs: Any) -> object:
+        calls.append(kwargs)
+        return object()
+
+    monkeypatch.setattr(WebsocketService, "_websocket_connect", connect)
+    legs = build_legs(
+        SpeechProviders(
+            stt="openai_realtime",
+            stt_key=A_KEY,
+            stt_model="gpt-live-transcribe",
+        ),
+        voice=PersonaVoice(voice_id="scripted", provider=None, speed=None),
+    )
+
+    await legs.stt._websocket_connect("wss://api.openai.com/v1/realtime")
+
+    assert calls == [{}]
+    assert legs.listening_ready_seconds == LISTENING_READY_SECONDS
 
 
 async def test_live_transcribe_uses_the_plural_languages_request():
