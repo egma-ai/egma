@@ -297,6 +297,7 @@ export async function startInstance(
           env: {
             ...process.env,
             EGMA_API_ORIGIN: `http://127.0.0.1:${apiPort}`,
+            ...(options.baseUrl === undefined ? {} : { EGMA_BASE_URL: options.baseUrl }),
             NODE_ENV: "development",
           },
           stdio: "ignore",

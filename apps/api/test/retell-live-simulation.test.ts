@@ -334,6 +334,7 @@ async function proveAuthenticatedBrowser(
   publicOrigin: string,
   sessionCookie: string,
   projectId: string,
+  projectName: string,
 ): Promise<void> {
   const browser = await openBrowser();
   const consoleErrors: string[] = [];
@@ -355,6 +356,7 @@ async function proveAuthenticatedBrowser(
       throw new Error(`the authenticated page answered ${String(response?.status())}`);
     }
     await page.getByRole("heading", { name: "Agents", exact: true }).waitFor();
+    await page.locator('[data-slot="project-name"]', { hasText: projectName }).waitFor();
     expect(page.url()).toContain(`/projects/${projectId}/agents`);
   } catch (cause) {
     throw new Error(
@@ -420,9 +422,14 @@ it.skipIf(!ENABLED || storage?.available !== true)(
       const identity = signup.body as unknown as {
         userId: string;
         organization: { id: string };
-        project: { id: string };
+        project: { id: string; name: string };
       };
-      await proveAuthenticatedBrowser(tunnel.url, sessionCookie, identity.project.id);
+      await proveAuthenticatedBrowser(
+        tunnel.url,
+        sessionCookie,
+        identity.project.id,
+        identity.project.name,
+      );
       fixture = spawn(PYTHON, [path.join(REPOSITORY, "fixtures/simulation-e2e/retell_provider.py")], {
         cwd: REPOSITORY,
         env: {
