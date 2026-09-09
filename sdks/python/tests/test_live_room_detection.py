@@ -185,7 +185,7 @@ async def test_agent_session_dispatches_a_mock_over_the_room(
 
 
 async def test_egma_already_in_the_room_is_found_and_answers(
-    live_livekit: Any, session: Any, egma_export: Any
+    live_livekit: Any, egma_export: Any
 ) -> None:
     """The named-dispatch order: egma is in the room before the agent.
 
@@ -196,9 +196,15 @@ async def test_egma_already_in_the_room_is_found_and_answers(
     room_name = "egma-sim-live-egma-first"
     egma = await _EgmaInTheRoom().join(live_livekit, room_name, ("check_calendar",))
     room = await _agent_joins(live_livekit, room_name)
+    session = AgentSession(llm=_CalendarLLM(), max_tool_steps=1)
     agent = ReceptionAgent()
     try:
         await simulation(agent, _LiveContext(room_name, room), session)
+        await session.start(
+            agent=agent,
+            room=room,
+            room_options=room_io.RoomOptions(audio_input=False, audio_output=False),
+        )
 
         assert egma.census() is not None, "the census never reached egma"
         reported = {tool["name"] for tool in egma.census()["tools"]}
@@ -210,12 +216,13 @@ async def test_egma_already_in_the_room_is_found_and_answers(
             "egma answered this one"
         )
     finally:
+        await session.aclose()
         await room.disconnect()
         await egma.leave()
 
 
 async def test_the_agent_in_the_room_first_waits_for_egma(
-    live_livekit: Any, session: Any, egma_export: Any
+    live_livekit: Any, egma_export: Any
 ) -> None:
     """The order that made two of the three dispatch paths work.
 
@@ -226,6 +233,7 @@ async def test_the_agent_in_the_room_first_waits_for_egma(
     """
     room_name = "egma-sim-live-agent-first"
     room = await _agent_joins(live_livekit, room_name)
+    session = AgentSession(llm=_CalendarLLM(), max_tool_steps=1)
     agent = ReceptionAgent()
     egma = _EgmaInTheRoom()
 
@@ -236,6 +244,11 @@ async def test_the_agent_in_the_room_first_waits_for_egma(
     late = asyncio.create_task(arrive_late())
     try:
         await simulation(agent, _LiveContext(room_name, room), session)
+        await session.start(
+            agent=agent,
+            room=room,
+            room_options=room_io.RoomOptions(audio_input=False, audio_output=False),
+        )
 
         assert egma.census() is not None, (
             "the SDK gave up before egma arrived, so nothing was wrapped — "
@@ -244,6 +257,7 @@ async def test_the_agent_in_the_room_first_waits_for_egma(
         assert set(couriers_on(session, agent)) == {"check_calendar"}
     finally:
         await late
+        await session.aclose()
         await room.disconnect()
         await egma.leave()
 

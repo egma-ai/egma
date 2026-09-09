@@ -14,6 +14,8 @@ export function quickTunnelUrl(output: string): string | undefined {
     .find((match) => match[1] !== "api")?.[0];
 }
 
+const PUBLIC_TUNNEL_READY_MILLISECONDS = 60_000;
+
 export async function startPublicTunnel(localUrl: string): Promise<{
   process: ChildProcess;
   url: string;
@@ -27,7 +29,7 @@ export async function startPublicTunnel(localUrl: string): Promise<{
   let said = "";
   child.stdout?.on("data", (piece: Buffer) => { said += piece.toString("utf8"); });
   child.stderr?.on("data", (piece: Buffer) => { said += piece.toString("utf8"); });
-  const deadline = Date.now() + 60_000;
+  const deadline = Date.now() + PUBLIC_TUNNEL_READY_MILLISECONDS;
   for (;;) {
     const found = quickTunnelUrl(said);
     if (found !== undefined) return { process: child, url: found, output: () => said };
@@ -37,6 +39,47 @@ export async function startPublicTunnel(localUrl: string): Promise<{
     if (Date.now() > deadline) {
       child.kill("SIGTERM");
       throw new Error(`cloudflared did not publish a URL within 60s:\n${said}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+/** Wait until the published hostname resolves and reaches the fixture server. */
+export async function waitForPublicTunnel(
+  tunnel: { process: ChildProcess; url: string; output: () => string },
+  healthPath: string,
+): Promise<void> {
+  const deadline = Date.now() + PUBLIC_TUNNEL_READY_MILLISECONDS;
+  let lastFailure: unknown;
+  for (;;) {
+    if (tunnel.process.exitCode !== null) {
+      throw new Error(`cloudflared exited before its public URL was reachable:\n${tunnel.output()}`);
+    }
+    let response: Response | undefined;
+    try {
+      response = await fetch(`${tunnel.url}${healthPath}`, {
+        signal: AbortSignal.timeout(2_000),
+      });
+    } catch (cause) {
+      // DNS publication, edge routing, and the connector can settle separately.
+      lastFailure = cause;
+    }
+    if (response !== undefined) {
+      if (response.status === 204) return;
+      if (response.status < 500) {
+        throw new Error(
+          `the public tunnel health route answered HTTP ${response.status}`,
+        );
+      }
+      lastFailure = new Error(
+        `the public tunnel health route answered HTTP ${response.status}`,
+      );
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        "the public tunnel did not become reachable within 60s",
+        { cause: lastFailure },
+      );
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { createPersona, readTraceGrades } from "@egma/db";
+import { safeRetellProviderData } from "@egma/retell";
 import { afterAll, expect, it } from "vitest";
 
 import { startInstance, type Instance } from "./support/instance.ts";
@@ -19,9 +20,11 @@ import {
   startFullPathWorkers,
   stopChild,
   waitForChild,
+  waitForPublicTunnel,
 } from "./support/simulation-proof.ts";
 
 const ENABLED = process.env["SIMULATION_E2E_RETELL"] === "1";
+const PROXY_PROBE = process.env["SIMULATION_E2E_RETELL_PROXY_PROBE"] === "1";
 const CONNECTION = process.env["SIMULATION_E2E_RETELL_CONNECTION"] ?? "text";
 const MOCKS = process.env["SIMULATION_E2E_MOCKS"] !== "off";
 const RETELL_KEY = process.env["SIMULATION_E2E_RETELL_API_KEY"]?.trim() ?? "";
@@ -197,6 +200,10 @@ async function callbackServer(token: string): Promise<{
     request.on("data", (piece: Buffer) => { raw += piece.toString("utf8"); });
     request.on("end", () => {
       const requestPath = request.url ?? "/";
+      if (request.method === "GET" && requestPath === "/_egma-fixture/health") {
+        response.writeHead(204).end();
+        return;
+      }
       const providerCallback = requestPath === "/check-availability" ||
         requestPath === "/record-request";
       if (!providerCallback && mockOrigin !== undefined) {
@@ -324,6 +331,88 @@ function browserCookie(setCookie: string, publicOrigin: string): {
   };
 }
 
+async function proveAuthenticatedBrowser(
+  publicOrigin: string,
+  sessionCookie: string,
+  projectId: string,
+): Promise<void> {
+  const browser = await openBrowser();
+  const consoleErrors: string[] = [];
+  let pageUrl = publicOrigin;
+  let title = "";
+  let body = "";
+  try {
+    const context = await browser.newContext();
+    await context.addCookies([browserCookie(sessionCookie, publicOrigin)]);
+    const page = await context.newPage();
+    page.on("console", (message) => {
+      if (message.type() === "error") consoleErrors.push(message.text());
+    });
+    const response = await page.goto(`${publicOrigin}/projects/${projectId}/agents`);
+    pageUrl = page.url();
+    title = await page.title();
+    body = (await page.locator("body").innerText()).slice(0, 500);
+    if (response === null || !response.ok()) {
+      throw new Error(`the authenticated page answered ${String(response?.status())}`);
+    }
+    await page.getByRole("heading", { name: "Agents", exact: true }).waitFor();
+    expect(page.url()).toContain(`/projects/${projectId}/agents`);
+  } catch (cause) {
+    throw new Error(
+      `public browser auth failed (${cause instanceof Error ? cause.message : "unknown"}); ` +
+      `url=${pageUrl}; title=${title}; body=${body}; console=${consoleErrors.slice(0, 5).join(" | ")}`,
+    );
+  } finally {
+    await browser.close();
+  }
+}
+
+it.runIf(PROXY_PROBE)(
+  "serves an authenticated page with the production secure-cookie policy",
+  { timeout: 120_000 },
+  async () => {
+    const callback = await callbackServer("proxy-probe-token");
+    let instance: Instance | undefined;
+    try {
+      instance = await startInstance("retell_public_proxy_probe", {
+        baseUrl: "https://fixture.example",
+        web: true,
+      });
+      callback.setMockOrigin(instance.origin);
+      const signup = await request(instance, "POST", "/api/signup", { body: {
+        email: "retell-proxy-probe@acme.example",
+        password: "a-password-long-enough-1",
+        organizationName: "Retell Proxy Probe",
+      } });
+      expect(signup.status, JSON.stringify(signup.body)).toBe(201);
+      const identity = signup.body as unknown as { project: { id: string } };
+      const browser = await openBrowser();
+      try {
+        const context = await browser.newContext();
+        await context.addCookies([browserCookie(signup.cookie, "https://fixture.example")]);
+        await context.route("https://fixture.example/**", async (route) => {
+          const requested = new URL(route.request().url());
+          const response = await route.fetch({
+            url: `${callback.origin}${requested.pathname}${requested.search}`,
+          });
+          await route.fulfill({ response });
+        });
+        const page = await context.newPage();
+        await page.goto(
+          `https://fixture.example/projects/${identity.project.id}/agents`,
+        );
+        await page.getByRole("heading", { name: "Agents", exact: true }).waitFor();
+        expect(page.url()).toContain(`/projects/${identity.project.id}/agents`);
+      } finally {
+        await browser.close();
+      }
+    } finally {
+      await instance?.close();
+      await callback.close();
+    }
+  },
+);
+
 it.skipIf(!ENABLED || storage?.available !== true)(
   `runs the real Retell ${CONNECTION} ${MOCKS ? "mocked" : "unmocked"} cell through storage, grading, and the browser`,
   { timeout: 480_000 },
@@ -338,20 +427,7 @@ it.skipIf(!ENABLED || storage?.available !== true)(
     const readyPath = path.join(scratch, "retell-ready.json");
     const stopPath = path.join(scratch, "retell-stop");
     let fixtureOutput = "";
-    const fixture = spawn(PYTHON, [path.join(REPOSITORY, "fixtures/simulation-e2e/retell_provider.py")], {
-      cwd: REPOSITORY,
-      env: {
-        ...process.env,
-        SIMULATION_E2E_RETELL_API_KEY: RETELL_KEY,
-        SIMULATION_E2E_RETELL_WEBHOOK_URL: tunnel.url,
-        SIMULATION_E2E_RETELL_WEBHOOK_AUTH: callbackToken,
-        SIMULATION_E2E_RETELL_READY: readyPath,
-        SIMULATION_E2E_RETELL_STOP: stopPath,
-      },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    fixture.stdout?.on("data", (piece: Buffer) => { fixtureOutput += piece.toString("utf8"); });
-    fixture.stderr?.on("data", (piece: Buffer) => { fixtureOutput += piece.toString("utf8"); });
+    let fixture: ChildProcess | undefined;
     let instance: Instance | undefined;
     let workers: ReturnType<typeof startFullPathWorkers> | undefined;
     let provisioned: {
@@ -364,12 +440,14 @@ it.skipIf(!ENABLED || storage?.available !== true)(
     let diagnosticDetail: Record<string, unknown> | undefined;
     let diagnosticGrade: Record<string, unknown> | undefined;
     let diagnosticProviderCall: Record<string, unknown> | undefined;
+    let diagnosticBrowser: {
+      url: string;
+      status: number | null;
+      title: string;
+      body: string;
+    } | undefined;
     try {
-      provisioned = await waitForFile<{
-        agentId: string;
-        agentVersion: number;
-        providerMetadata: Record<string, unknown>;
-      }>(readyPath, fixture, () => fixtureOutput);
+      await waitForPublicTunnel(tunnel, "/_egma-fixture/health");
       instance = await startInstance(`retell_live_${CONNECTION}_${MOCKS ? "mock" : "real"}`, {
         baseUrl: tunnel.url,
         web: true,
@@ -391,6 +469,26 @@ it.skipIf(!ENABLED || storage?.available !== true)(
         organization: { id: string };
         project: { id: string };
       };
+      await proveAuthenticatedBrowser(tunnel.url, sessionCookie, identity.project.id);
+      fixture = spawn(PYTHON, [path.join(REPOSITORY, "fixtures/simulation-e2e/retell_provider.py")], {
+        cwd: REPOSITORY,
+        env: {
+          ...process.env,
+          SIMULATION_E2E_RETELL_API_KEY: RETELL_KEY,
+          SIMULATION_E2E_RETELL_WEBHOOK_URL: tunnel.url,
+          SIMULATION_E2E_RETELL_WEBHOOK_AUTH: callbackToken,
+          SIMULATION_E2E_RETELL_READY: readyPath,
+          SIMULATION_E2E_RETELL_STOP: stopPath,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      fixture.stdout?.on("data", (piece: Buffer) => { fixtureOutput += piece.toString("utf8"); });
+      fixture.stderr?.on("data", (piece: Buffer) => { fixtureOutput += piece.toString("utf8"); });
+      provisioned = await waitForFile<{
+        agentId: string;
+        agentVersion: number;
+        providerMetadata: Record<string, unknown>;
+      }>(readyPath, fixture, () => fixtureOutput);
       const key = await request(instance, "POST", "/v1/keys", {
         cookie: sessionCookie,
         body: { name: "retell-live", projectId: identity.project.id },
@@ -525,16 +623,34 @@ it.skipIf(!ENABLED || storage?.available !== true)(
         const context = await browser.newContext();
         await context.addCookies([browserCookie(sessionCookie, tunnel.url)]);
         const page = await context.newPage();
-        await page.goto(`${tunnel.url}/projects/${identity.project.id}/runs/${runId}`);
-        await assertEvidencePage(page, {
-          humanIncludes: "tuesday",
-          agentIncludes: agentNeedle,
-          recording: CONNECTION === "web",
-          sourceLabel: CONNECTION === "text"
-            ? "Conversation from the Retell API"
-            : "Conversation from Retell",
-          gradeResult: validGrade.result,
-        });
+        let pageStatus: number | null = null;
+        try {
+          const response = await page.goto(`${tunnel.url}/projects/${identity.project.id}/runs/${runId}`);
+          pageStatus = response?.status() ?? null;
+          await assertEvidencePage(page, {
+            humanIncludes: "tuesday",
+            agentIncludes: agentNeedle,
+            recording: CONNECTION === "web",
+            sourceLabel: CONNECTION === "text"
+              ? "Conversation from the Retell API"
+              : "Conversation from Retell",
+            gradeResult: validGrade.result,
+          });
+        } catch (cause) {
+          const shown = new URL(page.url());
+          shown.search = "";
+          shown.hash = "";
+          diagnosticBrowser = {
+            url: shown.toString(),
+            status: pageStatus,
+            title: await page.title().catch(() => "<unavailable>"),
+            body: await page.locator("body").innerText().then(
+              (text) => text.slice(0, 1_000),
+              () => "<unavailable>",
+            ),
+          };
+          throw cause;
+        }
       } finally {
         await browser.close();
       }
@@ -594,8 +710,9 @@ it.skipIf(!ENABLED || storage?.available !== true)(
           },
           ...(diagnosticDetail === undefined ? {} : { evidence: diagnosticDetail }),
           ...(diagnosticGrade === undefined ? {} : { grade: diagnosticGrade }),
+          ...(diagnosticBrowser === undefined ? {} : { browser: diagnosticBrowser }),
           ...(diagnosticProviderCall === undefined ? {} : {
-            providerCall: diagnosticProviderCall,
+            providerCall: safeRetellProviderData(diagnosticProviderCall),
           }),
         }, null, 2),
         secrets,
@@ -614,9 +731,12 @@ it.skipIf(!ENABLED || storage?.available !== true)(
       await clean(async () => { await workers?.stop(); });
       await clean(async () => { await instance?.close(); });
       await clean(async () => {
+        if (fixture === undefined) return;
         await writeFile(stopPath, "stop\n", { encoding: "utf8", mode: 0o600 });
       });
-      await clean(async () => waitForChild(fixture, 60_000));
+      await clean(async () => {
+        if (fixture !== undefined) await waitForChild(fixture, 60_000);
+      });
       await clean(async () => stopChild(tunnel.process));
       await clean(async () => callback.close());
       await clean(async () => rm(scratch, { recursive: true, force: true }));
