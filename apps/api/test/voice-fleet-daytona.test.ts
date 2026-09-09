@@ -40,7 +40,7 @@ const temporaryStorage = vi.fn(async () => ({
 
 describe("Daytona voice credentials", () => {
   it("keeps the STS session token and scopes the role session lifetime", async () => {
-    const send = vi.fn(async () => ({
+    const send = vi.fn(async (_command: unknown) => ({
       Credentials: {
         AccessKeyId: "temporary-access",
         SecretAccessKey: "temporary-secret",
@@ -59,7 +59,10 @@ describe("Daytona voice credentials", () => {
       secretAccessKey: "temporary-secret",
       sessionToken: "temporary-session",
     });
-    expect(send.mock.calls[0]?.[0].input).toEqual({
+    const command = send.mock.calls.at(0)?.at(0) as
+      | { readonly input: unknown }
+      | undefined;
+    expect(command?.input).toEqual({
       RoleArn: settings.recordingRoleArn,
       RoleSessionName: "egma-daytona-runtime",
       DurationSeconds: 1_200,
@@ -169,7 +172,7 @@ describe("Daytona voice fleet", () => {
       },
       setLabels: vi.fn(async (labels: Record<string, string>) => labels),
     };
-    const create = vi.fn(async () => created);
+    const create = vi.fn<DaytonaClient["create"]>(async () => created);
     const remove = vi.fn(async () => undefined);
     const client: DaytonaClient = {
       create,
@@ -188,7 +191,9 @@ describe("Daytona voice fleet", () => {
       tasks: [{ id: "sandbox-1" }],
       failures: [],
     });
-    const request = create.mock.calls[0]?.[0];
+    const call = create.mock.calls.at(0);
+    if (call === undefined) throw new Error("Daytona create was not called");
+    const [request] = call;
     expect(request).toMatchObject({
       name: "egma-voice-runtime-1",
       snapshot: "snapshot-exact",
@@ -205,13 +210,13 @@ describe("Daytona voice fleet", () => {
       },
     });
     expect(request).not.toHaveProperty("ephemeral");
-    expect(request?.envVars).toMatchObject({
+    expect(request.envVars).toMatchObject({
       EGMA_SIMULATOR_RUNTIME: "daytona",
       EGMA_SIMULATOR_MODE: "one-shot",
       EGMA_SIMULATOR_MODALITIES: "voice",
       EGMA_SIMULATOR_VAD_PROVIDER: "silero",
     });
-    expect(Object.keys(request?.envVars ?? {})).not.toEqual(
+    expect(Object.keys(request.envVars)).not.toEqual(
       expect.arrayContaining([
         "EGMA_SIMULATOR_LIVEKIT_ROOM_NAME",
         "EGMA_SIMULATOR_LIVEKIT_ROOM_TOKEN",
@@ -221,7 +226,7 @@ describe("Daytona voice fleet", () => {
         "EGMA_SIMULATOR_S3_SESSION_TOKEN",
       ]),
     );
-    const raw = JSON.stringify(request?.envVars);
+    const raw = JSON.stringify(request.envVars);
     expect(raw).not.toContain(settings.livekitApiSecret);
     expect(raw).not.toContain(settings.apiKey);
     expect(raw).not.toContain(settings.serviceTokenSecret);

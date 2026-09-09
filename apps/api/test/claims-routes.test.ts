@@ -20,6 +20,7 @@ import {
 } from "../src/auth/service-token.ts";
 import { CLAIMS_PATH } from "../src/routes/claims.ts";
 import { fixedWindowRateLimit } from "../src/http/rate-limit.ts";
+import type { DaytonaClaimRuntime } from "../src/voice-fleet-daytona.ts";
 import {
   createApi,
   type TestApi,
@@ -1542,25 +1543,27 @@ describe("one source of execution truth", () => {
       recordingRoleArn: "arn:aws:iam::123:role/recording",
       recordingBucketArn: "arn:aws:s3:::recordings",
     };
-    const daytonaClaimRuntime = vi.fn(async (_claimant: string, simulationId: string) => ({
-      kind: "daytona_voice",
-      media: {
-        backend: "livekit",
-        livekit_url: "wss://livekit.example",
-        livekit_room_name: `egma-sim-${simulationId}`,
-        livekit_room_token: "room-token",
-        livekit_api_token: "api-token",
-      },
-      storage: {
-        backend: "s3",
-        endpoint: "https://s3.example",
-        bucket: "recordings",
-        region: "us-east-1",
-        access_key_id: "temporary-access",
-        secret_access_key: "temporary-secret",
-        session_token: "temporary-session",
-      },
-    }));
+    const daytonaClaimRuntime = vi.fn<DaytonaClaimRuntime>(
+      async (_claimant, simulationId) => ({
+        kind: "daytona_voice",
+        media: {
+          backend: "livekit",
+          livekit_url: "wss://livekit.example",
+          livekit_room_name: `egma-sim-${simulationId}`,
+          livekit_room_token: "room-token",
+          livekit_api_token: "api-token",
+        },
+        storage: {
+          backend: "s3",
+          endpoint: "https://s3.example",
+          bucket: "recordings",
+          region: "us-east-1",
+          access_key_id: "temporary-access",
+          secret_access_key: "temporary-secret",
+          session_token: "temporary-session",
+        },
+      }),
+    );
     const { key, connectionId, versionId } = await aRealtimeVoiceCustomerReadyToRun(
       "claims_daytona_provider_secrets",
       { providerCredentials: { load }, voiceFleet, daytonaClaimRuntime },
@@ -1591,7 +1594,7 @@ describe("one source of execution truth", () => {
 
   it("releases Daytona work when claim-time authority or labels cannot be prepared", async () => {
     const daytonaClaimRuntime = vi
-      .fn()
+      .fn<DaytonaClaimRuntime>()
       .mockRejectedValueOnce(new Error("Daytona is unavailable"))
       .mockResolvedValueOnce({
         kind: "daytona_voice",
@@ -1642,11 +1645,13 @@ describe("one source of execution truth", () => {
   });
 
   it("releases Daytona work when claim-time authority violates the contract", async () => {
-    const daytonaClaimRuntime = vi.fn(async () => ({
+    const invalidDaytonaClaimRuntime = vi.fn(async () => ({
       kind: "daytona_voice",
       media: {},
       storage: {},
     }));
+    const daytonaClaimRuntime =
+      invalidDaytonaClaimRuntime as unknown as DaytonaClaimRuntime;
     const { ada, key, connectionId, versionId } =
       await aRealtimeVoiceCustomerReadyToRun(
         "claims_daytona_runtime_invalid",
