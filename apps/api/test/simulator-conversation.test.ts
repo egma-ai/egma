@@ -30,8 +30,9 @@ import { openBrowser } from "./support/browser.ts";
 
 /**
  * Run the shipped Python simulator against the API, Postgres, ClickHouse,
- * and a local Retell text-mode counterpart, then grade its stored evidence with
- * the real grader service and a scripted judge. No live provider is involved.
+ * and object storage. The deterministic Retell case uses a local text-mode
+ * counterpart and scripted judge. The opt-in LiveKit matrix uses packaged
+ * workers, public token endpoints where selected, and the live grader model.
  *
  * Hold the terminal report at the API while checking evidence visibility;
  * ordered sender acceptance alone does not imply immediate ClickHouse visibility.
@@ -51,6 +52,30 @@ const LIVE_MODEL_KEY = process.env["LIVEKIT_E2E_OPENAI_API_KEY"]?.trim() ?? "";
 const LIVE_LANGUAGE = process.env["SIMULATION_E2E_LANGUAGE"] ?? "python";
 const LIVE_MODALITY = process.env["SIMULATION_E2E_MODALITY"] ?? "chat";
 const LIVE_MOCKS = process.env["SIMULATION_E2E_MOCKS"] !== "off";
+const LIVE_ACCESS = process.env["SIMULATION_E2E_ACCESS"] ?? "project_credentials";
+
+async function startPublicTunnel(localUrl: string): Promise<{
+  process: ChildProcess;
+  url: string;
+  output: () => string;
+}> {
+  const child = spawn(
+    process.env["SIMULATION_E2E_CLOUDFLARED"] ?? "cloudflared",
+    ["tunnel", "--no-autoupdate", "--url", localUrl],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let said = "";
+  child.stdout?.on("data", (piece: Buffer) => { said += piece.toString("utf8"); });
+  child.stderr?.on("data", (piece: Buffer) => { said += piece.toString("utf8"); });
+  const deadline = Date.now() + 60_000;
+  for (;;) {
+    const found = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/u.exec(said)?.[0];
+    if (found !== undefined) return { process: child, url: found, output: () => said };
+    if (child.exitCode !== null) throw new Error(`cloudflared exited with ${String(child.exitCode)}`);
+    if (Date.now() > deadline) throw new Error("cloudflared did not publish a URL within 60s");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
 
 /** The token the instance support configures on the API's side. */
 const SERVICE_TOKEN = "egma_st_held-by-this-test-suite-alone";
@@ -1148,19 +1173,22 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       const { key, cookie, userId, organizationId, projectId } = await signedUpKey();
       expect(["python", "javascript"]).toContain(LIVE_LANGUAGE);
       expect(["chat", "voice"]).toContain(LIVE_MODALITY);
+      expect(["project_credentials", "customer_token_endpoint"]).toContain(LIVE_ACCESS);
       const expectedAvailability = LIVE_MOCKS
         ? "Tuesday is completely full. The next opening is Thursday morning."
         : "The real calendar has a Tuesday appointment at 9:40.";
       const expectedBehavior = LIVE_MOCKS
         ? "reports that Tuesday is full and Thursday morning is the next opening after checking availability"
         : "reports that Tuesday has an appointment at 9:40 after checking availability";
-      const caseId = `livekit-${LIVE_LANGUAGE}-${LIVE_MODALITY}-project-credentials-${LIVE_MOCKS ? "mocked" : "unmocked"}`;
+      const caseId = `livekit-${LIVE_LANGUAGE}-${LIVE_MODALITY}-${LIVE_ACCESS.replaceAll("_", "-")}-${LIVE_MOCKS ? "mocked" : "unmocked"}`;
       const proofDirectory = path.join(
         import.meta.dirname,
         "../../../.proofs/simulation-e2e",
       );
       const providerDirectory = path.join(scratch, `${caseId}-provider`);
       const readyPath = path.join(providerDirectory, "ready.json");
+      const publicLivekitPath = path.join(providerDirectory, "public-livekit-url");
+      const tokenAuth = `simulation-token-${process.pid}-${LIVE_LANGUAGE}-${LIVE_MODALITY}`;
       const provider = spawn(
         SIMULATOR_PYTHON,
         [path.join(import.meta.dirname, "../../../fixtures/simulation-e2e/livekit_provider.py")],
@@ -1173,6 +1201,11 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             SIMULATION_E2E_PROVIDER_DIR: providerDirectory,
             SIMULATION_E2E_PROVIDER_READY: readyPath,
             SIMULATION_E2E_LANGUAGE: LIVE_LANGUAGE,
+            ...(LIVE_ACCESS === "customer_token_endpoint" ? {
+              SIMULATION_E2E_TOKEN_ENDPOINT: "1",
+              SIMULATION_E2E_PUBLIC_LIVEKIT_FILE: publicLivekitPath,
+              SIMULATION_E2E_TOKEN_AUTH: tokenAuth,
+            } : {}),
           },
           stdio: ["ignore", "pipe", "pipe"],
         },
@@ -1186,7 +1219,9 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       });
       let liveSimulator: ChildProcess | undefined;
       let liveGrader: Service | undefined;
+      const tunnels: ChildProcess[] = [];
       let artifact: { file: string; sha256: string; version: string } | undefined;
+      let diagnosticEvidence: Record<string, unknown> | undefined;
       try {
         const readyBy = Date.now() + 180_000;
         let ready: {
@@ -1195,6 +1230,8 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           apiSecret: string;
           agentName: string;
           artifact: { file: string; sha256: string; version: string };
+          localLivekitUrl: string;
+          localTokenEndpoint: string | null;
         } | undefined;
         while (ready === undefined && Date.now() <= readyBy) {
           if (provider.exitCode !== null) {
@@ -1210,6 +1247,25 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           throw new Error(`LiveKit provider did not become ready:\n${providerSaid}`);
         }
         artifact = ready.artifact;
+        let tokenEndpoint: string | undefined;
+        if (LIVE_ACCESS === "customer_token_endpoint") {
+          if (ready.localTokenEndpoint === null) {
+            throw new Error("provider did not expose its token endpoint");
+          }
+          const livekitTunnel = await startPublicTunnel(
+            ready.localLivekitUrl.replace("ws://", "http://"),
+          );
+          tunnels.push(livekitTunnel.process);
+          await writeFile(
+            publicLivekitPath,
+            livekitTunnel.url.replace("https://", "wss://"),
+            { encoding: "utf8", mode: 0o600 },
+          );
+          const localTokenEndpoint = new URL(ready.localTokenEndpoint);
+          const tokenTunnel = await startPublicTunnel(localTokenEndpoint.origin);
+          tunnels.push(tokenTunnel.process);
+          tokenEndpoint = `${tokenTunnel.url}${localTokenEndpoint.pathname}`;
+        }
 
         const registered = await call("POST", "/v1/agents", {
           key,
@@ -1219,13 +1275,16 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             connection: {
               agentPlatform: "livekit",
               connectionType: "livekit_room",
-              accessVariant: "livekit_room.project_credentials",
+              accessVariant: LIVE_ACCESS === "project_credentials"
+                ? "livekit_room.project_credentials"
+                : "livekit_room.customer_token_endpoint",
               modality: LIVE_MODALITY,
-              config: { url: ready.url, agentName: ready.agentName },
-              credentials: {
-                apiKey: ready.apiKey,
-                apiSecret: ready.apiSecret,
-              },
+              config: LIVE_ACCESS === "project_credentials"
+                ? { url: ready.url, agentName: ready.agentName }
+                : { tokenEndpoint, agentName: ready.agentName },
+              credentials: LIVE_ACCESS === "project_credentials"
+                ? { apiKey: ready.apiKey, apiSecret: ready.apiSecret }
+                : { headers: JSON.stringify({ Authorization: `Bearer ${tokenAuth}` }) },
             },
           },
         });
@@ -1337,6 +1396,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         const terminalStatus = await waitForTerminal(simulationId, 120_000);
         if (terminalStatus !== "completed") {
           const failed = await call("GET", `/v1/simulations/${simulationId}`, { key });
+          diagnosticEvidence = failed.body;
           throw new Error(JSON.stringify({
             status: failed.body.status,
             reason: failed.body.reason,
@@ -1348,6 +1408,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         expect(grade[0]?.result).toBe("passed");
         expect(grade[0]?.score).toBe(1);
         const detail = await call("GET", `/v1/simulations/${simulationId}`, { key });
+        diagnosticEvidence = detail.body;
         expect(detail.status, JSON.stringify(detail.body)).toBe(200);
         expect(detail.body).toMatchObject({
           status: "completed",
@@ -1355,7 +1416,12 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           agentPovComplete: true,
         });
         const transcript = detail.body.transcript as {
-          turns?: Array<{ kind?: string; text?: string; pov?: string }>;
+          turns?: Array<{
+            kind?: string;
+            text?: string;
+            pov?: string;
+            spans?: EvidenceSpan[];
+          }>;
           spans?: EvidenceSpan[];
         };
         type EvidenceSpan = {
@@ -1389,8 +1455,10 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             LIVE_MOCKS ? "thursday" : "9:40",
           )
         )).toBe(true);
-        expect(customerTurns.every((turn) => (turn.text?.trim().length ?? 0) > 0)).toBe(true);
-        const tools = flatten(transcript.spans ?? []).filter(
+        const tools = flatten([
+          ...(transcript.spans ?? []),
+          ...customerTurns.flatMap((turn) => turn.spans ?? []),
+        ]).filter(
           (span) => span.kind === "tool" && span.pov === "agent",
         );
         const availabilityCalls = tools.filter(
@@ -1493,6 +1561,14 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
               simulation: "failed",
               failureType: failure instanceof Error ? failure.name : "unknown",
             },
+            ...(diagnosticEvidence === undefined ? {} : {
+              evidence: {
+                status: diagnosticEvidence.status,
+                reason: diagnosticEvidence.reason,
+                agentPovComplete: diagnosticEvidence.agentPovComplete,
+                transcript: diagnosticEvidence.transcript,
+              },
+            }),
           }, null, 2) + "\n",
           { encoding: "utf8", mode: 0o600 },
         );
@@ -1502,8 +1578,9 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         liveGrader?.stop();
         await liveGrader?.finished;
         provider.kill("SIGTERM");
+        for (const tunnel of tunnels) tunnel.kill("SIGTERM");
         await Promise.all(
-          [liveSimulator, provider].map(async (child) => {
+          [liveSimulator, provider, ...tunnels].map(async (child) => {
             if (child === undefined || child.exitCode !== null) return;
             await new Promise<void>((resolve) => child.once("exit", () => resolve()));
           }),

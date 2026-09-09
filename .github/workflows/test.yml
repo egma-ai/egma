@@ -395,7 +395,7 @@ jobs:
           retention-days: 7
 
   simulation-e2e-livekit:
-    name: Simulation to grade (${{ matrix.language }}, ${{ matrix.modality }}, mocks ${{ matrix.mocks }})
+    name: Simulation to grade (${{ matrix.language }}, ${{ matrix.modality }}, ${{ matrix.access }}, mocks ${{ matrix.mocks }})
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'workflow_dispatch' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
@@ -404,6 +404,7 @@ jobs:
       matrix:
         language: [python, javascript]
         modality: [chat, voice]
+        access: [project_credentials, customer_token_endpoint]
         mocks: [on, off]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -438,6 +439,11 @@ jobs:
         working-directory: apps/simulator
         run: uv sync --frozen
 
+      - name: Install the voice sentence tokenizer
+        if: ${{ matrix.modality == 'voice' }}
+        working-directory: apps/simulator
+        run: uv run python -m nltk.downloader punkt_tab
+
       - name: Require the trusted model credential
         env:
           LIVEKIT_E2E_OPENAI_API_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
@@ -450,6 +456,15 @@ jobs:
       - name: Report the browser
         run: google-chrome --version
 
+      - name: Install the public tunnel client
+        if: ${{ matrix.access == 'customer_token_endpoint' }}
+        run: |
+          curl --fail --silent --show-error --location \
+            --output /tmp/cloudflared.deb \
+            https://github.com/cloudflare/cloudflared/releases/download/2025.7.0/cloudflared-linux-amd64.deb
+          sudo dpkg --install /tmp/cloudflared.deb
+          cloudflared --version
+
       - name: Warm the object-store image
         run: docker pull "$(awk '/^  minio:/{found=1} found && /image:/{print $2; exit}' docker-compose.yml)"
 
@@ -460,6 +475,7 @@ jobs:
           SIMULATION_E2E_LIVE: "1"
           SIMULATION_E2E_LANGUAGE: ${{ matrix.language }}
           SIMULATION_E2E_MODALITY: ${{ matrix.modality }}
+          SIMULATION_E2E_ACCESS: ${{ matrix.access }}
           SIMULATION_E2E_MOCKS: ${{ matrix.mocks }}
         run: >-
           pnpm exec vitest run --project fast
@@ -470,7 +486,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: simulation-e2e-${{ matrix.language }}-${{ matrix.modality }}-${{ matrix.mocks }}-${{ github.sha }}
+          name: simulation-e2e-${{ matrix.language }}-${{ matrix.modality }}-${{ matrix.access }}-${{ matrix.mocks }}-${{ github.sha }}
           path: .proofs/simulation-e2e/*
           include-hidden-files: true
           if-no-files-found: error
