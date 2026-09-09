@@ -1173,6 +1173,7 @@ export function TestsGrid(props: GridProps) {
     onDeleted,
     more,
   } = props;
+  const entryRequirement = useId();
 
   const [active, setActive] = useState<Woken | null>(null);
   /**
@@ -2118,10 +2119,18 @@ export function TestsGrid(props: GridProps) {
             disabled={!mayAuthor || missing !== null || entrySaving}
             busy={entrySaving}
             {...(why === undefined ? {} : { why })}
+            aria-describedby={
+              why === undefined && missing !== null ? entryRequirement : undefined
+            }
             onClick={() => void write()}
           >
             {entrySaving ? "Saving…" : "Save test"}
           </Button>
+          {why === undefined && missing !== null ? (
+            <span className="sr-only" id={entryRequirement}>
+              {missing}
+            </span>
+          ) : null}
           <Button
             type="button"
             variant="secondary"

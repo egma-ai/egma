@@ -1091,7 +1091,15 @@ describe("the suite-first Tests route", () => {
 
     const save = screen.getByRole("button", { name: "Save test" });
     expect((save as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.queryByText(/Needs a name/u)).toBeNull();
+    expect(document.querySelector("#entry-row-state")).toBeNull();
+    const requirement = save.getAttribute("aria-describedby");
+    expect(requirement).not.toBeNull();
+    expect(document.getElementById(requirement ?? "")?.textContent).toContain(
+      "Needs a name",
+    );
+    expect(document.getElementById(requirement ?? "")?.className).toContain(
+      "sr-only",
+    );
 
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "Books service" },
@@ -1104,9 +1112,12 @@ describe("the suite-first Tests route", () => {
     });
 
     // Required fields still keep Save disabled without a validation status line.
-    expect(screen.queryByText("Needs one persona.")).toBeNull();
-    expect((screen.getByRole("button", { name: "Save test" }) as HTMLButtonElement).disabled)
-      .toBe(true);
+    const incomplete = screen.getByRole("button", { name: "Save test" });
+    expect((incomplete as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      document.getElementById(incomplete.getAttribute("aria-describedby") ?? "")
+        ?.textContent,
+    ).toBe("Needs one persona.");
     fireEvent.click(screen.getByRole("button", { name: "+ Add a persona" }));
     fireEvent.click(await screen.findByRole("option", { name: "Impatient Rita" }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
