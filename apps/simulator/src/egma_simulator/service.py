@@ -278,8 +278,11 @@ class RunningSimulation:
                 blobs=self._blobs,
                 # The pinned persona version is the only model and voice
                 # source. The current direct keys arrived on this claim.
-                speech=SpeechProviders.from_models(
-                    self._spec.models, vad=self._config.vad_provider
+                speech=replace(
+                    SpeechProviders.from_models(
+                        self._spec.models, vad=self._config.vad_provider
+                    ),
+                    use_environment_proxy=self._spec.runtime is not None,
                 ),
                 media=MediaSettings.for_simulation(
                     self._config.media, self._spec.platform.carrier

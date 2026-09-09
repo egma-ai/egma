@@ -13,6 +13,7 @@ from egma_simulator.speech import (
     PersonaVoice,
     SpeechFault,
     SpeechProviders,
+    _daytona_deepgram_connect,
     _ears,
     _mouth,
 )
@@ -154,6 +155,79 @@ def test_cartesia_stt_receives_the_pinned_model(
 
     assert calls[0]["settings"].model == "ink-2"
     assert connected is not None
+
+
+def test_daytona_deepgram_sends_its_key_through_the_environment_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from deepgram.listen.v1 import client as deepgram_listen_client
+    from websockets.asyncio import client as websocket_client
+
+    original_connector = deepgram_listen_client.websockets_client_connect
+    monkeypatch.setattr(
+        deepgram_listen_client,
+        "websockets_client_connect",
+        original_connector,
+    )
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def connect(url: str, **kwargs: Any) -> object:
+        calls.append((url, kwargs))
+        return object()
+
+    monkeypatch.setattr(websocket_client, "connect", connect)
+    _ears(
+        SpeechProviders(
+            stt="deepgram",
+            stt_key="dtn_secret_deepgram_under_test",
+            stt_model="nova-3",
+            use_environment_proxy=True,
+        )
+    )
+
+    assert deepgram_listen_client.websockets_client_connect is (
+        _daytona_deepgram_connect
+    )
+    connector = deepgram_listen_client.websockets_client_connect
+    connector(
+        "wss://api.deepgram.com/v1/listen",
+        extra_headers={
+            "Authorization": "Token dtn_secret_deepgram_under_test",
+        },
+    )
+    assert calls == [
+        (
+            "wss://api.deepgram.com/v1/listen",
+            {
+                "additional_headers": {
+                    "Authorization": "Token dtn_secret_deepgram_under_test",
+                },
+                "proxy": True,
+            },
+        )
+    ]
+
+
+def test_non_daytona_deepgram_keeps_the_sdk_connector(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from deepgram.listen.v1 import client as deepgram_listen_client
+
+    original_connector = deepgram_listen_client.websockets_client_connect
+    monkeypatch.setattr(
+        deepgram_listen_client,
+        "websockets_client_connect",
+        original_connector,
+    )
+    _ears(
+        SpeechProviders(
+            stt="deepgram",
+            stt_key=A_KEY,
+            stt_model="nova-3",
+        )
+    )
+
+    assert deepgram_listen_client.websockets_client_connect is original_connector
 
 
 @pytest.mark.parametrize(

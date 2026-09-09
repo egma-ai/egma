@@ -369,6 +369,9 @@ class SpeechProviders:
     stt_customer_funded: bool = False
     tts_customer_funded: bool = False
 
+    use_environment_proxy: bool = False
+    """Whether provider sockets must honor the runtime's proxy settings."""
+
     stt_provider: str | None = None
     tts_provider: str | None = None
     """Who bills for each leg.
@@ -565,6 +568,15 @@ def _ears(
     if not providers.stt_model:
         raise SpeechFault("the deepgram listening leg was chosen without a model")
 
+    if providers.use_environment_proxy:
+        # Deepgram's pinned async client still uses the legacy websockets
+        # connector, which ignores Daytona's HTTPS_PROXY. A Daytona sandbox
+        # runs one claim, so selecting the current connector here is scoped to
+        # that dedicated runtime process.
+        from deepgram.listen.v1 import client as deepgram_listen_client
+
+        deepgram_listen_client.websockets_client_connect = _daytona_deepgram_connect
+
     leg = DeepgramSTTService(
         api_key=providers.stt_key,
         settings=DeepgramSTTService.Settings(model=providers.stt_model),
@@ -587,6 +599,19 @@ def _ears(
         await connection_ready.wait()
 
     return leg, connected
+
+
+def _daytona_deepgram_connect(
+    url: str, extra_headers: dict[str, str] | None = None
+) -> Any:
+    """Open Deepgram through Daytona's proxy with credentials in headers."""
+    from websockets.asyncio.client import connect
+
+    return connect(
+        url,
+        additional_headers=extra_headers,
+        proxy=True,
+    )
 
 
 def _connection_opened_by(leg: FrameProcessor) -> asyncio.Event:
