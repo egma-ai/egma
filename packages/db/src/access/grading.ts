@@ -737,22 +737,14 @@ export async function recordSimulationEvidenceErrorIn(
       `completed simulation ${input.simulationId} has no grading plan`,
     );
   }
-  if (
-    resolved.length === 0 &&
-    input.error !== SIMULATOR_EVIDENCE_DELIVERY_ERROR
-  ) {
-    return false;
-  }
+  if (resolved.length === 0) return false;
 
   const grades = await readTraceGrades(auth, {
     source: "simulation",
     traceId: input.traceId,
     runId: input.runId,
   });
-  if (
-    resolved.length > 0 &&
-    allEntriesHaveResults(resolved.map(frozen), grades.current).complete
-  ) {
+  if (allEntriesHaveResults(resolved.map(frozen), grades.current).complete) {
     return false;
   }
 

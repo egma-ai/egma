@@ -87,15 +87,6 @@ function advancePastEvidenceWait(): void {
   vi.setSystemTime(Date.now() + AGENT_POV_BOUND_SECONDS * 1_000 + 1);
 }
 
-async function excludeAllSimulationGraders(customer: Customer): Promise<void> {
-  await api.database.sql(
-    `update project_grader
-     set scope = '{"simulations":[],"production":null}'::jsonb
-     where project_id = $1`,
-    [customer.projectId],
-  );
-}
-
 /** Every captured request, already decoded, so a resource can be stamped. */
 let captured: OtlpExport[] = [];
 
@@ -1185,63 +1176,6 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
     const again = await settleSimulationsPastTheAgentPovBound();
     expect(again.map((one) => one.id)).not.toContain(landed.simulationId);
     expect((await getGradingJobForTrace(auth, landed.traceId))?.id).toBe(job?.id);
-  }, 120_000);
-
-  it("ends the evidence wait at the bound when no graders were selected", async () => {
-    const room = "egma-no-graders-bound-1";
-    const noGraders = await signUp(
-      api.app,
-      "no-graders@acme.example",
-      "No graders",
-    );
-    const noGradersKey = await projectKeyFor(api.app, noGraders);
-    await excludeAllSimulationGraders(noGraders);
-    const landed = await aLandedSimulation(
-      noGraders,
-      "no-graders-bound",
-      room,
-      {
-        ...A_LIVEKIT_AGENT,
-        config: {
-          url: "wss://acme.livekit.cloud",
-          agentName: "front-desk-no-graders",
-        },
-      },
-      {
-        startedAt: CONVERSATION_STARTED_AT,
-        endedAt: CONVERSATION_ENDED_AT,
-      },
-      [],
-      false,
-    );
-    const auth = contextFor(noGraders, "member");
-    await completeSimulation(auth, landed.simulationId, CONDUCTOR, {
-      endingReason: "agent_ended",
-      turnCount: 2,
-      providerReference: room,
-      startedAt: CONVERSATION_STARTED_AT,
-      endedAt: CONVERSATION_ENDED_AT,
-    });
-
-    advancePastEvidenceWait();
-    await settleSimulationsPastTheAgentPovBound();
-
-    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
-    vi.useRealTimers();
-    await exportTheCapture(noGradersKey, room);
-    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
-    const read = await api.app.inject({
-      method: "GET",
-      url: `/v1/simulations/${landed.simulationId}`,
-      headers: { authorization: `Bearer ${noGradersKey}` },
-    });
-    expect(read.statusCode, read.body).toBe(200);
-    expect(read.json()).toMatchObject({
-      gradingState: "not_requested",
-      agentPovIncomplete: false,
-      grades: [],
-      gradeHistory: [],
-    });
   }, 120_000);
 
   /**
