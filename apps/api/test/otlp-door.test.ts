@@ -747,6 +747,12 @@ describe.skipIf(!storage.available)("a compressed export", () => {
                     name: "user_turn",
                     startTimeUnixNano: "1785693880281989804",
                     endTimeUnixNano: "1785693881281989804",
+                    attributes: [
+                      {
+                        key: "lk.pii.user_transcript",
+                        value: { stringValue: "I need an appointment." },
+                      },
+                    ],
                   },
                 ],
               },
@@ -768,10 +774,11 @@ describe.skipIf(!storage.available)("a compressed export", () => {
       ),
     ).toEqual({});
 
-    const [row] = await store().rows<{ kind: string }>(
-      `select kind from spans where trace_id = '${traceId}'`,
+    const [row] = await store().rows<{ kind: string; text: string }>(
+      `select kind, text from spans where trace_id = '${traceId}'`,
     );
     expect(row?.kind).toBe("turn:human");
+    expect(row?.text).toBe("I need an appointment.");
   });
 
   it("is refused when the compression is one egma cannot undo", async () => {
