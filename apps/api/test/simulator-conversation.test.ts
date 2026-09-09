@@ -223,9 +223,29 @@ async function waitForSignal(
 class RetellCounterpart {
   private server: http.Server | undefined;
   private readonly replies = [
-    "Of course — we have Tuesday and Wednesday afternoon free next week.",
-    "Done: you are moved to Wednesday at half past two.",
+    [
+      {
+        role: "agent",
+        content: "Of course — we have Tuesday and Wednesday afternoon free next week.",
+      },
+    ],
+    [
+      {
+        role: "agent",
+        content: "Done: you are moved to Wednesday at half past two.",
+      },
+    ],
+    [
+      { role: "agent", content: "You are welcome. Goodbye." },
+      {
+        role: "tool_call_invocation",
+        tool_call_id: "terminal_call",
+        name: "end_call",
+        arguments: "{}",
+      },
+    ],
   ];
+  private readonly completionRequests: unknown[][] = [];
 
   /**
    * Hold the first agent answer so the pass can inspect a stable, live
@@ -277,14 +297,16 @@ class RetellCounterpart {
     const url = request.url ?? "";
     if (request.method === "POST" && url.startsWith("/agent-playground-completion/")) {
       const asked = JSON.parse(body) as { messages?: unknown[] };
-      const turn = Math.max(0, Math.floor((asked.messages?.length ?? 0) / 2));
+      const messages = asked.messages ?? [];
+      this.completionRequests.push(messages);
+      const turn = Math.max(0, Math.floor(messages.length / 2));
       const reply = this.replies[turn];
       if (reply === undefined) {
         send(422, { error: "the script ran dry" });
         return;
       }
       const answer = (): void => {
-        send(200, { messages: [{ role: "agent", content: reply }] });
+        send(200, { messages: reply, call_ended: turn === 2 });
       };
       if (turn === 1 && !this.hasHeldFirstCompletion) {
         this.hasHeldFirstCompletion = true;
@@ -310,6 +332,11 @@ class RetellCounterpart {
   /** Let the held agent answer return and the Simulation continue. */
   releaseHeldCompletion(): void {
     this.firstCompletionCanAnswer.open();
+  }
+
+  /** Every accepted completion request, in arrival order. */
+  requests(): readonly unknown[][] {
+    return this.completionRequests;
   }
 
   async stop(): Promise<void> {
@@ -499,6 +526,9 @@ type StoredSpan = {
   readonly emitter: string;
   readonly run_id: string;
   readonly agent_id: string;
+  readonly tool_name: string;
+  readonly tool_arguments: string;
+  readonly tool_result: string;
 };
 
 /** One conversation as it stands in the trace store, oldest span first. */
@@ -506,7 +536,8 @@ async function storedSpans(traceId: string): Promise<StoredSpan[]> {
   return rowsIn<StoredSpan>(
     instance.traceStore,
     `select name, kind, text, toString(duration_ns) as duration_ns, span_id,
-            parent_span_id, source, emitter, run_id, agent_id
+            parent_span_id, source, emitter, run_id, agent_id,
+            tool_name, tool_arguments, tool_result
        from spans
       where trace_id = '${traceId}'
       order by started_at,
@@ -1008,7 +1039,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         const beforeTerminal = spans.map((span) => span.name);
         expect(
           beforeTerminal.filter((name) => name.endsWith("_turn")),
-        ).toHaveLength(4);
+        ).toHaveLength(5);
         expect(
           beforeTerminal.filter((name) => name === "simulation"),
         ).toHaveLength(1);
@@ -1024,8 +1055,8 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       const conductedRun = await settledRun(key, conducted.runId, 60_000);
       const refusedRun = await settledRun(key, refused.runId, 60_000);
 
-      // The conversation that happened: completed, concluded by the persona,
-      // and every lifecycle column telling the truth about it.
+      // The conversation that happened: completed when Retell returned its
+      // ending, and every lifecycle column telling the truth about it.
       const row = await rowOf(conducted.simulationId);
       if (row.status !== "completed") {
         throw new Error(
@@ -1033,11 +1064,11 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             `the simulator said:\n${simulatorSaid}`,
         );
       }
-      expect(row.ending_reason).toBe("persona_concluded");
+      expect(row.ending_reason).toBe("agent_ended");
       expect(row.claimed_by).toBe("walking-simulator-1");
-      // Greeting, the scenario's one sentence, the scripted answer, and the
-      // persona's goodbye: four turns, counted by the simulator itself.
-      expect(row.turn_count).toBe(4);
+      // Greeting, the scenario's one sentence, the scripted answer, the
+      // persona's goodbye, and Retell's actual final reply: five turns.
+      expect(row.turn_count).toBe(5);
       // Text mode creates no retained provider-side conversation identifier.
       expect(row.provider_reference).toBe(null);
       const startedAt = new Date(String(row.started_at));
@@ -1048,8 +1079,9 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       // before PostgreSQL left running — one span per timed thing, nothing
       // invented, in the same shape the grader reads.
       const names = spans.map((span) => span.name);
-      expect(names.filter((name) => name === "agent_turn")).toHaveLength(2);
+      expect(names.filter((name) => name === "agent_turn")).toHaveLength(3);
       expect(names.filter((name) => name === "human_turn")).toHaveLength(2);
+      expect(names.filter((name) => name === "tool_call")).toHaveLength(1);
       expect(names.filter((name) => name === "turn_response_latency")).toHaveLength(1);
       expect(names).toContain("first_response_latency");
       expect(names.filter((name) => name === "simulation")).toHaveLength(1);
@@ -1078,7 +1110,21 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           "Done: you are moved to Wednesday at half past two.",
         ],
         ["human_turn", "That covers everything I needed. Thank you, goodbye."],
+        ["agent_turn", "You are welcome. Goodbye."],
       ]);
+
+      // The terminal words crossed Retell's real request boundary once. Its
+      // returned reply and end tool are evidence, without another persona turn.
+      expect(counterpart.requests()).toHaveLength(3);
+      expect(counterpart.requests()[2]?.at(-1)).toEqual({
+        role: "user",
+        content: "That covers everything I needed. Thank you, goodbye.",
+      });
+      expect(spans.find((span) => span.name === "tool_call")).toMatchObject({
+        tool_name: "end_call",
+        tool_arguments: "{}",
+        tool_result: "",
+      });
 
       // Filed under the customer's own row, from egma's own side of the
       // conversation, and never from anything the payload claimed.
@@ -1172,7 +1218,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         score: 1,
       });
       // The judge was shown the conversation egma assembled, not a report:
-      // four actual turns and no tool call, because the counterpart made none.
+      // five actual turns and the terminal tool returned by the counterpart.
       // The row's runtime ending stays out of the behavioral judge input.
       expect(judge.asked).toHaveLength(1);
       const [asked] = judge.asked;
@@ -1180,7 +1226,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       expect(asked?.expectedBehaviors).toEqual([
         { id: "behavior_1", text: THE_BEHAVIOR },
       ]);
-      expect(asked?.evidence.transcript).toHaveLength(4);
+      expect(asked?.evidence.transcript).toHaveLength(5);
       expect(asked?.evidence).not.toHaveProperty("outcome");
 
       // Read the same durable evidence through the public route used by the
@@ -1235,6 +1281,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           "That covers everything I needed. Thank you, goodbye.",
           "persona",
         ],
+        ["agent_turn", "You are welcome. Goodbye.", "persona"],
       ]);
 
       // And the row it was all filed against holds no conversation, because
