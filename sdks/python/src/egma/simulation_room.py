@@ -275,9 +275,70 @@ def _install_handoff_couriers(
     }
     refresh_tasks: set[asyncio.Task[None]] = set()
     refresh_tail: asyncio.Task[None] | None = None
+    closing_task: asyncio.Task[None] | None = None
+    room_listeners: list[tuple[str, Callable[..., None]]] = []
+    closed = False
+
+    async def close_session(why: str) -> None:
+        try:
+            logger.info(
+                "simulation %s: %s; closing its agent session",
+                simulation.named,
+                why,
+            )
+            await session.aclose()
+        except Exception:
+            logger.exception(
+                "simulation %s: its LiveKit AgentSession could not close after %s",
+                simulation.named,
+                why,
+            )
+
+    def finish(why: str) -> None:
+        nonlocal closing_task
+        if closed or closing_task is not None:
+            return
+        try:
+            closing_task = asyncio.create_task(close_session(why))
+        except RuntimeError:
+            logger.warning(
+                "simulation %s: no event loop remained to close its AgentSession",
+                simulation.named,
+            )
+
+    def on_participant_disconnected(participant: Any) -> None:
+        if getattr(participant, "identity", None) == seat.identity:
+            finish("Egma's participant left the room")
+
+    def on_connection_state_changed(state: int) -> None:
+        if state == ConnectionState.CONN_DISCONNECTED:
+            finish("the LiveKit room disconnected")
+
+    def listen_to_room(event: str, callback: Callable[..., None]) -> None:
+        seat.room.on(event, callback)
+        room_listeners.append((event, callback))
+
+    def cleanup() -> None:
+        nonlocal closed
+        if closed:
+            return
+        closed = True
+        for event, callback in reversed(room_listeners):
+            with contextlib.suppress(Exception):
+                seat.room.off(event, callback)
+        room_listeners.clear()
+        session.off("conversation_item_added", on_conversation_item_added)
+        for task in tuple(refresh_tasks):
+            task.cancel()
+        for agent_type in installed_types:
+            mock_tools(agent_type, {}, session=session)
+        installed_types.clear()
+        discovered.clear()
 
     def on_conversation_item_added(event: ConversationItemAddedEvent) -> None:
         nonlocal last_selected_agent, refresh_tail
+        if closed:
+            return
         try:
             if not isinstance(event.item, AgentHandoff):
                 return
@@ -368,16 +429,18 @@ def _install_handoff_couriers(
             )
 
     def on_close(_: Any) -> None:
-        session.off("conversation_item_added", on_conversation_item_added)
-        for task in tuple(refresh_tasks):
-            task.cancel()
-        for agent_type in installed_types:
-            mock_tools(agent_type, {}, session=session)
-        installed_types.clear()
-        discovered.clear()
+        cleanup()
 
-    session.on("conversation_item_added", on_conversation_item_added)
-    session.once("close", on_close)
+    try:
+        session.on("conversation_item_added", on_conversation_item_added)
+        session.once("close", on_close)
+        listen_to_room("participant_disconnected", on_participant_disconnected)
+        listen_to_room("connection_state_changed", on_connection_state_changed)
+    except Exception:
+        cleanup()
+        with contextlib.suppress(Exception):
+            session.off("close", on_close)
+        raise
 
 
 async def _refresh_census(

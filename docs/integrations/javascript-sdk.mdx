@@ -125,6 +125,13 @@ initialized state before it sends the first simulated input. This simulator-side
 wait is governed by the simulation's configured duration. You do not add another
 callback or readiness signal.
 
+When that simulation ends, Egma finishes pending output and its exact participant
+leaves the room. The SDK closes the `AgentSession` you supplied, which completes
+LiveKit's native session trace, flushes the final evidence, and releases entrypoint
+code that is waiting for session close. An abrupt room disconnect closes the
+session as well. These listeners are installed only after the Egma participant
+accepts the tool report in a simulation room.
+
 The worker reads the running test's `job_dispatch_metadata` at
 `ctx.job.metadata`, as one compact JSON string. With Project credentials, Egma
 writes it directly to the dispatch. With a token endpoint, Egma sends it in

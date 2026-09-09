@@ -80,6 +80,15 @@ const PARENTLESS_ROW_ORDER =
   `started_at asc, span_id asc`;
 
 /**
+ * Keep two speakers in conversational order when one native span carries both
+ * sides at the same timestamp. The span ID remains an identity tie-breaker.
+ */
+const TRACE_ROW_ORDER =
+  `started_at asc, ` +
+  `multiIf(kind = 'turn:human', 0, kind = 'turn:agent', 1, 2) asc, ` +
+  `span_id asc`;
+
+/**
  * Required half-open interval [from, to) in microseconds since the epoch.
  * Use bigint to preserve the trace store's precision beyond JavaScript Date.
  */
@@ -759,7 +768,7 @@ async function turnResponseLatencyP90sFor(
          toString(toUnixTimestamp64Micro(started_at)) as started_at_micros,
          toString(duration_ns) as duration_ns,
          row_number() over (
-           partition by trace_id order by started_at asc, span_id asc
+           partition by trace_id order by ${TRACE_ROW_ORDER}
          ) as trace_position
        from ${SPANS_TABLE} final
        where ${where}
@@ -1002,7 +1011,7 @@ export async function readTrace(
        emitter
      from ${SPANS_TABLE} final
      where ${where}
-     order by started_at asc, span_id asc
+     order by ${TRACE_ROW_ORDER}
      limit ${MAXIMUM_SPANS_PER_TRACE + 1}`,
       parameters,
     ),

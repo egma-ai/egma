@@ -46,6 +46,7 @@ export function attributionOf(
   return {
     source: "simulation",
     emitter,
+    modality: standing.modality,
     runId: standing.runId,
     agentId: standing.agentId,
     testVersionId: standing.testVersionId,

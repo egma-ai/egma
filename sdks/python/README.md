@@ -87,6 +87,8 @@ If the worker cannot complete the handshake with egma, `simulation` raises `NotR
 
 `simulation` has no total startup deadline. It waits for Egma to join and accept the tool configuration while the simulation room stays active. A room disconnect, Egma participant departure, or task cancellation stops the wait. Each RPC attempt keeps its own transport timeout, and transient registration or delivery failures are retried with the same configuration.
 
+When the configured simulation ends, Egma finishes its pending output and leaves the room. The SDK then closes the `AgentSession` that you supplied. An abrupt room disconnect closes it too. This completes LiveKit's native session trace and lets an entrypoint that waits for session close finish without its own timer. The listener is installed only after the exact Egma participant has accepted the tool report, and it is never installed in a production room.
+
 ### B. Production monitoring
 
 Call `monitor(ctx)` at the start of the job entrypoint, before `ctx.connect` and `session.start`:

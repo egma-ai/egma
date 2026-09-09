@@ -531,7 +531,49 @@ function installLifecycle({
   let refreshTail = Promise.resolve();
   let lastSelected = agent;
   let closed = false;
+  let closing = false;
   let cleanupPromise: Promise<void> | undefined;
+  const roomListeners: Array<[
+    string,
+    (...arguments_: never[]) => void,
+  ]> = [];
+  const room = ctx.room as unknown as {
+    on(name: string, listener: (...arguments_: never[]) => void): void;
+    off(name: string, listener: (...arguments_: never[]) => void): void;
+  };
+
+  const closeSession = (why: string): void => {
+    if (closed || closing) return;
+    closing = true;
+    console.info(
+      `Egma: simulation ${JSON.stringify(roomName)} ${why}; closing its AgentSession.`,
+    );
+    void session.close().catch((error: unknown) => {
+      console.warn(
+        `Egma: simulation ${JSON.stringify(roomName)} could not close its AgentSession after ${why}. ${messageOf(error)}`,
+      );
+    });
+  };
+
+  const participantDisconnected = (participant: {
+    identity: string;
+  }): void => {
+    if (participant.identity === seat.identity) {
+      closeSession("ended when Egma's participant left the room");
+    }
+  };
+
+  const roomDisconnected = (): void => {
+    closeSession("ended when the LiveKit room disconnected");
+  };
+
+  const listenToRoom = (
+    event: string,
+    callback: (...arguments_: never[]) => void,
+  ): void => {
+    room.on(event, callback);
+    roomListeners.push([event, callback]);
+  };
 
   const bind = (selected: voice.Agent): void => {
     const couriers: Record<string, MockTool> = {};
@@ -607,6 +649,13 @@ function installLifecycle({
     if (cleanupPromise !== undefined) return cleanupPromise;
     cleanupPromise = (async () => {
       closed = true;
+      for (const [event, callback] of roomListeners.splice(0).reverse()) {
+        try {
+          room.off(event, callback);
+        } catch {
+          // Cleanup must continue through every installed hook.
+        }
+      }
       session.off(
         voice.AgentSessionEventTypes.ConversationItemAdded,
         conversationItemAdded,
@@ -635,16 +684,11 @@ function installLifecycle({
       conversationItemAdded,
     );
     session.on(voice.AgentSessionEventTypes.Close, sessionClosed);
+    listenToRoom(PARTICIPANT_DISCONNECTED, participantDisconnected);
+    listenToRoom(ROOM_DISCONNECTED, roomDisconnected);
     ctx.addShutdownCallback(cleanup);
   } catch (error) {
-    session.off(
-      voice.AgentSessionEventTypes.ConversationItemAdded,
-      conversationItemAdded,
-    );
-    session.off(voice.AgentSessionEventTypes.Close, sessionClosed);
-    for (let index = bindings.length - 1; index >= 0; index -= 1) {
-      bindings[index]?.[Symbol.dispose]();
-    }
+    void cleanup();
     throw error;
   }
 }

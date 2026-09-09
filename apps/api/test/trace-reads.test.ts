@@ -841,6 +841,103 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
   });
 });
 
+describe.skipIf(!storage.available)(
+  "two speakers projected from one native LiveKit chat span",
+  () => {
+    const TRACE = "1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e";
+    const WHEN = {
+      from: "2026-08-04T00:00:00Z",
+      to: "2026-08-05T00:00:00Z",
+    } as const;
+    const AT = BigInt(Date.parse("2026-08-04T09:00:00Z")) * 1_000n;
+
+    function turn(over: Partial<NewSpan>): NewSpan {
+      return {
+        traceId: TRACE,
+        spanId: "",
+        parentSpanId: "",
+        source: "simulation",
+        emitter: "agent",
+        environment: "default",
+        startedAtMicroseconds: AT,
+        durationNanoseconds: 1_000_000_000n,
+        name: "agent_turn",
+        kind: "other",
+        status: "ok",
+        text: "",
+        audioUrl: "",
+        toolName: "",
+        toolArguments: "",
+        toolResult: "",
+        providerCallId: "room-chat-order",
+        agentPlatform: "livekit",
+        platformAgentId: "",
+        platformAgentName: "",
+        platformAgentVersion: "",
+        connectionType: "livekit_room",
+        runId: "run_01JQZ0000000000000000000CC",
+        agentId: "agt_01JQZ0000000000000000000CC",
+        agentVersionId: "",
+        testVersionId: "",
+        personaVersionId: "",
+        payload: "{}",
+        endsTrace: false,
+        ...over,
+      };
+    }
+
+    beforeAll(async () => {
+      await appendSpans(contextFor(acme, "admin"), [
+        turn({
+          spanId: "ee00000000000001",
+          kind: "turn:human",
+          text: "Please book Tuesday.",
+          payload:
+            '{"egma.projection":{"source":"lk.pii.user_input"}}',
+        }),
+        // This ID sorts before the projection ID. Public conversation order
+        // must follow speaker role for the shared native timestamp.
+        turn({
+          spanId: "1100000000000001",
+          kind: "turn:agent",
+          text: "Tuesday is booked.",
+        }),
+        // The same tie rule keeps a voice interruption readable too.
+        turn({
+          spanId: "ff00000000000001",
+          kind: "turn:human",
+          text: "Wait.",
+          startedAtMicroseconds: AT + 2_000_000n,
+        }),
+        turn({
+          spanId: "0100000000000001",
+          kind: "turn:agent",
+          text: "I stopped.",
+          startedAtMicroseconds: AT + 2_000_000n,
+        }),
+      ]);
+    });
+
+    it("returns caller then agent through the public trace endpoint", async () => {
+      const response = await readTraceOverHttp(
+        api.app,
+        acme.secret,
+        TRACE,
+        WHEN,
+      );
+      expect(response.statusCode, response.body).toBe(200);
+      const detail = response.json() as TraceDetailBody;
+
+      expect(detail.turns.map(({ kind, text }) => [kind, text])).toEqual([
+        ["turn:human", "Please book Tuesday."],
+        ["turn:agent", "Tuesday is booked."],
+        ["turn:human", "Wait."],
+        ["turn:agent", "I stopped."],
+      ]);
+    });
+  },
+);
+
 /**
  * Generic trace reads return tool facts without mock marks. Mock coverage is
  * derived by the simulation read from its pinned test and connection type.

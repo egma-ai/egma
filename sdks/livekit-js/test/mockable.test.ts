@@ -609,6 +609,43 @@ describe("egma.simulation", () => {
     expect(refused.room.localParticipant.performRpc).not.toHaveBeenCalled();
   });
 
+  it("closes the session only when the exact Egma persona departs", async () => {
+    const agent = agentWithTool("check_calendar", async () => "real");
+    const ctx = context("egma-sim-sim_129_departure", {
+      personaIdentity: "egma-persona-sim_129_departure",
+    });
+    ctx.room.remoteParticipants.set("somebody-else", {
+      identity: "somebody-else",
+    });
+    const oneSession = session();
+    const close = vi.spyOn(oneSession, "close").mockResolvedValue();
+
+    await simulation(agent, asJobContext(ctx), oneSession);
+    ctx.room.depart("somebody-else");
+    await Promise.resolve();
+    expect(close).not.toHaveBeenCalled();
+
+    ctx.room.depart("egma-persona-sim_129_departure");
+    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+
+    await ctx.shutdownCallbacks.at(-1)!();
+    expect(ctx.room.eventNames()).toEqual([]);
+  });
+
+  it("closes the simulation session when the room is lost", async () => {
+    const agent = agentWithTool("check_calendar", async () => "real");
+    const ctx = context("egma-sim-sim_129_room_loss");
+    const oneSession = session();
+    const close = vi.spyOn(oneSession, "close").mockResolvedValue();
+
+    await simulation(agent, asJobContext(ctx), oneSession);
+    ctx.room.disconnect();
+
+    await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+    await ctx.shutdownCallbacks.at(-1)!();
+    expect(ctx.room.eventNames()).toEqual([]);
+  });
+
   it("refuses a second claimant that arrives as the selected persona is returned", async () => {
     const agent = agentWithTool("check_calendar", async () => "real");
     const ctx = context("egma-sim-sim_130_race", {
