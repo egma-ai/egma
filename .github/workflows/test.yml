@@ -394,11 +394,17 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  simulation-e2e-python-chat:
-    name: Simulation to grade (Python LiveKit chat)
+  simulation-e2e-livekit:
+    name: Simulation to grade (${{ matrix.language }}, ${{ matrix.modality }}, mocks ${{ matrix.mocks }})
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'workflow_dispatch' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript]
+        modality: [chat, voice]
+        mocks: [on, off]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -452,16 +458,19 @@ jobs:
           EGMA_REQUIRE_OBJECT_STORAGE: "1"
           LIVEKIT_E2E_OPENAI_API_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
           SIMULATION_E2E_LIVE: "1"
+          SIMULATION_E2E_LANGUAGE: ${{ matrix.language }}
+          SIMULATION_E2E_MODALITY: ${{ matrix.modality }}
+          SIMULATION_E2E_MOCKS: ${{ matrix.mocks }}
         run: >-
           pnpm exec vitest run --project fast
           apps/api/test/simulator-conversation.test.ts
-          --testNamePattern "runs a packaged Python LiveKit chat"
+          --testNamePattern "runs a packaged LiveKit worker"
 
       - name: Upload redacted proof manifest
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: simulation-e2e-python-chat-${{ github.sha }}
+          name: simulation-e2e-${{ matrix.language }}-${{ matrix.modality }}-${{ matrix.mocks }}-${{ github.sha }}
           path: .proofs/simulation-e2e/*.json
           include-hidden-files: true
           if-no-files-found: error

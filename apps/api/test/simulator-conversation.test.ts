@@ -48,6 +48,9 @@ const SIMULATOR_DIRECTORY = path.join(
 const SIMULATOR_PYTHON = path.join(SIMULATOR_DIRECTORY, ".venv/bin/python");
 const LIVE_PROVIDER = process.env["SIMULATION_E2E_LIVE"] === "1";
 const LIVE_MODEL_KEY = process.env["LIVEKIT_E2E_OPENAI_API_KEY"]?.trim() ?? "";
+const LIVE_LANGUAGE = process.env["SIMULATION_E2E_LANGUAGE"] ?? "python";
+const LIVE_MODALITY = process.env["SIMULATION_E2E_MODALITY"] ?? "chat";
+const LIVE_MOCKS = process.env["SIMULATION_E2E_MOCKS"] !== "off";
 
 /** The token the instance support configures on the API's side. */
 const SERVICE_TOKEN = "egma_st_held-by-this-test-suite-alone";
@@ -1136,16 +1139,23 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
   );
 
   it.skipIf(!LIVE_PROVIDER)(
-    "runs a packaged Python LiveKit chat through storage, public reads, and grading",
+    "runs a packaged LiveKit worker through storage, public reads, and grading",
     { timeout: 420_000 },
     async () => {
       if (LIVE_MODEL_KEY === "") {
         throw new Error("LIVEKIT_E2E_OPENAI_API_KEY is required for the live provider case");
       }
       const { key, cookie, userId, organizationId, projectId } = await signedUpKey();
-      const expectedBehavior =
-        "reports that Tuesday is full and Thursday morning is the next opening after checking availability";
-      const providerDirectory = path.join(scratch, "python-livekit-provider");
+      expect(["python", "javascript"]).toContain(LIVE_LANGUAGE);
+      expect(["chat", "voice"]).toContain(LIVE_MODALITY);
+      const expectedAvailability = LIVE_MOCKS
+        ? "Tuesday is completely full. The next opening is Thursday morning."
+        : "The real calendar has a Tuesday appointment at 9:40.";
+      const expectedBehavior = LIVE_MOCKS
+        ? "reports that Tuesday is full and Thursday morning is the next opening after checking availability"
+        : "reports that Tuesday has an appointment at 9:40 after checking availability";
+      const caseId = `livekit-${LIVE_LANGUAGE}-${LIVE_MODALITY}-project-credentials-${LIVE_MOCKS ? "mocked" : "unmocked"}`;
+      const providerDirectory = path.join(scratch, `${caseId}-provider`);
       const readyPath = path.join(providerDirectory, "ready.json");
       const provider = spawn(
         SIMULATOR_PYTHON,
@@ -1158,6 +1168,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             SIMULATION_E2E_PROJECT_KEY: key,
             SIMULATION_E2E_PROVIDER_DIR: providerDirectory,
             SIMULATION_E2E_PROVIDER_READY: readyPath,
+            SIMULATION_E2E_LANGUAGE: LIVE_LANGUAGE,
           },
           stdio: ["ignore", "pipe", "pipe"],
         },
@@ -1198,12 +1209,12 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           key,
           body: {
             agentPlatform: "livekit",
-            name: "Packaged Python appointment agent",
+            name: `Packaged ${LIVE_LANGUAGE} appointment agent`,
             connection: {
               agentPlatform: "livekit",
               connectionType: "livekit_room",
               accessVariant: "livekit_room.project_credentials",
-              modality: "chat",
+              modality: LIVE_MODALITY,
               config: { url: ready.url, agentName: ready.agentName },
               credentials: {
                 apiKey: ready.apiKey,
@@ -1222,7 +1233,20 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           role: "member",
           via: "session",
         };
-        await createPersona(auth, { name: "Impatient Rita", ...NEUTRAL_PERSON });
+        await createPersona(auth, {
+          name: "Impatient Rita",
+          ...NEUTRAL_PERSON,
+          models: {
+            llm: { provider: "openai", model: "gpt-4o-mini" },
+            stt: { provider: "openai", model: "gpt-live-transcribe" },
+            tts: {
+              provider: "openai",
+              model: "tts-1",
+              voiceId: "alloy",
+              speed: 1,
+            },
+          },
+        });
         const suite = await call("POST", "/v1/test-suites", {
           key,
           body: { name: "Packaged LiveKit appointment" },
@@ -1237,12 +1261,12 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             scenario: "Ask whether Tuesday has an appointment available.",
             expectedBehaviors: [expectedBehavior],
             personas: ["Impatient Rita"],
-            mockTools: [{
-              toolName: "check_availability",
-              answer: {
-                answer: "Tuesday is completely full. The next opening is Thursday morning.",
-              },
-            }],
+            ...(LIVE_MOCKS ? {
+              mockTools: [{
+                toolName: "check_availability",
+                answer: { answer: expectedAvailability },
+              }],
+            } : {}),
           },
         });
         expect(pushed.status, JSON.stringify(pushed.body)).toBe(201);
@@ -1256,11 +1280,11 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
               ...process.env,
               EGMA_SIMULATOR_CONTROL_PLANE_URL: instance.origin,
               EGMA_SIMULATOR_SERVICE_TOKEN: SERVICE_TOKEN,
-              EGMA_SIMULATOR_CLAIMANT: "livekit-python-chat-simulator",
+              EGMA_SIMULATOR_CLAIMANT: `${caseId}-simulator`,
               EGMA_SIMULATOR_CLAIM_WAIT_SECONDS: "2",
               EGMA_SIMULATOR_HEARTBEAT_SECONDS: "1",
-              EGMA_SIMULATOR_WAL_DIR: path.join(scratch, "livekit-python-wal"),
-              EGMA_SIMULATOR_BLOB_DIR: path.join(scratch, "livekit-python-blobs"),
+              EGMA_SIMULATOR_WAL_DIR: path.join(scratch, `${caseId}-wal`),
+              EGMA_SIMULATOR_BLOB_DIR: path.join(scratch, `${caseId}-blobs`),
             },
             stdio: ["ignore", "pipe", "pipe"],
           },
@@ -1276,7 +1300,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             ingestion: loadIngestionSettings({}, { role: "ingest" }),
             databaseUrl: "",
             clickhouseUrl: "",
-            claimant: "livekit-python-chat-grader",
+            claimant: `${caseId}-grader`,
             stripeSecretKey: undefined,
             capacity: 1,
             concurrencyCap: undefined,
@@ -1285,7 +1309,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             sweepSeconds: 1,
             logLevel: "ERROR",
           },
-          log: makeLog("ERROR", "livekit-python-chat-grader"),
+          log: makeLog("ERROR", `${caseId}-grader`),
           providerCredentials: {
             async load() {
               return { openai: LIVE_MODEL_KEY };
@@ -1326,14 +1350,18 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           turn.kind === "turn:human" && turn.text?.toLowerCase().includes("tuesday")
         )).toBe(true);
         expect(turns.some((turn) =>
-          turn.kind === "turn:agent" && turn.text?.toLowerCase().includes("thursday")
+          turn.kind === "turn:agent" && turn.text?.toLowerCase().includes(
+            LIVE_MOCKS ? "thursday" : "9:40",
+          )
         )).toBe(true);
         expect(turns.every((turn, index) =>
           index === 0 || turn.kind !== turns[index - 1]?.kind
         )).toBe(true);
         expect(JSON.stringify(detail.body).toLowerCase()).toContain(
-          "tuesday is completely full. the next opening is thursday morning.",
+          expectedAvailability.toLowerCase(),
         );
+        expect(JSON.stringify(detail.body)).toContain("fixture-request-1");
+        expect(JSON.stringify(detail.body)).toContain("reschedule");
 
         const browser = await openBrowser();
         try {
@@ -1355,8 +1383,8 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           expect(main).toContain("User");
           expect(main).toContain("Agent");
           expect(main.toLowerCase()).toContain("tuesday");
-          expect(main.toLowerCase()).toContain("thursday");
-          expect(main).toContain("Packaged Python appointment agent");
+          expect(main.toLowerCase()).toContain(LIVE_MOCKS ? "thursday" : "9:40");
+          expect(main).toContain(`Packaged ${LIVE_LANGUAGE} appointment agent`);
           expect(main).not.toContain("LiveKit transcript unavailable");
         } finally {
           await browser.close();
@@ -1368,9 +1396,9 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         );
         await mkdir(proofDirectory, { recursive: true });
         await writeFile(
-          path.join(proofDirectory, "python-chat-project-credentials.json"),
+          path.join(proofDirectory, `${caseId}.json`),
           JSON.stringify({
-            caseId: "livekit-python-chat-project-credentials-mocked",
+            caseId,
             commitSha: process.env["GITHUB_SHA"] ?? "local-working-tree",
             artifact: ready.artifact,
             outcomes: {

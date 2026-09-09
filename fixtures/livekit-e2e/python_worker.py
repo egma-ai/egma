@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -18,6 +19,8 @@ class AppointmentAgent(Agent):
             instructions=(
                 "You schedule dental appointments. Always call "
                 "check_availability before you say whether Tuesday is free. "
+                "Then call record_request with day Tuesday and kind reschedule "
+                "before answering. "
                 "Keep each reply short."
             )
         )
@@ -33,6 +36,28 @@ class AppointmentAgent(Agent):
         if sentinel:
             await asyncio.to_thread(Path(sentinel).write_text, day, encoding="utf-8")
         return "The real calendar has a Tuesday appointment at 9:40."
+
+    @function_tool
+    async def record_request(self, day: str, kind: str) -> dict[str, object]:
+        """Record an appointment request after availability was checked.
+
+        Args:
+            day: The requested appointment day.
+            kind: The kind of appointment request.
+        """
+        sentinel = os.environ.get("EGMA_E2E_RECORD_REQUEST_SENTINEL", "")
+        if sentinel:
+            await asyncio.to_thread(
+                Path(sentinel).write_text,
+                json.dumps({"day": day, "kind": kind}),
+                encoding="utf-8",
+            )
+        return {
+            "recorded": True,
+            "reference": "fixture-request-1",
+            "day": day,
+            "kind": kind,
+        }
 
 
 async def entrypoint(ctx: agents.JobContext) -> None:

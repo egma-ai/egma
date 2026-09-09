@@ -36,6 +36,27 @@ const checkAvailability = llm.tool({
   },
 });
 
+const recordRequest = llm.tool({
+  name: "record_request",
+  description: "Record the appointment request after availability was checked.",
+  parameters: z.object({
+    day: z.string().describe("The requested appointment day."),
+    kind: z.string().describe("The kind of appointment request."),
+  }),
+  execute: async ({ day, kind }) => {
+    const sentinel = process.env.EGMA_E2E_RECORD_REQUEST_SENTINEL;
+    if (sentinel) {
+      await writeFile(sentinel, JSON.stringify({ day, kind }), "utf8");
+    }
+    return {
+      recorded: true,
+      reference: "fixture-request-1",
+      day,
+      kind,
+    };
+  },
+});
+
 export default defineAgent({
   prewarm: async (proc) => {
     proc.userData.vad = await silero.VAD.load();
@@ -47,8 +68,9 @@ export default defineAgent({
     const agent = voice.Agent.create({
       instructions:
         "You schedule dental appointments. Always call check_availability " +
-        "before you say whether Tuesday is free. Keep each reply short.",
-      tools: [checkAvailability],
+        "before you say whether Tuesday is free. Then call record_request " +
+        "with day Tuesday and kind reschedule before answering. Keep each reply short.",
+      tools: [checkAvailability, recordRequest],
     });
     const session = new voice.AgentSession({
       vad: ctx.proc.userData.vad,

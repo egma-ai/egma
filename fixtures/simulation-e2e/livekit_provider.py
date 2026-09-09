@@ -1,4 +1,4 @@
-"""Host local LiveKit and one packaged Python worker for the full-stack E2E."""
+"""Host local LiveKit and one packaged SDK worker for the full-stack E2E."""
 
 from __future__ import annotations
 
@@ -54,11 +54,27 @@ def main() -> int:
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
     try:
-        python, artifact = fixture.python_worker_environment(proof / "python-artifact")
+        language = os.environ.get("SIMULATION_E2E_LANGUAGE", "python").strip()
+        if language == "python":
+            python, artifact = fixture.python_worker_environment(
+                proof / "python-artifact"
+            )
+            command = [
+                str(python),
+                str(LIVEKIT_FIXTURE / "python_worker.py"),
+                "start",
+            ]
+        elif language == "javascript":
+            command, artifact = fixture.javascript_worker_environment(
+                proof / "javascript-artifact"
+            )
+        else:
+            raise RuntimeError(f"unsupported SIMULATION_E2E_LANGUAGE: {language}")
+        agent_name = f"egma-{language}-full-stack-e2e"
         worker = fixture.start_process(
-            "Python worker",
-            [str(python), str(LIVEKIT_FIXTURE / "python_worker.py"), "start"],
-            proof / "python-worker.log",
+            f"{language} worker",
+            command,
+            proof / f"{language}-worker.log",
             env=os.environ
             | {
                 "PYTHONUNBUFFERED": "1",
@@ -68,8 +84,11 @@ def main() -> int:
                 "OPENAI_API_KEY": required("LIVEKIT_E2E_OPENAI_API_KEY"),
                 "EGMA_URL": required("SIMULATION_E2E_API_ORIGIN"),
                 "EGMA_API_KEY": required("SIMULATION_E2E_PROJECT_KEY"),
-                "EGMA_E2E_AGENT_NAME": "egma-python-full-stack-e2e",
+                "EGMA_E2E_AGENT_NAME": agent_name,
                 "EGMA_E2E_SILENT_START": "1",
+                "EGMA_E2E_LONG_LIVED_ENTRY": (
+                    "1" if language == "javascript" else "0"
+                ),
             },
             cwd=LIVEKIT_FIXTURE,
         )
@@ -81,7 +100,8 @@ def main() -> int:
                     "url": server.url,
                     "apiKey": fixture.LIVEKIT_KEY,
                     "apiSecret": fixture.LIVEKIT_SECRET,
-                    "agentName": "egma-python-full-stack-e2e",
+                    "agentName": agent_name,
+                    "language": language,
                     "artifact": {
                         "file": artifact.path.name,
                         "sha256": artifact.sha256,

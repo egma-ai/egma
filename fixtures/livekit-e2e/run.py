@@ -799,6 +799,7 @@ def run_workbench_case(
         wait_http(f"{otlp_url}/health", collector)
 
         sentinel = directory / "real-tool-called"
+        record_request_sentinel = directory / "record-request-called"
         worker_env = os.environ | {
             "PYTHONUNBUFFERED": "1",
             "LIVEKIT_URL": livekit.url,
@@ -815,6 +816,7 @@ def run_workbench_case(
             # AgentSession closes. Completion must not depend on entry return.
             "EGMA_E2E_LONG_LIVED_ENTRY": "1" if language == "javascript" else "0",
             "EGMA_E2E_REAL_TOOL_SENTINEL": str(sentinel),
+            "EGMA_E2E_RECORD_REQUEST_SENTINEL": str(record_request_sentinel),
         }
         worker = start_process(
             f"{language} worker",
@@ -875,6 +877,12 @@ def run_workbench_case(
             raise AssertionError(f"{language} {modality} had no exchange: {terminal}")
         if sentinel.exists():
             raise AssertionError("the mocked real tool implementation executed")
+        wait_for_file(record_request_sentinel, worker)
+        recorded_input = json.loads(record_request_sentinel.read_text(encoding="utf-8"))
+        if recorded_input != {"day": "Tuesday", "kind": "reschedule"}:
+            raise AssertionError(
+                f"the real record_request tool received {recorded_input}"
+            )
 
         simulator_spans = [
             record
@@ -951,9 +959,20 @@ def run_workbench_case(
             and decoded_tool_output(record) == expected_output
             and record["attributes"].get("lk.function_tool.is_error") is False
         ]
-        if not successful_mock_calls or len(successful_mock_calls) != len(tool_spans):
+        recorded_requests = [
+            record
+            for record in tool_spans
+            if record["attributes"].get("lk.function_tool.name") == "record_request"
+            and isinstance(decoded_tool_output(record), dict)
+            and decoded_tool_output(record).get("recorded") is True
+            and decoded_tool_output(record).get("reference") == "fixture-request-1"
+            and record["attributes"].get("lk.function_tool.is_error") is False
+        ]
+        if len(successful_mock_calls) != 1 or len(recorded_requests) != 1:
             raise AssertionError(
-                f"expected every tool span to use the configured mock: {tool_spans}"
+                "expected one mocked availability lookup and one real recorded "
+                f"request; observed tool names: "
+                f"{[record['attributes'].get('lk.function_tool.name') for record in tool_spans]}"
             )
         names = {record["name"] for record in agent_spans}
         if not required_names.issubset(names):
@@ -974,6 +993,8 @@ def run_workbench_case(
             "turn_count": terminal["facts"]["turn_count"],
             "mock_call": True,
             "mock_call_count": len(successful_mock_calls),
+            "real_tool_call": True,
+            "real_tool_call_count": len(recorded_requests),
             "sdk_span_count": len(agent_spans),
             "worker_alive_after_final_evidence": True,
             "provider_reference": provider_reference,
