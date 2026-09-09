@@ -1,0 +1,193 @@
+import { loadIngestionSettings } from "@egma/ingestion";
+import { spawn, type ChildProcess } from "node:child_process";
+import type { Page } from "playwright-core";
+import { expect } from "vitest";
+
+import { makeLog } from "../../../grader/src/log.ts";
+import { startService } from "../../../grader/src/service.ts";
+
+export async function stopChild(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  child.kill("SIGTERM");
+  await exited;
+}
+
+export function startFullPathWorkers(options: {
+  readonly apiOrigin: string;
+  readonly serviceToken: string;
+  readonly claimant: string;
+  readonly simulatorDirectory: string;
+  readonly walDirectory: string;
+  readonly blobDirectory: string;
+  readonly modelKey: string;
+}): {
+  readonly simulator: ChildProcess;
+  readonly output: () => string;
+  stop(): Promise<void>;
+} {
+  let output = "";
+  const simulator = spawn("uv", ["run", "--frozen", "python", "-m", "egma_simulator"], {
+    cwd: options.simulatorDirectory,
+    env: {
+      ...process.env,
+      EGMA_SIMULATOR_CONTROL_PLANE_URL: options.apiOrigin,
+      EGMA_SIMULATOR_SERVICE_TOKEN: options.serviceToken,
+      EGMA_SIMULATOR_CLAIMANT: `${options.claimant}-simulator`,
+      EGMA_SIMULATOR_CLAIM_WAIT_SECONDS: "2",
+      EGMA_SIMULATOR_HEARTBEAT_SECONDS: "1",
+      EGMA_SIMULATOR_WAL_DIR: options.walDirectory,
+      EGMA_SIMULATOR_BLOB_DIR: options.blobDirectory,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  simulator.stdout?.on("data", (piece: Buffer) => { output += piece.toString("utf8"); });
+  simulator.stderr?.on("data", (piece: Buffer) => { output += piece.toString("utf8"); });
+  const grader = startService({
+    config: {
+      ingestion: loadIngestionSettings({}, { role: "ingest" }),
+      databaseUrl: "",
+      clickhouseUrl: "",
+      claimant: `${options.claimant}-grader`,
+      stripeSecretKey: undefined,
+      capacity: 1,
+      concurrencyCap: undefined,
+      heartbeatSeconds: 1,
+      leaseSeconds: 3_600,
+      sweepSeconds: 1,
+      logLevel: "ERROR",
+    },
+    log: makeLog("ERROR", `${options.claimant}-grader`),
+    providerCredentials: { async load() { return { openai: options.modelKey }; } },
+  });
+  return {
+    simulator,
+    output: () => output,
+    async stop() {
+      const stopped = stopChild(simulator);
+      grader.stop();
+      await grader.finished;
+      await stopped;
+    },
+  };
+}
+
+type EvidenceSpan = {
+  readonly spanId?: string;
+  readonly startedAt?: string;
+  readonly kind?: string;
+  readonly text?: string;
+  readonly toolName?: string;
+  readonly toolArguments?: string;
+  readonly toolResult?: string;
+  readonly toolProvenance?: string;
+  readonly pov?: string;
+  readonly spans?: readonly EvidenceSpan[];
+};
+
+export type ExpectedTool = {
+  readonly name: string;
+  readonly arguments: unknown;
+  readonly result: unknown;
+  readonly provenance?: "mocked";
+};
+
+function flatten(spans: readonly EvidenceSpan[]): EvidenceSpan[] {
+  return spans.flatMap((span) => [span, ...flatten(span.spans ?? [])]);
+}
+
+function decode(value: string | undefined): unknown {
+  if (value === undefined) return undefined;
+  let decoded: unknown = value;
+  for (let depth = 0; depth < 2 && typeof decoded === "string"; depth += 1) {
+    try { decoded = JSON.parse(decoded) as unknown; } catch { break; }
+  }
+  return decoded;
+}
+
+/** Assert the provider POV that the product displays, including exact tools. */
+export function assertPublicEvidence(
+  body: Record<string, unknown>,
+  expected: {
+    readonly pov: "agent" | "persona";
+    readonly humanIncludes: string;
+    readonly agentIncludes: string;
+    readonly tools: readonly ExpectedTool[];
+    readonly recording: boolean;
+  },
+): void {
+  expect(body).toMatchObject({
+    status: "completed",
+    gradingState: "complete",
+    ...(expected.pov === "agent" ? { agentPovComplete: true } : {}),
+    hasRecording: expected.recording,
+  });
+  const transcript = body.transcript as {
+    turns?: EvidenceSpan[];
+    spans?: EvidenceSpan[];
+  };
+  const turns = (transcript.turns ?? []).filter((turn) => turn.pov === expected.pov);
+  expect(turns.length).toBeGreaterThanOrEqual(2);
+  expect(turns.every((turn) => (turn.text?.trim().length ?? 0) > 0)).toBe(true);
+  const identities = turns.map((turn) => turn.spanId);
+  expect(identities.every((identity) => typeof identity === "string" && identity !== "")).toBe(true);
+  expect(new Set(identities).size).toBe(identities.length);
+  expect(turns.every((turn, index) =>
+    index === 0 || Date.parse(turn.startedAt ?? "") >= Date.parse(turns[index - 1]?.startedAt ?? "")
+  )).toBe(true);
+  expect(turns.some((turn) =>
+    turn.kind === "turn:human" && turn.text?.toLowerCase().includes(expected.humanIncludes)
+  )).toBe(true);
+  expect(turns.some((turn) =>
+    turn.kind === "turn:agent" && turn.text?.toLowerCase().includes(expected.agentIncludes)
+  )).toBe(true);
+
+  const tools = flatten([
+    ...(transcript.spans ?? []),
+    ...turns.flatMap((turn) => turn.spans ?? []),
+  ]).filter((span) => span.kind === "tool" && span.pov === expected.pov);
+  for (const wanted of expected.tools) {
+    const calls = tools.filter((span) => span.toolName === wanted.name);
+    expect(calls.length).toBeGreaterThanOrEqual(1);
+    for (const call of calls) {
+      expect(decode(call.toolArguments)).toEqual(wanted.arguments);
+      expect(decode(call.toolResult)).toEqual(wanted.result);
+      expect(call.toolProvenance).toBe(wanted.provenance);
+    }
+  }
+}
+
+/** Assert the same completed evidence through its customer-facing page. */
+export async function assertEvidencePage(
+  page: Page,
+  expected: {
+    readonly humanIncludes: string;
+    readonly agentIncludes: string;
+    readonly recording: boolean;
+  },
+): Promise<void> {
+  const results = page.getByRole("tab", { name: "Results summary", exact: true });
+  await results.waitFor();
+  await results.click();
+  const resultPanel = page.getByRole("tabpanel");
+  await expect.poll(() => resultPanel.innerText()).toContain("Graders");
+  expect(await resultPanel.innerText()).toContain("Passed");
+
+  const transcript = page.getByRole("tab", {
+    name: expected.recording ? "Transcript & audio" : "Transcript",
+    exact: true,
+  });
+  await transcript.click();
+  const transcriptPanel = page.getByRole("tabpanel");
+  const shown = await transcriptPanel.innerText();
+  expect(shown).toContain("User");
+  expect(shown).toContain("Agent");
+  expect(shown.toLowerCase()).toContain(expected.humanIncludes);
+  expect(shown.toLowerCase()).toContain(expected.agentIncludes);
+  expect(shown).not.toContain("LiveKit transcript unavailable");
+  if (expected.recording) {
+    const player = transcriptPanel.getByLabel("Simulation recording");
+    await player.waitFor({ state: "attached" });
+    expect(await player.getAttribute("src")).toContain("X-Amz-Signature=");
+  }
+}

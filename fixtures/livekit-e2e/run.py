@@ -285,6 +285,9 @@ def python_worker_environment(directory: Path) -> tuple[Path, SDKArtifact]:
         wheels = list(wheel_dir.glob("*.whl"))
     if len(wheels) != 1:
         raise RuntimeError(f"expected one Python wheel, found {wheels}")
+    agents_version = os.environ.get(
+        "LIVEKIT_E2E_PYTHON_AGENTS_VERSION", "1.7.1"
+    ).strip()
     checked(
         ["uv", "venv", "--python", "3.11", str(venv)],
         cwd=ROOT,
@@ -298,7 +301,7 @@ def python_worker_environment(directory: Path) -> tuple[Path, SDKArtifact]:
             "--python",
             str(venv / "bin/python"),
             str(wheels[0]),
-            "livekit-agents[openai,silero]==1.7.1",
+            f"livekit-agents[openai,silero]=={agents_version}",
         ],
         cwd=ROOT,
         log_path=directory / "python-install.log",
@@ -358,7 +361,16 @@ def javascript_worker_environment(directory: Path) -> tuple[list[str], SDKArtifa
         raise RuntimeError(f"expected one JavaScript package, found {packages}")
     package = packages[0]
     package_json = json.loads((FIXTURE / "package.json").read_text(encoding="utf-8"))
+    agents_version = os.environ.get(
+        "LIVEKIT_E2E_JAVASCRIPT_AGENTS_VERSION", "1.7.1"
+    ).strip()
     package_json["dependencies"]["@egma/livekit"] = f"file:{package}"
+    for dependency in (
+        "@livekit/agents",
+        "@livekit/agents-plugin-openai",
+        "@livekit/agents-plugin-silero",
+    ):
+        package_json["dependencies"][dependency] = agents_version
     (worker_dir / "package.json").write_text(
         json.dumps(package_json, indent=2) + "\n", encoding="utf-8"
     )
@@ -464,12 +476,10 @@ def simulation_spec(
         "mock_tools": [
             {
                 "tool_name": "check_availability",
-                "answer": {
-                    "answer": (
-                        "Tuesday is completely full. The next opening is "
-                        "Thursday morning."
-                    )
-                },
+                "answer": (
+                    "Tuesday is completely full. The next opening is "
+                    "Thursday morning."
+                ),
             }
         ],
         "job_dispatch_metadata": {"egma_e2e": f"{language}-{modality}-delayed"},

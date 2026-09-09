@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import signal
+import subprocess
 import sys
 import tempfile
 import threading
@@ -128,10 +129,24 @@ def main() -> int:
                 str(LIVEKIT_FIXTURE / "python_worker.py"),
                 "start",
             ]
+            runtime_version = subprocess.check_output(
+                [
+                    str(python),
+                    "-c",
+                    "import importlib.metadata; print(importlib.metadata.version('livekit-agents'))",
+                ],
+                text=True,
+            ).strip()
         elif language == "javascript":
             command, artifact = fixture.javascript_worker_environment(
                 proof / "javascript-artifact"
             )
+            worker_directory = Path(command[1]).parent
+            runtime_version = json.loads(
+                (worker_directory / "node_modules/@livekit/agents/package.json").read_text(
+                    encoding="utf-8"
+                )
+            )["version"]
         else:
             raise RuntimeError(f"unsupported SIMULATION_E2E_LANGUAGE: {language}")
         agent_name = f"egma-{language}-full-stack-e2e"
@@ -176,6 +191,7 @@ def main() -> int:
                     "apiSecret": fixture.LIVEKIT_SECRET,
                     "agentName": agent_name,
                     "language": language,
+                    "runtime": {"name": "livekit-agents", "version": runtime_version},
                     "localLivekitUrl": server.url,
                     "localTokenEndpoint": token_endpoint_url,
                     "artifact": {

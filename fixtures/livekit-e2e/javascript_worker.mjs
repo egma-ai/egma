@@ -41,7 +41,7 @@ const recordRequest = llm.tool({
   description: "Record the appointment request after availability was checked.",
   parameters: z.object({
     day: z.string().describe("The requested appointment day."),
-    kind: z.string().describe("The kind of appointment request."),
+    kind: z.literal("reschedule").describe("The kind of appointment request."),
   }),
   execute: async ({ day, kind }) => {
     const sentinel = process.env.EGMA_E2E_RECORD_REQUEST_SENTINEL;

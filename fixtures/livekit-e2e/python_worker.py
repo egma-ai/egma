@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 from pathlib import Path
+from typing import Literal
 
 from egma import simulation
 from livekit import agents
@@ -38,7 +39,7 @@ class AppointmentAgent(Agent):
         return "The real calendar has a Tuesday appointment at 9:40."
 
     @function_tool
-    async def record_request(self, day: str, kind: str) -> str:
+    async def record_request(self, day: str, kind: Literal["reschedule"]) -> str:
         """Record an appointment request after availability was checked.
 
         Args:

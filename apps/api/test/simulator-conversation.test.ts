@@ -27,6 +27,12 @@ import {
 } from "./support/object-storage.ts";
 import { NEUTRAL_PERSON } from "./support/traces.ts";
 import { openBrowser } from "./support/browser.ts";
+import {
+  assertEvidencePage,
+  assertPublicEvidence,
+  startFullPathWorkers,
+  stopChild,
+} from "./support/simulation-proof.ts";
 
 /**
  * Run the shipped Python simulator against the API, Postgres, ClickHouse,
@@ -74,6 +80,35 @@ async function startPublicTunnel(localUrl: string): Promise<{
     if (child.exitCode !== null) throw new Error(`cloudflared exited with ${String(child.exitCode)}`);
     if (Date.now() > deadline) throw new Error("cloudflared did not publish a URL within 60s");
     await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
+async function waitForTokenEndpoint(endpoint: string, auth: string): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  for (;;) {
+    try {
+      const answer = await fetch(endpoint, {
+        method: "POST",
+        signal: AbortSignal.timeout(2_000),
+        headers: {
+          Authorization: `Bearer ${auth}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          room_name: "egma-token-endpoint-readiness",
+          participant_identity: "readiness-probe",
+          participant_name: "readiness-probe",
+          room_config: { agents: [] },
+        }),
+      });
+      if (answer.ok) return;
+    } catch {
+      // Quick-tunnel DNS and edge routing can lag behind URL publication.
+    }
+    if (Date.now() > deadline) {
+      throw new Error("the public token endpoint did not become reachable within 60s");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
 
@@ -1217,10 +1252,10 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       provider.stderr?.on("data", (piece: Buffer) => {
         providerSaid += piece.toString("utf8");
       });
-      let liveSimulator: ChildProcess | undefined;
-      let liveGrader: Service | undefined;
+      let fullPathWorkers: ReturnType<typeof startFullPathWorkers> | undefined;
       const tunnels: ChildProcess[] = [];
       let artifact: { file: string; sha256: string; version: string } | undefined;
+      let runtime: { name: string; version: string } | undefined;
       let diagnosticEvidence: Record<string, unknown> | undefined;
       try {
         const readyBy = Date.now() + 180_000;
@@ -1230,6 +1265,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           apiSecret: string;
           agentName: string;
           artifact: { file: string; sha256: string; version: string };
+          runtime: { name: string; version: string };
           localLivekitUrl: string;
           localTokenEndpoint: string | null;
         } | undefined;
@@ -1247,6 +1283,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           throw new Error(`LiveKit provider did not become ready:\n${providerSaid}`);
         }
         artifact = ready.artifact;
+        runtime = ready.runtime;
         let tokenEndpoint: string | undefined;
         if (LIVE_ACCESS === "customer_token_endpoint") {
           if (ready.localTokenEndpoint === null) {
@@ -1265,6 +1302,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           const tokenTunnel = await startPublicTunnel(localTokenEndpoint.origin);
           tunnels.push(tokenTunnel.process);
           tokenEndpoint = `${tokenTunnel.url}${localTokenEndpoint.pathname}`;
+          await waitForTokenEndpoint(tokenEndpoint, tokenAuth);
         }
 
         const registered = await call("POST", "/v1/agents", {
@@ -1329,58 +1367,23 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             ...(LIVE_MOCKS ? {
               mockTools: [{
                 tool: "check_availability",
-                answer: { answer: expectedAvailability },
+                answer: expectedAvailability,
               }],
             } : {}),
           },
         });
         expect(pushed.status, JSON.stringify(pushed.body)).toBe(201);
 
-        liveSimulator = spawn(
-          "uv",
-          ["run", "--frozen", "python", "-m", "egma_simulator"],
-          {
-            cwd: SIMULATOR_DIRECTORY,
-            env: {
-              ...process.env,
-              EGMA_SIMULATOR_CONTROL_PLANE_URL: instance.origin,
-              EGMA_SIMULATOR_SERVICE_TOKEN: SERVICE_TOKEN,
-              EGMA_SIMULATOR_CLAIMANT: `${caseId}-simulator`,
-              EGMA_SIMULATOR_CLAIM_WAIT_SECONDS: "2",
-              EGMA_SIMULATOR_HEARTBEAT_SECONDS: "1",
-              EGMA_SIMULATOR_WAL_DIR: path.join(scratch, `${caseId}-wal`),
-              EGMA_SIMULATOR_BLOB_DIR: path.join(scratch, `${caseId}-blobs`),
-            },
-            stdio: ["ignore", "pipe", "pipe"],
-          },
-        );
-        liveSimulator.stdout?.on("data", (piece: Buffer) => {
-          simulatorSaid += piece.toString("utf8");
+        fullPathWorkers = startFullPathWorkers({
+          apiOrigin: instance.origin,
+          serviceToken: SERVICE_TOKEN,
+          claimant: caseId,
+          simulatorDirectory: SIMULATOR_DIRECTORY,
+          walDirectory: path.join(scratch, `${caseId}-wal`),
+          blobDirectory: path.join(scratch, `${caseId}-blobs`),
+          modelKey: LIVE_MODEL_KEY,
         });
-        liveSimulator.stderr?.on("data", (piece: Buffer) => {
-          simulatorSaid += piece.toString("utf8");
-        });
-        liveGrader = startService({
-          config: {
-            ingestion: loadIngestionSettings({}, { role: "ingest" }),
-            databaseUrl: "",
-            clickhouseUrl: "",
-            claimant: `${caseId}-grader`,
-            stripeSecretKey: undefined,
-            capacity: 1,
-            concurrencyCap: undefined,
-            heartbeatSeconds: 1,
-            leaseSeconds: 3_600,
-            sweepSeconds: 1,
-            logLevel: "ERROR",
-          },
-          log: makeLog("ERROR", `${caseId}-grader`),
-          providerCredentials: {
-            async load() {
-              return { openai: LIVE_MODEL_KEY };
-            },
-          },
-        });
+
         const started = await call("POST", "/v1/runs", {
           key,
           body: { suiteId, agentId, connectionId },
@@ -1414,77 +1417,44 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           status: "completed",
           gradingState: "complete",
           agentPovComplete: true,
+          hasRecording: LIVE_MODALITY === "voice",
         });
-        const transcript = detail.body.transcript as {
-          turns?: Array<{
-            kind?: string;
-            text?: string;
-            pov?: string;
-            spans?: EvidenceSpan[];
-          }>;
-          spans?: EvidenceSpan[];
-        };
-        type EvidenceSpan = {
-          kind?: string;
-          toolName?: string;
-          toolArguments?: string;
-          toolResult?: string;
-          toolProvenance?: string;
-          pov?: string;
-          spans?: EvidenceSpan[];
-        };
-        const flatten = (spans: EvidenceSpan[]): EvidenceSpan[] =>
-          spans.flatMap((span) => [span, ...flatten(span.spans ?? [])]);
-        const decode = (value: string | undefined): unknown => {
-          if (value === undefined) return undefined;
-          let decoded: unknown = value;
-          for (let depth = 0; depth < 2 && typeof decoded === "string"; depth += 1) {
-            try { decoded = JSON.parse(decoded) as unknown; } catch { break; }
-          }
-          return decoded;
-        };
-        const turns = transcript.turns ?? [];
-        const customerTurns = turns.filter((turn) => turn.pov === "agent");
-        expect(customerTurns.length).toBeGreaterThanOrEqual(2);
-        expect(customerTurns[0]).toMatchObject({ kind: "turn:human", pov: "agent" });
-        expect(customerTurns.some((turn) =>
-          turn.kind === "turn:human" && turn.text?.toLowerCase().includes("tuesday")
-        )).toBe(true);
-        expect(customerTurns.some((turn) =>
-          turn.kind === "turn:agent" && turn.text?.toLowerCase().includes(
-            LIVE_MOCKS ? "thursday" : "9:40",
-          )
-        )).toBe(true);
-        const tools = flatten([
-          ...(transcript.spans ?? []),
-          ...customerTurns.flatMap((turn) => turn.spans ?? []),
-        ]).filter(
-          (span) => span.kind === "tool" && span.pov === "agent",
-        );
-        const availabilityCalls = tools.filter(
-          (span) => span.toolName === "check_availability",
-        );
-        expect(availabilityCalls.length).toBeGreaterThanOrEqual(1);
-        for (const span of availabilityCalls) {
-          expect(decode(span.toolArguments)).toEqual({ day: "Tuesday" });
-          expect(decode(span.toolResult)).toBe(expectedAvailability);
-          expect(span.toolProvenance).toBe(LIVE_MOCKS ? "mocked" : undefined);
+        if (LIVE_MODALITY === "voice") {
+          const recording = await call(
+            "GET",
+            `/v1/simulations/${simulationId}/recording?projectId=${projectId}`,
+            { key },
+          );
+          expect(recording.status, JSON.stringify(recording.body)).toBe(200);
+          const recordingUrl = String(recording.body.url);
+          const audio = await fetch(recordingUrl);
+          expect(audio.status).toBe(200);
+          expect((await audio.arrayBuffer()).byteLength).toBeGreaterThan(0);
         }
-        const recordCalls = tools.filter((span) => span.toolName === "record_request");
-        expect(recordCalls.length).toBeGreaterThanOrEqual(1);
-        for (const span of recordCalls) {
-          expect(decode(span.toolArguments)).toEqual({
-            day: "Tuesday",
-            kind: "reschedule",
-          });
-          expect(decode(span.toolResult)).toEqual({
-            recorded: true,
-            reference: "fixture-request-1",
-            day: "Tuesday",
-            kind: "reschedule",
-          });
-          expect(span.toolProvenance).toBeUndefined();
-        }
+        assertPublicEvidence(detail.body, {
+          pov: "agent",
+          humanIncludes: "tuesday",
+          agentIncludes: LIVE_MOCKS ? "thursday" : "9:40",
+          recording: LIVE_MODALITY === "voice",
+          tools: [
+            {
+              name: "check_availability",
+              arguments: { day: "Tuesday" },
+              result: expectedAvailability,
+              ...(LIVE_MOCKS ? { provenance: "mocked" as const } : {}),
+            },
+            {
+              name: "record_request",
+              arguments: { day: "Tuesday", kind: "reschedule" },
+              result: {
+                recorded: true,
+                reference: "fixture-request-1",
+                day: "Tuesday",
+                kind: "reschedule",
+              },
+            },
+          ],
+        });
 
         const browser = await openBrowser();
         try {
@@ -1496,19 +1466,13 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           }]);
           const page = await context.newPage();
           await page.goto(
-            `${instance.origin}/projects/${projectId}/runs/${runId}/simulations/${simulationId}`,
+            `${instance.origin}/projects/${projectId}/runs/${runId}`,
           );
-          await page.getByRole("heading", { name: "Grades", exact: true }).waitFor();
-          const main = await page.locator("main").innerText();
-          expect(main).toContain("Graders passed");
-          expect(main).toMatch(/1\/1/u);
-          expect(main).toContain("Passed");
-          expect(main).toContain("User");
-          expect(main).toContain("Agent");
-          expect(main.toLowerCase()).toContain("tuesday");
-          expect(main.toLowerCase()).toContain(LIVE_MOCKS ? "thursday" : "9:40");
-          expect(main).toContain(`Packaged ${LIVE_LANGUAGE} appointment agent`);
-          expect(main).not.toContain("LiveKit transcript unavailable");
+          await assertEvidencePage(page, {
+            humanIncludes: "tuesday",
+            agentIncludes: LIVE_MOCKS ? "thursday" : "9:40",
+            recording: LIVE_MODALITY === "voice",
+          });
         } finally {
           await browser.close();
         }
@@ -1520,12 +1484,14 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             caseId,
             commitSha: process.env["GITHUB_SHA"] ?? "local-working-tree",
             artifact,
+            runtime,
             outcomes: {
               simulation: "completed",
               publicRead: true,
               agentPovComplete: true,
+              recording: LIVE_MODALITY === "voice",
               grade: "passed",
-              browser: { human: true, agent: true, source: true, grade: true },
+              browser: { human: true, agent: true, grade: true },
             },
           }, null, 2) + "\n",
           { encoding: "utf8", mode: 0o600 },
@@ -1542,7 +1508,11 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             readFile(path.join(providerDirectory, name), "utf8").catch(() => "")
           ),
         );
-        const safeProviderLog = [providerSaid, simulatorSaid, ...workerLogs]
+        const safeProviderLog = [
+          providerSaid,
+          fullPathWorkers?.output() ?? "",
+          ...workerLogs,
+        ]
           .join("\n")
           .replaceAll(LIVE_MODEL_KEY, "[REDACTED]")
           .replaceAll(key, "[REDACTED]");
@@ -1557,6 +1527,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             caseId,
             commitSha: process.env["GITHUB_SHA"] ?? "local-working-tree",
             ...(artifact === undefined ? {} : { artifact }),
+            ...(runtime === undefined ? {} : { runtime }),
             outcomes: {
               simulation: "failed",
               failureType: failure instanceof Error ? failure.name : "unknown",
@@ -1574,17 +1545,8 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         );
         throw failure;
       } finally {
-        liveSimulator?.kill("SIGTERM");
-        liveGrader?.stop();
-        await liveGrader?.finished;
-        provider.kill("SIGTERM");
-        for (const tunnel of tunnels) tunnel.kill("SIGTERM");
-        await Promise.all(
-          [liveSimulator, provider, ...tunnels].map(async (child) => {
-            if (child === undefined || child.exitCode !== null) return;
-            await new Promise<void>((resolve) => child.once("exit", () => resolve()));
-          }),
-        );
+        await fullPathWorkers?.stop();
+        await Promise.all([provider, ...tunnels].map(stopChild));
       }
     },
   );
