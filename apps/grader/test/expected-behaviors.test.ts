@@ -31,6 +31,7 @@ describe("the common LLM response", () => {
     expect(asked[0]?.expectedBehaviors).toEqual([
       { id: "behavior_1", text: BEHAVIORS[0] }, { id: "behavior_2", text: BEHAVIORS[1] }, { id: "behavior_3", text: BEHAVIORS[2] },
     ]);
+    expect(asked[0]?.evidence).not.toHaveProperty("outcome");
     expect(asked[0]?.evidence.toolCalls).toEqual([{ tool: "cancel", arguments: '{"subscription":"1"}' }]);
     expect(grade.score).toBe(2 / 3);
     expect(grade.details.assertions).toHaveLength(3);

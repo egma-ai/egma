@@ -1172,8 +1172,8 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         score: 1,
       });
       // The judge was shown the conversation egma assembled, not a report:
-      // four turns, the ending the row records, and no tool call, because the
-      // counterpart made none.
+      // four actual turns and no tool call, because the counterpart made none.
+      // The row's runtime ending stays out of the behavioral judge input.
       expect(judge.asked).toHaveLength(1);
       const [asked] = judge.asked;
       expect(asked?.criterion).toBe(seededCore?.prompt);
@@ -1181,11 +1181,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         { id: "behavior_1", text: THE_BEHAVIOR },
       ]);
       expect(asked?.evidence.transcript).toHaveLength(4);
-      expect(asked?.evidence.outcome).toMatchObject({
-        happened: true,
-        endingReason: "persona_concluded",
-        turns: 4,
-      });
+      expect(asked?.evidence).not.toHaveProperty("outcome");
 
       // Read the same durable evidence through the public route used by the
       // product. Raw store rows alone do not prove the customer can retrieve

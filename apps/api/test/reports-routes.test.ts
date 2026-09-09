@@ -1,4 +1,13 @@
-import { createPersona, getSimulation, readUsageThisPeriod, sweepOrphanedSimulations } from "@egma/db";
+import {
+  appendGrades,
+  claimGradingJobs,
+  createPersona,
+  finishGradingJob,
+  getSimulation,
+  readUsageThisPeriod,
+  sweepOrphanedSimulations,
+} from "@egma/db";
+import { traceIdOfSimulation } from "@egma/simulation-contract";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { CLAIMS_PATH } from "../src/routes/claims.ts";
@@ -507,6 +516,47 @@ describe("the lifecycle lands", () => {
       expect(header.body.status).toBe("completed");
       expect(header.body.completedCount).toBe(1);
       expect(header.body.failedCount).toBe(0);
+
+      const traceId = traceIdOfSimulation(simulationId);
+      if (traceId === undefined) throw new Error("the simulation has no trace identity");
+      const claimant = "reports-completed-grader";
+      const claim = (await claimGradingJobs({ claimant, capacity: 20 }))
+        .find((candidate) => candidate.traceId === traceId);
+      if (claim === undefined) throw new Error("the completed simulation has no grading claim");
+      const entry = claim.entries[0];
+      if (entry === undefined) throw new Error("the completed simulation has no selected grader");
+      await appendGrades(claim.auth, [{
+        source: "simulation",
+        traceId,
+        traceStartedAtMicroseconds: BigInt(claim.traceStartedAt.getTime()) * 1_000n,
+        runId,
+        projectGraderId: entry.projectGraderId,
+        graderDefinitionId: entry.graderDefinitionId,
+        graderDefinitionVersion: entry.graderDefinitionVersion,
+        parameterValues: entry.parameterValues,
+        score: 0,
+        details: { rationale: "The recorded behavior did not meet the criterion." },
+        graderPassThreshold: entry.graderPassThreshold,
+        gradingSequence: claim.sequenceBase + claim.attempts,
+        gradedAtMicroseconds: BigInt(Date.now()) * 1_000n,
+      }]);
+      await finishGradingJob(claim.auth, claim.id, claimant);
+
+      const lateFailure = await report(simulationId, [
+        terminalEvent("failed", "error", { turn_count: 14 }),
+      ]);
+      expect(lateFailure.statusCode).toBe(409);
+      expect(await gradingJobsFor(simulationId)).toBe(0);
+
+      const result = await ask(api.app, "GET", `/v1/simulations/${simulationId}`, key);
+      expect(result.statusCode, JSON.stringify(result.body)).toBe(200);
+      expect(result.body).toMatchObject({
+        status: "completed",
+        reason: "persona_concluded",
+        gradingState: "complete",
+        combinedScore: 0,
+        grades: [{ score: 0, result: "failed" }],
+      });
     },
   );
 

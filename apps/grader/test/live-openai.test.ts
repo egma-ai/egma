@@ -41,7 +41,6 @@ const EVIDENCE: JudgeInput = {
     { at: 4, speaker: "persona", text: "Yes please." },
     { at: 5, speaker: "agent", text: "Booked for Thursday at four. Anything else?" },
   ],
-  outcome: { happened: true, endingReason: "persona_concluded", turns: 5 },
   toolCalls: [{ tool: "reschedule_appointment", arguments: '{"to":"Thursday"}' }],
   measures: [{ measure: "turn_response_latency", samples: [900, 1_100] }],
 };
