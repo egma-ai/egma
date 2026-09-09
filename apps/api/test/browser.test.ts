@@ -5218,18 +5218,17 @@ describe("project grader model settings", () => {
       await proof.getByRole("tab", { name: "Grader library" }).click();
       await proof.getByRole("button", { name: "Cloned behavior core", exact: true }).click();
       library = proof.getByRole("dialog", { name: "Cloned behavior core" });
-      await library.getByLabel("Core version").selectOption("1");
-      await library.getByText("Decide only the expected behaviors you are given.", { exact: false }).waitFor();
-      expect(await library.getByRole("button", { name: "Edit core", exact: true }).count()).toBe(0);
-      expect(await library.getByRole("button", { name: "Clone grader", exact: true }).count()).toBe(0);
-      await library.screenshot({ path: "/tmp/egma-grader-core-history-desktop.png" });
+      await library.getByText("The agent must speak clearly.", { exact: true }).waitFor();
+      expect(await library.getByLabel("Core version").count()).toBe(0);
+      expect(await library.getByRole("button", { name: "Edit core", exact: true }).count()).toBe(1);
+      await library.screenshot({ path: "/tmp/egma-grader-core-current-desktop.png" });
       await proof.setViewportSize({ width: 390, height: 844 });
       await proof.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
       await proof.evaluate(() => {
         const document = Reflect.get(globalThis, "document") as { documentElement: { setAttribute(name: string, value: string): void } };
         document.documentElement.setAttribute("data-theme", "dark");
       });
-      await library.screenshot({ path: "/tmp/egma-grader-core-history-mobile-dark.png" });
+      await library.screenshot({ path: "/tmp/egma-grader-core-current-mobile-dark.png" });
       expect(await library.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
       await proof.keyboard.press("Escape");
       await library.waitFor({ state: "hidden" });
