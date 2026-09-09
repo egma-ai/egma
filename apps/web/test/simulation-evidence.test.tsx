@@ -241,8 +241,14 @@ function evidence(overrides: Record<string, unknown> = {}) {
       toolSpanCount: 0,
       erroredSpanCount: 0,
       turns: [
-        turn("span_human", "turn:human", "Move Thursday's clean.", 1),
-        turn("span_agent", "turn:agent", "You are all set for Tuesday.", 4),
+        {
+          ...turn("span_human", "turn:human", "Move Thursday's clean.", 1),
+          pov: "persona",
+        },
+        {
+          ...turn("span_agent", "turn:agent", "You are all set for Tuesday.", 4),
+          pov: "persona",
+        },
       ],
       spans: [],
       spansTruncated: false,
@@ -1133,7 +1139,7 @@ describe("the transcript time rail", () => {
       toolName: "check_availability",
       toolArguments: '{"preferred_date":"Tuesday"}',
       toolResult: "The next free slot is Thursday at 10:00 AM.",
-      pov: "agent" as const,
+      pov: "persona" as const,
       spans: [],
     };
     const nativeRecord = {
@@ -1254,6 +1260,7 @@ describe("the transcript time rail", () => {
       toolName: "lookup_appointment",
       toolArguments: "{}",
       toolResult: "{}",
+      pov: "persona" as const,
       spans: [],
     };
     const firstTurn = transcript.turns[0];
