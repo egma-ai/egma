@@ -251,7 +251,7 @@ async def test_the_structured_end_call_is_returned_for_pipecat_to_execute(model_
 
 
 @pytest.mark.parametrize("content", [None, ""])
-async def test_end_call_without_provider_words_gets_an_audible_goodbye(
+async def test_end_call_without_provider_words_keeps_the_end_action_textless(
     model_stub, content
 ):
     model_stub.answer_with(
@@ -271,8 +271,81 @@ async def test_end_call_without_provider_words_gets_an_audible_goodbye(
         reply = await client.reply(system_and_history())
     finally:
         await client.close()
-    assert reply.text == GOODBYE
+    assert reply.text == ""
     assert reply.requests_end_call is True
+
+
+@pytest.mark.parametrize("content", [None, " "])
+async def test_blank_completion_failure_keeps_only_safe_provider_metadata(
+    model_stub, content
+):
+    model_stub.answers.append(
+        web.json_response(
+            {
+                "id": "response-123",
+                "model": "served-model-2026-09-09",
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": content,
+                            "refusal": "private refusal text",
+                        },
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 0,
+                    "total_tokens": 12,
+                    "private": "provider body must not be retained",
+                },
+            }
+        )
+    )
+    client = OpenAICompatibleModel(
+        base_url=model_stub.base_url, api_key="secret-key", model_name="selected"
+    )
+    try:
+        with pytest.raises(ModelFailure) as caught:
+            await client.reply(system_and_history())
+    finally:
+        await client.close()
+
+    assert caught.value.diagnostic_attributes == {
+        "gen_ai.response.id": "response-123",
+        "gen_ai.response.model": "served-model-2026-09-09",
+        "gen_ai.response.finish_reason": "stop",
+        "gen_ai.response.refusal_present": True,
+        "gen_ai.usage.input_tokens": 12,
+        "gen_ai.usage.output_tokens": 0,
+        "gen_ai.usage.total_tokens": 12,
+    }
+    assert "private refusal text" not in repr(caught.value.diagnostic_attributes)
+
+
+async def test_malformed_completion_metadata_does_not_hide_the_blank_failure(model_stub):
+    model_stub.answers.append(
+        web.json_response(
+            {
+                "id": {"unexpected": "shape"},
+                "model": ["unexpected"],
+                "choices": [{"finish_reason": {}, "message": {"content": ""}}],
+                "usage": {"prompt_tokens": "twelve"},
+            }
+        )
+    )
+    client = OpenAICompatibleModel(
+        base_url=model_stub.base_url, api_key="k", model_name="selected"
+    )
+    try:
+        with pytest.raises(ModelFailure, match="no words") as caught:
+            await client.reply(system_and_history())
+    finally:
+        await client.close()
+    assert caught.value.diagnostic_attributes == {
+        "gen_ai.response.refusal_present": False
+    }
 
 
 async def test_a_literal_old_marker_has_no_control_meaning(model_stub):

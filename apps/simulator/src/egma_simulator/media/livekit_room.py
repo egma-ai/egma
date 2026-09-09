@@ -2132,6 +2132,20 @@ class LiveKitChatRoomBackend(RoomLifecycle):
             silence_ends_it=True,
         )
 
+    async def send(self, text: str) -> None:
+        """Send one final turn without opening another answer window."""
+        room = self._room
+        if room is None:
+            raise MediaBackendError("a persona turn was delivered before a room")
+        await room.send(text)
+
+    async def wait_ended(self) -> None:
+        """Wait for the room's observed normal ending."""
+        room = self._room
+        if room is None:
+            raise MediaBackendError("an ending was awaited before a room")
+        await room.ended.wait()
+
     async def _assembled(
         self,
         *,

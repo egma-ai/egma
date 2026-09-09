@@ -15,7 +15,7 @@ import asyncio
 import pytest
 
 from egma_simulator.conversation import Conducted, ConversationControls, conduct
-from egma_simulator.model import GOODBYE, ScriptedModel
+from egma_simulator.model import GOODBYE, ModelFailure, PersonaReply, ScriptedModel
 from egma_simulator.persona import Persona
 from egma_simulator.plugs import AgentReply
 from egma_simulator.plugs.scripted import ScriptedCounterpart
@@ -251,6 +251,7 @@ class NotingPlug:
     def __init__(self, *, opening: AgentReply, answers: list[AgentReply]) -> None:
         self.provider_reference = None
         self.delivered = 0
+        self.finished = 0
         self._opening = opening
         self._answers = answers
 
@@ -261,8 +262,184 @@ class NotingPlug:
         self.delivered += 1
         return self._answers.pop(0) if self._answers else AgentReply(text="Go on.")
 
+    async def finish(self, text: str) -> None:
+        del text
+        self.finished += 1
+
     async def close(self) -> None:
         return None
+
+
+class FixedModel:
+    model_name = "fixed"
+
+    def __init__(self, reply: PersonaReply) -> None:
+        self._reply = reply
+
+    async def reply(self, _context) -> PersonaReply:
+        return self._reply
+
+    async def close(self) -> None:
+        return None
+
+
+class TerminalPlug:
+    provider_reference = None
+
+    def __init__(self, final_answer: AgentReply | None = None) -> None:
+        self.ended = asyncio.Event()
+        self.final_answer = final_answer
+        self.sent: list[str] = []
+
+    async def open(self) -> None:
+        return None
+
+    async def deliver(self, text: str) -> AgentReply:
+        self.sent.append(text)
+        return AgentReply(text="continue")
+
+    async def finish(self, text: str) -> AgentReply | None:
+        self.sent.append(text)
+        return self.final_answer
+
+    async def wait_ended(self) -> None:
+        await self.ended.wait()
+
+    async def close(self) -> None:
+        return None
+
+
+def fixed_persona(reply: PersonaReply) -> Persona:
+    return Persona(
+        authored=AUTHORED,
+        scenario_instructions="One point.",
+        model=FixedModel(reply),
+    )
+
+
+async def test_a_real_terminal_turn_is_sent_once_before_the_persona_ends():
+    turns, recorder = collect()
+    plug = TerminalPlug(final_answer=AgentReply(text="Take care.", ended=True))
+    reply = PersonaReply(text="Goodbye.", concluded=True)
+    conducted = await conduct(
+        persona=fixed_persona(reply),
+        plug=plug,
+        max_turns=10,
+        max_duration_seconds=30,
+        on_turn=recorder,
+        on_timing=None,
+        controls=ConversationControls(),
+        name="sim:terminal",
+    )
+    assert plug.sent == ["Goodbye."]
+    assert turns == [("human", "Goodbye."), ("agent", "Take care.")]
+    assert conducted.ending == "agent_ended"
+
+
+async def test_a_textless_end_action_makes_no_turn_or_delivery():
+    turns, recorder = collect()
+    plug = TerminalPlug()
+    reply = PersonaReply(text="", concluded=True)
+    conducted = await conduct(
+        persona=fixed_persona(reply),
+        plug=plug,
+        max_turns=10,
+        max_duration_seconds=30,
+        on_turn=recorder,
+        on_timing=None,
+        controls=ConversationControls(),
+        name="sim:textless-terminal",
+    )
+    assert plug.sent == []
+    assert turns == []
+    assert conducted.ending == "persona_concluded"
+
+
+async def test_customer_end_cancels_pending_persona_work_without_a_late_turn():
+    class PendingModel:
+        model_name = "pending"
+
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.canceled = asyncio.Event()
+
+        async def reply(self, _context) -> PersonaReply:
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.canceled.set()
+                raise
+
+        async def close(self) -> None:
+            return None
+
+    model = PendingModel()
+    persona = Persona(
+        authored=AUTHORED, scenario_instructions="One point.", model=model
+    )
+    plug = TerminalPlug()
+    turns, recorder = collect()
+    running = asyncio.create_task(
+        conduct(
+            persona=persona,
+            plug=plug,
+            max_turns=10,
+            max_duration_seconds=30,
+            on_turn=recorder,
+            on_timing=None,
+            controls=ConversationControls(),
+            name="sim:customer-ended",
+        )
+    )
+    await model.started.wait()
+    plug.ended.set()
+    conducted = await running
+    assert model.canceled.is_set()
+    assert turns == []
+    assert plug.sent == []
+    assert conducted.ending == "agent_ended"
+
+
+async def test_customer_end_observed_first_beats_a_failure_ready_before_resume():
+    class RacingModel:
+        model_name = "racing"
+
+        def __init__(self) -> None:
+            self.reply_future = asyncio.get_running_loop().create_future()
+            self.started = asyncio.Event()
+
+        async def reply(self, _context) -> PersonaReply:
+            self.started.set()
+            return await self.reply_future
+
+        async def close(self) -> None:
+            return None
+
+    model = RacingModel()
+    persona = Persona(
+        authored=AUTHORED, scenario_instructions="One point.", model=model
+    )
+    plug = TerminalPlug()
+    turns, recorder = collect()
+    running = asyncio.create_task(
+        conduct(
+            persona=persona,
+            plug=plug,
+            max_turns=10,
+            max_duration_seconds=30,
+            on_turn=recorder,
+            on_timing=None,
+            controls=ConversationControls(),
+            name="sim:ordered-customer-end",
+        )
+    )
+    await model.started.wait()
+    plug.ended.set()
+    model.reply_future.set_exception(ModelFailure("late blank response"))
+    conducted = await running
+    assert conducted.ending == "agent_ended"
+    assert turns == []
 
 
 async def test_what_the_platform_said_rides_the_record_and_not_the_turn():

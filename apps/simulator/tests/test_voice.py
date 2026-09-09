@@ -33,7 +33,7 @@ from egma_simulator.conversation import (
 )
 from egma_simulator.media import VoiceMedia, scripted_transport
 from egma_simulator.media.scripted_transport import ScriptedTransport
-from egma_simulator.model import GOODBYE, ScriptedModel
+from egma_simulator.model import GOODBYE, ModelFailure, ScriptedModel
 from egma_simulator.persona import Persona
 from egma_simulator.pipeline import Assembled, assemble
 from egma_simulator.plugs import PlugError, failed_ending
@@ -689,6 +689,22 @@ async def test_an_exchange_the_agent_ends_still_leaves_a_recording(
     assert audio is not None
     recording = (tmp_path / audio["recording"]).read_bytes()
     assert_one_speaker_to_a_channel(recording, observed.turns)
+
+
+def test_a_late_persona_failure_cannot_replace_an_observed_agent_departure(
+    tmp_path: Path,
+):
+    assembled = assemble(
+        spec_for(), blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
+    )
+    conductor = assembled.conductor
+    assert conductor is not None
+    conductor.agent_is_departing()
+
+    conductor.the_brain_failed(ModelFailure("late persona failure"))
+
+    assert conductor._brain_fault is None
+    assert not conductor._faulted.is_set()
 
 
 class _ProductionStopScriptedVAD(ScriptedVAD):

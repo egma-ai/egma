@@ -148,6 +148,17 @@ class LiveKitChat:
             answered_at=answer.answer_began_at,
         )
 
+    async def finish(self, text: str) -> None:
+        """Send final persona words without asking the room for another turn."""
+        try:
+            await self._backend.send(text)
+        except MediaBackendError as refused:
+            raise PlugError(str(refused), ending=refused.ending) from refused
+
+    async def wait_ended(self) -> None:
+        """Wait until the room observes a normal remote ending."""
+        await self._backend.wait_ended()
+
     async def close(self) -> None:
         """Leave and clean up the room according to token authority; safe from every
         state.

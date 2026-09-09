@@ -202,6 +202,26 @@ async def test_the_agent_ending_the_exchange_is_read_from_the_flag(
     await plug.close()
 
 
+async def test_final_persona_words_use_one_completion_and_keep_its_reply(
+    start_text_mode_stub,
+):
+    running = await start_text_mode_stub(
+        api_key=SENTINEL_KEY,
+        replies=[Reply(), Reply(words="Take care.", ends=True)],
+    )
+    plug = text_mode(
+        {"retellAgentId": "agent_1", "baseUrl": running.base_url}, mock_tools=seam()
+    )
+    await plug.open()
+
+    answer = await plug.finish("Goodbye.")
+    await plug.close()
+
+    assert answer == AgentReply(text="Take care.", ended=True)
+    assert running.stub.delivered() == ["Goodbye."]
+    assert len(running.stub.requests) == 2
+
+
 async def test_an_end_tool_ends_the_exchange_even_without_the_flag(
     start_text_mode_stub,
 ):

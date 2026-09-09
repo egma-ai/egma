@@ -12,7 +12,7 @@ from conftest import loopback_spec, scripted_spec
 from egma_simulator import reporting, service
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.config import SimulatorConfig
-from egma_simulator.model import PersonaReply
+from egma_simulator.model import ModelFailure, PersonaReply
 from egma_simulator.redaction import SecretRegistry
 from egma_simulator.service import RunningSimulation
 from egma_simulator.spec import SimulationSpec
@@ -24,6 +24,7 @@ from egma_simulator.speech import SCRIPTED_PAIR
     [
         ("chat", "completed"),
         ("chat", "failed"),
+        ("chat", "metadata_failure"),
         ("chat", "canceled"),
         ("chat", "cleanup_failed"),
         ("chat", "evidence_cleanup_failed"),
@@ -43,6 +44,7 @@ async def test_execution_end_precedes_cleanup_and_evidence_delivery(
     delivered: list[dict] = []
     origin = datetime(2026, 9, 8, tzinfo=UTC)
     evidence_cleanup_calls = 0
+    logs: list[tuple[str, dict[str, object]]] = []
 
     def moment() -> str:
         return (origin + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -56,6 +58,14 @@ async def test_execution_end_precedes_cleanup_and_evidence_delivery(
             model_entered.set()
             if outcome == "failed":
                 raise RuntimeError("model execution failed")
+            if outcome == "metadata_failure":
+                raise ModelFailure(
+                    "the model's answer had no words to speak",
+                    diagnostic_attributes={
+                        "gen_ai.response.id": "response-123",
+                        "gen_ai.response.refusal_present": True,
+                    },
+                )
             if outcome == "canceled" and modality == "chat":
                 await asyncio.Event().wait()
             return PersonaReply(text="Goodbye.", concluded=outcome != "canceled")
@@ -110,6 +120,12 @@ async def test_execution_end_precedes_cleanup_and_evidence_delivery(
 
     monkeypatch.setattr(reporting, "moment", moment)
     monkeypatch.setattr(service, "build_model_client", build_model)
+
+    def capture_log(_logger, _level, event_name, _body, *args, **kwargs):
+        del args
+        logs.append((event_name, kwargs.get("attributes") or {}))
+
+    monkeypatch.setattr(service, "log_event", capture_log)
     if outcome == "evidence_cleanup_failed":
         monkeypatch.setattr(
             RunningSimulation,
@@ -159,6 +175,8 @@ async def test_execution_end_precedes_cleanup_and_evidence_delivery(
             "evidence_cleanup_failed",
             "recording_failed",
         )
+        else "failed"
+        if outcome == "metadata_failure"
         else outcome
     )
     if outcome == "assembly_failed":
@@ -179,3 +197,12 @@ async def test_execution_end_precedes_cleanup_and_evidence_delivery(
     if modality == "voice" and outcome == "completed":
         assert terminal["facts"]["audio"] is not None
         assert terminal["facts"]["turn_count"] > 0
+    if outcome == "metadata_failure":
+        finished = next(
+            attributes
+            for event, attributes in logs
+            if event == "egma.simulation.finished"
+        )
+        assert finished["gen_ai.response.id"] == "response-123"
+        assert finished["gen_ai.response.refusal_present"] is True
+        assert terminal["reason"].endswith("the model's answer had no words to speak")

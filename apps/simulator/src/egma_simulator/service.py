@@ -412,6 +412,9 @@ class RunningSimulation:
             # that broke, and only the plug knows the difference. See
             # `plugs.failed_ending`.
             ending = failed_ending(fault)
+            diagnostic_attributes = getattr(fault, "diagnostic_attributes", {})
+            if not isinstance(diagnostic_attributes, dict):
+                diagnostic_attributes = {}
             log_event(
                 logger,
                 logging.ERROR,
@@ -421,6 +424,7 @@ class RunningSimulation:
                     "egma.outcome": "failed",
                     "egma.ending": ending,
                     "error.type": type(fault).__name__,
+                    **diagnostic_attributes,
                 },
                 exc_info=True,
             )

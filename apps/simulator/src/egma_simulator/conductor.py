@@ -765,7 +765,8 @@ class _PersonaLLMService(LLMService):
                     ]
                 )
             )
-        await self.push_frame(LLMTextFrame(reply.text))
+        if reply.text:
+            await self.push_frame(LLMTextFrame(reply.text))
         reply = await self._execute_tool_calls(reply, context)
         self._reply = reply
 
@@ -862,7 +863,9 @@ class _PersonaReplyGate(FrameProcessor):
                 raise RuntimeError(
                     "Pipecat's persona response did not match its model reply"
                 )
-            if not self._conductor.is_ending:
+            if reply.concluded and not reply.text:
+                self._conductor.persona_concluded_without_speech()
+            elif not self._conductor.is_ending:
                 await self._conductor.wait_until(due)
                 if not self._conductor.is_ending:
                     self._conductor.persona_will_speak(
@@ -1331,6 +1334,8 @@ class VoiceConductor:
 
         @worker.event_handler("on_pipeline_error")
         async def _remember_fault(_worker: object, error: object) -> None:
+            if self._agent_departed:
+                return
             exception = getattr(error, "exception", None)
             processor = getattr(error, "processor", None)
             if isinstance(exception, ProviderKeyUnavailable):
@@ -1673,6 +1678,13 @@ class VoiceConductor:
         self._owes_a_turn = False
         self.media_advanced()
 
+    def persona_concluded_without_speech(self) -> None:
+        """End on a valid end action that requested no speech."""
+        if not self.is_ending:
+            self._ending = PERSONA_CONCLUDED
+        self._owes_a_turn = False
+        self.media_advanced()
+
     def _talked_over(self, began: MediaPosition) -> bool:
         if began < self._record.quiet_since:
             return True
@@ -1750,6 +1762,8 @@ class VoiceConductor:
         await self._recorder.close_input_at(source_end)
 
     def the_brain_failed(self, fault: BaseException) -> None:
+        if self._agent_departed:
+            return
         if self._brain_fault is None:
             self._brain_fault = fault
         self._faulted.set()
