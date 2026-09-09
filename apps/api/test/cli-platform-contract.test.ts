@@ -160,15 +160,15 @@ describe("the CLI and API suite contract", () => {
     expect(pushed.personas).toEqual([{ id: selectedPersona?.id, name: "Everyday caller" }]);
 
     const registered = await request(api.app, "POST", "/v1/agents", key, {
-      agentPlatform: "retell",
+      agentPlatform: "livekit",
       name: "Front desk",
       connection: {
-        agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        agentPlatform: "livekit",
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
         modality: "chat",
-        config: { retellAgentId: "agent_in_retell_cli_contract" },
-        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+        config: { url: "wss://cli-contract.livekit.cloud", agentName: "front-desk" },
+        credentials: { apiKey: "APIcliContract1234", apiSecret: "livekit-secret-cli-contract" },
       },
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
@@ -201,8 +201,8 @@ describe("the CLI and API suite contract", () => {
       },
       fetchImpl,
     );
-    expect(started.kind).toBe("started");
     if (started.kind !== "started") throw new Error(started.reason);
+    expect(started.kind).toBe("started");
     expect(started.run).toMatchObject({
       agentId,
       connectionId,

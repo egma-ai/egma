@@ -20,27 +20,16 @@ import {
   Refused,
 } from "../../../../../ui/form.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
-import { SettingsLayout } from "../../../../../ui/settings-nav.tsx";
 import {
   useOrganizationRead,
   useUnsavedChanges,
 } from "../../../../../ui/settings-read.ts";
-import {
-  AppShell,
-  PageBody,
-  PageHeader,
-  ProductPage,
-  useShellSession,
-} from "../../../../../ui/shell.tsx";
+import { useShellSession } from "../../../../../ui/shell.tsx";
 
 /** Organization-wide details. Model choices and credentials do not live here. */
 export default function OrganizationSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  return (
-    <AppShell>
-      <OrganizationSettingsBody projectId={projectId} />
-    </AppShell>
-  );
+  return <OrganizationSettingsBody projectId={projectId} />;
 }
 
 function OrganizationSettingsBody({ projectId }: { readonly projectId: string }) {
@@ -116,61 +105,32 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
   }
 
   if (answer === null) {
-    return (
-      <ProductPage viewport>
-        <PageHeader title="Organization" />
-        <PageBody>
-          <SettingsLayout projectId={projectId} current="organization">
-            <Loading what="this organization" />
-          </SettingsLayout>
-        </PageBody>
-      </ProductPage>
-    );
+    return <Loading what="this organization" />;
   }
 
   if (answer.status !== "ready") {
     return (
-      <ProductPage viewport>
-        <PageHeader title="Organization" />
-        <PageBody>
-          <SettingsLayout projectId={projectId} current="organization">
-            <Failure
+      <Failure
               message={
                 answer.status === "signed-out"
                   ? "Your session has ended. Sign in and try again."
                   : answer.refusal.message
               }
               onRetry={reload}
-            />
-          </SettingsLayout>
-        </PageBody>
-      </ProductPage>
+      />
     );
   }
 
   return (
-    <ProductPage viewport>
-      <PageHeader title="Organization" />
-      <PageBody>
-        <SettingsLayout projectId={projectId} current="organization">
+    <>
           {/* One form, and the title bar has already named the page. */}
           <div className="flex flex-col gap-4">
             {refused === null ? null : <Refused message={refused.message} />}
 
             <Form onSubmit={() => void save()}>
-              {/*
-                * The hint is the field's own rather than a paragraph written
-                * beside it. `Field` draws the sentence and hands its id to
-                * whatever control it wraps through context, so the
-                * `aria-describedby` cannot be dropped by an edit here and the
-                * space under the input is the 8px every other field in the
-                * product gets. The words and the wiring did not move; a second
-                * copy of a shared component's job did.
-                */}
               <Field
-                label="Name"
+                label="Organization name*"
                 htmlFor="organization-name"
-                hint="What Egma calls your organization. Changing it breaks no link and no invitation."
               >
                 <Input
                   id="organization-name"
@@ -178,6 +138,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
                   autoComplete="off"
                   spellCheck={false}
                   disabled={!mayAdminister}
+                  aria-required="true"
                   aria-invalid={named ? undefined : true}
                   onChange={(event) => {
                     editVersion.current += 1;
@@ -202,8 +163,6 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
               </FormActions>
             </Form>
           </div>
-        </SettingsLayout>
-      </PageBody>
-    </ProductPage>
+    </>
   );
 }

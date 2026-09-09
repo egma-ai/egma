@@ -1,17 +1,28 @@
-export type VoiceTaskMode = "one-shot" | "standby";
-
-export type AwsVoiceFleetSettings = {
-  readonly kind: "aws-ecs";
-  readonly cluster: string;
-  readonly taskDefinition: string;
-  readonly containerName: string;
-  readonly subnets: readonly string[];
-  readonly securityGroups: readonly string[];
+export type DaytonaVoiceFleetSettings = {
+  readonly kind: "daytona";
+  readonly apiUrl?: string;
+  readonly apiKey: string;
+  readonly target?: string;
+  readonly snapshot: string;
+  readonly releaseSha: string;
+  readonly ttlMinutes: number;
+  readonly serviceTokenSecret: string;
+  readonly providerSecrets: Readonly<Record<string, string>>;
+  readonly controlPlaneUrl: string;
+  readonly livekitUrl: string;
+  readonly livekitApiKey: string;
+  readonly livekitApiSecret: string;
+  readonly s3Endpoint: string;
+  readonly s3Bucket: string;
+  readonly s3Region: string;
+  readonly recordingRoleArn: string;
+  readonly recordingBucketArn: string;
 };
+
+export type VoiceFleetSettings = DaytonaVoiceFleetSettings;
 
 export type VoiceFleetTask = {
   readonly id: string;
-  readonly mode: VoiceTaskMode;
 };
 
 export type VoiceFleetLaunchFailure = {
@@ -24,12 +35,11 @@ export type VoiceFleetLaunchResult = {
   readonly failures: readonly VoiceFleetLaunchFailure[];
 };
 
-/** The cloud-specific edge. Tests and the launcher itself need no AWS package. */
+/** The cloud-specific edge. Demand accounting does not depend on Daytona. */
 export type VoiceFleet = {
   listTasks(): Promise<readonly VoiceFleetTask[]>;
   launchTasks(options: {
     readonly count: number;
-    readonly mode: VoiceTaskMode;
   }): Promise<VoiceFleetLaunchResult>;
 };
 
@@ -48,24 +58,46 @@ export type VoiceFleetReconcilerOptions = {
   readonly fleet: VoiceFleet;
   readonly estimateDemand: () => Promise<VoiceSimulationDemand>;
   readonly log: VoiceFleetLog;
-  readonly standbyTarget?: number;
-  readonly recentLaunchMilliseconds?: number;
   readonly initialBackoffMilliseconds?: number;
   readonly maximumBackoffMilliseconds?: number;
   readonly now?: () => number;
 };
 
 export type VoiceFleetReconcileResult = {
-  readonly desired: Readonly<Record<VoiceTaskMode, number>>;
-  readonly present: Readonly<Record<VoiceTaskMode, number>>;
-  readonly launched: Readonly<Record<VoiceTaskMode, number>>;
+  readonly desired: number;
+  readonly present: number;
+  readonly launched: number;
   readonly skipped: "overlap" | "backoff" | undefined;
 };
 
-type RecentLaunch = VoiceFleetTask & { readonly launchedAt: number };
+/** Coalesce wake-ups while preserving one that arrives during a failed pass. */
+export function createVoiceFleetWake(options: {
+  readonly reconcile: () => Promise<unknown> | undefined;
+  readonly failed: (error: unknown) => void;
+}): () => void {
+  let running = false;
+  let requested = false;
+  return () => {
+    requested = true;
+    if (running) return;
+    running = true;
+    void (async () => {
+      try {
+        do {
+          requested = false;
+          try {
+            await options.reconcile();
+          } catch (error) {
+            options.failed(error);
+          }
+        } while (requested);
+      } finally {
+        running = false;
+      }
+    })();
+  };
+}
 
-const DEFAULT_STANDBY_TARGET = 2;
-const DEFAULT_RECENT_LAUNCH_MILLISECONDS = 60_000;
 const DEFAULT_INITIAL_BACKOFF_MILLISECONDS = 1_000;
 const DEFAULT_MAXIMUM_BACKOFF_MILLISECONDS = 30_000;
 
@@ -83,14 +115,6 @@ function wholeNonnegative(value: number, name: string): number {
 export function createVoiceFleetReconciler(
   options: VoiceFleetReconcilerOptions,
 ): { reconcile(): Promise<VoiceFleetReconcileResult> } {
-  const standbyTarget = wholeNonnegative(
-    options.standbyTarget ?? DEFAULT_STANDBY_TARGET,
-    "the standby target",
-  );
-  const recentLaunchMilliseconds = wholeNonnegative(
-    options.recentLaunchMilliseconds ?? DEFAULT_RECENT_LAUNCH_MILLISECONDS,
-    "the recent-launch window",
-  );
   const initialBackoffMilliseconds = wholeNonnegative(
     options.initialBackoffMilliseconds ?? DEFAULT_INITIAL_BACKOFF_MILLISECONDS,
     "the initial launch backoff",
@@ -105,16 +129,15 @@ export function createVoiceFleetReconciler(
 
   const now = options.now ?? Date.now;
   let reconciling = false;
-  let recent: RecentLaunch[] = [];
   let retryAt = 0;
   let nextBackoff = initialBackoffMilliseconds;
 
   const empty = (
     skipped: VoiceFleetReconcileResult["skipped"],
   ): VoiceFleetReconcileResult => ({
-    desired: { "one-shot": 0, standby: 0 },
-    present: { "one-shot": 0, standby: 0 },
-    launched: { "one-shot": 0, standby: 0 },
+    desired: 0,
+    present: 0,
+    launched: 0,
     skipped,
   });
 
@@ -143,47 +166,18 @@ export function createVoiceFleetReconciler(
         wholeNonnegative(demand.active, "active voice demand");
         wholeNonnegative(demand.admissibleQueued, "queued voice demand");
 
-        const observedAt = now();
-        recent = recent.filter(
-          (task) => observedAt - task.launchedAt < recentLaunchMilliseconds,
-        );
-
-        // ECS may begin listing a task before the local ledger expires. Its
-        // stable task ARN is the identity, so the task counts once here.
         const tasks = new Map<string, VoiceFleetTask>();
-        for (const task of recent) tasks.set(task.id, task);
         for (const task of listed) tasks.set(task.id, task);
-
-        const desiredWork = demand.active + demand.admissibleQueued;
-        const desiredTotal = desiredWork + standbyTarget;
-        const present = { "one-shot": 0, standby: 0 };
-        for (const task of tasks.values()) present[task.mode] += 1;
-        const presentTotal = present["one-shot"] + present.standby;
-        const missingTotal = Math.max(0, desiredTotal - presentTotal);
-        // A standby keeps its launch mode after it claims. Active simulations
-        // may therefore occupy the standby-labelled tasks; subtract them when
-        // deciding how much waiting capacity remains. This is only launch
-        // arithmetic and never binds an active row to a particular task.
-        const waitingStandbys = Math.max(0, present.standby - demand.active);
-        const missingStandbys = Math.max(0, standbyTarget - waitingStandbys);
-        const standbyLaunches = Math.min(missingTotal, missingStandbys);
-        const desired = {
-          "one-shot": present["one-shot"] + missingTotal - standbyLaunches,
-          standby: present.standby + standbyLaunches,
-        } as const;
-        const launched = { "one-shot": 0, standby: 0 };
+        const desired = demand.active + demand.admissibleQueued;
+        const present = tasks.size;
+        const missing = Math.max(0, desired - present);
+        let launched = 0;
         const failures: VoiceFleetLaunchFailure[] = [];
 
-        for (const mode of ["one-shot", "standby"] as const) {
-          const missing = desired[mode] - present[mode];
-          if (missing === 0) continue;
+        if (missing > 0) {
           try {
-            const result = await options.fleet.launchTasks({ count: missing, mode });
-            const launchedAt = now();
-            recent.push(
-              ...result.tasks.map((task) => ({ ...task, launchedAt })),
-            );
-            launched[mode] += result.tasks.length;
+            const result = await options.fleet.launchTasks({ count: missing });
+            launched += result.tasks.length;
             failures.push(...result.failures);
           } catch (err) {
             failures.push({
@@ -206,7 +200,7 @@ export function createVoiceFleetReconciler(
         } else {
           retryAt = 0;
           nextBackoff = initialBackoffMilliseconds;
-          if (launched["one-shot"] + launched.standby > 0) {
+          if (launched > 0) {
             options.log.info(
               { launched, desired, present },
               "voice fleet reconciled to admissible work",

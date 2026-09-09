@@ -114,15 +114,18 @@ export function CreateSuiteSheet({
               />
             </Field>
           </SheetBody>
-          <SheetFooter>
+          <SheetFooter
+            secondary={
+              <SheetClose asChild>
+                <Button type="button" size="lg" variant="secondary" disabled={saving}>
+                  Cancel
+                </Button>
+              </SheetClose>
+            }
+          >
             <Button type="submit" size="lg" busy={saving} disabled={name.trim() === ""}>
               {saving ? "Creating…" : "Create suite"}
             </Button>
-            <SheetClose asChild>
-              <Button type="button" size="lg" variant="secondary" disabled={saving}>
-                Cancel
-              </Button>
-            </SheetClose>
           </SheetFooter>
         </form>
       </SheetContent>
@@ -233,6 +236,13 @@ export function RenameSuiteSheet({
             </dl>
           </SheetBody>
           <SheetFooter
+            secondary={
+              <SheetClose asChild>
+                <Button type="button" size="lg" variant="secondary" disabled={saving}>
+                  Cancel
+                </Button>
+              </SheetClose>
+            }
             destructive={
               <Button
                 type="button"
@@ -256,11 +266,6 @@ export function RenameSuiteSheet({
             >
               {saving ? "Saving…" : "Save name"}
             </Button>
-            <SheetClose asChild>
-              <Button type="button" size="lg" variant="secondary" disabled={saving}>
-                Cancel
-              </Button>
-            </SheetClose>
           </SheetFooter>
         </form>
       </SheetContent>

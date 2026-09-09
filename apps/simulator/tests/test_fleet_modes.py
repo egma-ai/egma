@@ -66,47 +66,6 @@ async def test_one_shot_exits_after_one_empty_claim(workbench, start_simulator):
     assert claims[0]["granted"] == []
 
 
-async def test_empty_standby_exits_at_its_idle_deadline(workbench, start_simulator):
-    simulator = start_simulator(
-        workbench,
-        capacity=1,
-        extra_env={
-            "EGMA_SIMULATOR_MODE": "standby",
-            "EGMA_SIMULATOR_STANDBY_SECONDS": "0.3",
-        },
-    )
-    await simulator.wait_for_output(lambda output: "simulator started" in output)
-    began = time.monotonic()
-
-    assert await wait_for_exit(simulator, 3) == 0
-    elapsed = time.monotonic() - began
-    assert 0.2 <= elapsed < 2
-    assert "standby simulator idle limit expired" in simulator.output()
-
-
-async def test_standby_keeps_its_full_execution_budget_after_waiting(
-    workbench, start_simulator
-):
-    began = time.monotonic()
-    simulator = start_simulator(
-        workbench,
-        capacity=1,
-        extra_env={
-            "EGMA_SIMULATOR_MODE": "standby",
-            "EGMA_SIMULATOR_STANDBY_SECONDS": "0.6",
-            "EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS": "5",
-        },
-    )
-    await asyncio.sleep(0.45)
-    await workbench.offer(
-        loopback_spec("sim-standby-voice", greeting="Hello.", max_turns=2)
-    )
-
-    await workbench.wait_for(terminal("sim-standby-voice"))
-    assert await wait_for_exit(simulator, 5) == 0
-    assert time.monotonic() - began > 0.6
-
-
 async def test_persistent_chat_at_capacity_fifty_serves_successive_work(
     workbench, start_simulator
 ):

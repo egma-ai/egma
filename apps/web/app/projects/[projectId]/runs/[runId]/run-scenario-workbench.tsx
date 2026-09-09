@@ -358,6 +358,26 @@ function ResultNotice({ evidence }: { readonly evidence: SimulationEvidence }) {
       </div>
     );
   }
+  if (evidence.evidenceError !== null && evidence.evidenceError !== undefined) {
+    return (
+      <div className="border border-s-4 border-border border-s-failure bg-surface-soft px-4 py-3 sm:px-5" role="alert">
+        <p className="m-0 text-sm font-medium text-foreground">Evidence collection did not finish</p>
+        <p className="m-0 mt-1 text-sm text-muted-foreground">
+          {evidence.evidenceError.message}
+        </p>
+      </div>
+    );
+  }
+  if (waitingForSimulationTranscript(evidence)) {
+    return (
+      <div className="border border-s-4 border-border border-s-brand bg-selected px-4 py-3 sm:px-5" role="status">
+        <p className="m-0 text-sm font-medium text-foreground">Collecting agent transcript</p>
+        <p className="m-0 mt-1 text-sm text-muted-foreground">
+          Waiting for the agent’s complete transcript before grading. If it cannot be collected, this simulation will show an evidence error.
+        </p>
+      </div>
+    );
+  }
   if (evidence.gradingState === "pending" || evidence.gradingState === "running") {
     return (
       <div className="border border-s-[3px] border-border border-s-brand bg-selected px-5 py-3 max-[40rem]:px-4" role="status">
@@ -616,8 +636,9 @@ function ResultSummary({
   if (evidence.gradingState === "not_requested") {
     return (
       <div className="flex min-w-0 flex-col gap-4">
+        {evidence.status === "failed" ? <ResultNotice evidence={evidence} /> : null}
         <SimulationFacts evidence={evidence} />
-        <ResultNotice evidence={evidence} />
+        {evidence.status === "failed" ? null : <ResultNotice evidence={evidence} />}
         <GradersLine regrade={regrade} />
         <div className="border border-border bg-surface p-5 max-[40rem]:p-4">
           <h3 className="m-0 text-base font-medium text-foreground">
@@ -634,8 +655,9 @@ function ResultSummary({
   if (rows.length === 0) {
     return (
       <div className="flex min-w-0 flex-col gap-4">
+        {evidence.status === "failed" ? <ResultNotice evidence={evidence} /> : null}
         <SimulationFacts evidence={evidence} />
-        <ResultNotice evidence={evidence} />
+        {evidence.status === "failed" ? null : <ResultNotice evidence={evidence} />}
         <GradersLine regrade={regrade} />
         <div className="border border-border bg-surface p-5 max-[40rem]:p-4">
           <h3 className="m-0 text-base font-medium text-foreground">
@@ -657,8 +679,9 @@ function ResultSummary({
       role="region"
       aria-label="Grader results"
     >
+      {evidence.status === "failed" ? <ResultNotice evidence={evidence} /> : null}
       <SimulationFacts evidence={evidence} />
-      <ResultNotice evidence={evidence} />
+      {evidence.status === "failed" ? null : <ResultNotice evidence={evidence} />}
       <GradersLine regrade={regrade} />
       {rows.map((row) => (
         <GraderResultCard
@@ -891,6 +914,22 @@ const RAIL_TAB = cn(
   "group-data-[orientation=horizontal]/tabs:data-[state=inactive]:after:h-px",
 );
 
+type EvidenceTab = "results" | "transcript";
+
+/** A running conversation opens where its live evidence is; all other phases start on results. */
+function defaultEvidenceTab(evidence: SimulationEvidence): EvidenceTab {
+  return evidence.status === "running" ? "transcript" : "results";
+}
+
+/** A phase change gets a new default without overriding a choice within that phase. */
+function evidenceTabPhase(evidence: SimulationEvidence): string {
+  if (evidence.status === "queued" || evidence.status === "claimed") {
+    return "queued";
+  }
+  if (evidence.status === "running") return "running";
+  return "settled";
+}
+
 function EvidenceDetail({
   evidence,
   onReload,
@@ -899,10 +938,23 @@ function EvidenceDetail({
   readonly onReload: () => void;
 }) {
   const regradeRequest = useRegradeRequest({ evidence, onReload });
+  const phase = evidenceTabPhase(evidence);
+  const tabKey = `${evidence.id}:${phase}`;
+  const [choice, setChoice] = useState<{
+    readonly key: string;
+    readonly value: EvidenceTab;
+  } | null>(null);
+  const selectedTab = choice?.key === tabKey
+    ? choice.value
+    : defaultEvidenceTab(evidence);
   return (
       <Tabs
-        key={evidence.id}
-        defaultValue="results"
+        key={tabKey}
+        value={selectedTab}
+        onValueChange={(value) => {
+          if (value !== "results" && value !== "transcript") return;
+          setChoice({ key: tabKey, value });
+        }}
         className="min-h-0 flex-1 gap-0 overflow-hidden"
       >
         {/*

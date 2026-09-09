@@ -21,6 +21,10 @@ import {
 import { CLAIMS_PATH } from "../src/routes/claims.ts";
 import { fixedWindowRateLimit } from "../src/http/rate-limit.ts";
 import {
+  DaytonaAssignmentUncertainError,
+  type DaytonaClaimRuntime,
+} from "../src/voice-fleet-daytona.ts";
+import {
   createApi,
   type TestApi,
   type TestApiOptions,
@@ -43,6 +47,7 @@ import {
 let api: TestApi;
 
 afterEach(async () => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   await api?.close();
 });
@@ -56,8 +61,8 @@ const RESCHEDULING = {
 
 const RETELL = {
   agentPlatform: "retell",
-  connectionType: "retell_chat_api",
-  accessVariant: "retell_chat_api.api_key",
+  connectionType: "retell_text_mode",
+  accessVariant: "retell_text_mode.api_key",
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_1" },
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -99,19 +104,25 @@ const PHONE = {
 /** The Retell chat target in these route tests is a chat agent. */
 const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
   const url = String(input);
-  if (!url.includes("/v2/list-agents")) {
-    throw new Error(`Unexpected Retell read: ${url}`);
+  const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200 });
+  if (url.includes("/v2/list-phone-numbers")) return json({ items: [], has_more: false });
+  if (url.includes("/get-agent/")) {
+    return json({
+      agent_id: url.includes("agent_in_retell_2") ? "agent_in_retell_2" : "agent_in_retell_1",
+      version: 105,
+      is_published: true,
+      response_engine: { type: "conversation-flow", conversation_flow_id: "flow_1", version: 105 },
+    });
   }
-  return new Response(
-    JSON.stringify({
+  if (url.includes("/get-conversation-flow/")) return json({ conversation_flow_id: "flow_1", version: 105, nodes: [] });
+  if (url.includes("/v2/list-agents")) return json({
       items: [
         { agent_id: "agent_in_retell_1", agent_name: "Front desk", channel: "chat" },
         { agent_id: "agent_in_retell_2", agent_name: "Second desk", channel: "chat" },
       ],
       has_more: false,
-    }),
-    { status: 200 },
-  );
+  });
+  throw new Error(`Unexpected Retell read: ${url}`);
 };
 
 /**
@@ -450,8 +461,8 @@ describe("claiming work", () => {
     expect(spec.modality).toBe("chat");
     expect(spec.connection).toEqual({
       agent_platform: "retell",
-      connection_type: "retell_chat_api",
-      access_variant: "retell_chat_api.api_key",
+      connection_type: "retell_text_mode",
+      access_variant: "retell_text_mode.api_key",
       config: { retellAgentId: "agent_in_retell_1" },
       credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
     });
@@ -716,28 +727,6 @@ describe("claiming work", () => {
     expect("mock_tools" in spec).toBe(false);
   });
 
-  it("carries no answers at all on a lane Egma cannot answer a call on", async () => {
-    // A Retell chat API conversation reaches the customer's own tools: Egma is
-    // nowhere in that path, so a test's mock tools are not sent as though they
-    // were going to be served.
-    const { key, connectionId, versionId } = await aCustomerReadyToRun(
-      "claims_unserved_lane",
-      {},
-      undefined,
-      { mockTools: [{ tool: "check_availability", answer: { slots: [] } }] },
-    );
-
-    await aQueuedRun(key, connectionId, versionId);
-    const answered = await claim(api.config.simulatorServiceToken, {
-      claimant: "sim-under-test",
-      capacity: 4,
-      wait_seconds: 0,
-    });
-    const spec = (answered.body.specs as Record<string, unknown>[])[0];
-    if (spec === undefined) throw new Error("no spec came back");
-    expect("mock_tools" in spec).toBe(false);
-  });
-
   it("goes on serving the version this simulation pinned after the test is edited", async () => {
     // The pinned test version is immutable, which is what the run's own frozen
     // copy of the world used to be for: an edit lands as a new version, and a
@@ -849,6 +838,24 @@ describe("claiming work", () => {
     });
     expect(badWait.statusCode).toBe(400);
     expect(String(badWait.body.message)).toContain("wait_seconds");
+
+    for (const shape of [
+      { capacity: 2, modalities: ["voice"] },
+      { capacity: 1, modalities: ["chat"] },
+      { capacity: 1, modalities: ["voice", "chat"] },
+      { capacity: 1 },
+    ]) {
+      const badDaytona = await claim(token, {
+        claimant: "egma-voice-runtime",
+        wait_seconds: 0,
+        runtime: "daytona",
+        ...shape,
+      });
+      expect(badDaytona.statusCode).toBe(400);
+      expect(String(badDaytona.body.message)).toContain(
+        "capacity 1 and only the voice modality",
+      );
+    }
   });
 });
 
@@ -950,331 +957,6 @@ describe("what the claim door never touches", () => {
       wait_seconds: 0,
     });
     expect(stillClaims.statusCode).toBe(200);
-  });
-});
-
-describe("a simulation the platform cannot hand over", () => {
-  it("blocks a Retell chat connection when Retell says its agent is voice", async () => {
-    const providerReads: string[] = [];
-    const retellFetch: typeof fetch = async (input) => {
-      providerReads.push(String(input));
-      return new Response(
-        JSON.stringify({
-          items: [
-            {
-              agent_id: "agent_in_retell_1",
-              agent_name: "Voice front desk",
-              channel: "voice",
-            },
-          ],
-          has_more: false,
-        }),
-        { status: 200 },
-      );
-    };
-    const { ada, key, connectionId, versionId } =
-      await aCustomerReadyToRun("claims_retell_voice_mismatch", {
-        retellFetch,
-      });
-    const doomed = await aQueuedRun(key, connectionId, versionId);
-
-    const answered = await claim(api.config.simulatorServiceToken, {
-      claimant: "sim-under-test",
-      capacity: 1,
-      wait_seconds: 0,
-    });
-
-    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
-    expect(answered.body.specs).toEqual([]);
-    expect(providerReads).toHaveLength(1);
-    expect(providerReads[0]).toContain("/v2/list-agents");
-    const row = await getSimulation(
-      contextFor(ada, "member"),
-      doomed.simulationId,
-    );
-    expect(row?.status).toBe("failed");
-    expect(row?.endingReason).toBe("dispatch_failed");
-  });
-
-  it("releases a transient claim, and lands a cancel that arrives during its next check", async () => {
-    let holdProvider = false;
-    let providerStarted!: () => void;
-    let letProviderFinish!: () => void;
-    const providerDidStart = new Promise<void>((resolve) => {
-      providerStarted = resolve;
-    });
-    const providerMayFinish = new Promise<void>((resolve) => {
-      letProviderFinish = resolve;
-    });
-    const { ada, key, connectionId, versionId } =
-      await aCustomerReadyToRun("claims_retell_temporarily_unavailable", {
-        retellFetch: async () => {
-          if (holdProvider) {
-            providerStarted();
-            await providerMayFinish;
-          }
-          return new Response("temporarily unavailable", { status: 503 });
-        },
-      });
-    const waiting = await aQueuedRun(key, connectionId, versionId);
-
-    const answered = await claim(api.config.simulatorServiceToken, {
-      claimant: "sim-under-test",
-      capacity: 1,
-      wait_seconds: 0,
-    });
-
-    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
-    expect(answered.body.specs).toEqual([]);
-    const row = await getSimulation(
-      contextFor(ada, "member"),
-      waiting.simulationId,
-    );
-    expect(row?.status).toBe("queued");
-    expect(row?.endingReason).toBeNull();
-    expect(row?.claimedBy).toBeNull();
-    const feed = await listRunEvents(contextFor(ada, "member"), waiting.runId);
-    expect(
-      feed?.events
-        .filter((event) => event.simulationId === waiting.simulationId)
-        .map((event) => event.status),
-    ).toEqual(["claimed", "queued"]);
-
-    // The same row is claimed again. This time Cancel lands while Retell is
-    // still being checked, before any simulator receives a spec.
-    holdProvider = true;
-    const checking = claim(api.config.simulatorServiceToken, {
-      claimant: "sim-under-test",
-      capacity: 1,
-      wait_seconds: 0,
-    });
-    await providerDidStart;
-    const canceled = await ask(
-      api.app,
-      "POST",
-      `/v1/runs/${waiting.runId}/cancel`,
-      key,
-    );
-    expect(canceled.statusCode, JSON.stringify(canceled.body)).toBe(200);
-    letProviderFinish();
-
-    const afterCancel = await checking;
-    expect(afterCancel.statusCode, JSON.stringify(afterCancel.body)).toBe(200);
-    expect(afterCancel.body.specs).toEqual([]);
-    const stopped = await getSimulation(
-      contextFor(ada, "member"),
-      waiting.simulationId,
-    );
-    expect(stopped?.status).toBe("canceled");
-    expect(stopped?.endingReason).toBeNull();
-    const settled = await ask(
-      api.app,
-      "GET",
-      `/v1/runs/${waiting.runId}`,
-      key,
-    );
-    expect(settled.body).toMatchObject({
-      status: "canceled",
-      canceledCount: 1,
-      finishedAt: expect.any(String),
-    });
-    const finalFeed = await listRunEvents(
-      contextFor(ada, "member"),
-      waiting.runId,
-    );
-    expect(
-      finalFeed?.events
-        .filter((event) => event.simulationId === waiting.simulationId)
-        .map((event) => event.status),
-    ).toEqual(["claimed", "queued", "claimed", "canceled"]);
-  });
-
-  it("starts independent Retell checks together and bounds a provider that never answers", async () => {
-    let active = 0;
-    let mostActive = 0;
-    let reads = 0;
-    let bothProviderReadsStarted!: () => void;
-    const providerReadsStarted = new Promise<void>((resolve) => {
-      bothProviderReadsStarted = resolve;
-    });
-    const retellFetch: typeof fetch = async (_input, init) => {
-      reads += 1;
-      active += 1;
-      mostActive = Math.max(mostActive, active);
-      if (reads === 2) bothProviderReadsStarted();
-      const signal = init?.signal;
-      if (signal === undefined || signal === null) {
-        throw new Error("the Retell check had no deadline");
-      }
-      return new Promise<Response>((_resolve, reject) => {
-        const stopped = (): void => {
-          active -= 1;
-          reject(signal.reason ?? new Error("the Retell check ended"));
-        };
-        if (signal.aborted) stopped();
-        else signal.addEventListener("abort", stopped, { once: true });
-      });
-    };
-    const { key, connectionId, versionId } =
-      await aCustomerReadyToRun("claims_retell_bounded_batch", {
-        retellFetch,
-      });
-    const second = await ask(api.app, "POST", "/v1/agents", key, {
-      agentPlatform: "retell",
-      name: "Second desk",
-      connection: {
-        ...RETELL,
-        config: { retellAgentId: "agent_in_retell_2" },
-      },
-    });
-    expect(second.statusCode, JSON.stringify(second.body)).toBe(201);
-    const secondConnection = (second.body.connection as { id: string }).id;
-    await Promise.all([
-      aQueuedRun(key, connectionId, versionId),
-      aQueuedRun(key, secondConnection, versionId),
-    ]);
-
-    const providerDeadlines: number[] = [];
-    const deadlineControllers: AbortController[] = [];
-    vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
-      providerDeadlines.push(milliseconds);
-      const controller = new AbortController();
-      deadlineControllers.push(controller);
-      return controller.signal;
-    });
-
-    const answering = claim(api.config.simulatorServiceToken, {
-      claimant: "sim-under-test",
-      capacity: 2,
-      wait_seconds: 0,
-    });
-    await providerReadsStarted;
-
-    expect(reads).toBe(2);
-    expect(mostActive).toBe(2);
-    expect(providerDeadlines).toEqual([15_000, 15_000]);
-
-    for (const controller of deadlineControllers) {
-      controller.abort(new Error("the controlled provider deadline ended"));
-    }
-    const answered = await answering;
-
-    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
-    expect(answered.body.specs).toEqual([]);
-    expect(active).toBe(0);
-  });
-
-  it("lands as dispatch_failed at once, while the rest of the batch still dispatches", async () => {
-    const { ada, key, connectionId, versionId } =
-      await aCustomerReadyToRun("claims_skip");
-
-    // Two runs over two connections; one connection stops resolving before the
-    // claim, so one spec can be assembled and one cannot.
-    const doomed = await aQueuedRun(key, connectionId, versionId);
-    const registered = await ask(api.app, "POST", "/v1/agents", key, {
-      agentPlatform: "retell",
-      name: "Second desk",
-      connection: { ...RETELL, config: { retellAgentId: "agent_in_retell_2" } },
-    });
-    const secondConnection = (registered.body.connection as { id: string }).id;
-    const healthy = await aQueuedRun(key, secondConnection, versionId);
-
-    // Marked archived in the row rather than through the Archive verb, on
-    // purpose: Archive settles the queue in the same transaction, so going
-    // through it would cancel the very simulation this test needs to reach the
-    // claim. What is under test is the claim door meeting a spec it cannot
-    // assemble, whatever left it that way.
-    await api.database.sql(
-      "update connection set archived_at = now() where id = $1",
-      [connectionId],
-    );
-
-    const answered = await claim(api.config.simulatorServiceToken, {
-      claimant: "sim-under-test",
-      capacity: 4,
-      wait_seconds: 0,
-    });
-    expect(answered.statusCode).toBe(200);
-
-    const specs = answered.body.specs as { simulation_id: string }[];
-    expect(specs.map((spec) => spec.simulation_id)).toEqual([
-      healthy.simulationId,
-    ]);
-
-    // The unbuildable row landed terminal at claim time: failed with the
-    // platform's own reason, never blamed on the simulator, never left for
-    // the sweep to misname orphaned — and never back through the queue, so a
-    // second ask does not see it again.
-    const row = await getSimulation(contextFor(ada, "member"), doomed.simulationId);
-    expect(row?.status).toBe("failed");
-    expect(row?.endingReason).toBe("dispatch_failed");
-    expect(row?.executionFailure).toBe(
-      "Egma could not dispatch this simulation: its connection is gone or its credentials would not unseal",
-    );
-    expect(row?.endedAt).toBeInstanceOf(Date);
-
-    const again = await claim(api.config.simulatorServiceToken, {
-      claimant: "sim-under-test",
-      capacity: 4,
-      wait_seconds: 0,
-    });
-    expect(again.body.specs).toEqual([]);
-
-    // That landing was the doomed run's last outstanding conversation, so
-    // the run settles now, with counts that say what happened.
-    const header = await ask(api.app, "GET", `/v1/runs/${doomed.runId}`, key);
-    expect(header.body.status).toBe("completed");
-    expect(header.body.completedCount).toBe(0);
-    expect(header.body.failedCount).toBe(1);
-    expect(header.body.canceledCount).toBe(0);
-  });
-
-  it("lands a credential that will not unseal the same way, and the batch dispatches whole", async () => {
-    const { ada, key, connectionId, versionId } =
-      await aCustomerReadyToRun("claims_corrupt");
-
-    const doomed = await aQueuedRun(key, connectionId, versionId);
-    const registered = await ask(api.app, "POST", "/v1/agents", key, {
-      agentPlatform: "retell",
-      name: "Second desk",
-      connection: { ...RETELL, config: { retellAgentId: "agent_in_retell_2" } },
-    });
-    const secondConnection = (registered.body.connection as { id: string }).id;
-    const healthy = await aQueuedRun(key, secondConnection, versionId);
-
-    // The one write no seam should offer: a sealed envelope replaced with
-    // bytes that will never decrypt, which is what a lost encryption key or
-    // a hand-edited row leaves behind. Unsealing it throws rather than
-    // answering empty, and that throw must cost one row, not the batch.
-    await api.database.sql(
-      "update connection set credentials = 'not-an-envelope-at-all' where id = $1",
-      [connectionId],
-    );
-
-    const answered = await claim(api.config.simulatorServiceToken, {
-      claimant: "sim-under-test",
-      capacity: 4,
-      wait_seconds: 0,
-    });
-    expect(answered.statusCode).toBe(200);
-
-    const specs = answered.body.specs as { simulation_id: string }[];
-    expect(specs.map((spec) => spec.simulation_id)).toEqual([
-      healthy.simulationId,
-    ]);
-
-    // The unopenable row took the same honest landing — the throw cost one
-    // row its dispatch, and the batch around it went out whole.
-    const row = await getSimulation(
-      contextFor(ada, "member"),
-      doomed.simulationId,
-    );
-    expect(row?.status).toBe("failed");
-    expect(row?.endingReason).toBe("dispatch_failed");
-    expect(row?.executionFailure).toBe(
-      "Egma could not dispatch this simulation: an internal error prevented Egma from building its simulation spec",
-    );
-    expect(row?.executionFailure).not.toContain("not-an-envelope-at-all");
   });
 });
 
@@ -1494,6 +1176,308 @@ describe("one source of execution truth", () => {
     expect((first.tts as Record<string, unknown>).key).toBeUndefined();
     expect(JSON.stringify(first)).not.toContain("deepgram-first");
     expect(JSON.stringify(first)).not.toContain("cartesia-first");
+  });
+
+  it("sends Daytona references for platform fallback keys", async () => {
+    const load = vi.fn(async () => ({
+      openai: "platform-openai",
+      deepgram: "platform-deepgram",
+      cartesia: "platform-cartesia",
+    }));
+    const voiceFleet = {
+      kind: "daytona" as const,
+      apiKey: "control",
+      snapshot: "snapshot",
+      releaseSha: "a".repeat(40),
+      ttlMinutes: 30,
+      serviceTokenSecret: "service-token",
+      providerSecrets: {
+        EGMA_OPENAI_API_KEY: "openai-secret",
+        EGMA_DEEPGRAM_API_KEY: "deepgram-secret",
+        EGMA_CARTESIA_API_KEY: "cartesia-secret",
+      },
+      controlPlaneUrl: "https://egma.example",
+      livekitUrl: "wss://livekit.example",
+      livekitApiKey: "key",
+      livekitApiSecret: "secret",
+      s3Endpoint: "https://s3.example",
+      s3Bucket: "recordings",
+      s3Region: "us-east-1",
+      recordingRoleArn: "arn:aws:iam::123:role/recording",
+      recordingBucketArn: "arn:aws:s3:::recordings",
+    };
+    const daytonaClaimRuntime = vi.fn<DaytonaClaimRuntime>(
+      async (_claimant, simulationId) => ({
+        kind: "daytona_voice",
+        media: {
+          backend: "livekit",
+          livekit_url: "wss://livekit.example",
+          livekit_room_name: `egma-sim-${simulationId}`,
+          livekit_room_token: "room-token",
+          livekit_api_token: "api-token",
+        },
+        storage: {
+          backend: "s3",
+          endpoint: "https://s3.example",
+          bucket: "recordings",
+          region: "us-east-1",
+          access_key_id: "temporary-access",
+          secret_access_key: "temporary-secret",
+          session_token: "temporary-session",
+        },
+      }),
+    );
+    const { key, connectionId, versionId } = await aRealtimeVoiceCustomerReadyToRun(
+      "claims_daytona_provider_secrets",
+      { providerCredentials: { load }, voiceFleet, daytonaClaimRuntime },
+    );
+    await aQueuedRun(key, connectionId, versionId);
+
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "daytona-runtime",
+      capacity: 1,
+      wait_seconds: 0,
+      modalities: ["voice"],
+      runtime: "daytona",
+    });
+    const models = (answered.body.specs as Record<string, unknown>[])[0]?.models;
+
+    expect(models).toMatchObject({
+      llm: { key: "env:EGMA_OPENAI_API_KEY" },
+      stt: { key: "env:EGMA_OPENAI_API_KEY" },
+      tts: { key: "env:EGMA_CARTESIA_API_KEY" },
+    });
+    expect(JSON.stringify(models)).not.toContain("platform-openai");
+    expect(JSON.stringify(models)).not.toContain("platform-cartesia");
+    expect(daytonaClaimRuntime).toHaveBeenCalledWith(
+      "daytona-runtime",
+      expect.any(String),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("releases Daytona work when claim-time authority or labels cannot be prepared", async () => {
+    const daytonaClaimRuntime = vi
+      .fn<DaytonaClaimRuntime>()
+      .mockRejectedValueOnce(new Error("Daytona is unavailable"))
+      .mockResolvedValueOnce({
+        kind: "daytona_voice",
+        media: {
+          backend: "livekit",
+          livekit_url: "wss://livekit.example",
+          livekit_room_name: "egma-sim-retry",
+          livekit_room_token: "room-token",
+          livekit_api_token: "api-token",
+        },
+        storage: {
+          backend: "s3",
+          endpoint: "https://s3.example",
+          bucket: "recordings",
+          region: "us-east-1",
+          access_key_id: "temporary-access",
+          secret_access_key: "temporary-secret",
+          session_token: "temporary-session",
+        },
+      });
+    const { ada, key, connectionId, versionId } =
+      await aRealtimeVoiceCustomerReadyToRun(
+        "claims_daytona_runtime_retry",
+        { daytonaClaimRuntime },
+      );
+    const { simulationId } = await aQueuedRun(key, connectionId, versionId);
+
+    const deferred = await claim(api.config.simulatorServiceToken, {
+      claimant: "egma-voice-runtime",
+      capacity: 1,
+      wait_seconds: 0,
+      modalities: ["voice"],
+      runtime: "daytona",
+    });
+    expect(deferred.body.specs).toEqual([]);
+    expect(
+      (await getSimulation(contextFor(ada, "member"), simulationId))?.status,
+    ).toBe("queued");
+
+    const retried = await claim(api.config.simulatorServiceToken, {
+      claimant: "egma-voice-runtime",
+      capacity: 1,
+      wait_seconds: 0,
+      modalities: ["voice"],
+      runtime: "daytona",
+    });
+    expect(retried.body.specs as unknown[]).toHaveLength(1);
+  });
+
+  it("expires Daytona runtime ownership before releasing timed-out work", async () => {
+    let receivedSignal: ((signal: AbortSignal) => void) | undefined;
+    const runtimeStarted = new Promise<AbortSignal>((resolve) => {
+      receivedSignal = resolve;
+    });
+    const daytonaClaimRuntime = vi.fn<DaytonaClaimRuntime>(
+      async (_claimant, _simulationId, signal) => {
+        receivedSignal?.(signal);
+        return await new Promise<never>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        });
+      },
+    );
+    const { ada, key, connectionId, versionId } =
+      await aRealtimeVoiceCustomerReadyToRun(
+        "claims_daytona_runtime_deadline",
+        { daytonaClaimRuntime },
+      );
+    const { simulationId } = await aQueuedRun(key, connectionId, versionId);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    const claiming = claim(api.config.simulatorServiceToken, {
+      claimant: "egma-voice-runtime",
+      capacity: 1,
+      wait_seconds: 0,
+      modalities: ["voice"],
+      runtime: "daytona",
+    });
+    const ownership = await runtimeStarted;
+    await vi.advanceTimersByTimeAsync(28_000);
+    const deferred = await claiming;
+
+    expect(ownership.aborted).toBe(true);
+    expect(deferred.body.specs).toEqual([]);
+    expect(
+      (await getSimulation(contextFor(ada, "member"), simulationId))?.status,
+    ).toBe("queued");
+  });
+
+  it("keeps the claim when its Daytona assignment commits after the deadline", async () => {
+    let finishLabels: (() => void) | undefined;
+    let labelsStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { labelsStarted = resolve; });
+    const labelsWritten = new Promise<void>((resolve) => { finishLabels = resolve; });
+    let assignedSimulation: string | undefined;
+    const daytonaClaimRuntime = vi.fn<DaytonaClaimRuntime>(
+      async (_claimant, simulationId) => {
+        labelsStarted?.();
+        await labelsWritten;
+        assignedSimulation = simulationId;
+        return {
+          kind: "daytona_voice",
+          media: {
+            backend: "livekit",
+            livekit_url: "wss://livekit.example",
+            livekit_room_name: `egma-sim-${simulationId}`,
+            livekit_room_token: "room-token",
+            livekit_api_token: "api-token",
+          },
+          storage: {
+            backend: "s3",
+            endpoint: "https://s3.example",
+            bucket: "recordings",
+            region: "us-east-1",
+            access_key_id: "temporary-access",
+            secret_access_key: "temporary-secret",
+            session_token: "temporary-session",
+          },
+        };
+      },
+    );
+    const { ada, key, connectionId, versionId } =
+      await aRealtimeVoiceCustomerReadyToRun(
+        "claims_daytona_assignment_commit",
+        { daytonaClaimRuntime },
+      );
+    const { simulationId } = await aQueuedRun(key, connectionId, versionId);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    const claiming = claim(api.config.simulatorServiceToken, {
+      claimant: "egma-voice-runtime",
+      capacity: 1,
+      wait_seconds: 0,
+      modalities: ["voice"],
+      runtime: "daytona",
+    });
+    await started;
+    await vi.advanceTimersByTimeAsync(28_000);
+    finishLabels?.();
+    const answered = await claiming;
+
+    expect(answered.body.specs as unknown[]).toHaveLength(1);
+    expect(assignedSimulation).toBe(simulationId);
+    const row = await getSimulation(contextFor(ada, "member"), simulationId);
+    expect(row?.status).toBe("claimed");
+    expect(row?.claimedBy).toBe("egma-voice-runtime");
+  });
+
+  it("keeps the claim when a timed-out Daytona label result is uncertain", async () => {
+    let finishLabels: (() => void) | undefined;
+    let labelsStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { labelsStarted = resolve; });
+    const labelsWritten = new Promise<void>((resolve) => { finishLabels = resolve; });
+    let possiblyAssignedSimulation: string | undefined;
+    const daytonaClaimRuntime = vi.fn<DaytonaClaimRuntime>(
+      async (_claimant, simulationId) => {
+        labelsStarted?.();
+        await labelsWritten;
+        possiblyAssignedSimulation = simulationId;
+        throw new DaytonaAssignmentUncertainError(
+          new Error("the label response was lost"),
+        );
+      },
+    );
+    const { ada, key, connectionId, versionId } =
+      await aRealtimeVoiceCustomerReadyToRun(
+        "claims_daytona_assignment_uncertain",
+        { daytonaClaimRuntime },
+      );
+    const { simulationId } = await aQueuedRun(key, connectionId, versionId);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    const claiming = claim(api.config.simulatorServiceToken, {
+      claimant: "egma-voice-runtime",
+      capacity: 1,
+      wait_seconds: 0,
+      modalities: ["voice"],
+      runtime: "daytona",
+    });
+    await started;
+    await vi.advanceTimersByTimeAsync(28_000);
+    finishLabels?.();
+    const deferred = await claiming;
+
+    expect(deferred.body.specs).toEqual([]);
+    expect(possiblyAssignedSimulation).toBe(simulationId);
+    const row = await getSimulation(contextFor(ada, "member"), simulationId);
+    expect(row?.status).toBe("claimed");
+    expect(row?.claimedBy).toBe("egma-voice-runtime");
+  });
+
+  it("releases Daytona work when claim-time authority violates the contract", async () => {
+    const invalidDaytonaClaimRuntime = vi.fn(async () => ({
+      kind: "daytona_voice",
+      media: {},
+      storage: {},
+    }));
+    const daytonaClaimRuntime =
+      invalidDaytonaClaimRuntime as unknown as DaytonaClaimRuntime;
+    const { ada, key, connectionId, versionId } =
+      await aRealtimeVoiceCustomerReadyToRun(
+        "claims_daytona_runtime_invalid",
+        { daytonaClaimRuntime },
+      );
+    const { simulationId } = await aQueuedRun(key, connectionId, versionId);
+
+    const deferred = await claim(api.config.simulatorServiceToken, {
+      claimant: "egma-voice-runtime",
+      capacity: 1,
+      wait_seconds: 0,
+      modalities: ["voice"],
+      runtime: "daytona",
+    });
+
+    expect(deferred.body.specs).toEqual([]);
+    expect(
+      (await getSimulation(contextFor(ada, "member"), simulationId))?.status,
+    ).toBe("queued");
   });
 
   it("releases work when the current AWS bundle cannot be read", async () => {

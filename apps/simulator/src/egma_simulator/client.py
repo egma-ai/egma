@@ -32,6 +32,8 @@ CLAIM_TIMEOUT_MARGIN_SECONDS = 15.0
 # Everything else answers promptly or is broken.
 BRISK_TIMEOUT_SECONDS = 10.0
 
+SIMULATOR_USER_AGENT = "egma-simulator/0.0.0"
+
 # Room registration is idempotent and must finish before a worker starts.
 # Keep transient retries short and finite, within the simulation watchdog.
 REGISTRATION_ATTEMPTS = 3
@@ -82,6 +84,7 @@ class ControlPlaneClient:
         *,
         claim_wait_seconds: float,
         service_token: str | None = None,
+        runtime: str | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         # Sent on every claim as ``wait_seconds`` and enforced locally as the
@@ -99,13 +102,19 @@ class ControlPlaneClient:
         # carries it" is not a thing to remember three times. No token
         # means no header at all — the workbench asks for nothing, and a
         # bare `Bearer ` would be a worse answer than silence.
-        self._headers = (
-            {"Authorization": f"Bearer {service_token}"} if service_token else {}
-        )
+        self._headers = {"User-Agent": SIMULATOR_USER_AGENT}
+        if service_token:
+            self._headers["Authorization"] = f"Bearer {service_token}"
+        self._runtime = runtime
         self._session: aiohttp.ClientSession | None = None
 
     async def __aenter__(self) -> ControlPlaneClient:
-        self._session = aiohttp.ClientSession(headers=self._headers)
+        # Daytona exposes its secret-substituting outbound proxy through the
+        # standard HTTP(S)_PROXY environment variables.
+        self._session = aiohttp.ClientSession(
+            headers=self._headers,
+            trust_env=self._runtime == "daytona",
+        )
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:
@@ -134,6 +143,7 @@ class ControlPlaneClient:
                     "wait_seconds": self._claim_wait_seconds,
                     "contract_versions": [spec_contract_version()],
                     **({} if modalities is None else {"modalities": list(modalities)}),
+                    **({} if self._runtime is None else {"runtime": self._runtime}),
                 },
                 timeout=self._claim_timeout,
             ) as response:

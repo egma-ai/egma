@@ -8,17 +8,20 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RootPage from "../app/page.tsx";
 import NewProjectPage from "../app/new-project/page.tsx";
 import ApiKeysPage from "../app/projects/[projectId]/settings/keys/page.tsx";
+import SettingsRouteLayout from "../app/projects/[projectId]/settings/layout.tsx";
 import OrganizationSettingsPage from "../app/projects/[projectId]/settings/organization/page.tsx";
 import PeoplePage from "../app/projects/[projectId]/settings/people/page.tsx";
-import ProjectSettingsPage from "../app/projects/[projectId]/settings/page.tsx";
+import ProjectSettingsPage from "../app/projects/[projectId]/settings/project/page.tsx";
 import type { Me } from "../lib/me.ts";
 import { REPLAY_PRIVATE_ATTRIBUTE } from "../lib/replay-privacy.ts";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
+import { renderSettingsPage } from "./render-settings-page.tsx";
 
 /**
  * Drive settings pages with stubbed API responses. Check project revision
@@ -38,7 +41,7 @@ const routed = vi.hoisted(() => {
      * the session into a loop that never settled.
      */
     router: { push, replace: vi.fn(), back: vi.fn() },
-    pathname: "/projects/prj_1/settings",
+    pathname: "/projects/prj_1/settings/organization",
     projectId: "prj_1",
   };
 });
@@ -60,6 +63,35 @@ vi.mock("next/link", () => ({
 vi.mock("next/image", () => ({
   default: ({ alt }: { alt: string }) => <img alt={alt} />,
 }));
+
+function renderAt(pathname: string, page: ReactElement) {
+  routed.pathname = pathname;
+  window.location.href = `http://egma.test${pathname}`;
+  window.location.pathname = pathname;
+  return renderSettingsPage(page);
+}
+
+function renderProjectSettings() {
+  return renderAt(
+    "/projects/prj_1/settings/project",
+    <ProjectSettingsPage />,
+  );
+}
+
+function renderOrganizationSettings() {
+  return renderAt(
+    "/projects/prj_1/settings/organization",
+    <OrganizationSettingsPage />,
+  );
+}
+
+function renderPeopleSettings() {
+  return renderAt("/projects/prj_1/settings/people", <PeoplePage />);
+}
+
+function renderApiKeysSettings() {
+  return renderAt("/projects/prj_1/settings/keys", <ApiKeysPage />);
+}
 
 const PROJECTS = [
   { id: "prj_1", name: "Default", slug: "default" },
@@ -163,9 +195,9 @@ beforeEach(() => {
     configurable: true,
     value: {
       ...window.location,
-      href: "http://egma.test/projects/prj_1/settings",
+      href: "http://egma.test/projects/prj_1/settings/organization",
       search: "",
-      pathname: "/projects/prj_1/settings",
+      pathname: "/projects/prj_1/settings/organization",
       replace: (url: string) => wentTo.push(url),
       assign: (url: string) => wentTo.push(url),
     },
@@ -175,7 +207,7 @@ beforeEach(() => {
     value: { ...window.history, pushState: vi.fn() },
   });
   routed.push.mockReset();
-  routed.pathname = "/projects/prj_1/settings";
+  routed.pathname = "/projects/prj_1/settings/organization";
   routed.projectId = "prj_1";
   vi.stubGlobal("scrollTo", vi.fn());
 });
@@ -204,7 +236,7 @@ const ORGANIZATION_WIDE: readonly {
       "/v1/organization": { status: 200, body: ORGANIZATION },
       "/api/organization/usage": { status: 200, body: PERIOD_USAGE },
     },
-    open: () => render(<OrganizationSettingsPage />),
+    open: () => renderOrganizationSettings(),
     removed: /Everything on this page belongs to the whole organization/,
   },
   {
@@ -216,30 +248,63 @@ const ORGANIZATION_WIDE: readonly {
       },
       "/v1/invitations": { status: 200, body: { invitations: [] } },
     },
-    open: () => render(<PeoplePage />),
+    open: () => renderPeopleSettings(),
     removed: /Membership belongs to the whole organization/,
   },
   {
     page: "API keys",
     answers: { "/v1/keys": { status: 200, body: { keys: [] } } },
-    open: () => render(<ApiKeysPage />),
+    open: () => renderApiKeysSettings(),
     removed: /Keys belong to the organization/,
   },
 ];
 
 describe("the Settings navigation", () => {
-  it("says which settings belong to the project and which to the organization", async () => {
+  it("keeps the settings rail mounted while a sibling route changes", () => {
+    const view = render(
+      <SettingsRouteLayout>
+        <p>Organization content</p>
+      </SettingsRouteLayout>,
+    );
+    const rail = screen.getByRole("navigation", { name: "Settings" });
+
+    routed.pathname = "/projects/prj_1/settings/billing";
+    view.rerender(
+      <SettingsRouteLayout>
+        <p>Billing content</p>
+      </SettingsRouteLayout>,
+    );
+
+    expect(screen.getByRole("navigation", { name: "Settings" })).toBe(rail);
+    expect(
+      screen.getByRole("link", { name: "Usage and Billing" }).getAttribute("aria-current"),
+    ).toBe("page");
+  });
+
+  it("lists organization settings first in the agreed order, then project settings", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
       "/v1/projects/prj_1": { status: 200, body: PROJECT },
     });
-    render(<ProjectSettingsPage />);
+    renderProjectSettings();
 
     const nav = await screen.findByRole("navigation", { name: "Settings" });
-    expect(nav.textContent).toContain("This project");
-    expect(nav.textContent).toContain("Organization");
-    expect(within(nav).getByRole("group", { name: "This project" })).toBeTruthy();
-    expect(within(nav).getByRole("group", { name: "Organization" })).toBeTruthy();
+    expect(within(nav).getAllByRole("group")).toEqual([
+      within(nav).getByRole("group", { name: "Organization" }),
+      within(nav).getByRole("group", { name: "Project" }),
+    ]);
+    expect(
+      within(nav)
+        .getAllByRole("link")
+        .map((link) => link.textContent),
+    ).toEqual([
+      "Organization Settings",
+      "Usage and Billing",
+      "Provider API Keys",
+      "People",
+      "API Keys",
+      "Project Settings",
+    ]);
     expect(within(nav).queryByRole("link", { name: "Judge" })).toBeNull();
 
     // Every address carries the project, including the organization-wide ones:
@@ -247,6 +312,11 @@ describe("the Settings navigation", () => {
     // inside the product shell for the selector to be there at all.
     const people = within(nav).getByRole("link", { name: "People" });
     expect(people.getAttribute("href")).toBe("/projects/prj_1/settings/people");
+    expect(
+      within(nav)
+        .getByRole("link", { name: "Project Settings" })
+        .getAttribute("href"),
+    ).toBe("/projects/prj_1/settings/project");
 
     // The navigation and the state it controls share one stable frame. The
     // frame is present before the read settles and does not move when the form
@@ -289,7 +359,7 @@ describe("project settings", () => {
       "/api/me": { status: 200, body: meWith(role) },
       "/v1/projects/prj_1": { status: 200, body: project },
     });
-    render(<ProjectSettingsPage />);
+    renderProjectSettings();
   }
 
   it("shows what is stored, and saves against the revision it was opened at", async () => {
@@ -300,7 +370,7 @@ describe("project settings", () => {
         { status: 200, body: { ...PROJECT, name: "Renamed", revision: "rev_2" } },
       ],
     });
-    render(<ProjectSettingsPage />);
+    renderProjectSettings();
 
     const name = (await screen.findByLabelText("Name")) as HTMLInputElement;
     // Waited for rather than read once: the field exists on the first ready
@@ -339,7 +409,7 @@ describe("project settings", () => {
         },
       ],
     });
-    render(<ProjectSettingsPage />);
+    renderProjectSettings();
 
     const name = (await screen.findByDisplayValue("Default")) as HTMLInputElement;
     const save = screen.getByRole("button", { name: "Save project" });
@@ -394,7 +464,7 @@ describe("project settings", () => {
         retryAnswer,
       ],
     });
-    render(<ProjectSettingsPage />);
+    renderProjectSettings();
 
     const name = (await screen.findByDisplayValue("Default")) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "Renamed" } });
@@ -402,7 +472,7 @@ describe("project settings", () => {
 
     expect(await screen.findByRole("button", { name: "Saving…" })).toBeTruthy();
     const settings = screen.getByRole("navigation", { name: "Settings" });
-    const judge = within(settings).getByRole("link", { name: "Organization" });
+    const judge = within(settings).getByRole("link", { name: "Organization Settings" });
     const click = new MouseEvent("click", {
       bubbles: true,
       cancelable: true,
@@ -431,7 +501,7 @@ describe("project settings", () => {
     });
     fireEvent(
       within(screen.getByRole("navigation", { name: "Settings" }))
-        .getByRole("link", { name: "Organization" }),
+        .getByRole("link", { name: "Organization Settings" }),
       clickWhileConfirming,
     );
     expect(clickWhileConfirming.defaultPrevented).toBe(true);
@@ -455,7 +525,7 @@ describe("project settings", () => {
     });
     fireEvent(
       within(screen.getByRole("navigation", { name: "Settings" }))
-        .getByRole("link", { name: "Organization" }),
+        .getByRole("link", { name: "Organization Settings" }),
       clickAfterFailure,
     );
     expect(clickAfterFailure.defaultPrevented).toBe(true);
@@ -494,14 +564,14 @@ describe("project settings", () => {
     });
     const confirm = vi.fn(() => false);
     vi.stubGlobal("confirm", confirm);
-    render(<ProjectSettingsPage />);
+    renderProjectSettings();
 
     fireEvent.change(await screen.findByDisplayValue("Default"), {
       target: { value: "A draft name" },
     });
 
     const settings = screen.getByRole("navigation", { name: "Settings" });
-    const judge = within(settings).getByRole("link", { name: "Organization" });
+    const judge = within(settings).getByRole("link", { name: "Organization Settings" });
     const click = new MouseEvent("click", {
       bubbles: true,
       cancelable: true,
@@ -528,7 +598,7 @@ describe("project settings", () => {
     fireEvent.click(selectors[0]!);
     fireEvent.click(screen.getByRole("menuitem", { name: "Outbound" }));
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
-    expect(routed.push).toHaveBeenCalledWith("/projects/prj_2/settings");
+    expect(routed.push).toHaveBeenCalledWith("/projects/prj_2/settings/project");
     expect(confirm).not.toHaveBeenCalled();
   });
 
@@ -559,7 +629,7 @@ describe("project settings", () => {
         { status: 200, body: { ...PROJECT, revision: "rev_2" } },
       ],
     });
-    render(<ProjectSettingsPage />);
+    renderProjectSettings();
 
     const name = (await screen.findByLabelText("Name")) as HTMLInputElement;
     // The stored name arrives a render after the field exists, so the draft is
@@ -663,7 +733,7 @@ describe("project settings", () => {
         body: { error: "unavailable", message: "Egma could not answer that." },
       },
     });
-    render(<ProjectSettingsPage />);
+    renderProjectSettings();
 
     expect(await screen.findByText("Egma could not answer that.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
@@ -677,7 +747,7 @@ describe("project settings", () => {
         body: { error: "not_signed_in", message: "no" },
       },
     });
-    render(<ProjectSettingsPage />);
+    renderProjectSettings();
 
     await waitFor(() => {
       expect(wentTo).toContain("/sign-in");
@@ -880,7 +950,7 @@ describe("organization settings", () => {
       "/v1/organization": { status: 200, body: organization },
       "/api/organization/usage": { status: 200, body: PERIOD_USAGE },
     });
-    render(<OrganizationSettingsPage />);
+    renderOrganizationSettings();
   }
 
   it("renames the organization and leaves its short name alone", async () => {
@@ -893,7 +963,7 @@ describe("organization settings", () => {
       ],
       "/api/organization/usage": { status: 200, body: PERIOD_USAGE },
     });
-    render(<OrganizationSettingsPage />);
+    renderOrganizationSettings();
 
     // Waited for the stored name, not just the field. The field exists on the
     // first ready render and what was read lands on the next, so typing on
@@ -902,7 +972,7 @@ describe("organization settings", () => {
     await screen.findByDisplayValue(ORGANIZATION.name);
     const save = screen.getByRole("button", { name: "Save organization" });
     expect(save.hasAttribute("disabled")).toBe(true);
-    fireEvent.change(screen.getByLabelText("Name"), {
+    fireEvent.change(screen.getByLabelText("Organization name*"), {
       target: { value: "Acme Voice" },
     });
     expect(save.hasAttribute("disabled")).toBe(false);
@@ -923,7 +993,7 @@ describe("organization settings", () => {
       name: "Save organization",
     });
     expect(savedButton.hasAttribute("disabled")).toBe(true);
-    fireEvent.change(screen.getByLabelText("Name"), {
+    fireEvent.change(screen.getByLabelText("Organization name*"), {
       target: { value: "Acme Voice Labs" },
     });
     expect(screen.queryByText("Saved.")).toBeNull();
@@ -957,7 +1027,7 @@ describe("organization settings", () => {
       ],
       "/api/organization/usage": { status: 200, body: PERIOD_USAGE },
     });
-    render(<OrganizationSettingsPage />);
+    renderOrganizationSettings();
 
     const name = (await screen.findByDisplayValue("Acme")) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "Acme Voice" } });
@@ -981,7 +1051,7 @@ describe("organization settings", () => {
     });
     fireEvent(
       within(screen.getByRole("navigation", { name: "Settings" }))
-        .getByRole("link", { name: "Organization" }),
+        .getByRole("link", { name: "Project Settings" }),
       clickWhileConfirming,
     );
     expect(clickWhileConfirming.defaultPrevented).toBe(true);
@@ -1010,7 +1080,7 @@ describe("organization settings", () => {
     });
     fireEvent(
       within(screen.getByRole("navigation", { name: "Settings" }))
-        .getByRole("link", { name: "Organization" }),
+        .getByRole("link", { name: "Project Settings" }),
       clickAfterFailure,
     );
     expect(clickAfterFailure.defaultPrevented).toBe(true);
@@ -1027,7 +1097,7 @@ describe("organization settings", () => {
     await act(async () => {
       finishRetry({ status: 200, body: renamed });
     });
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(
+    expect((screen.getByLabelText("Organization name*") as HTMLInputElement).value).toBe(
       "Acme Voice Labs",
     );
     expect(
@@ -1043,7 +1113,7 @@ describe("organization settings", () => {
     async (role) => {
       open(role, { ...ORGANIZATION, mayManageOrganization: false });
 
-      const name = (await screen.findByLabelText("Name")) as HTMLInputElement;
+      const name = (await screen.findByLabelText("Organization name*")) as HTMLInputElement;
       await waitFor(() => {
         expect(name.value).toBe("Acme");
       });
@@ -1061,25 +1131,11 @@ describe("organization settings", () => {
     },
   );
 
-  /**
-   * A hint nothing points at is a hint only a sighted reader ever gets.
-   *
-   * `Field` hands its hint id through React context, and only the CSS Modules
-   * input ever read it. The base input reads nothing it is not given, so the
-   * field writes the sentence and the `aria-describedby` in one place. It is
-   * asserted rather than assumed because the wiring could be dropped without
-   * the page looking any different.
-   */
-  it("names the hint under the field that has one", async () => {
+  it("labels the field without the removed storage hint", async () => {
     open("admin", ORGANIZATION);
 
-    const nameHint = await screen.findByText(
-      /breaks no link and no invitation/,
-    );
-    expect(nameHint.id).not.toBe("");
-    expect(screen.getByLabelText("Name").getAttribute("aria-describedby")).toBe(
-      nameHint.id,
-    );
+    expect(await screen.findByLabelText("Organization name*")).toBeTruthy();
+    expect(screen.queryByText(/What Egma calls your organization/)).toBeNull();
   });
 });
 
@@ -1149,7 +1205,7 @@ describe("people and invitations", () => {
         body: { userId: "usr_2", keys_revoked: 1 },
       },
     });
-    render(<PeoplePage />);
+    renderPeopleSettings();
   }
 
   it("lists everybody, with a role control an admin can change", async () => {
@@ -1171,6 +1227,16 @@ describe("people and invitations", () => {
     expect(
       sent.find((one) => one.url.includes("/v1/members/usr_2/role"))?.body,
     ).toEqual({ role: "member" });
+  });
+
+  it("calls the invitation section Invite team members", async () => {
+    open();
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
+    expect(
+      await screen.findByRole("heading", { name: "Invite team members" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Invite somebody" })).toBeNull();
   });
 
   /**
@@ -1268,7 +1334,7 @@ describe("people and invitations", () => {
         { status: 200, body: { invitations: [] } },
       ],
     });
-    render(<PeoplePage />);
+    renderPeopleSettings();
 
     fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
 
@@ -1317,7 +1383,7 @@ describe("people and invitations", () => {
         { status: 200, body: { invitations: [] } },
       ],
     });
-    render(<PeoplePage />);
+    renderPeopleSettings();
 
     fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
     fireEvent.change(await screen.findByLabelText("Email"), {
@@ -1364,7 +1430,7 @@ describe("people and invitations", () => {
     expect(window.history.pushState).toHaveBeenLastCalledWith(
       null,
       "",
-      "/projects/prj_1/settings?tab=invitations",
+      "/projects/prj_1/settings/people?tab=invitations",
     );
     fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
 
@@ -1379,8 +1445,8 @@ describe("people and invitations", () => {
       "draft@acme.example",
     );
 
-    window.location.href = "http://egma.test/projects/prj_1/settings";
-    window.location.pathname = "/projects/prj_1/settings";
+    window.location.href = "http://egma.test/projects/prj_1/settings/people";
+    window.location.pathname = "/projects/prj_1/settings/people";
 
     fireEvent.click(screen.getByRole("tab", { name: "People" }));
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
@@ -1402,7 +1468,7 @@ describe("people and invitations", () => {
         },
       ],
     });
-    render(<PeoplePage />);
+    renderPeopleSettings();
 
     fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
     expect(await screen.findByText("Invitations are offline.")).toBeTruthy();
@@ -1418,7 +1484,7 @@ describe("people and invitations", () => {
       },
       "/v1/invitations": "never",
     });
-    render(<PeoplePage />);
+    renderPeopleSettings();
 
     fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
     expect(await screen.findByText("Loading outstanding invitations…")).toBeTruthy();
@@ -1490,7 +1556,7 @@ describe("people and invitations", () => {
         { status: 200, body: { invitations: [DEAD_INVITATION] } },
       ],
     });
-    render(<PeoplePage />);
+    renderPeopleSettings();
 
     fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
 
@@ -1525,7 +1591,7 @@ describe("people and invitations", () => {
         },
       },
     });
-    render(<PeoplePage />);
+    renderPeopleSettings();
 
     fireEvent.change(
       (await screen.findAllByLabelText("ada@acme.example role"))[0]!,
@@ -1570,7 +1636,7 @@ describe("API keys", () => {
       "/api/me": { status: 200, body: meWith(role) },
       "/v1/keys": { status: 200, body: { keys } },
     });
-    render(<ApiKeysPage />);
+    renderApiKeysSettings();
   }
 
   /**
@@ -1600,7 +1666,7 @@ describe("API keys", () => {
         { status: 200, body: { keys: [MY_KEY] } },
       ],
     });
-    render(<ApiKeysPage />);
+    renderApiKeysSettings();
 
     fireEvent.change(await screen.findByLabelText("Name"), {
       target: { value: "My laptop" },
@@ -1647,7 +1713,7 @@ describe("API keys", () => {
         },
       ],
     });
-    render(<ApiKeysPage />);
+    renderApiKeysSettings();
 
     fireEvent.click(await screen.findByRole("button", { name: "Create key" }));
 
@@ -1673,7 +1739,7 @@ describe("API keys", () => {
     });
     const confirm = vi.fn(() => false);
     vi.stubGlobal("confirm", confirm);
-    render(<ApiKeysPage />);
+    renderApiKeysSettings();
 
     fireEvent.click(await screen.findByRole("button", { name: "Create key" }));
     expect(await screen.findByRole("button", { name: "Creating…" })).toBeTruthy();
@@ -1701,7 +1767,7 @@ describe("API keys", () => {
         { status: 200, body: { keys: [] } },
       ],
     });
-    render(<ApiKeysPage />);
+    renderApiKeysSettings();
 
     expect((await screen.findByLabelText("Scope") as HTMLSelectElement).value).toBe(
       "prj_1",
@@ -1722,7 +1788,7 @@ describe("API keys", () => {
       "/v1/keys": { status: 200, body: { keys: [MY_KEY] } },
       "/v1/keys/key_1/revoke": { status: 200, body: MY_KEY },
     });
-    render(<ApiKeysPage />);
+    renderApiKeysSettings();
 
     const table = await screen.findByRole("table", { name: "Your API keys" });
     fireEvent.click(within(table).getByRole("button", { name: "Revoke" }));
@@ -1752,7 +1818,7 @@ describe("API keys", () => {
         { status: 200, body: { keys: [MY_KEY] } },
       ],
     });
-    render(<ApiKeysPage />);
+    renderApiKeysSettings();
 
     fireEvent.change(await screen.findByLabelText("Scope"), {
       target: { value: "prj_2" },

@@ -280,8 +280,8 @@ export type DiscoverAgentsResponses = {
             modality: 'chat' | 'voice';
             connectionCandidates: Array<{
                 agentPlatform: 'retell';
-                connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number';
-                accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164';
+                connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number';
+                accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164';
                 modality: 'chat' | 'voice';
                 productLabel: string;
                 /**
@@ -325,8 +325,8 @@ export type ListConnectionOptionsResponses = {
         items: Array<{
             agentPlatform: 'retell' | 'livekit' | null;
             agentPlatformLabel: string;
-            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+            accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             accessVariantLabel: string;
             modality: 'voice' | 'chat';
             productLabel: string;
@@ -486,11 +486,11 @@ export type RegisterAgentData = {
             /**
              * Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room connections can use voice or chat.
              */
-            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+            connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
             /**
              * Credential method for the connection type, copied from the same catalog entry.
              */
-            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             /**
              * How simulations communicate with the agent. Use a modality offered by the selected catalog entry.
              */
@@ -857,11 +857,11 @@ export type AddConnectionData = {
         /**
          * Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room connections can use voice or chat.
          */
-        connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+        connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
         /**
          * Credential method for the connection type, copied from the same catalog entry.
          */
-        accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+        accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
         /**
          * How simulations communicate with the agent. Use a modality offered by the selected catalog entry.
          */
@@ -5426,6 +5426,10 @@ export type GetSimulationResponses = {
             message: string;
         } | null;
         gradingState: 'not_requested' | 'pending' | 'running' | 'complete' | 'error' | null;
+        evidenceError: {
+            error: 'evidence_collection_error';
+            message: string;
+        } | null;
         /**
          * The current result for each selected grader. Each grade has its own score, frozen threshold, result, and supporting details.
          */

@@ -475,7 +475,11 @@ describe("the suite-first Tests route", () => {
     const footer = sheet.querySelector('[data-slot="sheet-footer"]');
     expect(body?.className).toContain("gap-6");
     expect(body?.className).toContain("p-6");
-    expect(footer?.className).toContain("justify-end");
+    expect(footer?.className).toContain("justify-between");
+    expect(footer?.children).toHaveLength(2);
+    expect(footer?.children[0]?.textContent).toContain("Cancel");
+    expect(footer?.children[1]?.className).toContain("ml-auto");
+    expect(footer?.children[1]?.textContent).toContain("Start run");
     expect(
       within(footer as HTMLElement)
         .getAllByRole("button")
@@ -925,7 +929,7 @@ describe("the suite-first Tests route", () => {
     });
   });
 
-  it("leads the suites screen with Run a suite and shows exactly Name and Created", async () => {
+  it("places Run a suite before the primary Create suite action and shows exactly Name and Created", async () => {
     routed.pathname = "/projects/prj_1/tests";
     routed.params = { projectId: "prj_1" };
     answers({
@@ -945,12 +949,14 @@ describe("the suite-first Tests route", () => {
         .map((header) => header.textContent)
         .filter((header) => header !== "Suite actions"),
     ).toEqual(["Name", "Created"]);
-    // Running is the screen's first verb, and it reaches the run builder with
-    // no suite chosen — the builder is the screen that picks one.
-    expect(screen.getByRole("link", { name: "Run a suite" }).getAttribute("href")).toBe(
+    const run = screen.getByRole("link", { name: "Run a suite" });
+    expect(run.getAttribute("href")).toBe(
       "/projects/prj_1/runs/new",
     );
-    expect(screen.getByRole("button", { name: "Create suite" })).toBeTruthy();
+    const create = screen.getByRole("button", { name: "Create suite" });
+    expect(run.compareDocumentPosition(create) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
   });
 
   it("commits one cell alone, carrying the version it read", async () => {
@@ -998,6 +1004,59 @@ describe("the suite-first Tests route", () => {
     });
   });
 
+  it("keeps long stored tests compact while an open scenario grows with its text", async () => {
+    const longScenario = "A caller explains a complex booking problem with enough detail to exceed the scenario column.";
+    const longBehavior = "Confirms the caller identity, explains every available option, and records the exact next step without losing any requested detail.";
+    gridAnswers({
+      tests: [
+        testBody({
+          id: "tst_long",
+          name: "Long service request",
+          scenario: longScenario,
+          expectedBehaviors: [longBehavior, longBehavior],
+          personas: [PERSONA, { ...PERSONA, id: "prs_2", name: "Detailed Dana" }],
+        }),
+        testBody({ id: "tst_short", name: "Short request", scenario: "Book service." }),
+      ],
+    });
+    render(<TestSuitePage />);
+
+    const longRow = await screen.findByText("Long service request").then(
+      (name) => name.closest('[data-test-row="tst_long"]') as HTMLTableRowElement,
+    );
+    const shortRow = screen.getByText("Short request").closest(
+      '[data-test-row="tst_short"]',
+    ) as HTMLTableRowElement;
+    expect(longRow).not.toBeNull();
+    expect(shortRow).not.toBeNull();
+    for (const row of [longRow, shortRow]) {
+      expect(row.querySelectorAll("td").length).toBe(7);
+      expect(row.querySelector("td:last-child")?.className).toContain("align-middle");
+      for (const cell of Array.from(row.querySelectorAll("td")).slice(0, -1)) {
+        expect(cell.firstElementChild?.className).toContain("min-h-(--topbar-height)");
+      }
+    }
+    expect(screen.getByText(longScenario).className).toContain("line-clamp-2");
+    expect(screen.getByText(`1. ${longBehavior} · 2. ${longBehavior}`).className).toContain("line-clamp-2");
+
+    fireEvent.click(screen.getByText(longScenario));
+    const editor = screen.getByLabelText("Scenario") as HTMLTextAreaElement;
+    expect(editor.className).toContain("field-sizing-content");
+    fireEvent.change(editor, { target: { value: `${longScenario}\nA second line stays visible while editing.` } });
+    expect(editor.value).toContain("A second line stays visible while editing.");
+    fireEvent.keyDown(editor, { key: "Escape" });
+
+    const storedBehaviors = `1. ${longBehavior} · 2. ${longBehavior}`;
+    fireEvent.click(screen.getByText(storedBehaviors));
+    const behaviorEditor = screen.getByLabelText("Expected behavior 1") as HTMLTextAreaElement;
+    expect(behaviorEditor.tagName).toBe("TEXTAREA");
+    expect(behaviorEditor.className).toContain("field-sizing-content");
+    fireEvent.change(behaviorEditor, {
+      target: { value: `${longBehavior} This added detail stays visible while editing.` },
+    });
+    expect(behaviorEditor.value).toContain("This added detail stays visible while editing.");
+  });
+
   it("refuses in place a cell save that would empty a mandatory field", async () => {
     gridAnswers();
 
@@ -1032,11 +1091,15 @@ describe("the suite-first Tests route", () => {
 
     const save = screen.getByRole("button", { name: "Save test" });
     expect((save as HTMLButtonElement).disabled).toBe(true);
-    expect(
-      screen.getByText(
-        "Needs a name, a scenario, one expected behavior, and one persona.",
-      ),
-    ).toBeTruthy();
+    expect(document.querySelector("#entry-row-state")).toBeNull();
+    const requirement = save.getAttribute("aria-describedby");
+    expect(requirement).not.toBeNull();
+    expect(document.getElementById(requirement ?? "")?.textContent).toContain(
+      "Needs a name",
+    );
+    expect(document.getElementById(requirement ?? "")?.className).toContain(
+      "sr-only",
+    );
 
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "Books service" },
@@ -1048,17 +1111,17 @@ describe("the suite-first Tests route", () => {
       target: { value: "Offers an available time" },
     });
 
-    // The sentence shortens as the row fills, and it is always true.
-    expect(await screen.findByText("Needs one persona.")).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Save test" }) as HTMLButtonElement).disabled)
-      .toBe(true);
+    // Required fields still keep Save disabled without a validation status line.
+    const incomplete = screen.getByRole("button", { name: "Save test" });
+    expect((incomplete as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      document.getElementById(incomplete.getAttribute("aria-describedby") ?? "")
+        ?.textContent,
+    ).toBe("Needs one persona.");
     fireEvent.click(screen.getByRole("button", { name: "+ Add a persona" }));
     fireEvent.click(await screen.findByRole("option", { name: "Impatient Rita" }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
 
-    await waitFor(() => {
-      expect(screen.queryByText("Needs one persona.")).toBeNull();
-    });
     const ready = screen.getByRole("button", { name: "Save test" });
     expect((ready as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(ready);
@@ -2514,7 +2577,7 @@ describe("the suite-first Tests route", () => {
     fireEvent.keyDown(scenario, { key: "Enter" });
 
     // Edit the behaviors of the same test and blur, while scenario is pending.
-    fireEvent.click(within(row).getByText("Offers an available time"));
+    fireEvent.click(within(row).getByText(/Offers an available time/u));
     fireEvent.click(within(row).getByRole("button", { name: "+ Add a behavior" }));
     fireEvent.change(within(row).getByLabelText("Expected behavior 2"), {
       target: { value: "Reads the price back" },
@@ -2555,7 +2618,7 @@ describe("the suite-first Tests route", () => {
     await waitFor(() => {
       expect(screen.getByText("The caller books a service slot.")).toBeTruthy();
     });
-    expect(screen.getByText("Reads the price back")).toBeTruthy();
+    expect(screen.getByText(/Reads the price back/u)).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
   });
 

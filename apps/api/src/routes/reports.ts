@@ -66,6 +66,7 @@ export type ReportRoutesOptions = {
    * own bounded waits; a suite whose claim is not the waiting shortens them.
    */
   readonly simulationPullOptions?: RetellSimulationPullOptions | undefined;
+  readonly pullSimulationRecord?: typeof pullRetellSimulationRecord | undefined;
 };
 
 export const REPORTS_PATH = "/v1/simulations/:simulationId/reports";
@@ -310,7 +311,7 @@ export async function reportRoutes(
      * background. Log pull failures without failing report acceptance.
      */
     if (options.simulationPullReach !== undefined && endedNow) {
-      await pullRetellSimulationRecord(
+      await (options.pullSimulationRecord ?? pullRetellSimulationRecord)(
         standing.auth,
         simulationId,
         options.simulationPullReach,

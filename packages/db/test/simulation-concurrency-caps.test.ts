@@ -101,15 +101,15 @@ beforeAll(async () => {
   voiceConnectionId = voice.connection?.id ?? "";
 
   const chat = await createAgent(auth, {
-    agentPlatform: "retell",
+    agentPlatform: "livekit",
     name: "Chat worker",
     connection: {
-      agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
       modality: "chat",
-      config: { retellAgentId: "agent_caps_test" },
-      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      config: { url: "wss://test.livekit.cloud", agentName: "agent_caps_test" },
+      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ", apiSecret: "livekit-secret-A1B2C3D4WXYZ" },
     },
   });
   chatAgentId = chat.id;

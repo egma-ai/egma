@@ -15,13 +15,13 @@ afterEach(async () => {
   await api?.close();
 });
 
-const RETELL = {
-  agentPlatform: "retell",
-  connectionType: "retell_chat_api",
-  accessVariant: "retell_chat_api.api_key",
+const LIVEKIT_CHAT = {
+  agentPlatform: "livekit",
+  connectionType: "livekit_room",
+  accessVariant: "livekit_room.project_credentials",
   modality: "chat",
-  config: { retellAgentId: "agent_in_retell_1" },
-  credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+  config: { url: "wss://fixture.livekit.cloud", agentName: "agent_in_retell_1" },
+  credentials: { apiKey: "APIfixture12345678", apiSecret: "livekit-secret-fixture" },
 } as const;
 
 const TEST_BODY = {
@@ -425,9 +425,9 @@ describe("the Test Suites cutover", () => {
     expect(second.statusCode, JSON.stringify(second.body)).toBe(201);
 
     const registered = await request(api.app, "POST", "/v1/agents", key, {
-      agentPlatform: "retell",
+      agentPlatform: "livekit",
       name: "Front desk",
-      connection: { ...RETELL, name: "Northside chat" },
+      connection: { ...LIVEKIT_CHAT, name: "Northside chat" },
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
     const agent = registered.body.agent as { id: string };

@@ -1453,14 +1453,51 @@ export function transcriptToolCalls(
   );
 }
 
-/** These lanes receive their transcript separately from simulator evidence. */
-function platformTranscriptSource(
+type SimulationTranscriptAttribution = {
+  readonly platform: "Retell" | "LiveKit" | null;
+  readonly pov: EvidenceStep["pov"] | undefined;
+  readonly label: string | null;
+};
+
+/** Select the account that supplied each connection lane's conversation. */
+function simulationTranscriptAttribution(
   evidence: SimulationEvidence,
-): "Retell" | "LiveKit" | null {
-  const lane = evidence.connectionSnapshot.connectionType;
-  if (lane === "retell_web_call") return "Retell";
-  if (lane === "livekit_room") return "LiveKit";
-  return null;
+): SimulationTranscriptAttribution {
+  switch (evidence.connectionSnapshot.connectionType) {
+    case "livekit_room":
+      return {
+        platform: "LiveKit",
+        pov: "agent",
+        label: "Conversation recorded by the customer agent",
+      };
+    case "retell_web_call":
+      return {
+        platform: "Retell",
+        pov: "agent",
+        label: "Conversation from Retell",
+      };
+    case "retell_text_mode":
+      return {
+        platform: null,
+        pov: "persona",
+        label: "Conversation from the Retell API",
+      };
+    case "phone_number":
+      return {
+        platform: null,
+        pov: "persona",
+        label: "Conversation recorded by the persona",
+      };
+    default:
+      return { platform: null, pov: undefined, label: null };
+  }
+}
+
+/** Say whose account supplied the conversation shown in a simulation. */
+export function simulationTranscriptSourceLabel(
+  evidence: SimulationEvidence,
+): string | null {
+  return simulationTranscriptAttribution(evidence).label;
 }
 
 /** Keep reading a pending platform export after execution itself has ended. */
@@ -1468,7 +1505,8 @@ export function waitingForSimulationTranscript(
   evidence: SimulationEvidence,
 ): boolean {
   if (
-    platformTranscriptSource(evidence) === null ||
+    simulationTranscriptAttribution(evidence).platform === null ||
+    (evidence.evidenceError !== null && evidence.evidenceError !== undefined) ||
     evidence.agentPovIncomplete ||
     evidence.agentPovComplete
   ) {
@@ -1484,10 +1522,7 @@ export function simulationToolCalls(
 ): readonly EvidenceStep[] {
   return evidence.transcript === null
     ? []
-    : transcriptToolCalls(
-        evidence.transcript,
-        platformTranscriptSource(evidence) === null ? undefined : "agent",
-      );
+    : transcriptToolCalls(evidence.transcript, simulationTranscriptAttribution(evidence).pov);
 }
 
 type TurnConversationEvent = {
@@ -1988,8 +2023,8 @@ const DEFAULT_TRANSCRIPT_SPEAKERS: TranscriptSpeakerLabels = {
 };
 
 const DEFAULT_TRANSCRIPT_EMPTY_STATE: TranscriptEmptyState = {
-  title: "-",
-  description: "No conversation recorded",
+  title: "No conversation recorded",
+  description: "This simulation finished without a recorded conversation or tool calls.",
 };
 
 /** The same quiet absence whether no trace or an empty trace came back. */
@@ -2240,8 +2275,10 @@ export function SimulationTranscript({
   readonly evidence: SimulationEvidence;
   readonly recording: SimulationEvidenceRecording;
 }) {
-  const source = platformTranscriptSource(evidence);
-  const requiredPov = source === null ? undefined : "agent";
+  const attribution = simulationTranscriptAttribution(evidence);
+  const source = attribution.platform;
+  const sourceLabel = attribution.label;
+  const requiredPov = attribution.pov;
   const transcript = evidence.transcript;
   const toolCalls = useMemo(() => simulationToolCalls(evidence), [evidence]);
   const hasConversation = transcript !== null && (
@@ -2272,6 +2309,11 @@ export function SimulationTranscript({
   if (transcript === null) return <TranscriptEmpty />;
   return (
     <div className="flex min-w-0 flex-col gap-3">
+      {sourceLabel === null ? null : (
+        <p className="m-0 text-sm text-muted-foreground">
+          {sourceLabel}
+        </p>
+      )}
       {source !== null && evidence.agentPovIncomplete ? (
         <p className={NOTICE_LINE} role="status">
           {`${source} transcript incomplete. Only the conversation and tool calls Egma received are shown.`}

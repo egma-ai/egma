@@ -46,22 +46,13 @@ import {
   ListInstant,
 } from "../../../../../ui/relative-time.tsx";
 import { Section } from "../../../../../ui/section.tsx";
-import {
-  SettingsLayout,
-  SettingsTabs,
-} from "../../../../../ui/settings-nav.tsx";
+import { SettingsTabs } from "../../../../../ui/settings-nav.tsx";
 import {
   currentDraftState,
   useOrganizationRead,
   useUnsavedChanges,
 } from "../../../../../ui/settings-read.ts";
-import {
-  AppShell,
-  PageBody,
-  PageHeader,
-  ProductPage,
-  useShellSession,
-} from "../../../../../ui/shell.tsx";
+import { useShellSession } from "../../../../../ui/shell.tsx";
 
 /**
  * Membership and invitations apply to the organization. Without email
@@ -90,11 +81,7 @@ const ROW_ACTION =
 
 export default function PeopleSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  return (
-    <AppShell>
-      <PeopleSettings projectId={projectId} />
-    </AppShell>
-  );
+  return <PeopleSettings projectId={projectId} />;
 }
 
 function PeopleSettings({ projectId }: { readonly projectId: string }) {
@@ -255,35 +242,19 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
       : `Your ${role} role cannot manage members. Ask an organization admin.`;
 
   if (answer === null) {
-    return (
-      <ProductPage viewport>
-        <PageHeader title="People" />
-        <PageBody>
-          <SettingsLayout projectId={projectId} current="people">
-            <Loading what="this organization's people" />
-          </SettingsLayout>
-        </PageBody>
-      </ProductPage>
-    );
+    return <Loading what="this organization's people" />;
   }
 
   if (answer.status !== "ready") {
     return (
-      <ProductPage viewport>
-        <PageHeader title="People" />
-        <PageBody>
-          <SettingsLayout projectId={projectId} current="people">
-            <Failure
+      <Failure
               message={
                 answer.status === "signed-out"
                   ? "Your session has ended. Sign in and try again."
                   : answer.refusal.message
               }
               onRetry={reload}
-            />
-          </SettingsLayout>
-        </PageBody>
-      </ProductPage>
+      />
     );
   }
 
@@ -373,10 +344,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
   ];
 
   return (
-    <ProductPage viewport>
-      <PageHeader title="People" />
-      <PageBody>
-        <SettingsLayout projectId={projectId} current="people">
+    <>
           {refused === null ? null : <Refused message={refused.message} />}
 
           {mayManage ? (
@@ -432,9 +400,6 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
               />
             </div>
           )}
-        </SettingsLayout>
-      </PageBody>
-
       {confirming === null ? null : (
         <Dialog
           title={
@@ -475,7 +440,7 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
           )}
         </Dialog>
       )}
-    </ProductPage>
+    </>
   );
 }
 
@@ -608,10 +573,7 @@ function Invitations({
 
   return (
     <>
-      <Section
-        title="Invite somebody"
-        lead="If no mail transport is configured, Egma gives you a one-time link to send yourself."
-      >
+      <Section title="Invite team members">
         {note === null ? null : <Help>{note}</Help>}
         {/*
          * The link, on the same contained surface a new API key gets, and
@@ -672,7 +634,6 @@ function Invitations({
 
       <Section
         title="Invitations sent"
-        lead="Nobody has accepted these yet. An expired one cannot be accepted at all — send another."
       >
         {invitations === null ? (
           <Loading what="outstanding invitations" />

@@ -72,6 +72,7 @@ export function conversationOfSimulation(
 
   if (trace !== undefined && !trace.truncated) {
     const requiresAgentPov = laneProducesAnAgentPov(connectionType);
+    const requiredPov = simulationPov(connectionType);
     const agentEvidenceMissing = requiresAgentPov &&
       trace.agentEvidenceComplete !== true;
     return {
@@ -81,8 +82,8 @@ export function conversationOfSimulation(
           ? "The platform transcript is unavailable or incomplete. Egma's recording cannot replace it for grading."
           : null
       ),
-      transcript: transcriptOf(trace, requiresAgentPov),
-      events: toolCallsIn(trace, requiresAgentPov),
+      transcript: transcriptOf(trace, requiredPov),
+      events: toolCallsIn(trace, requiredPov),
       measures: measuresFromSpans(trace),
     };
   }
@@ -91,6 +92,19 @@ export function conversationOfSimulation(
     ...filedUnderTheSimulation,
     nothingToJudgeBecause: neverHappened ?? unreadable(simulation, trace),
   };
+}
+
+/** Select the same captured account that the simulation transcript UI shows. */
+function simulationPov(
+  connectionType: string,
+): TraceSpan["pov"] | undefined {
+  if (connectionType === "livekit_room" || connectionType === "retell_web_call") {
+    return "agent";
+  }
+  if (connectionType === "phone_number" || connectionType === "retell_text_mode") {
+    return "persona";
+  }
+  return undefined;
 }
 
 /**
@@ -191,9 +205,12 @@ export function conversationOfTrace(trace: TraceDetail): Conversation {
  * Project ordered turn spans into transcript entries with evidence span IDs.
  * Use the normalized text column and retain empty agent turns.
  */
-function transcriptOf(trace: TraceDetail, requiresAgentPov = false): readonly TranscriptTurn[] {
-  const turns = requiresAgentPov
-    ? trace.turns.filter((turn) => turn.pov === "agent")
+function transcriptOf(
+  trace: TraceDetail,
+  requiredPov?: TraceSpan["pov"],
+): readonly TranscriptTurn[] {
+  const turns = requiredPov !== undefined
+    ? trace.turns.filter((turn) => turn.pov === requiredPov)
     : fromOnePov(trace.turns, "agent");
   return turns.map((turn) => ({
     span_id: turn.spanId,
@@ -224,12 +241,15 @@ function speakerOf(kind: string): string {
  * Project nested and top-level tool spans into tool calls with arguments and
  * results. Sort by start time so graders can judge their order.
  */
-function toolCallsIn(trace: TraceDetail, requiresAgentPov = false): readonly ToolCall[] {
+function toolCallsIn(
+  trace: TraceDetail,
+  requiredPov?: TraceSpan["pov"],
+): readonly ToolCall[] {
   // Platform simulations must not turn a mock server observation into a
   // platform tool call, including when the platform reported no tools.
   const tools = [...everySpanIn(trace)].filter((span) => span.toolName !== "");
-  const selected = requiresAgentPov
-    ? tools.filter((span) => span.pov === "agent")
+  const selected = requiredPov !== undefined
+    ? tools.filter((span) => span.pov === requiredPov)
     : fromOnePov(tools, "agent");
   const called = selected.map(
     (span): ToolCall & { readonly at: string } => ({

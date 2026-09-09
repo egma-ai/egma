@@ -325,7 +325,7 @@ describe("the pages", () => {
 
     expect(people).toContain("acceptUrl");
     expect(people).toContain("delivered");
-    expect(people).toMatch(/no mail transport is configured/i);
+    expect(people).not.toContain("If no mail transport is configured");
   });
 
   /**

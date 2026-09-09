@@ -92,6 +92,16 @@ const gradingPlanSchema = {
   additionalProperties: false,
 } as const;
 
+const evidenceErrorSchema = {
+  type: "object",
+  properties: {
+    error: { type: "string", const: "evidence_collection_error" },
+    message: stringSchema,
+  },
+  required: ["error", "message"],
+  additionalProperties: false,
+} as const;
+
 const simulationSchema = {
   $defs: { traceSpan: traceSpanSchema },
   type: "object",
@@ -104,6 +114,7 @@ const simulationSchema = {
     status: simulationStatusSchema,
     workBlock: nullable(workBlockSchema),
     gradingState: nullable(gradingStateSchema),
+    evidenceError: nullable(evidenceErrorSchema),
     ...gradeProjectionProperties,
     reason: nullable(stringSchema),
     executionFailure: nullable(stringSchema),
@@ -236,6 +247,7 @@ const simulationSchema = {
     "position",
     "status",
     "gradingState",
+    "evidenceError",
     ...gradeProjectionRequired,
     "reason",
     "executionFailure",

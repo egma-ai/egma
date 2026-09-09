@@ -54,15 +54,6 @@ const TEXT_MODE = {
   credentials: { apiKey: SENTINEL_KEY },
 } as const;
 
-const RETELL_CHAT = {
-  agentPlatform: "retell",
-  connectionType: "retell_chat_api",
-  accessVariant: "retell_chat_api.api_key",
-  modality: "chat",
-  config: { retellAgentId: PLATFORM_AGENT },
-  credentials: { apiKey: SENTINEL_KEY },
-} as const;
-
 /** The voice door beside text mode: a web call against the same agent. */
 const WEB_CALL = {
   agentPlatform: "retell",
@@ -221,7 +212,7 @@ type TestWorld = {
 /** A customer with a suite, a persona and a test — everything a run needs. */
 async function aCustomerReadyToRun(
   label: string,
-  connection: typeof TEXT_MODE | typeof RETELL_CHAT,
+  connection: typeof TEXT_MODE,
   plan: RetellPlan = {},
   /** A trace store, for the one test that lands a terminal report. */
   traceStore = false,
@@ -400,12 +391,12 @@ describe("registering a text-mode connection against a named Retell agent", () =
     expect(JSON.stringify(refused.body)).not.toContain(SENTINEL_KEY);
   });
 
-  it("refuses a chat agent, which has its own door", async () => {
+  it("refuses a Retell chat agent as unsupported", async () => {
     const refused = await register("text_mode_confirm_chat_agent", {
       channel: "chat",
     });
     expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
-    expect(String(refused.body.message)).toContain("Chat API");
+    expect(String(refused.body.message)).toContain("does not run simulations");
   });
 });
 
@@ -841,13 +832,19 @@ describe("the sentinel Retell key", () => {
 describe("the version a run resolved, on the record", () => {
   it("lands on the run and on every conversation of it", async () => {
     const { ada, key, agentId, connectionId, suiteId } =
-      await aCustomerReadyToRun("text_mode_stamp_grain", RETELL_CHAT);
+      await aCustomerReadyToRun("text_mode_stamp_grain", TEXT_MODE);
+
+    const reach = await resolveRunStartReach(
+      contextFor(ada, "member"), agentId, connectionId,
+    );
+    if (reach === undefined) throw new Error("the text-mode connection had no reach");
 
     const started = await startRun(contextFor(ada, "member"), {
       suiteId,
       agentId,
       connectionId,
       agentVersion: SERVING_VERSION,
+      conductedConnectionIdentity: reach.connectionIdentity,
     });
 
     const header = await ask(api.app, "GET", `/v1/runs/${started.id}`, key);
@@ -892,20 +889,6 @@ describe("the version a run resolved, on the record", () => {
       "select count(*)::text as count from run",
     );
     expect(rows[0]?.count).toBe("0");
-  });
-
-  it("is absent on a run that pinned none", async () => {
-    const { ada, key, agentId, connectionId, suiteId } =
-      await aCustomerReadyToRun("text_mode_stamp_absent", RETELL_CHAT);
-
-    const started = await startRun(contextFor(ada, "member"), {
-      suiteId,
-      agentId,
-      connectionId,
-    });
-
-    const header = await ask(api.app, "GET", `/v1/runs/${started.id}`, key);
-    expect(header.body.agentVersion).toBeNull();
   });
 
   it("refuses a run whose connection was edited between the read and the write", async () => {
@@ -1027,17 +1010,22 @@ describe("what a version-pinned run's landing records", () => {
     const { ada, key, agentId, connectionId, suiteId } =
       await aCustomerReadyToRun(
         "text_mode_landing_record",
-        RETELL_CHAT,
+        TEXT_MODE,
         {},
         true,
         { mockTools: [{ tool: "check_availability", answer: { ok: true } }] },
       );
 
+    const reach = await resolveRunStartReach(
+      contextFor(ada, "member"), agentId, connectionId,
+    );
+    if (reach === undefined) throw new Error("the text-mode connection had no reach");
     await startRun(contextFor(ada, "member"), {
       suiteId,
       agentId,
       connectionId,
       agentVersion: SERVING_VERSION,
+      conductedConnectionIdentity: reach.connectionIdentity,
     });
 
     const claimed = await api.app.inject({

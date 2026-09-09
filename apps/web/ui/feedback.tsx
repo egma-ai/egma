@@ -120,7 +120,7 @@ export function Toast({
   return (
     <aside
       className={cn(
-        "fixed right-6 bottom-6 z-50 grid items-start",
+        "fixed right-6 bottom-6 z-50 grid items-center",
         "w-[min(380px,calc(100vw-(2*var(--space-4))))] min-h-(--tap-target)",
         "grid-cols-[var(--control-sm)_minmax(0,1fr)_var(--control-sm)] gap-3 p-3",
         "rounded-card border border-border border-l-2 border-l-foreground",
@@ -156,7 +156,7 @@ export function Toast({
         aria-hidden="true"
         data-slot="toast-mark"
       />
-      <span className="grid min-w-0 gap-1 pt-1 text-sm [&>span]:text-muted-foreground [&_strong]:font-medium">
+      <span className="grid min-w-0 gap-1 text-sm [&>span]:text-muted-foreground [&_strong]:font-medium">
         <strong>{title}</strong>
         {children === undefined ? null : <span>{children}</span>}
       </span>

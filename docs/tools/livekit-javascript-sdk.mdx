@@ -21,7 +21,7 @@ Keep your dependency lock file in Git so your team and CI use the same version.
 | `simulation` | `>=1.5.5 <2` |
 | `monitor` | `>=1.5.5 <2` |
 
-Both functions export spans and need LiveKit's OpenTelemetry support added in `1.5.5`. The package's broader peer range does not remove that requirement.
+Both functions export spans, so the package requires `1.5.5`, the first LiveKit Agents JS release with the public mock-tool hook and OpenTelemetry fan-out bridge. Calling either function on an older version gives a direct version error. You do not need to pin to `1.6.4`.
 
 ## Configure Egma
 
@@ -155,6 +155,8 @@ The function has no total startup deadline. It waits while the simulation room i
 Check the simulation's tool calls to confirm the mock matched. See [Mock tool responses](/guides/mock-tool-responses).
 
 After your normal `session.start` returns, LiveKit publishes its native agent state. Egma waits for an initialized state before sending the first simulated input. This wait uses the simulation's configured duration. You do not need another readiness callback.
+
+When that simulation ends, Egma finishes pending output and its exact participant leaves the room. The SDK closes the `AgentSession` you supplied, which completes LiveKit's native session trace, flushes the final evidence, and releases entrypoint code that is waiting for session close. An abrupt room disconnect closes the session as well. These listeners are installed only after the Egma participant accepts the tool report in a simulation room.
 
 ## Test in chat mode
 

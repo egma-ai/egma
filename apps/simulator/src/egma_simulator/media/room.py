@@ -410,6 +410,8 @@ class _Pipecat17InputDrain:
         failed: asyncio.Event,
         *,
         on_disconnected: Callable[[object], None] | None = None,
+        on_audio_track_subscribed: Callable[[str, str], None] | None = None,
+        on_audio_track_unsubscribed: Callable[[str, str], None] | None = None,
     ) -> None:
         try:
             from livekit import rtc
@@ -482,6 +484,8 @@ class _Pipecat17InputDrain:
         self._left_a_track = left_a_track
         self._canceling = False
         self._on_disconnected = on_disconnected
+        self._on_audio_track_subscribed = on_audio_track_subscribed
+        self._on_audio_track_unsubscribed = on_audio_track_unsubscribed
         self._audio_queue = _JoinAfterPipecatConversion()
         client._audio_queue = self._audio_queue
         self._ring_queue_type = RingQueue
@@ -590,6 +594,8 @@ class _Pipecat17InputDrain:
             name="livekit-audio-track-reader",
         )
         self._streams[key] = (stream, task)
+        if self._on_audio_track_subscribed is not None:
+            self._on_audio_track_subscribed(participant.sid, key)
         await self._joined_a_track(participant.sid)
 
     async def _track_unsubscribed(
@@ -599,7 +605,10 @@ class _Pipecat17InputDrain:
         if track.kind != self._audio_kind:
             await self._stock_unsubscribed(track, publication, participant)
             return
-        await self.finish_stream(track_key(participant.sid, track))
+        key = track_key(participant.sid, track)
+        await self.finish_stream(key)
+        if self._on_audio_track_unsubscribed is not None:
+            self._on_audio_track_unsubscribed(participant.sid, key)
         await self._left_a_track(participant.sid)
 
     def _stream_keys_of(self, participant_id: str | None) -> list[str]:
@@ -849,6 +858,7 @@ class JoinedRoom:
         self._startup_room: Any = None
         self._startup_handlers: list[tuple[str, Callable[..., None]]] = []
         self._startup_identities: dict[str, str] = {}
+        self._subscribed_audio_tracks: dict[str, set[str]] = {}
 
     @property
     def joined(self) -> bool:
@@ -863,6 +873,8 @@ class JoinedRoom:
     def watch_startup(self, startup: Any) -> None:
         """Attach the startup latch before the transport connects."""
         self._startup = startup
+        for participant_sid in self._subscribed_audio_tracks:
+            self._note_startup_audio_track(participant_sid)
 
     def create_transport(self) -> VoiceMedia:
         """Create stock LiveKit input and output processors without rates."""
@@ -880,7 +892,11 @@ class JoinedRoom:
         input_transport = transport.input()
         try:
             input_drain = _Pipecat17InputDrain(
-                input_transport, self.failed, on_disconnected=self._room_disconnected
+                input_transport,
+                self.failed,
+                on_disconnected=self._room_disconnected,
+                on_audio_track_subscribed=self._audio_track_subscribed,
+                on_audio_track_unsubscribed=self._audio_track_unsubscribed,
             )
         except Exception:
             self.failed.set()
@@ -964,7 +980,6 @@ class JoinedRoom:
                 if isinstance(frame, InputAudioRawFrame):
                     arrived_now(frame)
                     room.carrying_audio.set()
-                    room._note_startup_audio(getattr(frame, "user_id", ""))
                 await self.push_frame(frame, direction)
 
         return VoiceMedia(
@@ -994,6 +1009,7 @@ class JoinedRoom:
             sid = getattr(participant, "sid", "")
             if isinstance(sid, str) and isinstance(identity, str) and identity:
                 self._startup_identities[sid] = identity
+                self._note_startup_audio_track(sid)
             startup = self._startup
             if startup is not None:
                 startup.participant_seen(
@@ -1002,9 +1018,15 @@ class JoinedRoom:
                 )
 
         def _forget(participant: Any) -> None:
+            sid = getattr(participant, "sid", "")
+            identity = getattr(participant, "identity", "")
+            if isinstance(sid, str):
+                self._subscribed_audio_tracks.pop(sid, None)
+                self._startup_identities.pop(sid, None)
             startup = self._startup
             if startup is not None:
-                startup.participant_left(getattr(participant, "identity", ""))
+                startup.participant_audio_track_left(identity)
+                startup.participant_left(identity)
 
         def _startup_state(changed: dict[str, str], participant: Any) -> None:
             startup = self._startup
@@ -1025,11 +1047,30 @@ class JoinedRoom:
         for participant in raw_room.remote_participants.values():
             _remember(participant)
 
-    def _note_startup_audio(self, participant_sid: str) -> None:
+    def _audio_track_subscribed(self, participant_sid: str, key: str) -> None:
+        self._subscribed_audio_tracks.setdefault(participant_sid, set()).add(key)
+        self._note_startup_audio_track(participant_sid)
+
+    def _audio_track_unsubscribed(self, participant_sid: str, key: str) -> None:
+        tracks = self._subscribed_audio_tracks.get(participant_sid)
+        if tracks is None:
+            return
+        tracks.discard(key)
+        if tracks:
+            return
+        self._subscribed_audio_tracks.pop(participant_sid, None)
         startup = self._startup
         identity = self._startup_identities.get(participant_sid)
         if startup is not None and identity is not None:
-            startup.participant_audio(identity)
+            startup.participant_audio_track_left(identity)
+
+    def _note_startup_audio_track(self, participant_sid: str) -> None:
+        if not self._subscribed_audio_tracks.get(participant_sid):
+            return
+        startup = self._startup
+        identity = self._startup_identities.get(participant_sid)
+        if startup is not None and identity is not None:
+            startup.participant_audio_track(identity)
 
     def _detach_startup_states(self) -> None:
         room, self._startup_room = self._startup_room, None
@@ -1198,8 +1239,9 @@ def room_token(api_key: str, api_secret: str, room_name: str) -> str:
 async def delete_room(
     *,
     url: str,
-    api_key: str,
-    api_secret: str,
+    api_key: str | None,
+    api_secret: str | None,
+    token: str | None = None,
     room_name: str,
     quotable: Callable[[str], str] = lambda told: told,
 ) -> None:
@@ -1208,7 +1250,11 @@ async def delete_room(
 
     lkapi = None
     try:
-        lkapi = api.LiveKitAPI(url, api_key, api_secret)
+        lkapi = (
+            api.LiveKitAPI(url, token=token)
+            if token is not None
+            else api.LiveKitAPI(url, api_key, api_secret)
+        )
         await lkapi.room.delete_room(api.DeleteRoomRequest(room=room_name))
     except Exception as unfinished:
         logger.info(

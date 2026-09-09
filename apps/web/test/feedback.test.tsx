@@ -210,6 +210,28 @@ describe("shared feedback", () => {
     expect(mark?.getAttribute("class")).not.toContain("text-failure");
   });
 
+  it("centers the mark, message, and close action for every toast variant", () => {
+    const { unmount } = render(
+      <Toast open title="Agent saved" onDismiss={() => undefined}>
+        Support is ready.
+      </Toast>,
+    );
+    const status = screen.getByRole("status");
+    expect(status.className).toContain("items-center");
+    expect(status.querySelector("[data-slot=toast-mark]")?.className).not.toContain("self-start");
+    expect(status.querySelector("[data-slot=toast-mark]")?.nextElementSibling?.className).not.toContain("pt-1");
+    unmount();
+
+    render(
+      <Toast open kind="error" title="Could not save" onDismiss={() => undefined}>
+        Try again.
+      </Toast>,
+    );
+    const error = screen.getByRole("alert");
+    expect(error.className).toContain("items-center");
+    expect(error.querySelector("[data-slot=toast-mark]")?.nextElementSibling?.className).not.toContain("pt-1");
+  });
+
   it("names a busy button and makes it inert", () => {
     render(
       <Button type="button" busy>

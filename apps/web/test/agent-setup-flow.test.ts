@@ -24,16 +24,7 @@ const CHAT = {
   platformAgentId: "chat_1",
   name: "Chat support",
   modality: "chat" as const,
-  connectionCandidates: [
-    {
-      agentPlatform: "retell" as const,
-      connectionType: "retell_chat_api" as const,
-      accessVariant: "retell_chat_api.api_key" as const,
-      modality: "chat" as const,
-      productLabel: "Retell chat",
-      config: { retellAgentId: "chat_1" },
-    },
-  ],
+  connectionCandidates: [],
 };
 
 const VOICE = {

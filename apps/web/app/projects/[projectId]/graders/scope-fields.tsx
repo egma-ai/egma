@@ -543,7 +543,7 @@ export function ScopeFields({
         ) : null}
       </div>
 
-      <div className="flex flex-col gap-3 border-t border-border pt-5">
+      <div className="flex flex-col gap-3">
         <label className="flex min-h-(--control-md) items-center gap-3 text-sm font-medium text-foreground">
           <Checkbox
             checked={scope.production !== null}

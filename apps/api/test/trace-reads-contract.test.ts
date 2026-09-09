@@ -826,15 +826,15 @@ describe.skipIf(!storage.available)("narrowing a list to one kind of traffic", (
     // the pins off them, and that is what stamps the spans `simulation`.
     const auth: AuthContext = contextFor(acme, "member");
     const agent = await createAgent(auth, {
-      agentPlatform: "retell",
+      agentPlatform: "livekit",
       name: "Front desk",
       connection: {
-        agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        agentPlatform: "livekit",
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
         modality: "chat",
-        config: { retellAgentId: "agent_mixed" },
-        credentials: { apiKey: "retell-secret-mixed" },
+        config: { url: "wss://test.livekit.cloud", agentName: "agent_mixed" },
+        credentials: { apiKey: "livekit-key-mixed", apiSecret: "livekit-secret-mixed" },
       },
     });
     const personaId = (

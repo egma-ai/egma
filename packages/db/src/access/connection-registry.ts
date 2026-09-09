@@ -383,22 +383,11 @@ type ConnectionOption = {
   readonly accessVariant: AccessVariant;
   readonly modality: Modality;
   readonly productLabel: string;
-  /**
-   * Hide this option from connection setup while preserving labels for stored rows.
-   * Retell chat-native connections remain readable and runnable.
-   */
+  /** Hide this option from connection setup while preserving stored labels. */
   readonly dormant?: true;
 };
 
 const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
-  {
-    agentPlatform: "retell",
-    connectionType: "retell_chat_api",
-    accessVariant: "retell_chat_api.api_key",
-    modality: "chat",
-    productLabel: "Retell chat",
-    dormant: true,
-  },
   {
     agentPlatform: "retell",
     connectionType: "retell_text_mode",
@@ -503,10 +492,18 @@ export function connectionOptionMetadata(): readonly ConnectionOptionMetadata[] 
 
 export function productLabelOf(
   agentPlatform: AgentPlatform | null,
-  connectionType: ConnectionType,
-  accessVariant: AccessVariant,
-  modality: Modality,
+  connectionType: string,
+  accessVariant: string,
+  modality: string,
 ): string {
+  // Output-only compatibility for rows frozen before the Retell Chat API lane
+  // was retired. It is absent from the registry and cannot be created or run.
+  if (
+    agentPlatform === "retell" &&
+    connectionType === "retell_chat_api" &&
+    accessVariant === "retell_chat_api.api_key" &&
+    modality === "chat"
+  ) return "Retell chat";
   const exact = CONNECTION_OPTIONS.find(
     (option) =>
       option.agentPlatform === agentPlatform &&
@@ -786,61 +783,6 @@ function authHeadersJson(what: string, field: string, value: unknown): string {
 export const CONNECTION_REGISTRY: Readonly<
   Record<ConnectionType, ConnectionDescriptor>
 > = {
-  retell_chat_api: {
-    label: "Retell chat API",
-    agentPlatforms: ["retell"],
-    // The Retell chat adapter uses the chat-session API. Voice agents are
-    // reached through a phone connection after provider setup resolves one of
-    // their routed numbers. Admitting `voice` here would create a connection
-    // the simulator cannot conduct and fail it only after dispatch.
-    modalities: ["chat"],
-    topology: "hosted-broker",
-    accessVariants: [
-      {
-        id: "retell_chat_api.api_key",
-        label: "Retell API key",
-        named: "a Retell chat connection",
-        config: { retellAgentId: nonEmptyString },
-        fields: [
-          {
-            key: "retellAgentId",
-            label: "Retell agent ID",
-            kind: "text",
-            help: "The agent's own identifier in Retell, which starts with agent_.",
-          },
-        ],
-        credentials: {
-          required: true,
-          fields: ["apiKey"],
-          hint: lastFourOf("apiKey"),
-        },
-        credentialHelp:
-          "Egma stores your Retell API key sealed and never shows it again. " +
-          "A read gives back its last four characters, so you can tell two " +
-          "keys apart.",
-        credentialFields: [
-          {
-            field: "apiKey",
-            label: "Retell API key",
-            kind: "secret",
-            help: "Copied from your Retell dashboard.",
-          },
-        ],
-      },
-    ],
-    // The provider's own agent id: the first vendor to carry a reuse rule, and
-    // the simple case the mechanism was built for — one config key, compared as
-    // it was stored, is the whole identity. The family says text mode and
-    // the web call name the same agents, so any of the three doors lands on
-    // the one Egma agent the first door created.
-    reuse: {
-      family: "retellAgentId",
-      matchedKeys: ["retellAgentId"],
-      identityOf: (config) => config["retellAgentId"],
-    },
-    simulatorAdapter: true,
-    usesPlatformCarrier: false,
-  },
   retell_text_mode: {
     label: "Retell text mode",
     agentPlatforms: ["retell"],
@@ -858,9 +800,8 @@ export const CONNECTION_REGISTRY: Readonly<
         label: "Retell API key",
         named: "a Retell text mode connection",
         // `retellAgentId` and nothing else. Where Retell answers is **not** a
-        // stored config key: it is the plug's own test seam, the way it is on
-        // `retell_chat_api`, and `validConfig` refuses `baseUrl` here for the
-        // same reason it refuses it there. A customer-writable address would
+        // stored config key: it is the plug's own test seam, and `validConfig`
+        // refuses `baseUrl` here. A customer-writable address would
         // decide where this connection's sealed key is sent, which is a read
         // of a write-only secret by another name.
         config: { retellAgentId: nonEmptyString },
@@ -1297,6 +1238,7 @@ export function noSimulatorAdapterMessage(
 export function platformOfConnectionType(
   connectionType: string,
 ): AgentPlatform | null {
+  if (connectionType === "retell_chat_api") return "retell";
   const platforms = descriptorOf(connectionType).agentPlatforms;
   if (platforms === "any" || platforms.length !== 1) return null;
   return platforms[0] ?? null;

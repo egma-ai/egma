@@ -183,20 +183,11 @@ function Suites({ projectId }: { readonly projectId: string }) {
       ? undefined
       : `Your ${String(role)} role cannot change test suites. Ask an organization admin to change your role.`;
 
-  /**
-   * The screen's first verb is running a suite.
-   *
-   * `KM4-0` puts "Run a suite" at the far right as the wash primary, with
-   * "Create suite" beside it as the outlined one: the point of a suite is that
-   * it runs, and creating one is what a person does once. The empty screen is
-   * the exception, and it is the truthful one — with no suite to run, the only
-   * honest lead is creating the first.
-   */
+  /** The populated list leads with creating another suite. */
   const createAction =
     role === null ? undefined : (
       <Button
         type="button"
-        variant="secondary"
         disabled={!mayAuthor}
         {...(whyNot === undefined ? {} : { why: whyNot })}
         onClick={() => setCreating(true)}
@@ -219,7 +210,7 @@ function Suites({ projectId }: { readonly projectId: string }) {
     );
 
   const runAction = (
-    <Button asChild>
+    <Button asChild variant="secondary">
       <Link href={runBuilderPath(projectId)}>Run a suite</Link>
     </Button>
   );
@@ -415,8 +406,8 @@ function Suites({ projectId }: { readonly projectId: string }) {
         action={
           isEmpty ? undefined : (
             <>
-              {createAction}
               {runAction}
+              {createAction}
             </>
           )
         }

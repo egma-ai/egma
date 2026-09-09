@@ -27,7 +27,6 @@ def test_one_variable_is_enough(env, tmp_path):
     assert config.mode == "persistent"
     assert config.modalities is None
     assert config.execution_deadline_seconds == 900.0
-    assert config.standby_seconds == 1800.0
     assert config.thread_pool_workers is None
     assert config.vad_provider == "scripted"
     assert config.service_token is None
@@ -117,7 +116,6 @@ DURATION_VARIABLES = [
     "EGMA_SIMULATOR_CLAIM_WAIT_SECONDS",
     "EGMA_SIMULATOR_REPORT_DEADLINE_SECONDS",
     "EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS",
-    "EGMA_SIMULATOR_STANDBY_SECONDS",
 ]
 """Every variable read as a duration — all of them through one helper."""
 
@@ -154,21 +152,18 @@ def test_an_unknown_log_level_is_refused_by_name(env):
         SimulatorConfig.from_env()
 
 
-@pytest.mark.parametrize("mode", ["one-shot", "standby"])
-def test_a_bounded_voice_mode_has_one_slot_and_its_own_lifetime(env, mode):
+def test_one_shot_voice_mode_has_one_slot_and_its_own_lifetime(env):
     env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
-    env.setenv("EGMA_SIMULATOR_MODE", mode)
+    env.setenv("EGMA_SIMULATOR_MODE", "one-shot")
     env.setenv("EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS", "12")
-    env.setenv("EGMA_SIMULATOR_STANDBY_SECONDS", "34")
     env.setenv("EGMA_SIMULATOR_THREAD_POOL_WORKERS", "1")
 
     config = SimulatorConfig.from_env()
 
-    assert config.mode == mode
+    assert config.mode == "one-shot"
     assert config.capacity == 1
     assert config.modalities == ("voice",)
     assert config.execution_deadline_seconds == 12
-    assert config.standby_seconds == 34
     assert config.thread_pool_workers == 1
 
 
@@ -329,6 +324,26 @@ def test_a_bridge_starts_without_a_trunk_and_refuses_a_carrierless_call(env):
         settled.checked()
 
 
+def test_daytona_livekit_uses_only_scoped_room_credentials(env):
+    a_deployment_that_dials(
+        env,
+        EGMA_SIMULATOR_LIVEKIT_API_KEY=None,
+        EGMA_SIMULATOR_LIVEKIT_API_SECRET=None,
+        EGMA_SIMULATOR_LIVEKIT_ROOM_TOKEN="room-token",
+        EGMA_SIMULATOR_LIVEKIT_API_TOKEN="api-token",
+        EGMA_SIMULATOR_LIVEKIT_ROOM_NAME="egma-sim-runtime-1",
+    )
+
+    media = SimulatorConfig.from_env().media
+
+    assert media is not None
+    assert media.livekit_api_key is None
+    assert media.livekit_api_secret is None
+    assert media.livekit_room_name == "egma-sim-runtime-1"
+    assert "room-token" not in repr(media)
+    assert "api-token" not in repr(media)
+
+
 def test_a_work_order_carrier_cannot_select_a_media_backend(env):
     env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
     carrier = PlatformCarrier(trunk_address="a.example.com")
@@ -468,6 +483,18 @@ def test_naming_an_endpoint_is_what_sends_recordings_to_object_storage(env):
     assert store.access_key_id == "egma-object-storage"
     assert store.bucket == "egma-recordings"
     assert store.region == "us-east-1"
+
+
+def test_object_storage_accepts_an_sts_session_token(env):
+    a_deployment_with_object_storage(
+        env, EGMA_SIMULATOR_S3_SESSION_TOKEN="temporary-session-token"
+    )
+
+    store = SimulatorConfig.from_env().object_store
+
+    assert store is not None
+    assert store.session_token == "temporary-session-token"
+    assert "temporary-session-token" not in repr(store)
 
 
 def test_the_bucket_and_the_region_can_both_be_moved(env):

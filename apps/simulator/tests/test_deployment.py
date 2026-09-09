@@ -31,6 +31,13 @@ DOCUMENTED_ELSEWHERE = {
     # simulator: a bare process, which is what the workbench story and
     # every contributor's checkout use.
     "EGMA_SIMULATOR_BLOB_DIR",
+    # The hosted API assigns these per Daytona sandbox. They are not
+    # self-hosted Compose inputs and must not invite long-lived substitutes.
+    "EGMA_SIMULATOR_LIVEKIT_API_TOKEN",
+    "EGMA_SIMULATOR_LIVEKIT_ROOM_NAME",
+    "EGMA_SIMULATOR_LIVEKIT_ROOM_TOKEN",
+    "EGMA_SIMULATOR_RUNTIME",
+    "EGMA_SIMULATOR_S3_SESSION_TOKEN",
 }
 """Variables the code reads that no compose file passes, each for its own
 stated reason. Everything else must reach the container, because a
@@ -335,7 +342,6 @@ MAY_BE_ABSENT = {
     "EGMA_SIMULATOR_MODE": "empty keeps the persistent pull loop",
     "EGMA_SIMULATOR_MODALITIES": "empty uses the mode's modality default",
     "EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS": "mode-specific process default",
-    "EGMA_SIMULATOR_STANDBY_SECONDS": "standby mode owns its idle deadline",
     "EGMA_SIMULATOR_THREAD_POOL_WORKERS": "mode-specific native pool default",
     "EGMA_VOICE_SIMULATION_CONCURRENCY_CAP": "absent means no deployment voice cap",
     "EGMA_CHAT_SIMULATION_CONCURRENCY_CAP": "absent means no deployment chat cap",

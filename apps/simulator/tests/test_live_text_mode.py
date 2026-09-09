@@ -29,7 +29,7 @@ from conftest import (
     turns_for,
 )
 
-from egma_simulator.plugs.retell import DEFAULT_BASE_URL
+from egma_simulator.plugs.retell_common import DEFAULT_BASE_URL
 
 API_KEY = credential("TEST_RETELL_API_KEY", "RETELL_API_KEY")
 AGENT_ID = credential("TEST_RETELL_AGENT_ID", "EGMA_RETELL_AGENT_ID")

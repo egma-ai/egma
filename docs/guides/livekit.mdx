@@ -159,6 +159,10 @@ of giving Egma a LiveKit project key pair. The endpoint must return access to
 the requested room and arrange the named worker's dispatch. The example below
 does both through LiveKit's room configuration.
 
+For this authentication path, your endpoint owns the room lifecycle. It
+prepares the room, dispatches the requested worker, and cleans the room up
+after Egma leaves.
+
 ### Create the endpoint
 
 This example uses Python and FastAPI. Install its dependencies in a server
@@ -285,9 +289,17 @@ Check that the worker joins the `egma-sim-` room and receives any test metadata.
 
 Egma makes one token request per simulation. It allows 20 seconds for the
 response, does not follow redirects, and accepts a response body up to 64 KiB.
-It joins and leaves the room with the participant token; it cannot delete the
-room. Configure your worker to shut down when the caller leaves, and keep an
-empty-room timeout in your LiveKit configuration.
+It joins the room once with the participant token. A voice simulation
+publishes and subscribes to audio. A chat simulation joins as one text-only
+client: it publishes no media tracks, subscribes to no audio, and performs no
+audio decoding, speech-to-text, text-to-speech, recording, or voice processing.
+Egma waits 30 seconds for your worker to join and answer, then ends the
+simulation as `agent_never_joined`.
+
+Egma leaves when the conversation ends. It never deletes the room and never
+uses the token again, so your token endpoint owns cleanup for this room.
+Configure your worker to shut down when the caller leaves. A short empty-room
+timeout on your LiveKit project is one way to clean the room up.
 
 ## If the worker does not join or respond
 

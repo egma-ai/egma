@@ -178,7 +178,6 @@ const connectionInput = {
       type: "string",
       description: "Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room connections can use voice or chat.",
       enum: [
-        "retell_chat_api",
         "retell_text_mode",
         "retell_web_call",
         "phone_number",
@@ -189,7 +188,6 @@ const connectionInput = {
       type: "string",
       description: "Credential method for the connection type, copied from the same catalog entry.",
       enum: [
-        "retell_chat_api.api_key",
         "retell_text_mode.api_key",
         "retell_web_call.api_key",
         "phone_number.public_e164",
@@ -414,7 +412,6 @@ export const agentOperations = {
                     connectionType: {
                       type: "string",
                       enum: [
-                        "retell_chat_api",
                         "retell_text_mode",
                         "retell_web_call",
                         "phone_number",
@@ -423,7 +420,6 @@ export const agentOperations = {
                     accessVariant: {
                       type: "string",
                       enum: [
-                        "retell_chat_api.api_key",
                         "retell_text_mode.api_key",
                         "retell_web_call.api_key",
                         "phone_number.public_e164",
@@ -496,7 +492,6 @@ export const agentOperations = {
                 connectionType: {
                   type: "string",
                   enum: [
-                    "retell_chat_api",
                     "retell_text_mode",
                     "retell_web_call",
                     "phone_number",
@@ -506,7 +501,6 @@ export const agentOperations = {
                 accessVariant: {
                   type: "string",
                   enum: [
-                    "retell_chat_api.api_key",
                     "retell_text_mode.api_key",
                     "retell_web_call.api_key",
                     "phone_number.public_e164",

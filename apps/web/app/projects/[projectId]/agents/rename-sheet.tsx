@@ -100,7 +100,19 @@ export function RenameAgentSheet({
               <Help>Its name in Egma. Nothing at the provider changes.</Help>
             </Field>
           </SheetBody>
-          <SheetFooter>
+          <SheetFooter
+            secondary={
+              <Button
+                disabled={saving}
+                onClick={onClose}
+                size="lg"
+                type="button"
+                variant="secondary"
+              >
+                Cancel
+              </Button>
+            }
+          >
             <Button
               busy={saving}
               disabled={!mayAuthor || unchanged}
@@ -109,15 +121,6 @@ export function RenameAgentSheet({
               {...(why === undefined ? {} : { why })}
             >
               {saving ? "Saving…" : "Save"}
-            </Button>
-            <Button
-              disabled={saving}
-              onClick={onClose}
-              size="lg"
-              type="button"
-              variant="secondary"
-            >
-              Cancel
             </Button>
           </SheetFooter>
         </form>

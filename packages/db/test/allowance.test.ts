@@ -28,7 +28,7 @@ describe("which allowance a conversation is counted against", () => {
     // Chat is a chat simulation, whichever chat lane carried it.
     {
       modality: "chat",
-      connectionType: "retell_chat_api",
+      connectionType: "livekit_room",
       kind: "chat_simulations",
     },
     {
@@ -145,7 +145,7 @@ describe("how much of an allowance one conversation used", () => {
     expect(
       allowanceUsedBy({
         modality: "chat",
-        connectionType: "retell_chat_api",
+        connectionType: "livekit_room",
         ...span,
       }),
     ).toEqual({ kind: "chat_simulations", used: 1 });
@@ -155,7 +155,7 @@ describe("how much of an allowance one conversation used", () => {
     expect(
       allowanceUsedBy({
         modality: "chat",
-        connectionType: "retell_chat_api",
+        connectionType: "livekit_room",
         startedAt: null,
         executionEndedAt: null,
       }),

@@ -946,6 +946,7 @@ describe("regrading uses frozen history", () => {
       .resolves.toEqual({
         state: "not_requested",
         workBlock: null,
+        evidenceError: null,
         history: [],
         current: [],
         combinedScore: null,

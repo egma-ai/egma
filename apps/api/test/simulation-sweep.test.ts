@@ -69,15 +69,15 @@ async function anOrphan(
   const key = await projectKeyFor(api.app, ada);
 
   const registered = await ask(api.app, "POST", "/v1/agents", key, {
-    agentPlatform: "retell",
+    agentPlatform: "livekit",
     name: "Front desk",
     connection: {
-      agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
       modality: "chat",
-      config: { retellAgentId: "agent_in_retell_1" },
-      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      config: { url: "wss://sweep.livekit.cloud", agentName: "front-desk" },
+      credentials: { apiKey: "APIsweep12345678", apiSecret: "livekit-secret-sweep" },
     },
   });
   expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
@@ -169,6 +169,32 @@ describe("the standing sweep", () => {
       expect(wakes).toBe(5);
     } finally {
       release?.();
+      await sweep.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports exhausted agent evidence as a collection error", async () => {
+    vi.useFakeTimers();
+    const log = capturingLog();
+    const sweep = startOrphanSweep({
+      log,
+      intervalMilliseconds: 20,
+      sweep: async () => [],
+      settleAgentPovBound: async () => [{
+        id: "sim_evidence_error",
+        runId: "run_evidence_error",
+        agentPovFiled: false,
+        outcome: "evidence_error",
+      }],
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(20);
+      expect(log.infos).toHaveLength(1);
+      expect(log.infos[0]?.message).toContain(
+        "filed an evidence collection error",
+      );
+    } finally {
       await sweep.stop();
       vi.useRealTimers();
     }

@@ -1,8 +1,15 @@
 import {
   appendGrades,
+  claimSimulations,
   claimGradingJobs,
+  completeSimulation,
+  createAgent,
   finishGradingJob,
   getGradingJobForTrace,
+  listSimulations,
+  settleSimulationsPastTheAgentPovBound,
+  startRun,
+  startSimulation,
 } from "@egma/db";
 import { newId } from "@egma/ids";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
@@ -284,12 +291,12 @@ describe("adding a colleague, with no mail configured", () => {
     "hands the link to the inviter, and following it lands the colleague inside",
     async () => {
       await openPeopleSettings(page);
-      expect(await page.getByText("Invite somebody").count()).toBe(0);
+      expect(await page.getByText("Invite team members").count()).toBe(0);
       // People and invitations are two views of this settings page. The tab
       // keeps that navigation clear without making either view look like a
       // form choice.
       await page.getByRole("tab", { name: "Invitations" }).click();
-      await page.waitForSelector("text=Invite somebody");
+      await page.waitForSelector("text=Invite team members");
 
       await page.fill("#invite-email", "bob@acme.example");
       await page.selectOption("#invite-role", "viewer");
@@ -869,7 +876,9 @@ describe("what a project recorded in production", () => {
       // project like every other product page and the selector stays on screen
       // throughout it. Its own navigation is what separates the settings that
       // belong to this project from the ones that belong to the organization.
-      await page.waitForURL(new RegExp(`/projects/${project}/settings$`));
+      await page.waitForURL(
+        new RegExp(`/projects/${project}/settings/organization$`),
+      );
       await page
         .getByRole("navigation", { name: "Settings" })
         .getByRole("link", { name: "People" })
@@ -1104,11 +1113,10 @@ describe("what a project recorded in production", () => {
         }),
       ).toBe("nowrap");
       expect(shown).toContain("1m 13s");
-      // The p90 of the capture's three answered turns, which nearest-rank
-      // makes its slowest: 3454.607472 ms, measured from the caller's last
-      // audible sample (catalog version 8). `otlp-derived-measures.test.ts`
-      // works all three out by hand from this same capture.
-      expect(shown).toContain("3.45s");
+      // The p90 of the capture's three measured spoken replies, which
+      // nearest-rank makes its slowest: 3066.59356 ms. Unspoken native agent
+      // records keep their own timing outside the conversation-turn measure.
+      expect(shown).toContain("3.07s");
 
       /*
        * The table contains production traces only, so it needs no repeated source
@@ -1175,7 +1183,7 @@ describe("what a project recorded in production", () => {
         "Turns",
         "P90 turn latency",
       ]);
-      expect(await overview.innerText()).toContain("3.45s");
+      expect(await overview.innerText()).toContain("3.07s");
       expect(
         await sheet
           .getByRole("heading", { name: "Latency", exact: true })
@@ -1550,7 +1558,7 @@ describe("one exchange, read as a transcript", () => {
       await openIt();
       const shown = await page.innerText("main");
 
-      // Thirteen turns, alternating, labelled the way a transcript labels them.
+      // Spoken turns, alternating, labelled the way a transcript labels them.
       expect((shown.match(/^human:/gmu) ?? []).length).toBe(
         FIXTURE_TRACE.humanTurns,
       );
@@ -1577,42 +1585,10 @@ describe("one exchange, read as a transcript", () => {
         reached = at;
       }
 
-      // The four agent turns where nothing was said are turns, not gaps: two of
-      // them are where the agent only reached for the weather.
-      expect((shown.match(/\(no speech in this turn\)/gu) ?? []).length).toBe(4);
-    },
-    SETTLE,
-  );
-
-  it(
-    "opens a turn onto the timed steps inside it",
-    async () => {
-      await openIt();
-
-      // The fifth turn is the agent's answer to the Lisbon question: it says
-      // nothing out loud, because all it did was reach for the weather. Six
-      // timed things happened inside it — the tool, and a model request that
-      // nests four adapters deep — and the count says so before it is opened.
-      const turns = page.locator('[data-turn="true"]');
-      const weather = turns.nth(4);
-      expect(await weather.innerText()).toContain("6 steps");
-
-      await weather.locator("summary").first().click();
-      const steps = weather.locator(":scope > div > div > details");
-      expect(await steps.count()).toBe(2);
-      expect(await steps.nth(0).innerText()).toContain("Model");
-      expect(await steps.nth(1).innerText()).toContain("Tool");
-      expect(await weather.innerText()).toMatch(/\d+(\.\d+)? (ms|s)/u);
-
-      // And a step opens again onto exactly what was recorded — which is where
-      // the raw facts live, and deliberately not the default view.
-      const tool = steps.nth(1);
-      expect(await tool.innerText()).not.toContain("lookup_weather");
-      await tool.locator("summary").first().click();
-      const recorded = await tool.innerText();
-      expect(recorded).toContain("lookup_weather");
-      expect(recorded).toContain('{"location": "Lisbon"}');
-      expect(recorded).toContain("sunny with a temperature of 70 degrees.");
+      // Native records with no spoken response remain available in the raw
+      // trace, while the conversation rail contains no invented blank turns.
+      expect(shown).not.toContain("(no speech in this turn)");
+      expect(shown).toContain("Everything else recorded");
     },
     SETTLE,
   );
@@ -1638,6 +1614,22 @@ describe("one exchange, read as a transcript", () => {
       const reached = await around.innerText();
       expect(reached).toContain("Overview");
       expect(reached).toContain("agent_session");
+      // Tool-only native records moved out of the spoken-turn list, but their
+      // recorded call, arguments and result stay available down the hierarchy.
+      let disclosure = around;
+      for (;;) {
+        const children = disclosure === around
+          ? disclosure.locator(":scope > div > details")
+          : disclosure.locator(":scope > div > div > details");
+        const next = children.filter({ hasText: "lookup_weather" }).first();
+        if (await next.count() === 0) break;
+        await next.locator(":scope > summary").click();
+        disclosure = next;
+      }
+      const recorded = await disclosure.innerText();
+      expect(recorded).toContain("lookup_weather");
+      expect(recorded).toContain('{"location": "Lisbon"}');
+      expect(recorded).toContain("sunny with a temperature of 70 degrees.");
     },
     SETTLE,
   );
@@ -2285,12 +2277,16 @@ describe("the project grader library", () => {
         .poll(() => details.innerText(), { timeout: 30_000 })
         .toContain("Turn response latency");
       expect(await details.innerText()).toContain(
-        "Maximum response time (p90): 3 seconds by default",
+        "Maximum acceptable response latency: 3 seconds by default",
       );
       await details.getByRole("button", { name: "Use in project" }).click();
-      await details.getByLabel("Grades simulations").click();
-      await details.getByLabel("All simulations").click();
-      await details.getByLabel("Maximum response time (p90)").fill("2.5");
+      expect(await details.getByLabel("Grades simulations").isChecked()).toBe(true);
+      expect(await details.getByLabel("All simulations").isChecked()).toBe(true);
+      await details
+        .getByRole("spinbutton", {
+          name: "Maximum acceptable response latency*",
+        })
+        .fill("2.5");
       await details.getByRole("button", { name: "Use in project" }).click();
 
       await page.getByText("Grader added to Active graders.").waitFor();
@@ -2309,7 +2305,9 @@ describe("the project grader library", () => {
       });
       expect(
         await activeLatencyDetails
-          .getByLabel("Maximum response time (p90)")
+          .getByRole("spinbutton", {
+            name: "Maximum acceptable response latency*",
+          })
           .inputValue(),
       ).toBe("2.5");
       await activeLatencyDetails.getByRole("button", { name: "Cancel" }).click();
@@ -3211,7 +3209,9 @@ describe("the complete product, walked in order in a second project", () => {
       const thresholdEditor = walk.getByRole("dialog", {
         name: "Expected behaviors",
       });
-      await thresholdEditor.getByLabel("Pass threshold").fill("0.62");
+      await thresholdEditor
+        .getByRole("spinbutton", { name: "Pass threshold*" })
+        .fill("0.62");
       await thresholdEditor.getByRole("button", { name: "Save changes" }).click();
       await walk.waitForSelector("text=Grader changes saved.");
       await expect
@@ -3495,7 +3495,7 @@ describe("the complete product, walked in order in a second project", () => {
         'section[aria-labelledby="run-evidence-conversation"]',
       );
       expect(await emptyConversation.innerText()).toMatch(
-        /Conversation\s+-\s+No conversation recorded/u,
+        /Conversation\s+No conversation recorded/u,
       );
       expect(await walk.locator("audio").count()).toBe(0);
     },
@@ -3550,8 +3550,13 @@ describe("the complete product, walked in order in a second project", () => {
         .poll(() => evidence.innerText(), { timeout: 30_000 })
         .toContain("I need to move my cleaning to next week.");
       const shown = await evidence.innerText();
+      expect(shown).toContain("Conversation recorded by the persona");
       expect(shown).toContain("Of course — which afternoon suits you?");
       expect(shown).not.toContain("No conversation recorded");
+      await walk.screenshot({
+        path: "/tmp/egma-simulation-phone-source-desktop.png",
+        fullPage: true,
+      });
 
       // One trace, one current grade, seven nested assertions, and one mean.
       // With one selected grader the display-only mean is that grader's score.
@@ -3615,6 +3620,125 @@ describe("the complete product, walked in order in a second project", () => {
       await expect
         .poll(() => machineryOfTheRun(walk, runAddress), { timeout: 30_000 })
         .toBe("Completed");
+    },
+    SETTLE,
+  );
+
+  it(
+    "settles a completed LiveKit run when its agent evidence never arrives",
+    async () => {
+      const created = await createAgent(auth, {
+        agentPlatform: "livekit",
+        name: "LiveKit evidence failure",
+        connection: {
+          agentPlatform: "livekit",
+          connectionType: "livekit_room",
+          accessVariant: "livekit_room.project_credentials",
+          modality: "voice",
+          config: {
+            url: "wss://browser.livekit.example",
+            agentName: "browser-evidence-failure",
+          },
+          credentials: {
+            apiKey: "browser-livekit-key-A1B2C3D4",
+            apiSecret: "browser-livekit-secret-E5F6G7H8",
+          },
+        },
+      });
+      const started = await startRun(auth, {
+        suiteId: suiteIdOf(suiteAddress),
+        agentId: created.id,
+        connectionId: created.connection?.id ?? "",
+      });
+      const listed = await listSimulations(auth, started.id, { limit: 1 });
+      const simulation = listed?.items[0];
+      expect(simulation, "the evidence-failure run wrote one simulation").toBeDefined();
+      if (simulation === undefined) return;
+
+      const claimant = "browser-missing-agent-evidence";
+      const claimed = (await claimSimulations({ claimant, capacity: 1 }))[0];
+      expect(claimed?.id).toBe(simulation.id);
+      await startSimulation(auth, simulation.id, claimant);
+      await completeSimulation(auth, simulation.id, claimant, {
+        endingReason: "agent_ended",
+        turnCount: 2,
+        providerReference: "egma-sim-browser-evidence-failure",
+      });
+      expect(
+        await settleSimulationsPastTheAgentPovBound({ boundSeconds: 0 }),
+      ).toContainEqual({
+        id: simulation.id,
+        runId: started.id,
+        agentPovFiled: false,
+        outcome: "evidence_error",
+      });
+
+      const failureRunAddress = at("runs", started.id);
+      await walk.goto(at("runs"));
+      const failureRow = runRowOn(walk, failureRunAddress);
+      await failureRow.waitFor();
+      expect(await machineryOfTheRun(walk, failureRunAddress)).toBe("Completed");
+
+      await walk.goto(failureRunAddress);
+      await walk
+        .getByRole("button", { name: /Reschedules a booked appointment/u })
+        .first()
+        .click();
+      const results = walk.getByRole("tabpanel", { name: "Results summary" });
+      await expect
+        .poll(() => results.innerText(), { timeout: 30_000 })
+        .toContain("Evidence collection did not finish");
+      const shown = await results.innerText();
+      expect(shown).toContain(
+        "Egma could not collect the agent's complete evidence before the recovery window ended.",
+      );
+      expect(shown).not.toContain("Collecting agent transcript");
+      expect(shown).not.toContain("Result · Passed");
+      expect(shown).not.toContain("Result · Failed");
+      expect(shown).not.toContain("Result · Error");
+      await walk.screenshot({
+        path: "/tmp/egma-livekit-evidence-error-desktop.png",
+        fullPage: true,
+      });
+      await walk.setViewportSize({ width: 390, height: 844 });
+      await walk.evaluate('document.documentElement.dataset.theme = "dark"');
+      expect(
+        await walk.evaluate(
+          "document.documentElement.scrollWidth <= window.innerWidth",
+        ),
+      ).toBe(true);
+      await walk.screenshot({
+        path: "/tmp/egma-livekit-evidence-error-mobile-dark.png",
+        fullPage: true,
+      });
+      await walk.setViewportSize({ width: 1280, height: 900 });
+      await walk.evaluate('delete document.documentElement.dataset.theme');
+
+      await walk.getByRole("tab", { name: "Transcript & audio" }).click();
+      const transcript = walk.getByRole("tabpanel", {
+        name: "Transcript & audio",
+      });
+      expect(await transcript.innerText()).toContain(
+        "LiveKit transcript unavailable",
+      );
+      expect(await transcript.innerText()).not.toContain(
+        "Waiting for LiveKit transcript",
+      );
+
+      const cookies = (await walk.context().cookies(origin))
+        .map((cookie) => `${cookie.name}=${cookie.value}`)
+        .join("; ");
+      const publicRead = await instance.api.inject({
+        method: "GET",
+        url: `/v1/simulations/${simulation.id}?projectId=${second}`,
+        headers: { cookie: cookies },
+      });
+      expect(publicRead.statusCode, publicRead.body).toBe(200);
+      expect(publicRead.json()).toMatchObject({
+        gradingState: "error",
+        grades: [],
+        gradeHistory: [],
+      });
     },
     SETTLE,
   );
@@ -3766,9 +3890,9 @@ describe("the complete product, walked in order in a second project", () => {
         selectedRadio: "Monitor production",
       },
       {
-        what: "Settings",
-        address: at("settings"),
-        says: "Save project",
+        what: "Organization Settings",
+        address: at("settings", "organization"),
+        says: "Save organization",
       },
       {
         what: "People",
@@ -3781,9 +3905,9 @@ describe("the complete product, walked in order in a second project", () => {
         says: "Create a key",
       },
       {
-        what: "Organization",
-        address: at("settings", "organization"),
-        says: "Save organization",
+        what: "Project Settings",
+        address: at("settings", "project"),
+        says: "Save project",
       },
     ];
   }
@@ -4996,7 +5120,7 @@ describe("the complete product, walked in order in a second project", () => {
           `${origin}${conversation}`,
           runAddress,
           at("tests"),
-          at("settings"),
+          at("settings", "organization"),
         ]) {
           await walk.goto(address);
           // The settled page, for the reason the case above gives: nothing
@@ -5141,9 +5265,13 @@ describe("project grader model settings", () => {
       await create.getByLabel("Passes when").fill("The agent thanks the caller.");
       await create.getByLabel("Fails when").fill("The agent is rude.");
       await create.getByLabel("Language model").selectOption("openai/gpt-4o-mini");
-      await create.getByLabel("Pass threshold").fill("2");
+      await create
+        .getByRole("spinbutton", { name: "Pass threshold*" })
+        .fill("2");
       expect(await create.getByRole("button", { name: "Create grader" }).isDisabled()).toBe(true);
-      await create.getByLabel("Pass threshold").fill("1");
+      await create
+        .getByRole("spinbutton", { name: "Pass threshold*" })
+        .fill("1");
       await create.getByRole("button", { name: "Create grader" }).click();
       await create.waitFor({ state: "hidden" });
       const customRow = proof.locator("table").getByRole("row").filter({ hasText: "Model proof grader" });
@@ -5157,8 +5285,8 @@ describe("project grader model settings", () => {
       const use = proof.getByRole("dialog", { name: "Model proof grader" });
       await use.getByRole("button", { name: "Use in project" }).click();
       await use.getByLabel("Language model").selectOption("openai/gpt-4o-mini");
-      await use.getByLabel("Grades simulations").click();
-      await use.getByLabel("All simulations").click();
+      expect(await use.getByLabel("Grades simulations").isChecked()).toBe(true);
+      expect(await use.getByLabel("All simulations").isChecked()).toBe(true);
       await use.getByRole("button", { name: "Use in project" }).click();
       await use.waitFor({ state: "hidden" });
       async function openApplied() {
@@ -5204,18 +5332,17 @@ describe("project grader model settings", () => {
       await proof.getByRole("tab", { name: "Grader library" }).click();
       await proof.getByRole("button", { name: "Cloned behavior core", exact: true }).click();
       library = proof.getByRole("dialog", { name: "Cloned behavior core" });
-      await library.getByLabel("Core version").selectOption("1");
-      await library.getByText("Decide only the expected behaviors you are given.", { exact: false }).waitFor();
-      expect(await library.getByRole("button", { name: "Edit core", exact: true }).count()).toBe(0);
-      expect(await library.getByRole("button", { name: "Clone grader", exact: true }).count()).toBe(0);
-      await library.screenshot({ path: "/tmp/egma-grader-core-history-desktop.png" });
+      await library.getByText("The agent must speak clearly.", { exact: true }).waitFor();
+      expect(await library.getByLabel("Core version").count()).toBe(0);
+      expect(await library.getByRole("button", { name: "Edit core", exact: true }).count()).toBe(1);
+      await library.screenshot({ path: "/tmp/egma-grader-core-current-desktop.png" });
       await proof.setViewportSize({ width: 390, height: 844 });
       await proof.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
       await proof.evaluate(() => {
         const document = Reflect.get(globalThis, "document") as { documentElement: { setAttribute(name: string, value: string): void } };
         document.documentElement.setAttribute("data-theme", "dark");
       });
-      await library.screenshot({ path: "/tmp/egma-grader-core-history-mobile-dark.png" });
+      await library.screenshot({ path: "/tmp/egma-grader-core-current-mobile-dark.png" });
       expect(await library.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
       await proof.keyboard.press("Escape");
       await library.waitFor({ state: "hidden" });

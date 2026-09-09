@@ -14,6 +14,7 @@ import {
   FundingRefusedError,
   readTrace,
   readRunWorkBlock,
+  SIMULATION_EVIDENCE_COLLECTION_ERROR,
   readTraceGrading,
   regradeTrace,
   type GradingPlan,
@@ -283,6 +284,18 @@ export async function simulationRoutes(
         run.connectionSnapshot.connectionType,
         executionEvidence?.mockTools,
       );
+      const incompleteAgentPov = agentPovIncomplete(
+        simulation,
+        run,
+        transcript,
+      );
+      const evidenceError = grading?.evidenceError ?? (
+        incompleteAgentPov &&
+        simulation.providerReference !== null &&
+        simulation.providerReference !== ""
+          ? SIMULATION_EVIDENCE_COLLECTION_ERROR
+          : null
+      );
 
       return reply.send({
         id: simulation.id,
@@ -294,6 +307,7 @@ export async function simulationRoutes(
         workBlock: simulation.status === "queued"
           ? await readRunWorkBlock(acting.auth, simulation.runId, simulation.id)
           : null,
+        evidenceError,
         ...describedTraceGrading(grading),
         reason: simulation.endingReason,
         executionFailure: simulation.executionFailure,
@@ -309,7 +323,7 @@ export async function simulationRoutes(
         // Use the grading wait bound to distinguish evidence still arriving
         // from evidence missing after the deadline.
         agentPovComplete: transcript?.agentEvidenceComplete === true,
-        agentPovIncomplete: agentPovIncomplete(simulation, run, transcript),
+        agentPovIncomplete: incompleteAgentPov,
         measures: describedMeasures(simulation, transcript),
         // The observed metrics, off the one shared projection the transcript
         // answers with — so the strip on a simulation's evidence and the strip

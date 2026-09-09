@@ -14,3 +14,21 @@ export const AGENT_EVIDENCE_COMPLETE_SQL = `spans.emitter = 'agent' and (
     and isFinite(toFloat64OrNull(JSONExtractRaw(spans.payload, 'end_timestamp')))
     and JSONExtractBool(spans.payload, 'egma_normalised', 'degraded') = 0)
 )`;
+
+/**
+ * A complete provider record within one trace, run, and provider-call group.
+ * New Retell roots declare how many stable span IDs belong to the record, so a
+ * root cannot make partial evidence gradeable. Older roots have no declaration
+ * and retain the historical root-only behavior.
+ */
+export const AGENT_EVIDENCE_GROUP_COMPLETE_SQL = `countIf(${AGENT_EVIDENCE_COMPLETE_SQL}) > 0
+  and (
+    maxIf(
+      toUInt64OrZero(JSONExtractRaw(spans.payload, 'egma_normalised', 'expected_span_count')),
+      ${AGENT_EVIDENCE_COMPLETE_SQL}
+    ) = 0
+    or uniqExactIf(spans.span_id, spans.emitter = 'agent') >= maxIf(
+      toUInt64OrZero(JSONExtractRaw(spans.payload, 'egma_normalised', 'expected_span_count')),
+      ${AGENT_EVIDENCE_COMPLETE_SQL}
+    )
+  )`;

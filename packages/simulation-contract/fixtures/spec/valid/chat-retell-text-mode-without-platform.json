@@ -1,11 +1,11 @@
 {
   "contract_version": 5,
-  "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWER",
+  "simulation_id": "sim_01K4QW7M4E8YB2FVN0H9TZQWET",
   "modality": "chat",
   "connection": {
     "agent_platform": "retell",
-    "connection_type": "retell_chat_api",
-    "access_variant": "retell_chat_api.api_key",
+    "connection_type": "retell_text_mode",
+    "access_variant": "retell_text_mode.api_key",
     "config": {
       "retellAgentId": "agent_2f6c9e8d7b5a4c3e2f1d0a9b8c"
     },
@@ -19,7 +19,7 @@
     "language": "en-US"
   },
   "scenario": {
-    "instructions": "You booked a dental cleaning for next Tuesday and need to move it to Thursday the same week. You do not remember the exact time of the original appointment. Conclude once the new time has been read back to you."
+    "instructions": "Move a dental cleaning from Tuesday to Thursday."
   },
   "limits": {
     "max_duration_seconds": 600,
@@ -30,19 +30,19 @@
       "provider": "openai",
       "model": "gpt-4o-mini",
       "adapter": "openai_chat_completions",
-      "key": "fixture-not-a-real-secret-llm"
+      "key": "fixture-not-a-real-secret-persona-model-0001"
     },
     "stt": {
-      "provider": "deepgram",
-      "model": "nova-3-general",
-      "adapter": "deepgram"
+      "provider": "openai",
+      "model": "gpt-live-transcribe",
+      "adapter": "openai_realtime"
     },
     "tts": {
-      "provider": "cartesia",
-      "model": "sonic-3.5",
-      "adapter": "cartesia",
-      "voice_id": "warm-alto-2",
-      "speed": 0.9
+      "provider": "openai",
+      "model": "gpt-4o-mini-tts",
+      "adapter": "openai",
+      "voice_id": "alloy",
+      "speed": 1
     }
   }
 }

@@ -154,7 +154,7 @@ For recordings, configure both upload and playback:
 
 | Purpose | Settings |
 | --- | --- |
-| Simulator upload | `EGMA_SIMULATOR_S3_ENDPOINT`, `EGMA_SIMULATOR_S3_BUCKET`, `EGMA_SIMULATOR_S3_REGION`, `EGMA_SIMULATOR_S3_ACCESS_KEY_ID`, `EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY`. |
+| Simulator upload | `EGMA_SIMULATOR_S3_ENDPOINT`, `EGMA_SIMULATOR_S3_BUCKET`, `EGMA_SIMULATOR_S3_REGION`, `EGMA_SIMULATOR_S3_ACCESS_KEY_ID`, `EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY`, and the optional `EGMA_SIMULATOR_S3_SESSION_TOKEN` paired with temporary credentials. |
 | Browser playback | `EGMA_BLOB_PUBLIC_URL`, `EGMA_BLOB_BUCKET`, `EGMA_BLOB_REGION`, `EGMA_BLOB_ACCESS_KEY_ID`, `EGMA_BLOB_SECRET_ACCESS_KEY`. |
 
 Upload and playback must use the same recording bucket and region. The playback credential needs object-read permission; the uploader needs object-write permission. Use a browser-reachable storage origin for `EGMA_BLOB_PUBLIC_URL`, without a bucket path. Egma adds the bucket and object key when it signs the URL.
@@ -213,6 +213,7 @@ The bundled values are sufficient for a local installation. Change these when yo
     | `EGMA_SIMULATOR_CAPACITY` | Concurrent simulations per simulator process; default `2`. |
     | `EGMA_GRADER_CAPACITY` | Concurrent grading jobs per grader process; default `4`. |
     | `EGMA_SIMULATOR_LIVEKIT_URL`, `EGMA_SIMULATOR_LIVEKIT_API_KEY`, `EGMA_SIMULATOR_LIVEKIT_API_SECRET` | Replace the bundled media server used by the simulator. These do not configure the customer's LiveKit connection. |
+    | `EGMA_SIMULATOR_LIVEKIT_ROOM_NAME`, `EGMA_SIMULATOR_LIVEKIT_ROOM_TOKEN`, `EGMA_SIMULATOR_LIVEKIT_API_TOKEN` | Optional deployment-scoped room name, participant token, and room-admin and SIP token. Set all three together; they replace the simulator's LiveKit API key and secret for that one room. |
     | `EGMA_LIVEKIT_ADVERTISE_IP` | Address the bundled media server advertises to clients outside Compose. |
     | `EGMA_ROLE` | API ingestion role: `all` by default; `ingest` or `drain` for a split deployment. |
 
@@ -350,11 +351,10 @@ original price references. Model rate changes do not require Stripe setup.
 
 | Variable | Purpose |
 | --- | --- |
-| `EGMA_SIMULATOR_MODE` | `persistent` by default; `one-shot` claims once, and `standby` waits for one voice simulation before exiting |
-| `EGMA_SIMULATOR_MODALITIES` | Comma-separated `voice,chat`; unset accepts both in persistent mode and voice only in one-shot or standby mode |
-| `EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS` | One-shot and standby process deadline from claim through teardown; default 900; unused in persistent mode |
-| `EGMA_SIMULATOR_STANDBY_SECONDS` | Standby claim wait limit; default 1800; separate from the execution deadline |
-| `EGMA_SIMULATOR_THREAD_POOL_WORKERS` | Native thread pool size; defaults to 1 in one-shot/standby mode and leaves persistent-mode pools unchanged |
+| `EGMA_SIMULATOR_MODE` | `persistent` by default; `one-shot` claims once |
+| `EGMA_SIMULATOR_MODALITIES` | Comma-separated `voice,chat`; unset accepts both in persistent mode and voice only in one-shot mode |
+| `EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS` | One-shot process deadline from claim through teardown; default 900; unused in persistent mode |
+| `EGMA_SIMULATOR_THREAD_POOL_WORKERS` | Native thread pool size; defaults to 1 in one-shot mode and leaves persistent-mode pools unchanged |
 | `EGMA_GRADING_CONCURRENCY_CAP` | Optional deployment-wide cap shared by all grader workers; unset by default. One job grades one simulation or trace with all its attached graders. Separate from simulation caps. |
 | `EGMA_GRADER_INGESTION_LOG_DIR` | Persistent paid-usage log; default `/var/lib/egma/grader-ingestion`. Mount a separate writable volume here. The grader does not use the API ingestion log directory. |
 
@@ -362,18 +362,33 @@ original price references. Model rate changes do not require Stripe setup.
 
 ### Egma Cloud voice fleet
 
-These settings select the hosted ECS launcher. They are injected by the cloud
+These settings select the hosted Daytona launcher. They are injected by the cloud
 task definition and do not belong in a self-hosted `.env` or Compose file.
-Without `EGMA_VOICE_FLEET_LAUNCHER`, the API does not load AWS fleet code.
+Without `EGMA_VOICE_FLEET_LAUNCHER`, the API does not load Daytona or STS code.
 
 | Variable | Purpose |
 |---|---|
-| `EGMA_VOICE_FLEET_LAUNCHER` | Must be `aws-ecs` to enable hosted voice launches |
-| `EGMA_VOICE_FLEET_CLUSTER` | ECS cluster name or ARN |
-| `EGMA_VOICE_FLEET_TASK_DEFINITION` | Exact voice task-definition ARN; listing uses its family across revisions |
-| `EGMA_VOICE_FLEET_SUBNETS` | Non-empty JSON array of subnet IDs |
-| `EGMA_VOICE_FLEET_SECURITY_GROUPS` | Non-empty JSON array of security-group IDs |
+| `EGMA_VOICE_FLEET_LAUNCHER` | Must be `daytona` to enable hosted voice launches |
+| `DAYTONA_API_KEY` | Daytona control token; loaded into the API from AWS Secrets Manager |
+| `DAYTONA_SNAPSHOT_ID` | Immutable simulator snapshot for the deployed public commit |
+| `DAYTONA_SANDBOX_TTL_MINUTES` | Abandoned-sandbox cleanup limit; default 30 |
+| `DAYTONA_SERVICE_TOKEN_SECRET` | Daytona organization secret mounted as `EGMA_SIMULATOR_SERVICE_TOKEN` |
+| `DAYTONA_SANDBOX_SECRETS` | JSON map from supported provider environment names to Daytona organization secret names |
+| `EGMA_DAYTONA_RECORDING_ROLE_ARN` | Recording-only AWS role assumed after a sandbox claims one simulation |
+| `EGMA_DAYTONA_RECORDING_BUCKET_ARN` | Recording bucket ARN used to restrict that role session to the claimed simulation's recording |
+| `EGMA_SIMULATOR_RUNTIME` | Hosted claimant marker; `daytona` when present |
 | `EGMA_RELEASE_SHA` | Lowercase 40-character public commit SHA exposed by `/health` after deployment |
 
-The ECS client reads its region from the standard `AWS_REGION` value supplied
-by AWS. The release workflow checks `releaseSha` before it ships the web app.
+The launcher gives every sandbox the shared OpenTelemetry service name
+`egma-voice-simulator` and stable release, snapshot, and runtime resource
+attributes. Daytona supplies the sandbox ID as `service.instance.id`. A sandbox
+claims work after it starts, so the API exports an
+`egma.daytona.sandbox.assigned` span that maps `daytona.sandbox.id` to
+`egma.simulation_id`. In PostHog, that mapping joins one simulation to the
+sandbox lifecycle and resource telemetry; the simulation ID is not a dynamic
+resource attribute on each Daytona metric.
+
+Daytona workers receive their room and recording authority in the claimed work
+order, so the launcher does not set the simulator's LiveKit or S3 credential
+variables on the sandbox. The release workflow checks `releaseSha` before it
+ships the web app.

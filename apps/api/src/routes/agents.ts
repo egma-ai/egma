@@ -568,16 +568,6 @@ async function confirmRetellAgent(
         config: { retellAgentId: choice.platformAgentId },
       };
     }
-    if (
-      wanted.connectionType === "retell_chat_api" &&
-      wanted.accessVariant === "retell_chat_api.api_key" &&
-      wanted.modality === "chat"
-    ) {
-      return {
-        connectionType: "retell_chat_api" as const,
-        config: { retellAgentId: choice.platformAgentId },
-      };
-    }
     // The web-call lane. Like the chat one, it names the platform agent in its
     // own config and needs nothing of the customer's to be routed: Egma places
     // the call itself. It is also the lane a mocked run is conducted over, so
@@ -648,11 +638,10 @@ async function confirmRetellAgent(
       modality: checked.candidate.modality,
       config: checked.candidate.config,
       // The kinds that conduct with a key of their own keep a copy on the
-      // connection: every exchange they conduct needs it — the chat API, the
-      // text mode, and the web call Egma opens itself. A phone connection
+      // connection: every exchange they conduct needs it — text mode and the
+      // web call Egma opens itself. A phone connection
       // dials with the deployment's carrier and holds none.
-      ...(checked.candidate.connectionType === "retell_chat_api" ||
-      checked.candidate.connectionType === "retell_text_mode" ||
+      ...(checked.candidate.connectionType === "retell_text_mode" ||
       checked.candidate.connectionType === "retell_web_call"
         ? { credentials: { apiKey } }
         : {}),
@@ -705,33 +694,6 @@ async function takeCustody(
     }
     throw error;
   }
-}
-
-/**
- * Best-effort precheck for a reusable retell_chat_api agent on the first
- * agent page. This is narrower than registerAgent's reuse rules; data-layer
- * checks and the route's cleanup still handle misses and races.
- */
-async function reusedAgentFor(
-  acting: AuthContext,
-  wanted: NewConnection,
-): Promise<Agent | undefined> {
-  const vendorAgent = wanted.config["retellAgentId"];
-  if (
-    wanted.connectionType !== "retell_chat_api" ||
-    typeof vendorAgent !== "string" ||
-    vendorAgent === ""
-  ) {
-    return undefined;
-  }
-  const page = await listAgents(acting, {});
-  return page.items.find((one) =>
-    one.connections.some(
-      (connection) =>
-        connection.connectionType === "retell_chat_api" &&
-        connection.config["retellAgentId"] === vendorAgent,
-    ),
-  );
 }
 
 /**
@@ -1185,17 +1147,6 @@ export async function agentRoutes(
             options.retellFetch,
           );
     if (isRefusal(confirmedInline)) return refused(reply, confirmedInline);
-
-    /*
-     * The agent this registration would reuse, and whether it is already bound
-     * somewhere else. Asked here so the ordinary refusal writes nothing at all.
-     */
-    if (confirmedInline !== undefined) {
-      const reusing = await reusedAgentFor(acting, confirmedInline.connection);
-      const bound =
-        reusing === undefined ? undefined : boundElsewhere(reusing, inlineChoice);
-      if (bound !== undefined) return refused(reply, bound);
-    }
 
     const registered = await registerAgent(acting, {
       // Empty rather than absent, so the factory's own "an agent needs a name"

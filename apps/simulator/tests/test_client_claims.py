@@ -81,3 +81,13 @@ async def test_a_claim_can_select_a_modality_and_reads_the_server_claim_time():
     assert bodies[0]["modalities"] == ["voice"]
     assert answer.document == {"simulation_id": "sim-voice"}
     assert answer.claimed_at.isoformat() == "2026-09-08T01:02:03+00:00"
+
+
+async def test_a_daytona_claim_carries_its_runtime(recording_control_plane):
+    base_url, bodies = recording_control_plane
+    async with ControlPlaneClient(
+        base_url, claim_wait_seconds=7.0, runtime="daytona"
+    ) as client:
+        await client.claim("voice-one-shot", 1, ("voice",))
+
+    assert bodies[0]["runtime"] == "daytona"

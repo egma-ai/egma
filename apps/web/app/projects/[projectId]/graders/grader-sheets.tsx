@@ -1,5 +1,6 @@
 "use client";
 
+import { CircleHelpIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   createCustomGrader,
@@ -52,6 +53,7 @@ import { Select } from "@/components/ui/select";
 import { Field, Refused } from "../../../../ui/form.tsx";
 import { useDraftNavigation } from "../../../../ui/draft-navigation.tsx";
 import { NumberField } from "../../../../ui/number-field.tsx";
+import { Tooltip } from "../../../../ui/feedback.tsx";
 import { Loading } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
 import { useUnsavedChanges } from "../../../../ui/settings-read.ts";
@@ -202,7 +204,7 @@ function Section({
   lead,
   children,
 }: {
-  readonly title: string;
+  readonly title: ReactNode;
   /** One faint line saying what the part below is. */
   readonly lead?: string;
   readonly children: ReactNode;
@@ -280,6 +282,13 @@ function defaultSettingLabel(definition: GraderSettingDefinition): string {
     : `${String(definition.defaultValue)} ${definition.unit}`;
 }
 
+/** Keep the versioned catalog label intact while using the product's clearer copy. */
+function settingLabel(definition: GraderSettingDefinition): string {
+  return definition.key === "maximum_response_time_ms"
+    ? "Maximum acceptable response latency"
+    : definition.label;
+}
+
 function SettingsFields({
   projectId,
   definitions,
@@ -313,7 +322,7 @@ function SettingsFields({
           <NumberField
             key={definition.key}
             id={`grader-setting-${definition.key}`}
-            label={definition.label}
+            label={`${settingLabel(definition)}*`}
             value={value}
             onChange={(next) => onChange({ ...draft, [definition.key]: next })}
             unit={milliseconds ? "seconds" : (definition.unit ?? undefined)}
@@ -335,11 +344,6 @@ function SettingsFields({
             disabled={disabled}
             required
             invalid={converted === null}
-            hint={
-              milliseconds
-                ? "The grader compares the trace's p90 response time with this value."
-                : undefined
-            }
           />
         );
       })}
@@ -387,26 +391,53 @@ function PassThresholdField({
     parsed >= 0 &&
     parsed <= 1;
   return (
-    /*
-     * The star on the label is presentation, and the field says the same thing
-     * to a screen reader through `required` — the native attribute the
-     * accessibility tree reads as the required state. `DESIGN.md` asks that a
-     * starred label never be only a picture; this is that promise kept by the
-     * control rather than by a second attribute beside it.
-     */
-    <NumberField
-      id="grader-pass-threshold"
-      label={COPY.passThreshold}
-      value={value}
-      onChange={onChange}
-      min={0}
-      max={1}
-      step={0.01}
-      disabled={disabled}
-      required
-      invalid={!valid}
-      hint={COPY.passThresholdHint}
-    />
+    <div className="flex flex-col gap-2" data-slot="pass-threshold-field">
+      <Input
+        className={cn(
+          "tabular-nums",
+          "[appearance:textfield]",
+          "[&::-webkit-inner-spin-button]:appearance-none",
+          "[&::-webkit-outer-spin-button]:appearance-none",
+        )}
+        id="grader-pass-threshold"
+        type="number"
+        inputMode="decimal"
+        value={value}
+        min={0}
+        max={1}
+        step={0.01}
+        disabled={disabled}
+        required
+        aria-required="true"
+        aria-invalid={!valid || undefined}
+        autoComplete="off"
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </div>
+  );
+}
+
+function PassThresholdSection({ children }: { readonly children: ReactNode }) {
+  return (
+    <Section
+      title={
+        <span className="flex items-center gap-2">
+          <label htmlFor="grader-pass-threshold">{COPY.passThreshold}</label>
+          <Tooltip label={COPY.passThresholdHint}>
+            <button
+              className="grid size-4 cursor-pointer place-items-center border-0 bg-transparent p-0 text-muted-foreground pointer-hover:text-foreground pointer-coarse:size-(--tap-target)"
+              type="button"
+              aria-label="What does pass threshold mean?"
+            >
+              <CircleHelpIcon className="size-4" aria-hidden="true" />
+            </button>
+          </Tooltip>
+        </span>
+      }
+      lead="A value between 0 and 1."
+    >
+      {children}
+    </Section>
   );
 }
 
@@ -447,11 +478,7 @@ function LibraryFacts({
       </Fact>
       {historical ? (
         <Fact label="Definition version">v{entry.definitionVersion}</Fact>
-      ) : (
-        <Fact label="Project use">
-          <ProjectUseChip active={entry.activeProjectGraderId !== null} />
-        </Fact>
-      )}
+      ) : null}
     </Facts>
   );
 }
@@ -564,13 +591,11 @@ export function LibraryGraderSheet({
 }) {
   const draftNavigation = useDraftNavigation();
   const [mode, setMode] = useState<"details" | "use" | "clone" | "core">(opened);
-  const [selectedVersion, setSelectedVersion] = useState(definitionVersion ?? entry.currentDefinitionVersion);
   useEffect(() => {
     if (open) {
       setMode(opened);
-      setSelectedVersion(definitionVersion ?? entry.currentDefinitionVersion);
     }
-  }, [open, opened, definitionVersion, entry.currentDefinitionVersion]);
+  }, [open, opened]);
   return (
     <Sheet open={open} onOpenChange={(next) => !next && draftNavigation.request(onClose)}>
       <SheetContent aria-describedby={undefined}>
@@ -595,22 +620,11 @@ export function LibraryGraderSheet({
         <DefinitionRead
           projectId={projectId}
           definitionId={entry.id}
-          definitionVersion={selectedVersion}
+          definitionVersion={definitionVersion}
         >
           {(read) => {
             const historical = definitionVersion !== undefined || read.definitionVersion !== read.currentDefinitionVersion;
             return <>
-              {definitionVersion === undefined && (mode === "details" || historical) ? (
-                <div>
-                  <Field label="Core version" htmlFor="grader-core-version">
-                    <Select id="grader-core-version" value={String(read.definitionVersion)}
-                      onChange={(event) => setSelectedVersion(Number(event.target.value))}>
-                      {Array.from({ length: read.currentDefinitionVersion }, (_, at) => at + 1).reverse().map((version) =>
-                        <option key={version} value={String(version)}>v{version}{version === read.currentDefinitionVersion ? " · Current" : " · Read-only"}</option>)}
-                    </Select>
-                  </Field>
-                </div>
-              ) : null}
             {historical || mode === "details" ? (
               <LibraryDetails
                 entry={read}
@@ -671,7 +685,7 @@ function LibraryDetails({
                   className="m-0 text-sm text-muted-foreground"
                   key={setting.key}
                 >
-                  {setting.label}: {defaultSettingLabel(setting)} by default
+                  {settingLabel(setting)}: {defaultSettingLabel(setting)} by default
                 </p>
               ))}
             </div>
@@ -685,7 +699,23 @@ function LibraryDetails({
           </Section>
         )}
       </SheetBody>
-      <SheetFooter>
+      <SheetFooter
+        secondary={
+          <>
+            <SheetClose asChild>
+              <Button type="button" size="lg" variant="secondary">
+                Close
+              </Button>
+            </SheetClose>
+            {!historical && mayAuthor && entry.type === "llm_as_judge" ? (
+              <>
+                <Button type="button" size="lg" variant="secondary" onClick={onClone}>Clone grader</Button>
+                {entry.owner === "project" ? <Button type="button" size="lg" variant="secondary" onClick={onEditCore}>Edit core</Button> : null}
+              </>
+            ) : null}
+          </>
+        }
+      >
         {historical ? null : entry.activeProjectGraderId === null ? (
           <Button
             type="button"
@@ -707,15 +737,6 @@ function LibraryDetails({
             View active grader
           </Button>
         )}
-        {!historical && mayAuthor && entry.type === "llm_as_judge" ? <>
-          <Button type="button" size="lg" variant="secondary" onClick={onClone}>Clone grader</Button>
-          {entry.owner === "project" ? <Button type="button" size="lg" variant="secondary" onClick={onEditCore}>Edit core</Button> : null}
-        </> : null}
-        <SheetClose asChild>
-          <Button type="button" size="lg" variant="secondary">
-            Close
-          </Button>
-        </SheetClose>
       </SheetFooter>
     </>
   );
@@ -756,12 +777,17 @@ function GraderCoreForm({ entry, projectId, open, cloning, onDone, onCancel }: {
         <Textarea id="grader-core-instructions" value={instructions} rows={10} aria-required="true" disabled={saving} onChange={(event) => setInstructions(event.target.value)} />
       </Field>}
     </SheetBody>
-    <SheetFooter>
-      <Button type="submit" size="lg" busy={saving} disabled={name.trim() === "" || (!cloning && (!changed || instructions.trim() === ""))}>
-        {saving ? "Saving…" : cloning ? "Clone grader" : "Save core"}
-      </Button>
-      <Button type="button" size="lg" variant="secondary" disabled={saving} onClick={onCancel}>Back</Button>
-    </SheetFooter>
+      <SheetFooter
+        secondary={
+          <Button type="button" size="lg" variant="secondary" disabled={saving} onClick={onCancel}>
+            Back
+          </Button>
+        }
+      >
+        <Button type="submit" size="lg" busy={saving} disabled={name.trim() === "" || (!cloning && (!changed || instructions.trim() === ""))}>
+          {saving ? "Saving…" : cloning ? "Clone grader" : "Save core"}
+        </Button>
+      </SheetFooter>
   </form>;
 }
 
@@ -778,7 +804,7 @@ function UseGraderForm({
   readonly onCancel: () => void;
   readonly onUsed: () => void;
 }) {
-  const [scope, setScope] = useState<ProjectGraderScope>(EMPTY_GRADER_SCOPE);
+  const [scope, setScope] = useState<ProjectGraderScope>(ALL_SIMULATIONS_SCOPE);
   const [scopeValid, setScopeValid] = useState(true);
   const [settings, setSettings] = useState<SettingsDraft>(() =>
     initialSettings(entry.settingDefinitions),
@@ -791,7 +817,7 @@ function UseGraderForm({
   const valid =
     scopeValid && filledSettings !== null && filledThreshold !== null;
   const changed =
-    JSON.stringify(scope) !== JSON.stringify(EMPTY_GRADER_SCOPE) ||
+    JSON.stringify(scope) !== JSON.stringify(ALL_SIMULATIONS_SCOPE) ||
     JSON.stringify(settings) !==
       JSON.stringify(initialSettings(entry.settingDefinitions)) ||
     threshold !== "1";
@@ -838,13 +864,15 @@ function UseGraderForm({
     >
       <SheetBody>
         {refused === null ? null : <Refused message={refused.message} />}
-        <ScopeFields
-          projectId={projectId}
-          scope={scope}
-          disabled={saving}
-          onChange={setScope}
-          onValidityChange={setScopeValid}
-        />
+        <Section title="Scope">
+          <ScopeFields
+            projectId={projectId}
+            scope={scope}
+            disabled={saving}
+            onChange={setScope}
+            onValidityChange={setScopeValid}
+          />
+        </Section>
         <SettingsFields
           projectId={projectId}
           definitions={entry.settingDefinitions}
@@ -852,26 +880,23 @@ function UseGraderForm({
           disabled={saving}
           onChange={setSettings}
         />
-        <div className="border-t border-border pt-5">
+        <PassThresholdSection>
           <PassThresholdField
             value={threshold}
             disabled={saving}
             onChange={setThreshold}
           />
-        </div>
+        </PassThresholdSection>
       </SheetBody>
-      <SheetFooter>
+      <SheetFooter
+        secondary={
+          <Button type="button" size="lg" variant="secondary" disabled={saving} onClick={onCancel}>
+            Back
+          </Button>
+        }
+      >
         <Button type="submit" size="lg" busy={saving} disabled={!valid}>
           {saving ? "Using…" : "Use in project"}
-        </Button>
-        <Button
-          type="button"
-          size="lg"
-          variant="secondary"
-          disabled={saving}
-          onClick={onCancel}
-        >
-          Back
         </Button>
       </SheetFooter>
     </form>
@@ -1061,13 +1086,13 @@ function EditGraderForm({
           disabled={saving || !mayAuthor}
           onChange={setSettings}
         />
-        <div className="border-t border-border pt-5">
+        <PassThresholdSection>
           <PassThresholdField
             value={threshold}
             disabled={saving || !mayAuthor}
             onChange={setThreshold}
           />
-        </div>
+        </PassThresholdSection>
       </SheetBody>
       {/*
        * **The footer answers and gets out of the way, and nothing else.**
@@ -1076,7 +1101,15 @@ function EditGraderForm({
        * by the ⋮ on the row — in the active list and in the library — and it
        * still opens the same confirmation that names the grader.
        */}
-      <SheetFooter>
+      <SheetFooter
+        secondary={
+          <SheetClose asChild>
+            <Button type="button" size="lg" variant="secondary" disabled={saving}>
+              Cancel
+            </Button>
+          </SheetClose>
+        }
+      >
         <Button
           type="submit"
           size="lg"
@@ -1085,16 +1118,6 @@ function EditGraderForm({
         >
           {saving ? "Saving…" : "Save changes"}
         </Button>
-        <SheetClose asChild>
-          <Button
-            type="button"
-            size="lg"
-            variant="secondary"
-            disabled={saving}
-          >
-            Cancel
-          </Button>
-        </SheetClose>
       </SheetFooter>
     </form>
   );
@@ -1306,22 +1329,6 @@ export function CreateCustomGraderSheet({
                 onChange={(event) => setFailsWhen(event.target.value)}
               />
             </Field>
-            <div className="border-t border-border pt-5">
-              <PassThresholdField
-                value={threshold}
-                disabled={saving}
-                onChange={setThreshold}
-              />
-            </div>
-            {form === null || form.status === "signed-out" ? (
-              <Loading what="grader models" />
-            ) : form.status !== "ready" ? (
-              <Refused message={form.refusal.message} action={
-                <Button type="button" variant="secondary" onClick={reloadForm}>Try again</Button>
-              } />
-            ) : (
-              <SettingsFields projectId={projectId} definitions={definitions} draft={settings} disabled={saving} onChange={setSettings} />
-            )}
             <Section title="Scope">
               <ScopeFields
                 key={scopeRevision}
@@ -1333,21 +1340,35 @@ export function CreateCustomGraderSheet({
                 onValidityChange={setScopeValid}
               />
             </Section>
+            {form === null || form.status === "signed-out" ? (
+              <Loading what="grader models" />
+            ) : form.status !== "ready" ? (
+              <Refused message={form.refusal.message} action={
+                <Button type="button" variant="secondary" onClick={reloadForm}>Try again</Button>
+              } />
+            ) : (
+              <SettingsFields projectId={projectId} definitions={definitions} draft={settings} disabled={saving} onChange={setSettings} />
+            )}
+            <PassThresholdSection>
+              <PassThresholdField
+                value={threshold}
+                disabled={saving}
+                onChange={setThreshold}
+              />
+            </PassThresholdSection>
           </SheetBody>
-          <SheetFooter>
+          <SheetFooter
+            secondary={
+              <SheetClose asChild>
+                <Button type="button" size="lg" variant="secondary" disabled={saving}>
+                  Cancel
+                </Button>
+              </SheetClose>
+            }
+          >
             <Button type="submit" size="lg" busy={saving} disabled={!valid}>
               {saving ? "Creating…" : "Create grader"}
             </Button>
-            <SheetClose asChild>
-              <Button
-                type="button"
-                size="lg"
-                variant="secondary"
-                disabled={saving}
-              >
-                Cancel
-              </Button>
-            </SheetClose>
           </SheetFooter>
         </form>
       </SheetContent>

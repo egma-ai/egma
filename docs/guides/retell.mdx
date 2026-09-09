@@ -168,8 +168,9 @@ recorded, including calls to your real backend. Calls answered by a test mock
 are marked **mocked**. The voice recording captures what the simulated caller
 heard.
 
-Retell text mode has no stored call record for Egma to import. Its transcript
-comes from the simulated conversation itself.
+Retell text mode has no stored call record for Egma to import. Egma records the
+complete API exchange it conducted, including the tool results Retell returns.
+Retell does not provide a separate native agent trace for text mode.
 
 If the agent's record is incomplete, check that the ended call is available
 in Retell. Once missing evidence arrives in Egma, you can

@@ -70,8 +70,8 @@ delay, status, or matching rules to the envelope.
 | Retell web call | Egma prepares a temporary agent version for the run. Your Egma instance must be reachable by Retell. |
 | LiveKit | Call `await simulation(agent, ctx, session)` from the [Python SDK](/tools/livekit-python-sdk) or [JavaScript SDK](/tools/livekit-javascript-sdk) before `session.start`. |
 
-Retell's chat API and phone calls do not apply these mock answers. Use text mode
-or a web call when your Retell test depends on mocks.
+Retell phone calls do not apply these mock answers. Use text mode or a web call
+when your Retell test depends on mocks.
 
 For LiveKit, the `simulation` helper is required even when a test has no mocks.
 It sends the agent's spans, reports its tools, and applies the running test's

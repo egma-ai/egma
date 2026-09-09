@@ -187,11 +187,11 @@ export const registerAgent = <ThrowOnError extends boolean = false>(parameters: 
         /**
          * Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room connections can use voice or chat.
          */
-        connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+        connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
         /**
          * Credential method for the connection type, copied from the same catalog entry.
          */
-        accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+        accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
         /**
          * How simulations communicate with the agent. Use a modality offered by the selected catalog entry.
          */
@@ -319,8 +319,8 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
     projectId?: string;
     name?: string;
     agentPlatform: 'retell' | 'livekit' | null;
-    connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
-    accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+    connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+    accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
     modality: 'voice' | 'chat';
     environment?: string;
     config?: {

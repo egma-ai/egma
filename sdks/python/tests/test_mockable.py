@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 from conftest import (
@@ -212,8 +213,11 @@ async def test_egma_arriving_after_the_agent_is_waited_for(session):
     assert room.methods_asked == [seam.HELLO_METHOD]
     assert room.asked[0].identity == EGMA_IDENTITY
     assert set(couriers_on(session, agent)) == {"check_calendar"}
-    # Nothing is left subscribed to the room once egma has been found.
-    assert room.listeners == {}
+    # Startup listeners are gone; only simulation-completion listeners remain.
+    assert set(room.listeners) == {
+        "connection_state_changed",
+        "participant_disconnected",
+    }
 
 
 async def test_room_disconnect_ends_the_wait_for_egma(session):
@@ -271,7 +275,10 @@ async def test_egma_already_in_the_room_is_found_without_waiting(session):
     await simulation(agent, in_a_simulation(room), session)
 
     assert set(couriers_on(session, agent)) == {"check_calendar"}
-    assert room.listeners == {}
+    assert set(room.listeners) == {
+        "connection_state_changed",
+        "participant_disconnected",
+    }
 
 
 async def test_the_persona_a_token_endpoint_mints_for_is_found_too(session):
@@ -290,6 +297,44 @@ async def test_the_persona_a_token_endpoint_mints_for_is_found_too(session):
 
     assert room.asked[0].identity == persona
     assert set(couriers_on(session, agent)) == {"check_calendar"}
+
+
+async def test_the_exact_persona_departure_closes_the_simulation_session(
+    session, monkeypatch
+):
+    """The simulator can finish capture while the customer's entrypoint waits."""
+    agent = ReceptionAgent()
+    persona = persona_in()
+    room = StubRoom(present=(persona, "somebody-else"))
+    close = AsyncMock()
+    monkeypatch.setattr(session, "aclose", close)
+
+    await simulation(agent, in_a_simulation(room), session)
+    room.depart("somebody-else")
+    await asyncio.sleep(0)
+    close.assert_not_awaited()
+
+    room.depart(persona)
+    await asyncio.sleep(0)
+
+    close.assert_awaited_once_with()
+
+
+async def test_room_loss_closes_the_simulation_session_and_removes_listeners(
+    session, monkeypatch
+):
+    agent = ReceptionAgent()
+    room = StubRoom()
+    close = AsyncMock()
+    monkeypatch.setattr(session, "aclose", close)
+
+    await simulation(agent, in_a_simulation(room), session)
+    room.disconnect()
+    await asyncio.sleep(0)
+
+    close.assert_awaited_once_with()
+    session.emit("close", CloseEvent(reason=CloseReason.USER_INITIATED))
+    assert room.listeners == {}
 
 
 async def test_two_participants_answering_to_egmas_name_are_refused(session, caplog):

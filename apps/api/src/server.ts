@@ -1,5 +1,7 @@
 import {
   openDrainOwnership,
+  sweepPendingRetellSimulationCollections,
+  takeRetellSimulationCollectionLease,
   ping,
   pingClickHouse,
   type DrainOwnership,
@@ -52,9 +54,13 @@ import {
   type RetellProductionIngestion,
 } from "./retell-production-ingestion.ts";
 import type { RetellReach } from "./retell/api.ts";
-import type { RetellSimulationPullOptions } from "./retell-simulation-ingestion.ts";
+import {
+  createRetellSimulationCollector,
+  type RetellSimulationPullOptions,
+} from "./retell-simulation-ingestion.ts";
 import { startOrphanSweep, type OrphanSweep } from "./simulation-sweep.ts";
 import type { Config } from "./config.ts";
+import type { DaytonaClaimRuntime } from "./voice-fleet-daytona.ts";
 import {
   platformEvent,
   PRIVATE_LOG_SERIALIZERS,
@@ -125,6 +131,8 @@ export type ServerOptions = {
   readonly traceStoreReady?: (() => boolean) | undefined;
   /** Hosted-only wake-up shared by run creation and the standing sweep. */
   readonly wakeVoiceFleet?: (() => void) | undefined;
+  /** Hosted-only per-simulation authority and sandbox correlation. */
+  readonly daytonaClaimRuntime?: DaytonaClaimRuntime | undefined;
   /**
    * The Billing section's reads, on a deployment whose settings selected the
    * cloud adapter. Absent on every other deployment, and absent is the
@@ -174,6 +182,39 @@ export function buildApi(options: ServerOptions): Api {
   /** `all` and `drain` walk the pending prefix; `ingest` never does. */
   const drainsEvidence =
     role !== "ingest" && options.drainsPendingEvidence !== false;
+  const simulationPullAbort = new AbortController();
+  const simulationCollector = createRetellSimulationCollector();
+  const pullSimulationRecord: typeof simulationCollector.pull = async (
+    auth,
+    simulationId,
+    reach,
+    log,
+    pullOptions,
+  ) => {
+    const lease = await takeRetellSimulationCollectionLease(auth, simulationId);
+    if (lease === undefined) return;
+    try {
+      const leasedReach = {
+        ...reach,
+        signal: reach.signal === undefined
+          ? lease.signal
+          : AbortSignal.any([reach.signal, lease.signal]),
+      };
+      await simulationCollector.pull(auth, simulationId, leasedReach, log, {
+        ...pullOptions,
+        onCollectionFinished: () => lease.release(),
+      });
+    } catch (cause) {
+      await lease.release();
+      throw cause;
+    }
+  };
+  const simulationPullReach = {
+    ...(options.retellReach ?? {}),
+    signal: options.retellReach?.signal === undefined
+      ? simulationPullAbort.signal
+      : AbortSignal.any([options.retellReach.signal, simulationPullAbort.signal]),
+  };
 
   // One client for the whole process, shared by the drainer and the health
   // check: two would be two connection pools to one bucket, and a health probe
@@ -495,6 +536,24 @@ export function buildApi(options: ServerOptions): Api {
   // customer — so there is no organization to key a budget on, and a busy
   // run can never eat a customer's request budget from the inside.
   void app.register(claimRoutes, {
+    ...(options.wakeVoiceFleet === undefined ? {} : { wakeVoiceFleet: options.wakeVoiceFleet }),
+    ...(config.voiceFleet === undefined
+      ? {}
+      : {
+          daytonaProviderSecretEnvironment: Object.fromEntries(
+            Object.keys(config.voiceFleet.providerSecrets).map((variable) => [
+              variable === "EGMA_OPENAI_API_KEY"
+                ? "openai"
+                : variable === "EGMA_DEEPGRAM_API_KEY"
+                  ? "deepgram"
+                  : "cartesia",
+              variable,
+            ]),
+          ),
+        }),
+    ...(options.daytonaClaimRuntime === undefined
+      ? {}
+      : { daytonaClaimRuntime: options.daytonaClaimRuntime }),
     serviceToken: config.simulatorServiceToken,
     providerCredentials: config.providerCredentials,
     carrierRoute: config.carrierRoute,
@@ -506,9 +565,6 @@ export function buildApi(options: ServerOptions): Api {
     // address of Egma's at all — the claim fills one in per call, for exactly
     // the tools that simulation's own test names.
     baseUrl: config.baseUrl,
-    ...(options.retellFetch === undefined
-      ? {}
-      : { retellFetch: options.retellFetch }),
   });
 
   // The heartbeat door, beside the claim door on the same terms — and all
@@ -534,7 +590,8 @@ export function buildApi(options: ServerOptions): Api {
     // call record and files it under the simulation: the agent's POV, for a
     // platform that exports nothing of its own. It asks where every other
     // Retell read in this deployment asks.
-    simulationPullReach: options.retellReach ?? {},
+    simulationPullReach,
+    pullSimulationRecord,
     ...(options.simulationPullOptions === undefined
       ? {}
       : { simulationPullOptions: options.simulationPullOptions }),
@@ -622,6 +679,18 @@ export function buildApi(options: ServerOptions): Api {
     }
     orphanSweep = startOrphanSweep({
       log: app.log,
+      ...(acceptsEvidence ? { recoverRetell: async () => {
+        const pending = await sweepPendingRetellSimulationCollections();
+        await Promise.all(pending.map(async ({ id, auth }) => {
+          await pullSimulationRecord(
+            auth,
+            id,
+            simulationPullReach,
+            app.log,
+            options.simulationPullOptions ?? {},
+          );
+        }));
+      } } : {}),
       ...(options.wakeVoiceFleet === undefined
         ? {}
         : { wakeVoiceFleet: options.wakeVoiceFleet }),
@@ -662,7 +731,9 @@ export function buildApi(options: ServerOptions): Api {
   app.addHook("onClose", async () => {
     // Awaited, so closing drains any tick in flight: whoever closes the app
     // and then the stores knows the sweep holds no connection to them.
+    simulationPullAbort.abort();
     await orphanSweep?.stop();
+    await simulationCollector.settle();
     await retellProductionIngestion?.stop();
     // The drainer stays alive through the earlier acceptance shutdown, so a
     // segment uploaded during that window can still be consumed in process.

@@ -235,11 +235,12 @@ describe.skipIf(!storage.available)("the captured trace, found in a list", () =>
     /*
      * Both endpoints derive response latency from framework speech spans.
      * The fixture arithmetic and span IDs are documented in otlp-derived-measures.test.ts.
-     * Samples are 3454.607472, 2900.4494, and 3066.59356 ms; nearest-rank p90
-     * with three samples selects the largest, 3454.607472 ms.
+     * The spoken-response samples are 2900.4494 and 3066.59356 ms;
+     * nearest-rank p90 selects 3066.59356 ms. Empty native response records
+     * remain raw spans and do not create response-latency samples.
      */
     expect(turnLatency?.derived).toBe(true);
-    expect(trace?.turnResponseLatencyP90Milliseconds).toBe(3454.607472);
+    expect(trace?.turnResponseLatencyP90Milliseconds).toBe(3066.59356);
     expect(trace?.turnResponseLatencyP90Milliseconds).toBe(turnLatency?.p90);
     expect(trace?.turnResponseLatencyP90Partial).toBe(false);
   });
@@ -306,7 +307,7 @@ describe.skipIf(!storage.available)("the captured trace, found in a list", () =>
 });
 
 describe.skipIf(!storage.available)("the captured trace, read as a transcript", () => {
-  it("is thirteen turns in the order they were taken", async () => {
+  it("contains every spoken turn in the order it was taken", async () => {
     const detail = await transcript();
 
     expect(detail.turns).toHaveLength(
@@ -327,10 +328,9 @@ describe.skipIf(!storage.available)("the captured trace, read as a transcript", 
    * The exchange that was actually had, written out — which is the only
    * assertion that can tell a transcript from a list of rows in the right order.
    *
-   * The four agent turns with no text are real and not a loss: they are the
-   * turns where the agent did not speak, two of them because they only called
-   * the weather tool. Recognition rides the human's turn as attributes rather
-   * than as a span of its own, which is why every human turn has its line.
+   * Empty native agent records remain in the raw trace but are not transcript
+   * turns. Recognition rides the human's turn as attributes rather than as a
+   * span of its own, which is why every human turn has its line.
    */
   it("carries what each speaker actually said, in the order they said it", async () => {
     const detail = await transcript();
@@ -340,21 +340,17 @@ describe.skipIf(!storage.available)("the captured trace, read as a transcript", 
     ).toEqual([
       ["turn:agent", "Hello! How can I assist you today?"],
       ["turn:human", "Hi Kelly, my name is Sam."],
-      ["turn:agent", ""],
       ["turn:human", "Can you tell me what the weather is like in Lisbon today?"],
-      ["turn:agent", ""],
       [
         "turn:agent",
         "The weather in Lisbon today is sunny with a temperature of 70 degrees. Do you need any more information?",
       ],
       ["turn:human", "Thanks, and how about Oslo? Is it colder there right now?"],
-      ["turn:agent", ""],
       [
         "turn:agent",
         "Oslo is also sunny, but it has the same temperature of 70 degrees. Would you like to know anything else?",
       ],
       ["turn:human", "Great, that is all I needed."],
-      ["turn:agent", ""],
       ["turn:human", "Have a good day, and goodbye."],
       ["turn:agent", "Thank you, Sam! Have a great day, and goodbye!"],
     ]);
@@ -374,15 +370,11 @@ describe.skipIf(!storage.available)("the captured trace, read as a transcript", 
     ).toEqual([
       "model,tts,speaking",
       "speaking,speaking,speaking,end-of-turn",
-      "model,tts",
       "end-of-turn",
-      "model,tool",
       "model,tts,speaking",
       "speaking,speaking,speaking,end-of-turn",
-      "model,tool",
       "model,tts,speaking",
       "speaking,speaking,end-of-turn",
-      "model,tts",
       "speaking,end-of-turn",
       "model,tts,speaking",
     ]);
@@ -404,24 +396,22 @@ describe.skipIf(!storage.available)("the captured trace, read as a transcript", 
   });
 
   /**
-   * The two weather lookups are not loose spans at the top of the trace: each
-   * one happened inside the agent turn that made it, and finding it means
-   * opening that turn. A transcript where a tool call floated free would be one
-   * where nobody could tell which answer it was for.
+   * The two weather lookups remain nested under their native agent records.
+   * Those records are raw trace containers because they have no spoken reply;
+   * the tools do not become blank conversation turns or float to the top.
    */
-  it("keeps each tool call inside the agent turn that made it", async () => {
+  it("keeps each tool call inside the native agent record that made it", async () => {
     const detail = await transcript();
 
-    const turnsWithTools = detail.turns.filter((turn) =>
-      everySpan(turn.spans).some((span) => span.kind === "tool"),
+    const recordsWithTools = everySpan(detail.spans).filter((span) =>
+      span.name === "agent_turn" &&
+      span.kind === "other" &&
+      everySpan(span.spans).some((child) => child.kind === "tool"),
     );
-    expect(turnsWithTools.map((turn) => turn.kind)).toEqual([
-      "turn:agent",
-      "turn:agent",
-    ]);
+    expect(recordsWithTools).toHaveLength(2);
 
-    const tools = turnsWithTools.flatMap((turn) =>
-      everySpan(turn.spans).filter((span) => span.kind === "tool"),
+    const tools = recordsWithTools.flatMap((record) =>
+      everySpan(record.spans).filter((span) => span.kind === "tool"),
     );
     expect(tools).toHaveLength(FIXTURE_TRACE.toolSpans);
     expect(tools.map((tool) => tool.toolName)).toEqual([
@@ -434,7 +424,7 @@ describe.skipIf(!storage.available)("the captured trace, read as a transcript", 
     );
 
     // And nowhere else: no tool call sits at the top of the trace.
-    expect(everySpan(detail.spans).filter((span) => span.kind === "tool")).toEqual(
+    expect(detail.spans.filter((span) => span.kind === "tool")).toEqual(
       [],
     );
   });
@@ -460,12 +450,6 @@ describe.skipIf(!storage.available)("the captured trace, read as a transcript", 
       "llm_request_run",
       "llm_request_run",
     ]);
-    // Inside a turn, which is where a person looking for what went wrong looks.
-    for (const span of failed) {
-      expect(everySpan(detail.turns).map((each) => each.spanId)).toContain(
-        span.spanId,
-      );
-    }
   });
 
   /**
@@ -840,6 +824,103 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
     expect((await measureOf(REPORTED)).partial).toBe(false);
   });
 });
+
+describe.skipIf(!storage.available)(
+  "two speakers projected from one native LiveKit chat span",
+  () => {
+    const TRACE = "1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e";
+    const WHEN = {
+      from: "2026-08-04T00:00:00Z",
+      to: "2026-08-05T00:00:00Z",
+    } as const;
+    const AT = BigInt(Date.parse("2026-08-04T09:00:00Z")) * 1_000n;
+
+    function turn(over: Partial<NewSpan>): NewSpan {
+      return {
+        traceId: TRACE,
+        spanId: "",
+        parentSpanId: "",
+        source: "simulation",
+        emitter: "agent",
+        environment: "default",
+        startedAtMicroseconds: AT,
+        durationNanoseconds: 1_000_000_000n,
+        name: "agent_turn",
+        kind: "other",
+        status: "ok",
+        text: "",
+        audioUrl: "",
+        toolName: "",
+        toolArguments: "",
+        toolResult: "",
+        providerCallId: "room-chat-order",
+        agentPlatform: "livekit",
+        platformAgentId: "",
+        platformAgentName: "",
+        platformAgentVersion: "",
+        connectionType: "livekit_room",
+        runId: "run_01JQZ0000000000000000000CC",
+        agentId: "agt_01JQZ0000000000000000000CC",
+        agentVersionId: "",
+        testVersionId: "",
+        personaVersionId: "",
+        payload: "{}",
+        endsTrace: false,
+        ...over,
+      };
+    }
+
+    beforeAll(async () => {
+      await appendSpans(contextFor(acme, "admin"), [
+        turn({
+          spanId: "ee00000000000001",
+          kind: "turn:human",
+          text: "Please book Tuesday.",
+          payload:
+            '{"egma.projection":{"source":"lk.pii.user_input"}}',
+        }),
+        // This ID sorts before the projection ID. Public conversation order
+        // must follow speaker role for the shared native timestamp.
+        turn({
+          spanId: "1100000000000001",
+          kind: "turn:agent",
+          text: "Tuesday is booked.",
+        }),
+        // The same tie rule keeps a voice interruption readable too.
+        turn({
+          spanId: "ff00000000000001",
+          kind: "turn:human",
+          text: "Wait.",
+          startedAtMicroseconds: AT + 2_000_000n,
+        }),
+        turn({
+          spanId: "0100000000000001",
+          kind: "turn:agent",
+          text: "I stopped.",
+          startedAtMicroseconds: AT + 2_000_000n,
+        }),
+      ]);
+    });
+
+    it("returns caller then agent through the public trace endpoint", async () => {
+      const response = await readTraceOverHttp(
+        api.app,
+        acme.secret,
+        TRACE,
+        WHEN,
+      );
+      expect(response.statusCode, response.body).toBe(200);
+      const detail = response.json() as TraceDetailBody;
+
+      expect(detail.turns.map(({ kind, text }) => [kind, text])).toEqual([
+        ["turn:human", "Please book Tuesday."],
+        ["turn:agent", "Tuesday is booked."],
+        ["turn:human", "Wait."],
+        ["turn:agent", "I stopped."],
+      ]);
+    });
+  },
+);
 
 /**
  * Generic trace reads return tool facts without mock marks. Mock coverage is

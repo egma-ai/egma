@@ -174,6 +174,8 @@ Without the SDK report, Egma fails the LiveKit simulation. Check the simulation'
 
 After your normal `session.start` returns, LiveKit publishes its native agent state. Egma waits for an initialized state before sending the first simulated input. This wait uses the simulation's configured duration. You do not need another readiness callback.
 
+When that simulation ends, Egma finishes pending output and its exact participant leaves the room. The SDK closes the `AgentSession` you supplied, which completes LiveKit's native session trace, flushes the final evidence, and releases entrypoint code that is waiting for session close. An abrupt room disconnect closes the session as well. These listeners are installed only after the Egma participant accepts the tool report in a simulation room.
+
 ## Test in chat mode
 
 For a LiveKit chat connection, keep the `egma-sim-chat-` branch shown in the example. It disables audio input and output and sends text without waiting for speech transcription. Also disable any independent audio publishers in that branch.

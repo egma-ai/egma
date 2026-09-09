@@ -162,6 +162,7 @@ class OpenAICompatibleModel:
         reasoning_effort: str | None = None,
         timeout_seconds: float = MODEL_TIMEOUT_SECONDS,
         customer_funded: bool = False,
+        use_environment_proxy: bool = False,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
@@ -169,6 +170,7 @@ class OpenAICompatibleModel:
         self._model_name = model_name
         self._reasoning_effort = reasoning_effort
         self._timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+        self._use_environment_proxy = use_environment_proxy
         self._session: aiohttp.ClientSession | None = None
 
     @property
@@ -177,7 +179,7 @@ class OpenAICompatibleModel:
 
     def _live_session(self) -> aiohttp.ClientSession:
         if self._session is None:
-            self._session = aiohttp.ClientSession()
+            self._session = aiohttp.ClientSession(trust_env=self._use_environment_proxy)
         return self._session
 
     def _provider_detail(self, value: object) -> str:
@@ -219,9 +221,7 @@ class OpenAICompatibleModel:
         )
         asked: dict[str, Any] = {"model": self._model_name}
         asked.update(
-            (name, value)
-            for name, value in invocation.items()
-            if is_given(value)
+            (name, value) for name, value in invocation.items() if is_given(value)
         )
         if self._reasoning_effort is not None:
             asked["reasoning_effort"] = self._reasoning_effort
@@ -366,4 +366,5 @@ def build_model_client(
         model_name=selected.model,
         reasoning_effort=selected.reasoning_effort,
         customer_funded=selected.funding_receipt is not None,
+        use_environment_proxy=getattr(spec, "runtime", None) is not None,
     )

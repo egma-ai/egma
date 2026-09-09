@@ -609,10 +609,10 @@ function ShellFrame({
     me === null
       ? null
       : shown !== null
-        ? settingsPath(shown, "project")
+        ? settingsPath(shown, "organization")
         : projects[0] === undefined
           ? "/new-project"
-          : settingsPath(projects[0].id, "people");
+          : settingsPath(projects[0].id, "organization");
   /**
    * **Null until the session read answers, and never `viewer` in the meantime.**
    * A cautious default reads as a fact: every admin would be shown the
@@ -864,6 +864,7 @@ export function PageHeader({
   title,
   lead,
   action,
+  topbarAction,
   toolbar,
   breadcrumbs,
 }: {
@@ -871,6 +872,8 @@ export function PageHeader({
   readonly title: string;
   readonly lead?: ReactNode;
   readonly action?: ReactNode;
+  /** An exceptional record action aligned with the current breadcrumb. */
+  readonly topbarAction?: ReactNode;
   /** What this page filters or searches by, at the left of the toolbar row. */
   readonly toolbar?: ReactNode;
   /** Parent links and the current page, in that order. */
@@ -913,14 +916,19 @@ export function PageHeader({
         <PageContentFrame className="items-center gap-3" slot="page-topbar-content">
           {breadcrumbs === undefined ? (
             /* A heading carries no size of its own; the class is the size. */
-            <h1 className="m-0 min-w-0 truncate text-base font-medium">{title}</h1>
+            <h1 className="m-0 min-w-0 flex-1 truncate text-base font-medium">{title}</h1>
           ) : (
             /*
              * Straight through: the trail a page passes already ends with that
              * page, and `PageNavigationItems` is what holds it to that. There
              * is nothing here to rebuild.
              */
-            <PageNavigation items={breadcrumbs} />
+            <div className="min-w-0 flex-1">
+              <PageNavigation items={breadcrumbs} />
+            </div>
+          )}
+          {topbarAction === undefined ? null : (
+            <div className="ml-auto flex flex-none items-center">{topbarAction}</div>
           )}
         </PageContentFrame>
       </div>

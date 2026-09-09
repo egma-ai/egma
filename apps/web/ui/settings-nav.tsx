@@ -25,30 +25,30 @@ export type SettingsSection =
 type Item = {
   readonly id: SettingsSection;
   readonly label: string;
-  /** The path under the project's settings, or nothing for the root. */
+  /** The path under the project's settings. */
   readonly rest: readonly string[];
 };
 
 const PROJECT_SETTINGS: readonly Item[] = [
-  { id: "project", label: "Project", rest: [] },
+  { id: "project", label: "Project Settings", rest: ["project"] },
 ];
 
 const ORGANIZATION_SETTINGS: readonly Item[] = [
-  { id: "billing", label: "Usage and billing", rest: ["billing"] },
-  { id: "organization", label: "Organization", rest: ["organization"] },
-  { id: "people", label: "People", rest: ["people"] },
-  { id: "keys", label: "API keys", rest: ["keys"] },
+  { id: "organization", label: "Organization Settings", rest: ["organization"] },
+  { id: "billing", label: "Usage and Billing", rest: ["billing"] },
   {
     id: "provider-api-keys",
     label: "Provider API Keys",
     rest: ["provider-api-keys"],
   },
+  { id: "people", label: "People", rest: ["people"] },
+  { id: "keys", label: "API Keys", rest: ["keys"] },
 ];
 
 /** Where one Settings page lives, for anything that links to it. */
 export function settingsPath(
   projectId: string,
-  section: SettingsSection = "project",
+  section: SettingsSection = "organization",
 ): string {
   const item = [...PROJECT_SETTINGS, ...ORGANIZATION_SETTINGS].find(
     (one) => one.id === section,
@@ -180,8 +180,8 @@ export function SettingsNav({
       )}
       aria-label="Settings"
     >
-      {group("This project", PROJECT_SETTINGS)}
       {group("Organization", ORGANIZATION_SETTINGS)}
+      {group("Project", PROJECT_SETTINGS)}
     </nav>
   );
 }

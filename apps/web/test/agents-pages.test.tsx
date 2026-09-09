@@ -1726,6 +1726,76 @@ describe("goal-first agent setup", () => {
     ).toBe(false);
   });
 
+  it("adds the missing simulation phone when Both resumes a bound Retell agent", async () => {
+    routed.search = "?sheet=connect&agent=agt_1&goal=both&platform=retell";
+    const savedAgent = {
+      ...AGENT,
+      platformAgentId: "agent_voice_1",
+      monitoringKeyPresent: true,
+      monitoringApiKeyHint: "WXYZ",
+      pullProductionCalls: false,
+    };
+    const committedAgent = {
+      ...savedAgent,
+      pullProductionCalls: true,
+    };
+    sheetAnswers({
+      "/v1/agents/agt_1": [
+        { status: 200, body: { agent: savedAgent, connections: [] } },
+        { status: 200, body: { agent: savedAgent, connections: [] } },
+        {
+          status: 200,
+          body: {
+            agent: committedAgent,
+            connections: [
+              {
+                ...MEASURED_CONNECTION,
+                id: "con_phone_2",
+                agentId: "agt_1",
+                config: { phoneNumber: "+14155550100" },
+              },
+            ],
+          },
+        },
+      ],
+      "/v1/agents:discover": { status: 200, body: retellDiscovery },
+      "/v1/agents/agt_1/connections": {
+        status: 503,
+        body: {
+          error: "response_lost",
+          message: "The phone may have been saved. Try again.",
+        },
+      },
+    });
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Find agents" }));
+    await pickRetellAgent("Appointment line");
+    fireEvent.click(screen.getByRole("button", { name: "Set up both" }));
+    expect(
+      await screen.findByText("The phone may have been saved. Try again."),
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Set up both" }));
+
+    await waitFor(() => {
+      expect(screen.queryByText("The phone may have been saved. Try again.")).toBeNull();
+    });
+    const saved = sent.find((call) =>
+      call.url.startsWith("/v1/agents/agt_1/connections"),
+    );
+    expect(
+      sent.filter((call) => call.url.startsWith("/v1/agents/agt_1/connections")),
+    ).toHaveLength(1);
+    expect(saved?.body).toMatchObject({
+      agentPlatform: "retell",
+      connectionType: "phone_number",
+      config: { phoneNumber: "+14155550100" },
+      platformAgentId: "agent_voice_1",
+      pullProductionCalls: true,
+    });
+    expect(saved?.body).not.toHaveProperty("credentials");
+  });
+
   it("lists every voice agent, keeps a no-phone agent usable for simulations, and counts only phones", async () => {
     // Egma registers Retell **voice** agents, so a chat-native agent is never
     // in the picker: no lane reaches one.

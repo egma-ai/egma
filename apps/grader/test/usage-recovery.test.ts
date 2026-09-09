@@ -76,7 +76,7 @@ function settings(endpoint?: string): IngestionSettings {
     flushMilliseconds: 1,
     segmentMaxBytes: 100_000,
     segmentMaxRecords: 10,
-    requestTimeoutMilliseconds: 100,
+    requestTimeoutMilliseconds: endpoint === undefined ? 5_000 : 100,
     scanIntervalMilliseconds: 1000,
   };
 }

@@ -14,10 +14,13 @@ import logging
 import math
 import struct
 import sys
+import urllib.parse
 from array import array
 from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from functools import cache
+from typing import Any
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
@@ -68,6 +71,12 @@ CARTESIA_SPEED_RANGE = (0.6, 1.5)
 
 A speed outside this range is refused. The adapter never changes the value
 selected by the pinned TTS model."""
+
+OPENAI_REALTIME_PROXY_OPEN_SECONDS = 30.0
+"""How long a proxied OpenAI Realtime socket may take to open."""
+
+OPENAI_REALTIME_PROXY_READY_SECONDS = 45.0
+"""How long proxied OpenAI Realtime may take to become ready."""
 
 LISTENING_READY_SECONDS = 15.0
 """How long a listening leg may take to become able to hear.
@@ -367,6 +376,9 @@ class SpeechProviders:
     stt_customer_funded: bool = False
     tts_customer_funded: bool = False
 
+    use_environment_proxy: bool = False
+    """Whether provider sockets must honor the runtime's proxy settings."""
+
     stt_provider: str | None = None
     tts_provider: str | None = None
     """Who bills for each leg.
@@ -431,6 +443,9 @@ class SpeechLegs:
     voice: PersonaVoice
     """The exact voice pinned by this work order's TTS selection."""
 
+    listening_ready_seconds: float = LISTENING_READY_SECONDS
+    """How long the listening leg may take to become ready."""
+
     listening: Callable[[], Awaitable[None]] | None = None
     """Waits until the listening leg can hear, for a leg that connects."""
 
@@ -442,11 +457,13 @@ class SpeechLegs:
         if self.listening is None:
             return
         try:
-            await asyncio.wait_for(self.listening(), timeout=LISTENING_READY_SECONDS)
+            await asyncio.wait_for(
+                self.listening(), timeout=self.listening_ready_seconds
+            )
         except TimeoutError as never_ready:
             raise SpeechFault(
                 "the listening leg did not connect within "
-                f"{LISTENING_READY_SECONDS:.0f}s; nothing said would have been "
+                f"{self.listening_ready_seconds:.0f}s; nothing said would have been "
                 "heard"
             ) from never_ready
 
@@ -474,6 +491,11 @@ def build_legs(providers: SpeechProviders, *, voice: PersonaVoice) -> SpeechLegs
         stt=listening_leg,
         tts=speaking,
         voice=spoken_with,
+        listening_ready_seconds=(
+            OPENAI_REALTIME_PROXY_READY_SECONDS
+            if providers.stt == "openai_realtime" and providers.use_environment_proxy
+            else LISTENING_READY_SECONDS
+        ),
         listening=listening,
         closers=closers,
     )
@@ -563,6 +585,15 @@ def _ears(
     if not providers.stt_model:
         raise SpeechFault("the deepgram listening leg was chosen without a model")
 
+    if providers.use_environment_proxy:
+        # Deepgram's pinned async client still uses the legacy websockets
+        # connector, which ignores Daytona's HTTPS_PROXY. A Daytona sandbox
+        # runs one claim, so selecting the current connector here is scoped to
+        # that dedicated runtime process.
+        from deepgram.listen.v1 import client as deepgram_listen_client
+
+        deepgram_listen_client.websockets_client_connect = _daytona_deepgram_connect
+
     leg = DeepgramSTTService(
         api_key=providers.stt_key,
         settings=DeepgramSTTService.Settings(model=providers.stt_model),
@@ -585,6 +616,31 @@ def _ears(
         await connection_ready.wait()
 
     return leg, connected
+
+
+@asynccontextmanager
+async def _daytona_deepgram_connect(
+    url: str, extra_headers: dict[str, str] | None = None
+) -> AsyncGenerator[Any, None]:
+    """Open Deepgram through Daytona's proxy with credentials in headers."""
+    from deepgram.core.api_error import ApiError
+    from websockets.asyncio.client import connect
+    from websockets.exceptions import InvalidStatus
+
+    try:
+        async with connect(
+            url,
+            additional_headers=extra_headers,
+            proxy=True,
+        ) as protocol:
+            yield protocol
+    except InvalidStatus as fault:
+        if fault.response.status_code not in {401, 403}:
+            raise
+        raise ApiError(
+            status_code=fault.response.status_code,
+            body="Websocket initialized with invalid credentials.",
+        ) from fault
 
 
 def _connection_opened_by(leg: FrameProcessor) -> asyncio.Event:
@@ -642,8 +698,30 @@ def _cartesia_mouth(
     The voice and speed are the pinned TTS selection's own. This adapter
     neither substitutes nor clamps them.
     """
-    from pipecat.services.cartesia.tts import CartesiaTTSService, GenerationConfig
+    from pipecat.services.cartesia.tts import (
+        CartesiaTTSService as StockCartesiaTTSService,
+    )
+    from pipecat.services.cartesia.tts import GenerationConfig
     from pipecat.services.tts_service import TextAggregationMode
+
+    class CartesiaTTSService(StockCartesiaTTSService):
+        async def _websocket_connect(self, uri: str, **kwargs: Any):
+            parsed = urllib.parse.urlsplit(uri)
+            query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+            safe_uri = urllib.parse.urlunsplit(
+                parsed._replace(
+                    query=urllib.parse.urlencode(
+                        [(name, value) for name, value in query if name != "api_key"]
+                    )
+                )
+            )
+            headers = dict(kwargs.pop("additional_headers", {}) or {})
+            headers["X-API-Key"] = self._api_key
+            return await super()._websocket_connect(
+                safe_uri,
+                additional_headers=headers,
+                **kwargs,
+            )
 
     if not providers.tts_key:
         raise SpeechFault("the cartesia speaking leg was chosen without a key")
@@ -692,17 +770,32 @@ def _openai_mouth(
         async def run_tts(
             self, text: str, context_id: str
         ) -> AsyncGenerator[Frame, None]:
+            from pipecat.frames.frames import ErrorFrame
+
+            spoke = False
             try:
                 async for frame in super().run_tts(text, context_id):
+                    if isinstance(frame, ErrorFrame):
+                        yield frame
+                        await self.remove_audio_context(context_id)
+                        return
+                    spoke = spoke or isinstance(frame, TTSAudioRawFrame)
                     yield frame
+            except asyncio.CancelledError:
+                await self.remove_audio_context(context_id)
+                raise
             except Exception as fault:
                 if providers.tts_customer_funded and authentication_rejected(fault):
-                    from pipecat.frames.frames import ErrorFrame
-
                     failure = ProviderKeyUnavailable("openai")
                     yield ErrorFrame(error=str(failure), exception=fault)
+                    await self.remove_audio_context(context_id)
+                    return
                 else:
+                    await self.remove_audio_context(context_id)
                     raise
+            if not spoke:
+                await self.remove_audio_context(context_id)
+                raise SpeechFault("the openai speaking leg returned no audio")
 
     if not providers.tts_key:
         raise SpeechFault("the openai speaking leg was chosen without a key")
@@ -719,6 +812,9 @@ def _openai_mouth(
     leg = OpenAITTSService(
         api_key=providers.tts_key,
         settings=settings,
+        # OpenAI returns finite HTTP streams. Pipecat closes the turn after they
+        # finish; an idle timer can stop it while a response is still in flight.
+        stop_frame_timeout_s=None,
     )
     return leg, spoken_with, ()
 
@@ -738,6 +834,12 @@ def _openai_realtime_ears(
 
     class OpenAIRealtimeSTTService(PipecatOpenAIRealtimeSTTService):
         """Pipecat's realtime service with the live model's current wire shape."""
+
+        async def _websocket_connect(self, uri: str, **kwargs: Any) -> Any:
+            if providers.use_environment_proxy:
+                kwargs.setdefault("proxy", True)
+                kwargs.setdefault("open_timeout", OPENAI_REALTIME_PROXY_OPEN_SECONDS)
+            return await super()._websocket_connect(uri, **kwargs)
 
         async def _handle_transcription_completed(self, evt: dict) -> None:
             """Keep what the provider says the transcription cost.

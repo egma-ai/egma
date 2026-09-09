@@ -4,10 +4,10 @@ import { useParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { getProject, updateProject } from "@egma/platform-api/client";
 
-import { IDENTITY_CONFLICT, type Refusal } from "../../../../lib/api.ts";
-import { roleOf } from "../../../../lib/me.ts";
-import { platformAnswer, platformClient } from "../../../../lib/platform-client.ts";
-import type { ProjectSettings } from "../../../../lib/settings.ts";
+import { IDENTITY_CONFLICT, type Refusal } from "../../../../../lib/api.ts";
+import { roleOf } from "../../../../../lib/me.ts";
+import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
+import type { ProjectSettings } from "../../../../../lib/settings.ts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -19,20 +19,13 @@ import {
   Help,
   Problem,
   Refused,
-} from "../../../../ui/form.tsx";
-import { Failure, Loading, NotFound } from "../../../../ui/page-state.tsx";
-import { SettingsLayout } from "../../../../ui/settings-nav.tsx";
+} from "../../../../../ui/form.tsx";
+import { Failure, Loading, NotFound } from "../../../../../ui/page-state.tsx";
 import {
   useOrganizationRead,
   useUnsavedChanges,
-} from "../../../../ui/settings-read.ts";
-import {
-  AppShell,
-  PageBody,
-  PageHeader,
-  ProductPage,
-  useShellSession,
-} from "../../../../ui/shell.tsx";
+} from "../../../../../ui/settings-read.ts";
+import { useShellSession } from "../../../../../ui/shell.tsx";
 
 /**
  * Edit project metadata with expectedRevision so concurrent saves cannot
@@ -41,11 +34,7 @@ import {
  */
 export default function ProjectSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  return (
-    <AppShell>
-      <ProjectSettingsBody projectId={projectId} />
-    </AppShell>
-  );
+  return <ProjectSettingsBody projectId={projectId} />;
 }
 
 function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
@@ -172,27 +161,13 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
   }
 
   if (answer === null) {
-    return (
-      <ProductPage viewport>
-        <PageHeader title="Project" />
-        <PageBody>
-          <SettingsLayout projectId={projectId} current="project">
-            <Loading what="this project" />
-          </SettingsLayout>
-        </PageBody>
-      </ProductPage>
-    );
+    return <Loading what="this project" />;
   }
 
   if (answer.status !== "ready") {
-    return (
-      <ProductPage viewport>
-        <PageHeader title="Project" />
-        <PageBody>
-          <SettingsLayout projectId={projectId} current="project">
-            {answer.status === "missing" ? (
+    return answer.status === "missing" ? (
               <NotFound message={answer.refusal.message} />
-            ) : (
+    ) : (
               <Failure
                 message={
                   answer.status === "signed-out"
@@ -201,18 +176,11 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
                 }
                 onRetry={reload}
               />
-            )}
-          </SettingsLayout>
-        </PageBody>
-      </ProductPage>
     );
   }
 
   return (
-    <ProductPage viewport>
-      <PageHeader title="Project" />
-      <PageBody>
-        <SettingsLayout projectId={projectId} current="project">
+    <>
           {/* One form needs no extra section heading beneath the page title. */}
           <div className="flex flex-col gap-4">
             {refused === null ? null : (
@@ -286,8 +254,6 @@ function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {
               </FormActions>
             </Form>
           </div>
-        </SettingsLayout>
-      </PageBody>
-    </ProductPage>
+    </>
   );
 }

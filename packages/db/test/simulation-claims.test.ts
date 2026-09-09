@@ -92,15 +92,15 @@ async function seedCustomer(
   apiKey: string,
 ): Promise<Seeded> {
   const created = await createAgent(auth, {
-    agentPlatform: "retell",
+    agentPlatform: "livekit",
     name: "Front desk",
     connection: {
-      agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
       modality: "chat",
-      config: { retellAgentId: `agent_${apiKey}` },
-      credentials: { apiKey },
+      config: { url: "wss://test.livekit.cloud", agentName: `agent_${apiKey}` },
+      credentials: { apiKey, apiSecret: "livekit-secret-A1B2C3D4WXYZ" },
     },
   });
 
@@ -346,13 +346,17 @@ describe("the connection door", () => {
 
     const reached = await resolveSimulationConnection(claim.auth, claim.id);
     expect(reached?.connectionId).toBe(acmeSeed.connectionId);
-    expect(reached?.agentPlatform).toBe("retell");
-    expect(reached?.connectionType).toBe("retell_chat_api");
-    expect(reached?.accessVariant).toBe("retell_chat_api.api_key");
+    expect(reached?.agentPlatform).toBe("livekit");
+    expect(reached?.connectionType).toBe("livekit_room");
+    expect(reached?.accessVariant).toBe("livekit_room.project_credentials");
     expect(reached?.config).toEqual({
-      retellAgentId: "agent_retell-secret-A1B2C3D4WXYZ",
+      url: "wss://test.livekit.cloud",
+      agentName: "agent_retell-secret-A1B2C3D4WXYZ",
     });
-    expect(reached?.credentials).toEqual({ apiKey: "retell-secret-A1B2C3D4WXYZ" });
+    expect(reached?.credentials).toEqual({
+      apiKey: "retell-secret-A1B2C3D4WXYZ",
+      apiSecret: "livekit-secret-A1B2C3D4WXYZ",
+    });
   });
 
   it("refuses every context that is not the simulator's own", async () => {
@@ -428,15 +432,15 @@ describe("the connection door", () => {
 
     // Put the connection back for whatever runs after this file's tests.
     const restored = await createAgent(actingAsAcme(), {
-      agentPlatform: "retell",
+      agentPlatform: "livekit",
       name: "Front desk restored",
       connection: {
-        agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        agentPlatform: "livekit",
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
         modality: "chat",
-        config: { retellAgentId: "agent_restored_1" },
-        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+        config: { url: "wss://test.livekit.cloud", agentName: "agent_restored_1" },
+        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ", apiSecret: "livekit-secret-A1B2C3D4WXYZ" },
       },
     });
     acmeSeed = {
@@ -454,13 +458,14 @@ describe("the connection door", () => {
     // a claim reads live: connections are deliberately unversioned, and a
     // key rotated mid-run must be the key the next conversation dials with.
     await updateConnection(actingAsAcme(), acmeSeed.agentId, acmeSeed.connectionId, {
-      credentials: { apiKey: "  retell-secret-rotated-9999ABCD  " },
+      credentials: { apiKey: "  retell-secret-rotated-9999ABCD  ", apiSecret: "livekit-secret-A1B2C3D4WXYZ" },
     });
 
     const claim = await claimOne(simulationId);
     const reached = await resolveSimulationConnection(claim.auth, claim.id);
     expect(reached?.credentials).toEqual({
       apiKey: "retell-secret-rotated-9999ABCD",
+      apiSecret: "livekit-secret-A1B2C3D4WXYZ",
     });
   });
 });
@@ -696,12 +701,12 @@ describe("archiving a target out from under work", () => {
   async function aSpareConnection(name: string): Promise<string> {
     const added = await addConnection(actingAsAcme(), acmeSeed.agentId, {
       name,
-      agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
       modality: "chat",
-      config: { retellAgentId: `agent_${name}` },
-      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      config: { url: "wss://test.livekit.cloud", agentName: `agent_${name}` },
+      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ", apiSecret: "livekit-secret-A1B2C3D4WXYZ" },
     });
     return added?.id ?? "";
   }
@@ -711,15 +716,15 @@ describe("archiving a target out from under work", () => {
     name: string,
   ): Promise<{ agentId: string; connectionId: string }> {
     const created = await createAgent(actingAsAcme(), {
-      agentPlatform: "retell",
+      agentPlatform: "livekit",
       name,
       connection: {
-        agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        agentPlatform: "livekit",
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
         modality: "chat",
-        config: { retellAgentId: `agent_${name}` },
-        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+        config: { url: "wss://test.livekit.cloud", agentName: `agent_${name}` },
+        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ", apiSecret: "livekit-secret-A1B2C3D4WXYZ" },
       },
     });
     return { agentId: created.id, connectionId: created.connection?.id ?? "" };
