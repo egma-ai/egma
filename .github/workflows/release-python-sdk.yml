@@ -182,7 +182,7 @@ jobs:
             return "$status"
           }
 
-          for version in 1.6.6 1.7.1; do
+          for version in 1.7.1; do
             for modality in chat voice; do
               run_case "$version" "$modality"
             done

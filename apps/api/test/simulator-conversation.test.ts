@@ -508,7 +508,9 @@ async function storedSpans(traceId: string): Promise<StoredSpan[]> {
             parent_span_id, source, emitter, run_id, agent_id
        from spans
       where trace_id = '${traceId}'
-      order by started_at, span_id`,
+      order by started_at,
+               multiIf(kind = 'turn:human', 0, kind = 'turn:agent', 1, 2),
+               span_id`,
   );
 }
 
@@ -1269,8 +1271,8 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         : "The real calendar has a Tuesday appointment at 9:40.";
       const expectedAvailabilityResult = expectedAvailability;
       const expectedBehavior = LIVE_MOCKS
-        ? "reports that Tuesday is full and Thursday morning is the next opening after checking availability"
-        : "reports that Tuesday has an appointment at 9:40 after checking availability";
+        ? "reports that Tuesday is full, Thursday morning is the next opening, and confirms the reschedule request was recorded"
+        : "reports that Tuesday has an appointment at 9:40 and confirms the reschedule request was recorded";
       const caseId = `livekit-${LIVE_LANGUAGE}-${LIVE_MODALITY}-${LIVE_ACCESS.replaceAll("_", "-")}-${LIVE_MOCKS ? "mocked" : "unmocked"}`;
       const proofDirectory = path.join(
         import.meta.dirname,
@@ -1396,7 +1398,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           via: "session",
         };
         await createPersona(auth, {
-          name: "Impatient Rita",
+          name: "Focused caller",
           ...NEUTRAL_PERSON,
           models: {
             llm: { provider: "openai", model: "gpt-4o-mini" },
@@ -1420,9 +1422,13 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           body: {
             suiteId,
             name: "Finds the mocked opening",
-            scenario: "Ask whether Tuesday has an appointment available.",
+            scenario:
+              "Ask whether Tuesday has an appointment available and ask the agent " +
+              "to record a reschedule request. After the agent gives the availability " +
+              "and confirms the request was recorded, thank them and end immediately. " +
+              "Do not negotiate, ask for another day, or ask follow-up questions.",
             expectedBehaviors: [expectedBehavior],
-            personas: ["Impatient Rita"],
+            personas: ["Focused caller"],
             ...(LIVE_MOCKS ? {
               mockTools: [{
                 tool: "check_availability",

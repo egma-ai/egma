@@ -123,15 +123,21 @@ function expectWebEvidenceToMatchRetell(
   expect(egmaTurns).toEqual(providerTurns);
 
   const pending = new Map<string, { name: unknown; arguments: unknown }>();
+  const seen = new Set<string>();
   const providerTools: Array<{ name: unknown; arguments: unknown; result: unknown }> = [];
   for (const entry of woven) {
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
     const message = entry as Record<string, unknown>;
     const id = typeof message.tool_call_id === "string" ? message.tool_call_id : "";
     if (message.role === "tool_call_invocation" && id !== "") {
+      if (seen.has(id)) throw new Error(`Retell reused tool call id ${id}`);
+      seen.add(id);
       pending.set(id, { name: message.name, arguments: decoded(message.arguments) });
-    } else if (message.role === "tool_call_result" && pending.has(id)) {
-      const invocation = pending.get(id)!;
+    } else if (message.role === "tool_call_result") {
+      const invocation = pending.get(id);
+      if (id === "" || invocation === undefined) {
+        throw new Error(`Retell returned an orphan tool result${id === "" ? "" : ` ${id}`}`);
+      }
       pending.delete(id);
       providerTools.push({ ...invocation, result: decoded(message.content) });
     }
@@ -154,6 +160,7 @@ function expectCompleteTextModeExchange(body: Record<string, unknown>): void {
   expect(publicTools(transcript, "persona").map((tool) => tool.toolName)).toEqual([
     "check_availability",
     "record_request",
+    "end_call",
   ]);
 }
 
@@ -305,6 +312,7 @@ it.skipIf(!ENABLED || storage?.available !== true)(
           modality: CONNECTION === "text" ? "chat" : "voice",
           config: { retellAgentId: provisioned.agentId },
           credentials: { apiKey: RETELL_KEY },
+          platformAgentId: provisioned.agentId,
         },
       } });
       expect(registered.status, JSON.stringify(registered.body)).toBe(201);

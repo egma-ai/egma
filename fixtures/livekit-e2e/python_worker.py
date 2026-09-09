@@ -18,12 +18,13 @@ class AppointmentAgent(Agent):
     def __init__(self) -> None:
         super().__init__(
             instructions=(
-                "You schedule dental appointments. Always call "
-                "check_availability exactly once, with day Tuesday, before you "
-                "say whether Tuesday is free. Never check a different day. "
-                "Then call record_request with day Tuesday and kind reschedule "
-                "exactly once before answering. "
-                "Keep each reply short."
+                "You schedule dental appointments. On the caller's first request, "
+                "call check_availability with day Tuesday, then immediately call "
+                "record_request with day Tuesday and kind reschedule. Each call is "
+                "required exactly once, even when Tuesday is full. Do not ask for "
+                "confirmation and never check another day. After both tools return, "
+                "state the availability, confirm the request was recorded, and end "
+                "the conversation. Keep the reply short."
             )
         )
 

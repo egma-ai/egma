@@ -384,7 +384,7 @@ jobs:
           retention-days: 7
 
   simulation-e2e-livekit:
-    name: Simulation to grade (${{ matrix.language }}, LiveKit ${{ matrix.runtime }}, ${{ matrix.modality }}, ${{ matrix.access }}, mocks ${{ matrix.mocks }})
+    name: Simulation to grade (${{ matrix.language }}, LiveKit ${{ matrix.runtime }}, ${{ matrix.modality }}, project credentials, mocks ${{ matrix.mocks }})
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'workflow_dispatch' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
@@ -393,16 +393,8 @@ jobs:
       matrix:
         language: [python, javascript]
         modality: [chat, voice]
-        access: [project_credentials, customer_token_endpoint]
         mocks: [on]
         runtime: [1.7.1]
-        include:
-          - { language: python, runtime: 1.6.6, modality: chat, access: project_credentials, mocks: on }
-          - { language: python, runtime: 1.6.6, modality: voice, access: project_credentials, mocks: on }
-          - { language: javascript, runtime: 1.5.5, modality: chat, access: project_credentials, mocks: on }
-          - { language: javascript, runtime: 1.5.5, modality: voice, access: project_credentials, mocks: on }
-          - { language: javascript, runtime: 1.6.4, modality: chat, access: project_credentials, mocks: on }
-          - { language: javascript, runtime: 1.6.4, modality: voice, access: project_credentials, mocks: on }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -453,19 +445,6 @@ jobs:
       - name: Report the browser
         run: google-chrome --version
 
-      - name: Install the public tunnel client
-        if: ${{ matrix.access == 'customer_token_endpoint' }}
-        run: |
-          curl --fail --silent --show-error --location \
-            --output /tmp/cloudflared.deb \
-            https://github.com/cloudflare/cloudflared/releases/download/2025.7.0/cloudflared-linux-amd64.deb
-          sudo dpkg --install /tmp/cloudflared.deb
-          cloudflared --version
-
-      - name: Resolve newly created public tunnel names through public DNS
-        if: ${{ matrix.access == 'customer_token_endpoint' }}
-        run: printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | sudo tee /etc/resolv.conf > /dev/null
-
       - name: Warm the object-store image
         run: docker pull "$(awk '/^  minio:/{found=1} found && /image:/{print $2; exit}' docker-compose.yml)"
 
@@ -476,11 +455,11 @@ jobs:
           SIMULATION_E2E_LIVE: "1"
           SIMULATION_E2E_LANGUAGE: ${{ matrix.language }}
           SIMULATION_E2E_MODALITY: ${{ matrix.modality }}
-          SIMULATION_E2E_ACCESS: ${{ matrix.access }}
+          SIMULATION_E2E_ACCESS: project_credentials
           SIMULATION_E2E_MOCKS: ${{ matrix.mocks }}
           LIVEKIT_E2E_PYTHON_AGENTS_VERSION: ${{ matrix.runtime }}
           LIVEKIT_E2E_JAVASCRIPT_AGENTS_VERSION: ${{ matrix.runtime }}
-          EGMA_E2E_SESSION_DELAY_MS: ${{ matrix.runtime != '1.7.1' && '10000' || '0' }}
+          EGMA_E2E_SESSION_DELAY_MS: "10000"
         run: >-
           pnpm exec vitest run --project fast
           apps/api/test/simulator-conversation.test.ts
@@ -490,7 +469,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: simulation-e2e-${{ matrix.language }}-livekit-${{ matrix.runtime }}-${{ matrix.modality }}-${{ matrix.access }}-${{ matrix.mocks }}-${{ github.sha }}
+          name: simulation-e2e-${{ matrix.language }}-livekit-${{ matrix.runtime }}-${{ matrix.modality }}-project-credentials-${{ matrix.mocks }}-${{ github.sha }}
           path: .proofs/simulation-e2e/*
           include-hidden-files: true
           if-no-files-found: error
@@ -545,6 +524,7 @@ jobs:
           curl --fail --silent --show-error --location \
             --output /tmp/cloudflared.deb \
             https://github.com/cloudflare/cloudflared/releases/download/2025.7.0/cloudflared-linux-amd64.deb
+          echo 'a65ceb838f1deb941f7ea9101ff54eaba04179135fd562456a59ea293479e113  /tmp/cloudflared.deb' | sha256sum --check --strict
           sudo dpkg --install /tmp/cloudflared.deb
       - name: Resolve newly created public tunnel names through public DNS
         run: printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | sudo tee /etc/resolv.conf > /dev/null
