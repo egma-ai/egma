@@ -24,7 +24,6 @@ import {
 } from "./support/simulation-proof.ts";
 
 const ENABLED = process.env["SIMULATION_E2E_RETELL"] === "1";
-const PROXY_PROBE = process.env["SIMULATION_E2E_RETELL_PROXY_PROBE"] === "1";
 const CONNECTION = process.env["SIMULATION_E2E_RETELL_CONNECTION"] ?? "text";
 const MOCKS = process.env["SIMULATION_E2E_MOCKS"] !== "off";
 const RETELL_KEY = process.env["SIMULATION_E2E_RETELL_API_KEY"]?.trim() ?? "";
@@ -366,36 +365,6 @@ async function proveAuthenticatedBrowser(
     await browser.close();
   }
 }
-
-it.runIf(PROXY_PROBE)(
-  "serves an authenticated page through the public fixture tunnel",
-  { timeout: 120_000 },
-  async () => {
-    const callback = await callbackServer("proxy-probe-token");
-    const tunnel = await startPublicTunnel(callback.origin);
-    let instance: Instance | undefined;
-    try {
-      await waitForPublicTunnel(tunnel, "/_egma-fixture/health");
-      instance = await startInstance("retell_public_proxy_probe", {
-        baseUrl: tunnel.url,
-        web: true,
-      });
-      callback.setMockOrigin(instance.origin);
-      const signup = await request(tunnel.url, "POST", "/api/signup", { body: {
-        email: "retell-proxy-probe@acme.example",
-        password: "a-password-long-enough-1",
-        organizationName: "Retell Proxy Probe",
-      } });
-      expect(signup.status, JSON.stringify(signup.body)).toBe(201);
-      const identity = signup.body as unknown as { project: { id: string } };
-      await proveAuthenticatedBrowser(tunnel.url, signup.cookie, identity.project.id);
-    } finally {
-      await instance?.close();
-      await stopChild(tunnel.process);
-      await callback.close();
-    }
-  },
-);
 
 it.skipIf(!ENABLED || storage?.available !== true)(
   `runs the real Retell ${CONNECTION} ${MOCKS ? "mocked" : "unmocked"} cell through storage, grading, and the browser`,

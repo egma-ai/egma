@@ -478,7 +478,8 @@ jobs:
   simulation-e2e-retell:
     name: Simulation to grade (Retell ${{ matrix.connection }}, mocks ${{ matrix.mocks }})
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'workflow_dispatch' }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    # GitHub's runner resolves newly announced public callback hostnames reliably.
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -526,8 +527,6 @@ jobs:
             https://github.com/cloudflare/cloudflared/releases/download/2025.7.0/cloudflared-linux-amd64.deb
           echo 'a65ceb838f1deb941f7ea9101ff54eaba04179135fd562456a59ea293479e113  /tmp/cloudflared.deb' | sha256sum --check --strict
           sudo dpkg --install /tmp/cloudflared.deb
-      - name: Resolve newly created public tunnel names through public DNS
-        run: printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | sudo tee /etc/resolv.conf > /dev/null
       - name: Warm the object-store image
         run: docker pull "$(awk '/^  minio:/{found=1} found && /image:/{print $2; exit}' docker-compose.yml)"
       - name: Run Retell through storage and browser-visible grade
