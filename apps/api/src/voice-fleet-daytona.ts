@@ -49,6 +49,13 @@ const TERMINAL_STATES = new Set([
   "destroying",
   "destroyed",
 ]);
+const ABSENCE_CONFIRMATIONS = 3;
+
+function isNotFound(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const value = err as { readonly status?: number; readonly statusCode?: number; readonly response?: { readonly status?: number } };
+  return value.status === 404 || value.statusCode === 404 || value.response?.status === 404;
+}
 
 export function daytonaVoiceFleet(
   settings: DaytonaVoiceFleetSettings,
@@ -76,26 +83,33 @@ export function daytonaVoiceFleet(
     if (watching.has(sandbox.id)) return;
     watching.add(sandbox.id);
     void (async () => {
-      try {
-        let result = await completion(sandbox.id);
-        while (result === undefined) {
+      let missingConfirmations = 0;
+      while (true) {
+        try {
+          const result = await completion(sandbox.id);
+          missingConfirmations = 0;
+          if (result === undefined) {
+            await new Promise<void>((resolve) => setTimeout(resolve, pollMilliseconds));
+            continue;
+          }
+          options.log.info(
+            { sandboxId: sandbox.id, state: result.sandbox.state, exitCode: result.exitCode },
+            "Daytona voice simulator process ended",
+          );
+          await options.client.delete(result.sandbox, 60, true);
+          break;
+        } catch (err) {
+          missingConfirmations = isNotFound(err) ? missingConfirmations + 1 : 0;
+          options.log.error(
+            { err, sandboxId: sandbox.id, state: sandbox.state, errorReason: sandbox.errorReason },
+            "Daytona voice simulator lifecycle could not be reconciled",
+          );
+          if (missingConfirmations >= ABSENCE_CONFIRMATIONS) break;
           await new Promise<void>((resolve) => setTimeout(resolve, pollMilliseconds));
-          result = await completion(sandbox.id);
         }
-        options.log.info(
-          { sandboxId: sandbox.id, state: result.sandbox.state, exitCode: result.exitCode },
-          "Daytona voice simulator process ended",
-        );
-        await options.client.delete(result.sandbox, 60, true);
-      } catch (err) {
-        options.log.error(
-          { err, sandboxId: sandbox.id, state: sandbox.state, errorReason: sandbox.errorReason },
-          "Daytona voice simulator lifecycle could not be reconciled",
-        );
-      } finally {
-        watching.delete(sandbox.id);
-        options.onFreed?.();
       }
+      watching.delete(sandbox.id);
+      options.onFreed?.();
     })();
   };
 
@@ -166,12 +180,27 @@ export function daytonaClaimRuntime(
 ): DaytonaClaimRuntime {
   const assumeRole = options.assumeRole ?? awsRecordingRole();
   return async (claimant, simulationId) => {
-    const [sandbox, runtime] = await Promise.all([
-      options.client.get(claimant),
-      issueDaytonaVoiceRuntime({ settings, simulationId, assumeRole }),
-    ]);
+    const sandbox = await options.client.get(claimant);
+    const labels = sandbox.labels ?? {};
+    const runtimeId = labels["egma.runtime_id"];
+    const expectedName = runtimeId === undefined ? undefined : `egma-voice-${runtimeId}`.slice(0, 63);
+    if (
+      labels["egma.runtime"] !== FLEET_LABELS["egma.runtime"]
+      || labels["egma.release_sha"] !== settings.releaseSha
+      || labels["egma.snapshot_id"] !== settings.snapshot
+      || runtimeId === undefined
+      || runtimeId.length === 0
+      || claimant !== expectedName
+    ) {
+      throw new Error("Daytona claimant does not belong to the active voice fleet");
+    }
+    const assignedSimulation = labels["egma.simulation_id"];
+    if (assignedSimulation !== undefined && assignedSimulation !== simulationId) {
+      throw new Error("Daytona claimant is already assigned to another simulation");
+    }
+    const runtime = await issueDaytonaVoiceRuntime({ settings, simulationId, assumeRole });
     await sandbox.setLabels({
-      ...(sandbox.labels ?? {}),
+      ...labels,
       "egma.simulation_id": simulationId,
     });
     return runtime;

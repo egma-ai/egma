@@ -113,6 +113,8 @@ describe("Daytona voice credentials", () => {
       labels: {
         "egma.runtime": "voice-simulator",
         "egma.release_sha": "a".repeat(40),
+        "egma.snapshot_id": "snapshot-exact",
+        "egma.runtime_id": "runtime-1",
       },
       process: { getEntrypointSession: vi.fn(async () => ({ commands: [] })) },
       setLabels: vi.fn(async (labels: Record<string, string>) => labels),
@@ -131,6 +133,8 @@ describe("Daytona voice credentials", () => {
     expect(sandbox.setLabels).toHaveBeenCalledWith({
       "egma.runtime": "voice-simulator",
       "egma.release_sha": "a".repeat(40),
+      "egma.snapshot_id": "snapshot-exact",
+      "egma.runtime_id": "runtime-1",
       "egma.simulation_id": "sim_123",
     });
     expect(runtime).toMatchObject({
@@ -151,6 +155,57 @@ describe("Daytona voice credentials", () => {
     expect(temporaryStorage).toHaveBeenLastCalledWith(expect.objectContaining({
       policy: expect.stringContaining("arn:aws:s3:::recordings/sim_123/dual-channel.wav"),
     }));
+  });
+
+  it("rejects claimants outside the exact active fleet before issuing authority", async () => {
+    temporaryStorage.mockClear();
+    const sandbox = {
+      id: "sandbox-1",
+      labels: {
+        "egma.runtime": "voice-simulator",
+        "egma.release_sha": "stale-release",
+        "egma.snapshot_id": "snapshot-exact",
+        "egma.runtime_id": "runtime-1",
+      },
+      process: { getEntrypointSession: vi.fn(async () => ({ commands: [] })) },
+      setLabels: vi.fn(async (labels: Record<string, string>) => labels),
+    };
+    const assign = daytonaClaimRuntime(settings, {
+      client: { get: vi.fn(async () => sandbox) } as unknown as DaytonaClient,
+      assumeRole: temporaryStorage,
+    });
+
+    await expect(assign("egma-voice-runtime-1", "sim_123")).rejects.toThrow(
+      "does not belong to the active voice fleet",
+    );
+    expect(temporaryStorage).not.toHaveBeenCalled();
+    expect(sandbox.setLabels).not.toHaveBeenCalled();
+  });
+
+  it("rejects a sandbox already assigned to a different simulation", async () => {
+    temporaryStorage.mockClear();
+    const sandbox = {
+      id: "sandbox-1",
+      labels: {
+        "egma.runtime": "voice-simulator",
+        "egma.release_sha": "a".repeat(40),
+        "egma.snapshot_id": "snapshot-exact",
+        "egma.runtime_id": "runtime-1",
+        "egma.simulation_id": "sim_previous",
+      },
+      process: { getEntrypointSession: vi.fn(async () => ({ commands: [] })) },
+      setLabels: vi.fn(async (labels: Record<string, string>) => labels),
+    };
+    const assign = daytonaClaimRuntime(settings, {
+      client: { get: vi.fn(async () => sandbox) } as unknown as DaytonaClient,
+      assumeRole: temporaryStorage,
+    });
+
+    await expect(assign("egma-voice-runtime-1", "sim_new")).rejects.toThrow(
+      "already assigned to another simulation",
+    );
+    expect(temporaryStorage).not.toHaveBeenCalled();
+    expect(sandbox.setLabels).not.toHaveBeenCalled();
   });
 });
 
@@ -263,5 +318,43 @@ describe("Daytona voice fleet", () => {
       tasks: [],
       failures: [{ reason: "sandbox_create_failed", detail: "quota reached" }],
     });
+  });
+
+  it("keeps failed deletions reserved until a later delete succeeds", async () => {
+    let finishDelete: (() => void) | undefined;
+    const secondDelete = new Promise<void>((resolve) => { finishDelete = resolve; });
+    const sandbox = {
+      id: "sandbox-retry",
+      state: "started",
+      process: {
+        getEntrypointSession: vi.fn(async () => ({ commands: [{ exitCode: 0 }] })),
+      },
+      setLabels: vi.fn(async (labels: Record<string, string>) => labels),
+    };
+    const remove = vi.fn()
+      .mockRejectedValueOnce(new Error("temporary delete failure"))
+      .mockImplementationOnce(async () => secondDelete);
+    const onFreed = vi.fn();
+    const client: DaytonaClient = {
+      create: vi.fn(async () => sandbox),
+      get: vi.fn(async () => sandbox),
+      delete: remove,
+      async *list() {},
+    };
+    const fleet = daytonaVoiceFleet(settings, {
+      client,
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      onFreed,
+      pollMilliseconds: 0,
+    });
+
+    await fleet.launchTasks({ count: 1 });
+    await vi.waitFor(() => expect(remove).toHaveBeenCalledTimes(2));
+    expect(await fleet.listTasks()).toEqual([{ id: "sandbox-retry" }]);
+    expect(onFreed).not.toHaveBeenCalled();
+
+    finishDelete?.();
+    await vi.waitFor(() => expect(onFreed).toHaveBeenCalledOnce());
+    expect(await fleet.listTasks()).toEqual([]);
   });
 });
