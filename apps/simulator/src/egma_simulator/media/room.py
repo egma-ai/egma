@@ -30,80 +30,6 @@ RpcNotice = Callable[[Any], None]
 RpcRefusalNotice = Callable[[Any, MockToolRefusal], None]
 
 
-class _LiveKitOutputDiagnostics:
-    """Count audio accepted or refused by one LiveKit output."""
-
-    def __init__(self) -> None:
-        self.attempted = 0
-        self.accepted = 0
-        self.rejected = 0
-        self.not_connected = 0
-        self.no_source = 0
-        self.exception_type = ""
-        self.invalid_state = 0
-
-    async def write(
-        self,
-        client: Any,
-        write: Callable[[Any], Awaitable[bool]],
-        frame: Any,
-    ) -> bool:
-        self.attempted += 1
-        connected = bool(getattr(client, "_connected", False))
-        has_source = getattr(client, "_audio_source", None) is not None
-        accepted = await write(frame)
-        if accepted:
-            self.accepted += 1
-        else:
-            self.rejected += 1
-            if not connected:
-                self.not_connected += 1
-            elif not has_source:
-                self.no_source += 1
-        return accepted
-
-    async def capture(
-        self, capture: Callable[[Any], Awaitable[None]], frame: Any
-    ) -> None:
-        try:
-            await capture(frame)
-        except Exception:
-            error = sys.exception()
-            self.exception_type = type(error).__qualname__ if error else "Exception"
-            if error is not None and "InvalidState" in str(error):
-                self.invalid_state += 1
-            raise
-
-    def report(self) -> None:
-        log_event(
-            logger,
-            logging.INFO if self.rejected == 0 else logging.WARNING,
-            "egma.media.livekit_output",
-            "livekit persona audio delivery measured",
-            attributes={
-                "livekit.audio.attempted_frames": self.attempted,
-                "livekit.audio.accepted_frames": self.accepted,
-                "livekit.audio.rejected_frames": self.rejected,
-                "livekit.audio.not_connected_frames": self.not_connected,
-                "livekit.audio.no_source_frames": self.no_source,
-                "livekit.audio.exception_type": self.exception_type,
-                "livekit.audio.invalid_state_frames": self.invalid_state,
-            },
-        )
-
-
-class _ObservedAudioSource:
-    def __init__(self, source: Any, diagnostics: _LiveKitOutputDiagnostics) -> None:
-        self._source = source
-        self._diagnostics = diagnostics
-
-    async def capture_frame(self, frame: Any) -> None:
-        await self._diagnostics.capture(self._source.capture_frame, frame)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._source, name)
-
-
 def disconnect_reason_name(reason: object) -> str:
     """Keep the documented RTC reason, never arbitrary provider payloads."""
     from livekit import rtc
@@ -952,7 +878,7 @@ class JoinedRoom:
 
     def create_transport(self) -> VoiceMedia:
         """Create stock LiveKit input and output processors without rates."""
-        from pipecat.frames.frames import Frame, InputAudioRawFrame, TTSStoppedFrame
+        from pipecat.frames.frames import Frame, InputAudioRawFrame
         from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
         from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
 
@@ -964,15 +890,6 @@ class JoinedRoom:
         )
         self._transport = transport
         input_transport = transport.input()
-        output_transport = transport.output()
-        output_diagnostics = _LiveKitOutputDiagnostics()
-        client = output_transport._client
-        write_audio_frame = output_transport.write_audio_frame
-
-        async def _write_audio_frame(frame: Any) -> bool:
-            return await output_diagnostics.write(client, write_audio_frame, frame)
-
-        output_transport.write_audio_frame = _write_audio_frame
         try:
             input_drain = _Pipecat17InputDrain(
                 input_transport,
@@ -988,13 +905,6 @@ class JoinedRoom:
 
         @transport.event_handler("on_connected")
         async def _connected(_transport: object) -> None:
-            audio_source = client._audio_source
-            if audio_source is not None and not isinstance(
-                audio_source, _ObservedAudioSource
-            ):
-                client._audio_source = _ObservedAudioSource(
-                    audio_source, output_diagnostics
-                )
             offer = self._offer
             if offer is not None:
                 offer()
@@ -1072,18 +982,9 @@ class JoinedRoom:
                     room.carrying_audio.set()
                 await self.push_frame(frame, direction)
 
-        class _OutputObserved(FrameProcessor):
-            async def process_frame(
-                self, frame: Frame, direction: FrameDirection
-            ) -> None:
-                await super().process_frame(frame, direction)
-                if isinstance(frame, TTSStoppedFrame):
-                    output_diagnostics.report()
-                await self.push_frame(frame, direction)
-
         return VoiceMedia(
             input=(input_transport, _Arrival()),
-            output=(output_transport, _OutputObserved(), PlayoutStamp()),
+            output=(transport.output(), PlayoutStamp()),
             ended=self.ended,
             failed=self.failed,
             transport_name=f"livekit server at {self._quotable(self._url)}",

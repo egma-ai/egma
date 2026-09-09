@@ -16,20 +16,71 @@ export function quickTunnelUrl(output: string): string | undefined {
 
 const PUBLIC_TUNNEL_READY_MILLISECONDS = 60_000;
 
+type NamedTunnelSettings = {
+  readonly id: string;
+  readonly url: string;
+  readonly credentialsFile: string;
+};
+
+export function namedTunnelSettings(
+  env: NodeJS.ProcessEnv = process.env,
+): NamedTunnelSettings | undefined {
+  const values = {
+    id: env["SIMULATION_E2E_TUNNEL_ID"]?.trim() ?? "",
+    url: env["SIMULATION_E2E_TUNNEL_URL"]?.trim() ?? "",
+    credentialsFile: env["SIMULATION_E2E_TUNNEL_CREDENTIALS_FILE"]?.trim() ?? "",
+  };
+  const configured = Object.values(values).filter((value) => value !== "").length;
+  if (configured === 0) return undefined;
+  if (configured !== 3) {
+    throw new Error(
+      "a named simulation tunnel requires SIMULATION_E2E_TUNNEL_ID, " +
+      "SIMULATION_E2E_TUNNEL_URL, and SIMULATION_E2E_TUNNEL_CREDENTIALS_FILE",
+    );
+  }
+  let address: URL;
+  try {
+    address = new URL(values.url);
+  } catch {
+    throw new Error("SIMULATION_E2E_TUNNEL_URL must be an HTTPS origin");
+  }
+  if (address.protocol !== "https:" || address.pathname !== "/" ||
+      address.search !== "" || address.hash !== "" ||
+      address.username !== "" || address.password !== "") {
+    throw new Error("SIMULATION_E2E_TUNNEL_URL must be an HTTPS origin");
+  }
+  return { ...values, url: address.origin };
+}
+
 export async function startPublicTunnel(localUrl: string): Promise<{
   process: ChildProcess;
   url: string;
   output: () => string;
 }> {
+  const named = namedTunnelSettings();
   const child = spawn(
     process.env["SIMULATION_E2E_CLOUDFLARED"] ?? "cloudflared",
-    ["tunnel", "--no-autoupdate", "--url", localUrl],
+    named === undefined
+      ? ["tunnel", "--no-autoupdate", "--url", localUrl]
+      : [
+          "tunnel",
+          "--no-autoupdate",
+          "--url",
+          localUrl,
+          "run",
+          "--credentials-file",
+          named.credentialsFile,
+          named.id,
+        ],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
   let said = "";
   child.stdout?.on("data", (piece: Buffer) => { said += piece.toString("utf8"); });
   child.stderr?.on("data", (piece: Buffer) => { said += piece.toString("utf8"); });
   const deadline = Date.now() + PUBLIC_TUNNEL_READY_MILLISECONDS;
+  if (named !== undefined) {
+    return { process: child, url: named.url, output: () => said };
+  }
   for (;;) {
     const found = quickTunnelUrl(said);
     if (found !== undefined) return { process: child, url: found, output: () => said };

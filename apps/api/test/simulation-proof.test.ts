@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { assertPublicEvidence, assertValidGrade } from "./support/simulation-proof.ts";
+import {
+  assertPublicEvidence,
+  assertValidGrade,
+  namedTunnelSettings,
+} from "./support/simulation-proof.ts";
 
 function grade(result: "passed" | "failed" | "errored", score: number | null) {
   return {
@@ -51,5 +55,41 @@ describe("full-path transcript proof", () => {
       tools: [],
       recording: false,
     })).not.toThrow();
+  });
+});
+
+describe("named simulation tunnel settings", () => {
+  it("uses a complete HTTPS named-tunnel configuration", () => {
+    expect(namedTunnelSettings({
+      SIMULATION_E2E_TUNNEL_ID: "tunnel-id",
+      SIMULATION_E2E_TUNNEL_URL: "https://retell-local.example.com",
+      SIMULATION_E2E_TUNNEL_CREDENTIALS_FILE: "/private/tunnel.json",
+    })).toEqual({
+      id: "tunnel-id",
+      url: "https://retell-local.example.com",
+      credentialsFile: "/private/tunnel.json",
+    });
+  });
+
+  it("normalizes a trailing slash from the named tunnel origin", () => {
+    expect(namedTunnelSettings({
+      SIMULATION_E2E_TUNNEL_ID: "tunnel-id",
+      SIMULATION_E2E_TUNNEL_URL: "https://retell-local.example.com/",
+      SIMULATION_E2E_TUNNEL_CREDENTIALS_FILE: "/private/tunnel.json",
+    })?.url).toBe("https://retell-local.example.com");
+  });
+
+  it("rejects a partial named-tunnel configuration", () => {
+    expect(() => namedTunnelSettings({
+      SIMULATION_E2E_TUNNEL_ID: "tunnel-id",
+    })).toThrow(/requires SIMULATION_E2E_TUNNEL_ID/u);
+  });
+
+  it("rejects credentials in the public tunnel URL", () => {
+    expect(() => namedTunnelSettings({
+      SIMULATION_E2E_TUNNEL_ID: "tunnel-id",
+      SIMULATION_E2E_TUNNEL_URL: "https://user:password@retell-local.example.com",
+      SIMULATION_E2E_TUNNEL_CREDENTIALS_FILE: "/private/tunnel.json",
+    })).toThrow(/must be an HTTPS origin/u);
   });
 });

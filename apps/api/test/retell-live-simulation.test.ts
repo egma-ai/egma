@@ -7,8 +7,10 @@ import path from "node:path";
 
 import { createPersona, readTraceGrades } from "@egma/db";
 import { safeRetellProviderData } from "@egma/retell";
+import type { Page } from "playwright-core";
 import { afterAll, expect, it } from "vitest";
 
+import { signedRecordingLink } from "../src/recordings/signed-link.ts";
 import { startInstance, type Instance } from "./support/instance.ts";
 import { openBrowser } from "./support/browser.ts";
 import { BUCKET, startObjectStorage } from "./support/object-storage.ts";
@@ -25,6 +27,7 @@ import {
 } from "./support/simulation-proof.ts";
 
 const ENABLED = process.env["SIMULATION_E2E_RETELL"] === "1";
+const PREFLIGHT = process.env["SIMULATION_E2E_RETELL_PREFLIGHT"] === "1";
 const CONNECTION = process.env["SIMULATION_E2E_RETELL_CONNECTION"] ?? "text";
 const MOCKS = process.env["SIMULATION_E2E_MOCKS"] !== "off";
 const RETELL_KEY = process.env["SIMULATION_E2E_RETELL_API_KEY"]?.trim() ?? "";
@@ -34,7 +37,7 @@ const SERVICE_TOKEN = "egma_st_held-by-this-test-suite-alone";
 const REPOSITORY = path.join(import.meta.dirname, "../../..");
 const SIMULATOR = path.join(REPOSITORY, "apps/simulator");
 const PYTHON = path.join(SIMULATOR, ".venv/bin/python");
-const storage = ENABLED
+const storage = ENABLED || PREFLIGHT
   ? await startObjectStorage("retell-live-simulation")
   : undefined;
 
@@ -347,6 +350,7 @@ async function proveAuthenticatedBrowser(
   sessionCookie: string,
   projectId: string,
   projectName: string,
+  inspect?: (page: Page) => Promise<void>,
 ): Promise<void> {
   const browser = await openBrowser();
   const consoleErrors: string[] = [];
@@ -370,6 +374,7 @@ async function proveAuthenticatedBrowser(
     await page.getByRole("heading", { name: "Agents", exact: true }).waitFor();
     await page.locator('[data-slot="project-name"]', { hasText: projectName }).first().waitFor();
     expect(page.url()).toContain(`/projects/${projectId}/agents`);
+    await inspect?.(page);
   } catch (cause) {
     throw new Error(
       `public browser auth failed (${cause instanceof Error ? cause.message : "unknown"}); ` +
@@ -380,10 +385,83 @@ async function proveAuthenticatedBrowser(
   }
 }
 
+async function proveLocalFixture(): Promise<void> {
+  const callback = await callbackServer("retell-preflight-token");
+  const port = new URL(callback.origin).port;
+  const publicOrigin = `http://fixture.localhost:${port}`;
+  let instance: Instance | undefined;
+  try {
+    instance = await startInstance("retell_fixture_preflight", {
+      baseUrl: publicOrigin,
+      web: true,
+    });
+    callback.setMockOrigin(instance.origin);
+    callback.setRecordingOrigin(liveStorage().store.publicUrl);
+
+    const signup = await request(publicOrigin, "POST", "/api/signup", { body: {
+      email: "retell-preflight@acme.example",
+      password: "a-password-long-enough-1",
+      organizationName: "Retell Preflight",
+    } });
+    expect(signup.status, JSON.stringify(signup.body)).toBe(201);
+    const identity = signup.body as unknown as {
+      project: { id: string; name: string };
+    };
+
+    const audio = await readFile(
+      path.join(REPOSITORY, "fixtures/spoken-sentence/one-sentence.wav"),
+    );
+    const objectKey = await liveStorage().put("retell-preflight.wav", audio);
+    const signed = signedRecordingLink(
+      { ...liveStorage().store, publicUrl: publicOrigin },
+      objectKey,
+    );
+    await proveAuthenticatedBrowser(
+      publicOrigin,
+      signup.cookie,
+      identity.project.id,
+      identity.project.name,
+      async (page) => {
+        const decoded = await page.evaluate(async (url) => {
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(`recording answered HTTP ${response.status}`);
+          const BrowserAudioContext = (globalThis as unknown as {
+            AudioContext: new () => {
+              decodeAudioData(bytes: ArrayBuffer): Promise<{ duration: number }>;
+              close(): Promise<void>;
+            };
+          }).AudioContext;
+          const context = new BrowserAudioContext();
+          try {
+            return {
+              bytes: (await response.clone().arrayBuffer()).byteLength,
+              duration: (await context.decodeAudioData(await response.arrayBuffer())).duration,
+            };
+          } finally {
+            await context.close();
+          }
+        }, signed.url);
+        expect(decoded.bytes).toBe(audio.byteLength);
+        expect(decoded.duration).toBeGreaterThan(0);
+      },
+    );
+  } finally {
+    await instance?.close();
+    await callback.close();
+  }
+}
+
+it.runIf(PREFLIGHT && storage?.available === true)(
+  "proves the Retell public fixture before using provider credentials",
+  { timeout: 180_000 },
+  proveLocalFixture,
+);
+
 it.skipIf(!ENABLED || storage?.available !== true)(
   `runs the real Retell ${CONNECTION} ${MOCKS ? "mocked" : "unmocked"} cell through storage, grading, and the browser`,
   { timeout: 480_000 },
   async () => {
+    await proveLocalFixture();
     expect(["text", "web"]).toContain(CONNECTION);
     if (RETELL_KEY === "" || MODEL_KEY === "") throw new Error("Retell and model E2E keys are required");
     const scratch = await mkdtemp(path.join(os.tmpdir(), "egma-retell-live-"));

@@ -687,22 +687,38 @@ def _openai_mouth(
 ) -> tuple[FrameProcessor, PersonaVoice, tuple[Callable[[], Awaitable[None]], ...]]:
     """The persona's voice through Pipecat's stock OpenAI service."""
     from pipecat.services.openai.tts import OpenAITTSService as StockOpenAITTSService
+    from pipecat.services.tts_service import TextAggregationMode
 
     class OpenAITTSService(StockOpenAITTSService):
         async def run_tts(
             self, text: str, context_id: str
         ) -> AsyncGenerator[Frame, None]:
+            from pipecat.frames.frames import ErrorFrame
+
+            spoke = False
             try:
                 async for frame in super().run_tts(text, context_id):
+                    if isinstance(frame, ErrorFrame):
+                        yield frame
+                        await self.remove_audio_context(context_id)
+                        return
+                    spoke = spoke or isinstance(frame, TTSAudioRawFrame)
                     yield frame
+            except asyncio.CancelledError:
+                await self.remove_audio_context(context_id)
+                raise
             except Exception as fault:
                 if providers.tts_customer_funded and authentication_rejected(fault):
-                    from pipecat.frames.frames import ErrorFrame
-
                     failure = ProviderKeyUnavailable("openai")
                     yield ErrorFrame(error=str(failure), exception=fault)
+                    await self.remove_audio_context(context_id)
+                    return
                 else:
+                    await self.remove_audio_context(context_id)
                     raise
+            if not spoke:
+                await self.remove_audio_context(context_id)
+                raise SpeechFault("the openai speaking leg returned no audio")
 
     if not providers.tts_key:
         raise SpeechFault("the openai speaking leg was chosen without a key")
@@ -719,6 +735,10 @@ def _openai_mouth(
     leg = OpenAITTSService(
         api_key=providers.tts_key,
         settings=settings,
+        # OpenAI is a finite HTTP stream. Its EOF closes the audio context;
+        # an idle timer can stop a turn while the response is still in flight.
+        stop_frame_timeout_s=None,
+        text_aggregation_mode=TextAggregationMode.TOKEN,
     )
     return leg, spoken_with, ()
 

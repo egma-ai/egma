@@ -1,7 +1,7 @@
 /** Packaged JavaScript SDK worker used by the LiveKit end-to-end lane. */
 
 import { writeFile } from "node:fs/promises";
-import { chmodSync, writeFileSync } from "node:fs";
+import { chmodSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { simulation } from "@egma/livekit";
@@ -123,7 +123,10 @@ export default defineAgent({
   },
 });
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   cli.runApp(
     new WorkerOptions({
       agent: import.meta.filename,

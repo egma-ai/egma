@@ -385,11 +385,13 @@ def javascript_worker_environment(directory: Path) -> tuple[list[str], SDKArtifa
     if len(packages) != 1:
         raise RuntimeError(f"expected one JavaScript package, found {packages}")
     package = packages[0]
+    install_package = worker_dir / "egma-livekit.tgz"
+    shutil.copy2(package, install_package)
     package_json = json.loads((FIXTURE / "package.json").read_text(encoding="utf-8"))
     agents_version = os.environ.get(
         "LIVEKIT_E2E_JAVASCRIPT_AGENTS_VERSION", "1.7.1"
     ).strip()
-    package_json["dependencies"]["@egma/livekit"] = f"file:{package}"
+    package_json["dependencies"]["@egma/livekit"] = "file:./egma-livekit.tgz"
     for dependency in (
         "@livekit/agents",
         "@livekit/agents-plugin-openai",
@@ -399,7 +401,8 @@ def javascript_worker_environment(directory: Path) -> tuple[list[str], SDKArtifa
     (worker_dir / "package.json").write_text(
         json.dumps(package_json, indent=2) + "\n", encoding="utf-8"
     )
-    shutil.copy2(FIXTURE / "javascript_worker.mjs", worker_dir)
+    worker_script = worker_dir / "javascript_worker.mjs"
+    shutil.copy2(FIXTURE / "javascript_worker.mjs", worker_script)
     checked(
         [
             "pnpm",
@@ -426,13 +429,21 @@ def javascript_worker_environment(directory: Path) -> tuple[list[str], SDKArtifa
         cwd=worker_dir,
         log_path=directory / "javascript-package-check.log",
     )
+    entrypoint_log = directory / "javascript-entrypoint-check.log"
+    checked(
+        ["node", str(worker_script), "--help"],
+        cwd=worker_dir,
+        log_path=entrypoint_log,
+    )
+    if "LiveKit Agents CLI" not in entrypoint_log.read_text(encoding="utf-8"):
+        raise RuntimeError("the JavaScript worker entrypoint did not start its CLI")
     version = package.name.removesuffix(".tgz").rsplit("-", 1)[-1]
     artifact = SDKArtifact(
         path=package,
         version=version,
         sha256=hashlib.sha256(package.read_bytes()).hexdigest(),
     )
-    return ["node", str(worker_dir / "javascript_worker.mjs"), "start"], artifact
+    return ["node", str(worker_script), "start"], artifact
 
 
 def direct_models(openai_key: str, modality: str) -> dict:
