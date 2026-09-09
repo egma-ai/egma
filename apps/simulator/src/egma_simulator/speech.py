@@ -687,7 +687,6 @@ def _openai_mouth(
 ) -> tuple[FrameProcessor, PersonaVoice, tuple[Callable[[], Awaitable[None]], ...]]:
     """The persona's voice through Pipecat's stock OpenAI service."""
     from pipecat.services.openai.tts import OpenAITTSService as StockOpenAITTSService
-    from pipecat.services.tts_service import TextAggregationMode
 
     class OpenAITTSService(StockOpenAITTSService):
         async def run_tts(
@@ -735,10 +734,9 @@ def _openai_mouth(
     leg = OpenAITTSService(
         api_key=providers.tts_key,
         settings=settings,
-        # OpenAI is a finite HTTP stream. Its EOF closes the audio context;
-        # an idle timer can stop a turn while the response is still in flight.
+        # OpenAI returns finite HTTP streams. Pipecat closes the turn after they
+        # finish; an idle timer can stop it while a response is still in flight.
         stop_frame_timeout_s=None,
-        text_aggregation_mode=TextAggregationMode.TOKEN,
     )
     return leg, spoken_with, ()
 

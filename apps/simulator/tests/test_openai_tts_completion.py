@@ -54,13 +54,13 @@ class _HeldResponse:
 
 
 class _CreateResponse:
-    def __init__(self, response: _HeldResponse) -> None:
-        self._response = response
+    def __init__(self, *responses: _HeldResponse) -> None:
+        self._responses = iter(responses)
         self.calls: list[dict[str, object]] = []
 
     def __call__(self, **kwargs: object) -> _HeldResponse:
         self.calls.append(kwargs)
-        return self._response
+        return next(self._responses)
 
 
 class _EmptyResponse(_HeldResponse):
@@ -132,7 +132,7 @@ class _Media:
         pass
 
 
-def _openai_tts(response: _HeldResponse, *, customer_funded: bool = False):
+def _openai_tts(*responses: _HeldResponse, customer_funded: bool = False):
     legs = build_legs(
         SpeechProviders(
             stt="scripted",
@@ -144,7 +144,7 @@ def _openai_tts(response: _HeldResponse, *, customer_funded: bool = False):
         voice=PersonaVoice(voice_id="alloy", provider="openai", speed=1.0),
     )
     tts = legs.tts
-    create = _CreateResponse(response)
+    create = _CreateResponse(*responses)
     tts._client = SimpleNamespace(
         audio=SimpleNamespace(
             speech=SimpleNamespace(
@@ -166,8 +166,9 @@ async def test_openai_http_tts_completes_on_eof_not_an_idle_gap(monkeypatch) -> 
         "sent_tokenize",
         lambda text: [f"{part.strip()}." for part in text.split(".") if part.strip()],
     )
-    response = _HeldResponse()
-    tts, create = _openai_tts(response)
+    first_response = _HeldResponse()
+    second_response = _HeldResponse()
+    tts, create = _openai_tts(first_response, second_response)
     output = _AcceptedOutput()
     recorder = conductor_module._EvidenceRecorder(
         num_channels=2, auto_start_recording=True
@@ -194,23 +195,37 @@ async def test_openai_http_tts_completes_on_eof_not_an_idle_gap(monkeypatch) -> 
                 LLMFullResponseEndFrame(),
             ]
         )
-        await asyncio.wait_for(response.entered.wait(), 5)
+        await asyncio.wait_for(first_response.entered.wait(), 5)
+        assert len(tts._audio_contexts) == 1
+        context_id = next(iter(tts._audio_contexts))
         with pytest.raises(TimeoutError):
             await asyncio.wait_for(conductor.stopped.wait(), 3.2)
 
-        response.first.set()
-        await asyncio.wait_for(response.first_sent.wait(), 5)
+        first_response.first.set()
+        await asyncio.wait_for(first_response.first_sent.wait(), 5)
         with pytest.raises(TimeoutError):
             await asyncio.wait_for(conductor.stopped.wait(), 3.2)
 
-        response.middle.set()
-        await asyncio.wait_for(response.ended.wait(), 5)
+        first_response.middle.set()
+        await asyncio.wait_for(first_response.ended.wait(), 5)
+        await asyncio.wait_for(second_response.entered.wait(), 5)
+        assert list(tts._audio_contexts) == [context_id]
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(conductor.stopped.wait(), 3.2)
+
+        second_response.first.set()
+        await asyncio.wait_for(second_response.first_sent.wait(), 5)
+        second_response.middle.set()
+        await asyncio.wait_for(second_response.ended.wait(), 5)
         await asyncio.wait_for(conductor.stopped.wait(), 1)
         assert len(conductor.positions_at_stop) == 1
         assert conductor.positions_at_stop[0]
         assert max(conductor.positions_at_stop[0]) > 0
         assert output.accepted > 0
-        assert [call["input"] for call in create.calls] == [spoken]
+        assert [call["input"] for call in create.calls] == [
+            "First sentence.",
+            "Second sentence.",
+        ]
 
         await worker.queue_frame(EndFrame())
         await asyncio.wait_for(running, 5)
