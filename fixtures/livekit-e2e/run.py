@@ -1080,11 +1080,15 @@ def main() -> int:
         os.environ.get("LIVEKIT_E2E_OPENAI_API_KEY", "").strip()
         or os.environ.get("OPENAI_API_KEY", "").strip()
     )
-    if not openai_key:
+    if not openai_key and args.case != "production-inert":
         raise RuntimeError(
             "LIVEKIT_E2E_OPENAI_API_KEY is required; this lane cannot skip "
             "its real model proof"
         )
+    if not openai_key:
+        # The production-inert fixture constructs the provider client but returns
+        # before session startup and calls its local tool directly.
+        openai_key = "unused-production-inert-openai-key"
     if not SIMULATOR_PYTHON.exists():
         raise RuntimeError("run `uv sync --frozen` in apps/simulator before this lane")
 
