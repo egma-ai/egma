@@ -1,0 +1,83 @@
+---
+title: "Built-in graders"
+---
+
+Open **Graders** in your project. **Active graders** shows the graders used by
+that project. **Grader library** contains the graders you can add.
+
+## Expected behaviors
+
+Egma adds **Expected behaviors** to every project. It checks the behavior
+statements from the exact test version used by each simulation.
+
+It reads the conversation's transcript, ending outcome, tool names and
+arguments, and observed metrics. Tool return payloads are not sent to the LLM.
+When agent evidence is available, it uses the agent's account of the turns and
+calls. See
+[Check which evidence arrived](/docs/platform/runs/start-and-follow-a-run#check-which-evidence-arrived)
+if a tool call is missing or the transcript is incomplete.
+
+Each statement gets a decision and supporting evidence. The grader's
+score is:
+
+```text
+passed statements / total statements
+```
+
+For example, three passing statements out of four give a score of `0.75`. The
+default pass threshold is `1`, so all statements must pass for this grader's
+individual result to pass.
+
+Expected behaviors grades chat and voice simulations. Its scope always covers
+all simulations and excludes production conversations. You can change the
+language model and pass threshold, but you cannot remove it or change its
+scope. A custom clone is independent and can have its own scope.
+
+If the evidence does not let the grader decide a statement, the grade has an
+error and no overall score. An unknown result is not counted as a failed
+statement.
+
+## Response latency
+
+**Response latency** checks the p90 response time across measured conversation
+turns. It returns `1` when the observed p90 is at or below your maximum, or `0`
+when it exceeds the maximum.
+
+For voice simulations, response time runs from the end of the simulated
+caller's played audio to the arrival of the agent's spoken reply. The caller's
+audio includes its voice's trailing padding. For chat, it measures the wait
+between the caller's message and the agent's reply.
+
+To add it:
+
+1. Open **Grader library** and find **Response latency**.
+2. Open its menu and select **Use in project**.
+3. Choose the simulations or production sample it should grade.
+4. Set **Maximum response time (p90)** in milliseconds. The supplied value is
+   `3000`.
+5. Keep **Pass threshold** at `1` to require the latency check to pass, then
+   select **Use in project**.
+
+The maximum response time and the pass threshold are different settings. The
+maximum checks an observed time in milliseconds. The pass threshold compares
+the resulting score, `0` or `1`.
+
+The p90 uses nearest rank. With fewer than ten measured turns, it is the
+slowest measured turn. A conversation without valid response latency
+measurements produces a grading error, not a passing score.
+
+Simulation latency uses the simulated caller's measurements when available.
+The agent's measurements stay separate under `otherPov`. Production latency
+uses the agent's own evidence. LiveKit closes its speech spans after the
+detector's silence wait, and the simulated caller also observes the playback
+delay, so the two clocks can report different waits. Egma does not combine
+their samples. The grader uses the same primary series shown in the metrics.
+
+Response latency supports chat and voice when the required measurements are
+present. You can change its scope and settings or remove it from a project.
+
+## Add your own checks
+
+Use [custom graders](/docs/platform/graders/custom-graders) for a rule that should apply across
+multiple tests or production conversations. Keep scenario-specific requirements
+in the test's expected behaviors.

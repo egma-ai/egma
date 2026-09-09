@@ -1,0 +1,40 @@
+---
+title: "Install the skills"
+sidebarTitle: "How to install"
+---
+
+Egma skills give your coding agent instructions for working in your repository. The agent reads your prompts, tools, and startup code, then uses the [CLI](/skills-cli-sdks/cli/install) to make changes in Egma.
+
+## Install the skills
+
+Run these commands in your voice agent's repository. Select your coding agent when the installer asks where to install them.
+
+```bash
+npx --yes skills add egma-ai/egma --skill integrate-egma
+npx --yes skills add egma-ai/egma --skill write-egma-tests
+```
+
+The installed skill names are `integrate-egma` and `write-egma-tests`.
+
+You also need Node.js 22 or newer and the Egma CLI:
+
+```bash
+npm install --global egma-cli
+egma login
+```
+
+Approve the login in your browser and select the project to use. For your own Egma instance, use `egma login --url` with its URL. See [CLI setup](/skills-cli-sdks/cli/install#sign-in-and-initialize).
+
+## Next steps
+
+[Integrate Egma](/skills-cli-sdks/skills/integrate-egma) to connect your agent, then [write tests](/skills-cli-sdks/skills/write-tests) for its behavior.
+
+## Update the skills
+
+Update your installed skills:
+
+```bash
+npx skills update
+```
+
+Keep your repository's skill lock file with the rest of your development setup so your team can see which source it uses.

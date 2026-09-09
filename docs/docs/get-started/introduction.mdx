@@ -1,0 +1,48 @@
+---
+title: "Platform introduction"
+---
+
+Egma is an open-source platform for testing voice agents and monitoring them in production. Check how your agent behaves before release and investigate problems in real conversations.
+
+Use [Egma Cloud](https://app.egma.ai) or [self-host Egma](/self-hosting/get-started) on your own infrastructure.
+
+## Quickstart
+
+Follow the [five-minute quickstart](/docs/get-started/quickstart) to connect your agent, create a test, and review your first voice simulation.
+
+## Testing voice agents
+
+Run simulated voice and text conversations against your agent. Save tests in your agent’s repository and run them again when you change its prompts, models, or tools.
+
+- Build regression suites around the tasks your agent needs to handle.
+- Mock selected tool responses to test failures and other situations that are hard to reproduce.
+- Review transcripts, voice simulation recordings, and grading results.
+
+[Write a test →](/docs/platform/tests/write-a-test)
+
+## Monitoring voice agents
+
+Real conversations can expose behavior you didn’t see in testing. Collect production traces to review transcripts, inspect tool calls, and check available performance metrics. Apply graders to check conversations against your agent’s requirements.
+
+Egma supports monitoring for LiveKit agents through its Python and JavaScript SDKs, and for Retell agents through a direct integration.
+
+[Set up monitoring →](/docs/platform/monitoring/set-up-monitoring)
+
+## Why Egma?
+
+When we were building voice products, we spent hours making test calls and investigating problems in production. Every change meant checking the agent’s behavior again. Even after all that testing, real conversations exposed behavior we hadn’t anticipated.
+
+We built Egma to make those checks repeatable and help us understand failures in production. We wanted to ship voice agents with more confidence and keep checking how they behaved once real people were using them.
+
+- **Open source.** Inspect the code, adapt it to your workflow, and self-host the platform.
+- **Bring your own keys.** Use your provider keys in Cloud or a self-hosted deployment and pay providers directly for those model calls. Cloud plan and applicable voice usage charges still apply.
+- **Choose your models.** Select from supported language and speech models to suit your tests.
+- **Customize personas.** Set the simulated caller’s behavior, language, and voice to reflect the people your agent serves.
+- **Customize graders.** Write your own grading instructions and set models, pass thresholds, and which conversations to grade.
+- **Keep tests with your code.** Review test changes alongside agent changes and run them from the CLI or your coding agent.
+
+## Community & contact
+
+Found a bug or have a feature request? [Open a GitHub issue](https://github.com/egma-ai/egma/issues).
+
+[Discord (invite coming soon)](https://example.com/egma-discord-placeholder)

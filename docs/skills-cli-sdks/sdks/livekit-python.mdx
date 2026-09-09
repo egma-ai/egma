@@ -1,0 +1,220 @@
+---
+title: "LiveKit Python SDK"
+---
+
+The `egma` package adds two functions to your LiveKit worker:
+
+- `monitor` sends production traces to **Monitoring**.
+- `simulation` reports the agent's tools, installs the test's mock responses, and sends the agent's trace to the simulation record.
+
+Use `simulation` for every LiveKit simulation, including tests without mocks. Use `monitor` for production monitoring. You can call both in the same worker; each acts only in its own kind of room. First connect the worker through [LiveKit](/docs/integrations/livekit).
+
+## Install
+
+Use Python 3.11 or newer and `livekit-agents>=1.6.6,<1.9`.
+
+<CodeGroup>
+
+```bash uv
+uv add egma
+```
+
+```bash pip
+pip install egma
+```
+
+</CodeGroup>
+
+Keep the resolved package version in your dependency lock file. The SDK also requires `openai>=2,<3`; let your package manager resolve that range with your LiveKit dependencies.
+
+## Configure Egma
+
+Both functions need an Egma URL and a project-scoped API key. Create a key in **Settings → API keys**, or run `egma project api-key create --name "LiveKit worker"` from an initialized agent repository.
+
+Set these values where the worker runs:
+
+| Variable | Value |
+| --- | --- |
+| `EGMA_URL` | `https://app.egma.ai`, or the public URL of your own Egma instance. |
+| `EGMA_API_KEY` | The project API key you created. Use the same project as the simulation connection. |
+
+Keep the key in your deployment's secret store. The worker must be able to reach the URL. In a container or on another machine, `localhost` refers to that worker, not your Egma server. These settings are required for simulations as well as monitoring.
+
+## Add the SDK to your worker
+
+Call `monitor(ctx)` at the start of your job entrypoint, before connecting or starting the session. Call `await simulation(agent, ctx, session)` after creating the agent and session, before `session.start`.
+
+The following worker uses OpenAI for speech and responses. Install its model plugins alongside the SDK:
+
+```bash
+uv add 'livekit-agents[openai,silero]>=1.6.6,<1.9'
+```
+
+Set your usual `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, and `OPENAI_API_KEY` in the worker environment. Set the [Egma variables](#configure-egma), then save this as `agent.py`:
+
+```python
+from egma import simulation, monitor
+from livekit import agents
+from livekit.agents import Agent, AgentSession, function_tool, room_io
+from livekit.plugins import openai, silero
+
+
+class Receptionist(Agent):
+    def __init__(self) -> None:
+        super().__init__(
+            instructions=(
+                "You are a dental receptionist. Use opening_hours when asked "
+                "when the practice is open. Keep your answers brief."
+            )
+        )
+
+    @function_tool
+    async def opening_hours(self) -> str:
+        """Get the practice's opening hours."""
+        return "Monday to Friday, 9 AM to 5 PM."
+
+
+async def entrypoint(ctx: agents.JobContext) -> None:
+    monitor(ctx)
+    await ctx.connect()
+
+    agent = Receptionist()
+    session = AgentSession(
+        vad=silero.VAD.load(),
+        stt=openai.STT(model="gpt-4o-mini-transcribe"),
+        llm=openai.LLM(model="gpt-4o-mini"),
+        tts=openai.TTS(model="gpt-4o-mini-tts", voice="ash"),
+    )
+    await simulation(agent, ctx, session)
+
+    chat = ctx.job.room.name.startswith("egma-sim-chat-")
+    options = (
+        room_io.RoomOptions(
+            audio_input=False,
+            audio_output=False,
+            text_output=room_io.TextOutputOptions(sync_transcription=False),
+        )
+        if chat
+        else room_io.RoomOptions()
+    )
+    await session.start(agent=agent, room=ctx.room, room_options=options)
+    await session.generate_reply(instructions="Greet the caller.")
+
+
+if __name__ == "__main__":
+    agents.cli.run_app(
+        agents.WorkerOptions(
+            entrypoint_fnc=entrypoint,
+            agent_name="receptionist",
+        )
+    )
+```
+
+Run the worker:
+
+```bash
+uv run agent.py download-files
+uv run agent.py dev
+```
+
+Use `receptionist` as the worker dispatch name in your Egma LiveKit connection. For your existing agent, keep its models, tools, and startup behavior and add the two SDK calls at the same points.
+
+## Monitor production
+
+Use the [configured Egma URL and project key](#configure-egma), deploy the worker, and make a production call. Open **Monitoring** in the key's project to see the conversation. There is no additional monitoring switch to enable for LiveKit.
+
+The helper adds an OTLP/HTTP protobuf exporter to `/v1/traces`. It keeps compatible existing OpenTelemetry exporters, including LiveKit Cloud observability. It sends batches and flushes the last batch when the job stops.
+
+Rooms whose names start with `egma-sim-` are reserved for Egma simulations. `monitor` skips them; `simulation` sends their traces to the simulation record. Use another prefix for production rooms.
+
+### If no conversation appears
+
+Check that you deployed the monitoring call, supplied a project-scoped key with write access, and used a URL reachable from the worker. An organization-wide key cannot ingest traces.
+
+The helper raises an error for missing settings, malformed settings, or an incompatible tracer provider. For network or export failures, inspect the worker's OpenTelemetry logs. Egma can show a conversation only after its trace arrives. Restart the worker after changing `EGMA_URL` or `EGMA_API_KEY`.
+
+## Mock tool responses
+
+Add a mock to a [test](/docs/platform/tests/write-a-test) using the exact registered tool name. For the worker above:
+
+````markdown
+## Mock tools
+
+### opening_hours
+
+```json
+{
+  "answer": "The practice is closed on Monday. It opens Tuesday at 9 AM."
+}
+```
+````
+
+Each mock has one fixed `answer` or `error` for that tool in that test. `simulation` connects to the simulation room if necessary, finds Egma's participant, and installs only the selected mocks. It follows agent handoffs and agent tasks in the same session. Call it once for the initial agent.
+
+The function also exports the agent's own conversation trace over OTLP, even when the test has no mocks. The simulation transcript includes the agent's turns and tool calls, including real tools. Calls answered by a mock are marked `mocked`.
+
+Simulation spans are batched every second and flushed when the session closes and when the job stops. Keep one LiveKit job per process: the exporter is bound to that job's room, and a second job in the same process is refused.
+
+| Situation | Behavior |
+| --- | --- |
+| Production room | The function returns without connecting, exporting, sending messages, or wrapping tools. |
+| A simulation tool named in the test | Egma supplies the authored response. |
+| A tool with no matching mock | The real tool runs. |
+| The room ends before Egma accepts the initial tool report | `simulation` raises `egma.NotReported`; the session does not start. |
+| Egma cannot be reached during a mocked tool call | The call raises `ToolError`; the real tool does not run. |
+| Egma receives a tool call and refuses it | The call raises `ToolError`; the real tool does not run. |
+
+<Warning>
+  Tools without a matching mock still run their real implementations. Use a test account or sandbox for tools that can make real changes, and confirm the mock names match your registered tools.
+</Warning>
+
+The helper has no total startup deadline. It waits while the simulation room is active; individual token requests and hello attempts keep their transport timeouts. A permanent refusal, room disconnect, Egma participant departure, or cancellation ends startup. Do not catch `NotReported` and start the session anyway. Check the room connection, Egma's participant, and the SDK version when this error occurs. Missing settings or an incompatible tracing setup raise `ValueError` instead.
+
+Without the SDK report, Egma fails the LiveKit simulation. Check the simulation's tool calls to confirm the response used. See [Mock tool responses](/docs/platform/tests/mock-tool-responses).
+
+After your normal `session.start` returns, LiveKit publishes its native agent state. Egma waits for an initialized state before sending the first simulated input. This wait uses the simulation's configured duration. You do not need another readiness callback.
+
+When that simulation ends, Egma finishes pending output and its exact participant leaves the room. The SDK closes the `AgentSession` you supplied, which completes LiveKit's native session trace, flushes the final evidence, and releases entrypoint code that is waiting for session close. An abrupt room disconnect closes the session as well. These listeners are installed only after the Egma participant accepts the tool report in a simulation room.
+
+## Test in chat mode
+
+For a LiveKit chat connection, keep the `egma-sim-chat-` branch shown in the example. It disables audio input and output and sends text without waiting for speech transcription. Also disable any independent audio publishers in that branch.
+
+Other room names keep your normal voice settings. A worker that still publishes audio in an Egma chat simulation causes the simulation to stop.
+
+## Read test startup data
+
+Put data that the worker normally needs at startup in the test's `## Env` section:
+
+````markdown
+## Env
+
+```json
+{
+  "job_dispatch_metadata": {
+    "clinic_name": "Maple Street Dental"
+  }
+}
+```
+````
+
+Inside the entrypoint, read it through LiveKit:
+
+```python
+import json
+
+world = json.loads(ctx.job.metadata or "{}")
+clinic_name = world.get("clinic_name", "Maple Street Dental")
+```
+
+Egma sends the value as a compact JSON string. It adds no Egma fields to that data and leaves room metadata empty. The SDK uses the room name to detect simulations.
+
+## Function reference
+
+| Function | Parameters and result |
+| --- | --- |
+| `monitor(ctx, *, endpoint=None, api_key=None)` | Takes a LiveKit `JobContext`. Optional `endpoint` and `api_key` override `EGMA_URL` and `EGMA_API_KEY`. Returns `None`. |
+| `await simulation(agent, ctx, session, *, endpoint=None, api_key=None)` | Takes the initial LiveKit `Agent`, `JobContext`, and `AgentSession`. Optional settings override `EGMA_URL` and `EGMA_API_KEY`. Returns `None`. |
+| `NotReported` | Exported error raised when the simulation cannot complete its initial report to Egma. |
+
+Each function returns before reading settings in the room type it does not handle. The active function still needs `EGMA_URL` and `EGMA_API_KEY`, so a worker used only for simulations needs both settings too.

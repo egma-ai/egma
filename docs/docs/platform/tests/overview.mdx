@@ -1,0 +1,33 @@
+---
+title: "Tests"
+sidebarTitle: "What is a test?"
+---
+
+A **test** describes one situation and the behaviors you expect from your
+agent. It selects one or more personas to act as the caller. You can also
+supply mock tool responses and startup context for the agent.
+
+For example, a booking test can ask the caller to request an afternoon
+appointment and require the agent to check availability before offering a
+time.
+
+## Keep tests in a suite
+
+A [test suite](/docs/platform/tests/test-suites) belongs to a project and holds
+tests that you review and run together. In your agent repository, each suite
+has a directory under `egma/tests/`, and each test is a Markdown file.
+
+A run executes the complete suite against one agent connection. Each test
+and selected persona combination produces a simulation.
+
+## Build a test
+
+- [Test features](/docs/platform/tests/features): scenario, expected behaviors,
+  personas, mock tools, and startup context.
+- [Write a test](/docs/platform/tests/write-a-test): a complete Markdown example
+  that you can adapt and push to Egma.
+- [Write tests with your coding agent](/skills-cli-sdks/skills/write-tests): use the agent's
+  code and tools to create suitable tests.
+
+After you push your tests, [start a run](/docs/platform/runs/start-and-follow-a-run)
+and inspect each simulation's conversation and grading results.

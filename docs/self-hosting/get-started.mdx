@@ -67,9 +67,9 @@ egma login --url http://localhost:3101
 egma init --url http://localhost:3101
 ```
 
-Approve the login in your browser. Then follow the [CLI guide](/tools/cli) to connect LiveKit or Retell, write a test, and run it.
+Approve the login in your browser. Then follow the [CLI guide](/skills-cli-sdks/cli/install) to connect LiveKit or Retell, write a test, and run it.
 
-For LiveKit, install the [Python SDK](/tools/livekit-python-sdk) or [JavaScript SDK](/tools/livekit-javascript-sdk) in the worker. Call `await simulation(agent, ctx, session)` before the session starts for every simulation. Set `EGMA_URL` to an address the worker can reach and `EGMA_API_KEY` to a key for the simulation's project. Both simulation traces and production monitoring need these settings. A worker deployed elsewhere cannot reach this machine through `localhost`.
+For LiveKit, install the [Python SDK](/skills-cli-sdks/sdks/livekit-python) or [JavaScript SDK](/skills-cli-sdks/sdks/livekit-javascript) in the worker. Call `await simulation(agent, ctx, session)` before the session starts for every simulation. Set `EGMA_URL` to an address the worker can reach and `EGMA_API_KEY` to a key for the simulation's project. Both simulation traces and production monitoring need these settings. A worker deployed elsewhere cannot reach this machine through `localhost`.
 
 ## Check the installation
 

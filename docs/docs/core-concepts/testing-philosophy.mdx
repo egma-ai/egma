@@ -1,0 +1,44 @@
+---
+title: "Testing philosophy"
+---
+
+Test the situations your voice agent must handle before you release a change.
+Use repeatable conversations to check its behavior, then read the evidence
+behind each result.
+
+## Start with one situation
+
+A [test](/docs/platform/tests/overview) describes what the caller wants and what
+your agent should do. Keep one situation in each test. For an appointment
+agent, use separate tests for a successful booking, no available slots, and
+a booking tool error.
+
+Write expected behaviors that someone can check from the conversation.
+“The agent asks the caller to confirm the appointment time” gives a clearer
+result than “The agent handles the booking well.”
+
+## Vary the caller and the conditions
+
+Use [personas](/docs/platform/personas) to try the same situation with different
+callers. Use [mock tools](/docs/platform/tests/mock-tool-responses) to supply
+specific backend responses, and [startup context](/docs/platform/tests/features#startup-context)
+to give the agent the data it needs before the conversation starts.
+
+Group related tests into a [test suite](/docs/platform/tests/test-suites). Run the
+suite again when you change the agent's prompt, models, tools, or code.
+
+## Read the evidence
+
+A [run](/docs/platform/runs/overview) executes the suite against one agent
+connection. Check execution and grading separately. A conversation that
+finished can still contain behavior that failed a grader.
+
+Read each [grader's result](/docs/platform/graders/overview), then inspect the
+transcript, tool calls, and recording when available. Use that evidence to
+decide whether the agent, the test, or the grading rule needs a change.
+
+## Learn from production
+
+Tests cover the situations you define. [Monitoring](/docs/core-concepts/monitoring-philosophy)
+helps you find other situations in real conversations. Turn a production
+failure into a test with suitable test data, then rerun it as you fix the agent.

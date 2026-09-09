@@ -1,0 +1,23 @@
+---
+title: "Quickstart in 5 minutes"
+description: "Run your first voice simulation with your coding agent."
+---
+
+Run your first voice simulation in as little as five minutes with Egma’s skills and your coding agent. Open your voice agent’s repository and give your coding agent this prompt:
+
+```text
+Set up Egma simulation testing in this repo. Install the skills with:
+npx skills add egma-ai/egma --skill integrate-egma write-egma-tests
+
+Use integrate-egma to connect my voice agent and write-egma-tests to
+create one test with one persona. Run it over voice, share the results
+link, and wait for the run to finish.
+```
+
+The skill uses [Egma Cloud](https://app.egma.ai), our hosted version, by default. For self-hosting, [set up your instance first](/self-hosting/get-started), then add "Use my Egma instance at `<your-instance-url>`" to the prompt above.
+
+Follow the prompts to install the skills for your coding agent and authorize Egma login. Review the proposed test and mock any tools that could change your data. Open the results link to review the conversation and grading results once they are ready.
+
+For LiveKit, the skill may use a local worker for your first run. Deploy any SDK changes before starting later runs.
+
+Prefer to use the terminal yourself? [Get started with the CLI](/skills-cli-sdks/cli/install).

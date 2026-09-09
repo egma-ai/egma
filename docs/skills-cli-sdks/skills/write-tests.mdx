@@ -1,0 +1,30 @@
+---
+title: "Write tests"
+---
+
+First [install the skills](/skills-cli-sdks/skills/install) and [integrate Egma](/skills-cli-sdks/skills/integrate-egma) in your voice agent repository.
+
+After the repository is connected, ask your coding agent to use `write-egma-tests`:
+
+```text
+Use write-egma-tests to create tests for this agent's appointment booking flow.
+Read the prompt, tools, and startup data first. Cover a successful booking,
+no available appointments, and a booking tool error. Use mock responses for
+tools that write to our backend. Push the tests to Egma and summarize them.
+```
+
+The skill finds or creates a test suite, selects personas from your project, and writes Markdown tests under `egma/tests/`. Each test describes one situation and the behaviors you expect. It can also include tool responses and the data your agent needs at startup.
+
+Review the scenarios, expected behaviors, tool names, and mock responses before running them. A tool that has no mock uses its real implementation. See [Mock tool responses](/docs/platform/tests/mock-tool-responses) for the setup and failure behavior.
+
+## Run the tests
+
+Ask your coding agent to run the suite against the agent and connection you selected:
+
+```text
+Start an Egma run for the appointment booking suite. Use the agent and
+connection configured for this repository. Open the result and explain any
+failed expected behaviors using the transcript and tool calls.
+```
+
+Run creation returns a results URL. Grading continues after the CLI command finishes. Use [Start and follow a run](/docs/platform/runs/start-and-follow-a-run) to inspect its progress and result.

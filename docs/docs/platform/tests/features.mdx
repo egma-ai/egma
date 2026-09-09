@@ -1,0 +1,50 @@
+---
+title: "Test features"
+---
+
+Each test describes one situation. Use its fields to control the caller's
+task, state the required behavior, and supply the agent's test data.
+
+## Scenario
+
+The `## Scenario` section tells the persona what it wants and how to act in
+this conversation. Describe the caller's situation in plain language. Keep
+unrelated situations in separate tests.
+
+## Expected behaviors
+
+The `## Expected behaviors` section is a numbered list of observable
+requirements. Include at least one. The Expected behaviors grader checks
+these statements against the simulation's evidence.
+
+For a booking test, a requirement could be: “The agent asks the caller to
+confirm the appointment date and time before booking.”
+
+## Personas
+
+The `personas` field selects one or more [personas](/docs/platform/personas).
+A persona defines the kind of caller. The scenario defines what that caller
+wants in this test. Each selected persona adds a simulation when you run the
+suite.
+
+## Mock tools
+
+The optional `## Mock tools` section supplies a fixed response or error for
+a named tool. Use the exact tool names and response shapes from your agent.
+A tool without a mock runs its real implementation.
+
+Read [Mock tool responses](/docs/platform/tests/mock-tool-responses) for supported
+connections and worker setup.
+
+## Startup context
+
+The optional `## Env` section supplies data before the conversation starts.
+It does not set shell environment variables or store credentials.
+
+- Retell uses `retell_dynamic_variables` with string values.
+- LiveKit uses `job_dispatch_metadata`, which the worker reads from
+  `ctx.job.metadata`.
+
+Include only the field your platform needs. See the complete
+[Markdown test example](/docs/platform/tests/write-a-test) for the file format,
+section order, and startup data examples.

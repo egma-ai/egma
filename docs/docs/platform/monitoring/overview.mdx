@@ -1,0 +1,31 @@
+---
+title: "Monitoring"
+sidebarTitle: "What is monitoring?"
+---
+
+**Monitoring** collects evidence from your agent's production conversations.
+Use it to inspect what callers said, how the agent replied, which tools it
+called, and the available performance metrics.
+
+You do not need tests or simulation runs to monitor an agent. LiveKit sends
+production traces through the Egma SDK. Retell imports completed voice calls
+through its API.
+
+## Inspect a conversation
+
+Open **Monitoring** in your project and select a conversation. Read its
+transcript, available metrics, and grades. Use tool calls and timing to
+investigate the agent's behavior.
+
+To check requirements across incoming conversations, configure a suitable
+[grader](/docs/platform/graders/configure-graders) with production scope and a
+sample percentage.
+
+## Set up monitoring
+
+Follow [Set up monitoring](/docs/platform/monitoring/set-up-monitoring) for Retell
+or LiveKit. Complete a real conversation and verify that its evidence arrives
+in your project before treating the setup as complete.
+
+Read [Monitoring philosophy](/docs/core-concepts/monitoring-philosophy) for how to use
+production findings to improve your tests.

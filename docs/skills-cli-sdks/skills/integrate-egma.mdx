@@ -1,0 +1,21 @@
+---
+title: "Integrate Egma"
+---
+
+First [install the skills and sign in](/skills-cli-sdks/skills/install). Open the repository that contains your voice agent.
+
+Ask your coding agent to use `integrate-egma`:
+
+```text
+Use integrate-egma to set up simulation testing for the voice agent in this
+repository. Read its startup code, prompts, and tools. Connect it to my Egma
+project and show me the agent and connection to use for a test run.
+```
+
+Egma supports [LiveKit](/docs/integrations/livekit) and [Retell](/docs/integrations/retell). Have the provider credentials available in your terminal or deployment secret store. Keep secret values out of prompts and test files.
+
+For LiveKit, follow the [Python SDK](/skills-cli-sdks/sdks/livekit-python) or [JavaScript SDK](/skills-cli-sdks/sdks/livekit-javascript) instructions. Every simulation needs `await simulation(agent, ctx, session)` in the worker, including tests without mocks. Set the worker's `EGMA_URL` and project-scoped `EGMA_API_KEY`. For production monitoring, also call `monitor(ctx)` at the start of the job entrypoint and deploy the worker before checking for conversations in Egma.
+
+## Next step
+
+[Write tests](/skills-cli-sdks/skills/write-tests) for the connected agent.

@@ -1,0 +1,37 @@
+---
+title: "Monitoring philosophy"
+---
+
+Monitor real conversations to understand how your voice agent behaves after
+release. Callers can ask for things, combine requests, or encounter failures
+that your test suite does not cover.
+
+## Inspect what happened
+
+Egma collects production conversation evidence through its LiveKit SDKs and
+Retell integration. Use [Monitoring](/docs/platform/monitoring/overview) to inspect
+transcripts, tool calls, and available timing metrics.
+
+A metric describes an observed fact, such as response time. A grader checks
+that evidence against a rule. Use both when you investigate a conversation:
+a fast reply can still be wrong, and a correct reply can still keep a caller
+waiting too long.
+
+## Choose what to grade
+
+Select [graders](/docs/platform/graders/overview) that express requirements for real
+conversations. Configure their production scope and sample percentage. A
+conversation without a grade may be outside the sample, still processing, or
+unable to be graded. Check its state before drawing a conclusion.
+
+The built-in Expected behaviors grader checks test requirements during
+simulations. Use a suitable custom or metric grader for production checks.
+
+## Use findings to improve tests
+
+When a real conversation reveals a failure, reproduce the situation in a
+test. Replace customer details with test data and mock the relevant tool
+responses. Add the test to a suite so you can check the fix and future changes.
+
+[Set up monitoring](/docs/platform/monitoring/set-up-monitoring) to start collecting
+conversations from your agent.

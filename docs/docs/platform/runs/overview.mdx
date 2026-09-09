@@ -1,0 +1,33 @@
+---
+title: "Runs"
+sidebarTitle: "What is a run?"
+---
+
+A **run** executes one complete test suite against one agent connection.
+Each test and selected persona combination produces one **simulation**.
+A suite with two tests that each select two personas produces four
+simulations in a run.
+
+## What a run saves
+
+When a run starts, Egma saves its test and persona behavior versions, persona
+model and voice settings, and grader selection, versions, settings, and
+thresholds. Changes to these settings apply to future runs.
+
+This gives you the test inputs and grading rules used for the conversations
+you are reviewing.
+
+## Execution and grading
+
+Execution and grading have separate states. First check whether each
+simulation completed its conversation. Then check whether its selected
+graders finished and what each one reported.
+
+A successful CLI command means the run started. It does not mean that the
+simulations finished or passed. A combined score helps compare results; it
+does not assign an overall pass or fail.
+
+[Start and follow a run](/docs/platform/runs/start-and-follow-a-run) to inspect its
+progress, transcript, recording, and individual grades. Use
+[Automate tests in CI](/docs/platform/runs/automate-tests-in-ci) to wait for results
+from a script.

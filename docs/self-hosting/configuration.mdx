@@ -42,7 +42,7 @@ Add the required keys to `.env`, then run `egma self-host up`. These deployment 
   This selects the secret as the provider source instead of the direct environment values. Give the API and grader processes AWS credentials that can read it. The current bundle is fetched for each work item, so a rotated secret applies to subsequent work. Setting only one selector prevents startup.
 </Accordion>
 
-Keys saved in [Settings → Provider API Keys](/configuration/provider-api-keys) take precedence for their organization. Deployment keys or the provider bundle supply providers without an organization key; the bundle is fetched only when a work item needs it.
+Keys saved in [Settings → Provider API Keys](/docs/platform/provider-api-keys) take precedence for their organization. Deployment keys or the provider bundle supply providers without an organization key; the bundle is fetched only when a work item needs it.
 
 ## Public URLs and networking
 
@@ -87,7 +87,7 @@ Keep direct application ports `3100` and `3101` private through your server's ne
 
 From another machine, verify that you can sign in at the public instance URL, run a test, and play its recording. Retell must be able to reach the instance URL for mock-tool callbacks. LiveKit workers must be able to reach it to send simulation and monitoring traces.
 
-Install the [Python SDK](/tools/livekit-python-sdk) or [JavaScript SDK](/tools/livekit-javascript-sdk) in each LiveKit worker. Call `monitor(ctx)` first in its job entrypoint for production monitoring, and `await simulation(agent, ctx, session)` before starting a simulation session. The simulation call is required even when a test has no mocks. Keep the worker's SDK dependency current when updating the platform.
+Install the [Python SDK](/skills-cli-sdks/sdks/livekit-python) or [JavaScript SDK](/skills-cli-sdks/sdks/livekit-javascript) in each LiveKit worker. Call `monitor(ctx)` first in its job entrypoint for production monitoring, and `await simulation(agent, ctx, session)` before starting a simulation session. The simulation call is required even when a test has no mocks. Keep the worker's SDK dependency current when updating the platform.
 
 ### Ports
 
@@ -124,7 +124,7 @@ For email delivery, set `EGMA_SMTP_URL` to your SMTP or SMTPS connection URL and
 
 Reset links are not printed to platform logs. Configure SMTP before users depend on email-based account recovery. After configuration, create an invitation and confirm that the message arrives.
 
-API clients send an Egma key as a bearer token. Use a project-scoped key with write access for LiveKit monitoring. Create it through **Settings → API keys** or the [CLI](/tools/cli#use-the-cli-in-ci).
+API clients send an Egma key as a bearer token. Use a project-scoped key with write access for LiveKit monitoring. Create it through **Settings → API keys** or the [CLI](/skills-cli-sdks/cli/install#use-the-cli-in-ci).
 
 `EGMA_RATE_LIMIT_PER_MINUTE` defaults to `600` authenticated requests per organization per API process. Keys in one organization share that process's budget.
 
@@ -196,7 +196,7 @@ For Twilio, use the termination trunk hostname and the credential-list username 
 
 The bundled SIP gateway defaults to port `5060` over TCP and UDP, and RTP ports `10000` through `10020` over UDP. Set `EGMA_LIVEKIT_SIP_PORT`, `EGMA_LIVEKIT_SIP_RTP_PORT_START`, and `EGMA_LIVEKIT_SIP_RTP_PORT_END` if your route needs different ports. The gateway must be reachable by the carrier on its signaling and media ports.
 
-`EGMA_LIVEKIT_SIP_USE_EXTERNAL_IP` defaults to `true`. For a fixed public IP or one-to-one NAT, set `EGMA_LIVEKIT_SIP_EXTERNAL_IP` to the public address and configure matching port forwarding. An HTTP reverse proxy does not carry SIP or RTP traffic. Use the [Retell guide](/guides/retell) to add the phone-number connection after the route is configured.
+`EGMA_LIVEKIT_SIP_USE_EXTERNAL_IP` defaults to `true`. For a fixed public IP or one-to-one NAT, set `EGMA_LIVEKIT_SIP_EXTERNAL_IP` to the public address and configure matching port forwarding. An HTTP reverse proxy does not carry SIP or RTP traffic. Use the [Retell guide](/docs/integrations/retell) to add the phone-number connection after the route is configured.
 
 ## Advanced settings
 

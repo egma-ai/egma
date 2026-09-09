@@ -85,7 +85,7 @@ describe("the public skill source", () => {
   });
 
   it("keeps the documented complete test in the shape the real parser reads", async () => {
-    const documentedPath = "docs/guides/write-a-test.mdx";
+    const documentedPath = "docs/docs/platform/tests/write-a-test.mdx";
     const docs = await readFile(path.join(CODE_ROOT, documentedPath), "utf8");
     const examples = markdownExamples(docs);
     const example = examples.find(

@@ -1,0 +1,80 @@
+---
+title: "Test suites"
+---
+
+A test suite contains tests in one project. A run executes the entire suite
+against one agent connection. Keep tests together when they protect the same
+workflow, such as appointment booking or order cancellation.
+
+## Create a suite
+
+In a repository connected to Egma, run:
+
+```bash
+egma pull
+egma suite create appointment-booking --name "Appointment booking"
+```
+
+Egma creates the suite and writes its identity to
+`egma/tests/appointment-booking/suite.yaml`. Add your Markdown tests beside that
+file:
+
+```text
+egma/
+  config.yaml
+  tests/
+    appointment-booking/
+      suite.yaml
+      book-consultation.md
+      no-available-slots.md
+```
+
+The directory is the local name you pass to the CLI. The ID in `suite.yaml`
+identifies the suite on Egma. Keep the generated ID; do not copy it into another
+directory to create a second suite.
+
+Write the files using [test format 5](/docs/platform/tests/write-a-test), then run
+`egma push`. You can change the suite's display name in `suite.yaml` and push
+the change.
+
+## Choose what runs together
+
+A suite does not store an agent or connection. Choose those when you
+[start a run](/docs/platform/runs/start-and-follow-a-run). This lets you use the same tests
+against different supported connections.
+
+Egma runs every active test in the suite once for each persona that test names.
+Two tests with two personas each produce four simulations. A suite with no
+tests cannot run.
+
+Create separate suites for tests you need to run separately. A run does not
+accept a selection of individual tests from a suite.
+
+## Keep local and browser changes in sync
+
+Run `egma pull` before editing to get the current project. Commit the suite
+manifest and test files with your agent changes. Push saves all local suite and
+test changes together.
+
+If a push reports that a test changed on Egma, resolve the difference before
+trying again. Keep your local draft, pull the current version, and apply your
+intended changes to it. Do not remove synchronization fields to bypass the
+conflict.
+
+## Remove a test or suite
+
+Removing a local file is not a request to delete it from Egma. Use the explicit
+commands:
+
+```bash
+egma test delete appointment-booking/no-available-slots.md
+```
+
+To delete the suite and every test inside it:
+
+```bash
+egma suite delete appointment-booking
+```
+
+Deletion is permanent. Existing run evidence stays readable, including the
+test versions that those simulations used.

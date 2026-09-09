@@ -8,9 +8,9 @@
     "dark": "#c2410c"
   },
   "logo": {
-    "light": "/logo/mark-light.svg",
-    "dark": "/logo/mark-dark.svg",
-    "href": "/guides/overview"
+    "light": "/docs/assets/logo/mark-light.svg",
+    "dark": "/docs/assets/logo/mark-dark.svg",
+    "href": "/docs/get-started/introduction"
   },
   "favicon": "/favicon.svg",
   "appearance": {
@@ -28,40 +28,66 @@
           {
             "group": "Get started",
             "pages": [
-              "guides/overview"
+              "docs/get-started/introduction",
+              "docs/get-started/quickstart"
+            ]
+          },
+          {
+            "group": "Core concepts",
+            "pages": [
+              "docs/core-concepts/testing-philosophy",
+              "docs/core-concepts/monitoring-philosophy"
+            ]
+          },
+          {
+            "group": "Platform",
+            "pages": [
+              "docs/platform/agents-and-connections",
+              {
+                "group": "Tests",
+                "pages": [
+                  "docs/platform/tests/overview",
+                  "docs/platform/tests/test-suites",
+                  "docs/platform/tests/features",
+                  "docs/platform/tests/write-a-test",
+                  "docs/platform/tests/mock-tool-responses"
+                ]
+              },
+              "docs/platform/personas",
+              {
+                "group": "Runs",
+                "pages": [
+                  "docs/platform/runs/overview",
+                  "docs/platform/runs/start-and-follow-a-run",
+                  "docs/platform/runs/automate-tests-in-ci"
+                ]
+              },
+              {
+                "group": "Graders",
+                "pages": [
+                  "docs/platform/graders/overview",
+                  "docs/platform/graders/types",
+                  "docs/platform/graders/built-in-graders",
+                  "docs/platform/graders/custom-graders",
+                  "docs/platform/graders/configure-graders",
+                  "docs/platform/graders/scores-and-thresholds"
+                ]
+              },
+              {
+                "group": "Monitoring",
+                "pages": [
+                  "docs/platform/monitoring/overview",
+                  "docs/platform/monitoring/set-up-monitoring"
+                ]
+              },
+              "docs/platform/provider-api-keys"
             ]
           },
           {
             "group": "Integrations",
             "pages": [
-              "guides/retell",
-              "guides/livekit"
-            ]
-          },
-          {
-            "group": "Testing",
-            "pages": [
-              "guides/write-a-test",
-              "guides/test-suites",
-              "guides/personas",
-              "guides/mock-tool-responses",
-              "guides/start-and-follow-a-run",
-              "guides/automate-tests-in-ci"
-            ]
-          },
-          {
-            "group": "Monitoring",
-            "pages": [
-              "guides/set-up-monitoring"
-            ]
-          },
-          {
-            "group": "Grading",
-            "pages": [
-              "guides/built-in-graders",
-              "guides/custom-graders",
-              "guides/configure-graders",
-              "guides/scores-and-thresholds"
+              "docs/integrations/retell",
+              "docs/integrations/livekit"
             ]
           }
         ]
@@ -70,200 +96,207 @@
         "tab": "Skills, CLI & SDKs",
         "groups": [
           {
-            "group": "Tools",
+            "group": "Skills",
             "pages": [
-              "tools/skills",
-              "tools/cli"
+              "skills-cli-sdks/skills/install",
+              "skills-cli-sdks/skills/integrate-egma",
+              "skills-cli-sdks/skills/write-tests"
             ]
           },
           {
-            "group": "LiveKit SDKs",
+            "group": "CLI",
             "pages": [
-              "tools/livekit-python-sdk",
-              "tools/livekit-javascript-sdk"
+              "skills-cli-sdks/cli/install"
             ]
           },
           {
-            "group": "Configuration",
+            "group": "SDKs",
             "pages": [
-              "configuration/provider-api-keys"
+              "skills-cli-sdks/sdks/livekit-python",
+              "skills-cli-sdks/sdks/livekit-javascript"
             ]
           }
         ]
       },
       {
         "tab": "Self-hosting",
-        "pages": [
-          "self-hosting/get-started",
-          "self-hosting/configuration"
+        "groups": [
+          {
+            "group": "How to self-host",
+            "pages": [
+              "self-hosting/get-started",
+              "self-hosting/configuration",
+              "self-hosting/support"
+            ]
+          }
         ]
       },
       {
         "tab": "API reference",
         "pages": [
-          "api/overview",
+          "api-reference/overview",
           {
             "group": "Runs",
             "pages": [
-              "api/create-a-run",
-              "api/list-runs",
-              "api/get-a-run",
-              "api/list-simulations",
-              "api/list-run-events",
-              "api/cancel-a-run"
+              "api-reference/create-a-run",
+              "api-reference/list-runs",
+              "api-reference/get-a-run",
+              "api-reference/list-simulations",
+              "api-reference/list-run-events",
+              "api-reference/cancel-a-run"
             ]
           },
           {
             "group": "Agents",
             "pages": [
-              "api/discover-agents",
-              "api/register-agent",
-              "api/list-agents",
-              "api/get-agent",
-              "api/update-agent",
-              "api/archive-agent",
-              "api/restore-agent"
+              "api-reference/discover-agents",
+              "api-reference/register-agent",
+              "api-reference/list-agents",
+              "api-reference/get-agent",
+              "api-reference/update-agent",
+              "api-reference/archive-agent",
+              "api-reference/restore-agent"
             ]
           },
           {
             "group": "Connections",
             "pages": [
-              "api/list-connection-options",
-              "api/add-connection",
-              "api/get-connection",
-              "api/update-connection",
-              "api/archive-connection",
-              "api/restore-connection"
+              "api-reference/list-connection-options",
+              "api-reference/add-connection",
+              "api-reference/get-connection",
+              "api-reference/update-connection",
+              "api-reference/archive-connection",
+              "api-reference/restore-connection"
             ]
           },
           {
             "group": "Test Suites",
             "pages": [
-              "api/list-test-suites",
-              "api/create-test-suite",
-              "api/get-test-suite",
-              "api/update-test-suite",
-              "api/delete-test-suite"
+              "api-reference/list-test-suites",
+              "api-reference/create-test-suite",
+              "api-reference/get-test-suite",
+              "api-reference/update-test-suite",
+              "api-reference/delete-test-suite"
             ]
           },
           {
             "group": "Tests",
             "pages": [
-              "api/list-tests",
-              "api/create-test",
-              "api/get-test-version",
-              "api/get-test",
-              "api/update-test",
-              "api/delete-test",
-              "api/list-test-versions"
+              "api-reference/list-tests",
+              "api-reference/create-test",
+              "api-reference/get-test-version",
+              "api-reference/get-test",
+              "api-reference/update-test",
+              "api-reference/delete-test",
+              "api-reference/list-test-versions"
             ]
           },
           {
             "group": "Personas",
             "pages": [
-              "api/use-persona",
-              "api/list-personas",
-              "api/create-persona",
-              "api/get-persona-form",
-              "api/get-persona",
-              "api/update-persona",
-              "api/delete-persona",
-              "api/list-persona-versions",
-              "api/get-persona-usage",
-              "api/get-persona-version",
-              "api/fork-persona"
+              "api-reference/use-persona",
+              "api-reference/list-personas",
+              "api-reference/create-persona",
+              "api-reference/get-persona-form",
+              "api-reference/get-persona",
+              "api-reference/update-persona",
+              "api-reference/delete-persona",
+              "api-reference/list-persona-versions",
+              "api-reference/get-persona-usage",
+              "api-reference/get-persona-version",
+              "api-reference/fork-persona"
             ]
           },
           {
             "group": "Simulations",
             "pages": [
-              "api/get-simulation",
-              "api/regrade-simulation"
+              "api-reference/get-simulation",
+              "api-reference/regrade-simulation"
             ]
           },
           {
             "group": "Traces",
             "pages": [
-              "api/list-traces",
-              "api/get-trace"
+              "api-reference/list-traces",
+              "api-reference/get-trace"
             ]
           },
           {
             "group": "Recordings",
             "pages": [
-              "api/get-simulation-recording"
+              "api-reference/get-simulation-recording"
             ]
           },
           {
             "group": "Graders",
             "pages": [
-              "api/get-grader-form",
-              "api/list-grader-library",
-              "api/get-grader-library-entry",
-              "api/update-grader-definition",
-              "api/use-grader-in-project",
-              "api/create-custom-grader",
-              "api/clone-grader",
-              "api/list-graders",
-              "api/update-grader",
-              "api/remove-grader"
+              "api-reference/get-grader-form",
+              "api-reference/list-grader-library",
+              "api-reference/get-grader-library-entry",
+              "api-reference/update-grader-definition",
+              "api-reference/use-grader-in-project",
+              "api-reference/create-custom-grader",
+              "api-reference/clone-grader",
+              "api-reference/list-graders",
+              "api-reference/update-grader",
+              "api-reference/remove-grader"
             ]
           },
           {
             "group": "Monitoring",
             "pages": [
-              "api/discover-retell-voice-agents",
-              "api/start-monitoring",
-              "api/stop-monitoring"
+              "api-reference/discover-retell-voice-agents",
+              "api-reference/start-monitoring",
+              "api-reference/stop-monitoring"
             ]
           },
           {
             "group": "Repository",
             "pages": [
-              "api/apply-repository-change-set"
+              "api-reference/apply-repository-change-set"
             ]
           },
           {
             "group": "Projects",
             "pages": [
-              "api/list-projects",
-              "api/create-project",
-              "api/get-project",
-              "api/update-project"
+              "api-reference/list-projects",
+              "api-reference/create-project",
+              "api-reference/get-project",
+              "api-reference/update-project"
             ]
           },
           {
             "group": "Organization",
             "pages": [
-              "api/get-organization",
-              "api/update-organization"
+              "api-reference/get-organization",
+              "api-reference/update-organization"
             ]
           },
           {
             "group": "Members",
             "pages": [
-              "api/list-members",
-              "api/list-invitations",
-              "api/create-invitation",
-              "api/change-member-role",
-              "api/remove-member",
-              "api/deactivate-member"
+              "api-reference/list-members",
+              "api-reference/list-invitations",
+              "api-reference/create-invitation",
+              "api-reference/change-member-role",
+              "api-reference/remove-member",
+              "api-reference/deactivate-member"
             ]
           },
           {
             "group": "API keys",
             "pages": [
-              "api/list-api-keys",
-              "api/create-api-key",
-              "api/revoke-api-key"
+              "api-reference/list-api-keys",
+              "api-reference/create-api-key",
+              "api-reference/revoke-api-key"
             ]
           },
           {
             "group": "Provider API keys",
             "pages": [
-              "api/list-provider-keys",
-              "api/put-provider-key",
-              "api/delete-provider-key"
+              "api-reference/list-provider-keys",
+              "api-reference/put-provider-key",
+              "api-reference/delete-provider-key"
             ]
           }
         ]
@@ -303,247 +336,7 @@
   "redirects": [
     {
       "source": "/",
-      "destination": "/guides/overview"
-    },
-    {
-      "source": "/index",
-      "destination": "/guides/overview"
-    },
-    {
-      "source": "/introduction",
-      "destination": "/guides/overview"
-    },
-    {
-      "source": "/quickstart",
-      "destination": "/guides/overview#quickstart"
-    },
-    {
-      "source": "/self-hosting",
-      "destination": "/self-hosting/get-started"
-    },
-    {
-      "source": "/concepts/agents-and-connections",
-      "destination": "/tools/cli#connect-an-agent"
-    },
-    {
-      "source": "/concepts/tests-and-runs",
-      "destination": "/guides/start-and-follow-a-run"
-    },
-    {
-      "source": "/concepts/graders",
-      "destination": "/guides/built-in-graders"
-    },
-    {
-      "source": "/concepts/telemetry",
-      "destination": "/guides/set-up-monitoring"
-    },
-    {
-      "source": "/integrations/retell",
-      "destination": "/guides/retell"
-    },
-    {
-      "source": "/integrations/livekit-token-endpoint",
-      "destination": "/guides/livekit#use-a-token-endpoint"
-    },
-    {
-      "source": "/integrations/python-sdk",
-      "destination": "/tools/livekit-python-sdk"
-    },
-    {
-      "source": "/integrations/javascript-sdk",
-      "destination": "/tools/livekit-javascript-sdk"
-    },
-    {
-      "source": "/cli/overview",
-      "destination": "/tools/cli"
-    },
-    {
-      "source": "/cli/commands",
-      "destination": "/tools/cli"
-    },
-    {
-      "source": "/cli/test-files",
-      "destination": "/guides/write-a-test"
-    },
-    {
-      "source": "/configuration/environment-variables",
-      "destination": "/self-hosting/configuration"
-    },
-    {
-      "source": "/configuration/authentication",
-      "destination": "/self-hosting/configuration"
-    },
-    {
-      "source": "/api/authentication",
-      "destination": "/api/overview#authentication"
-    },
-    {
-      "source": "/api/agents",
-      "destination": "/api/list-agents"
-    },
-    {
-      "source": "/api/test-suites",
-      "destination": "/api/list-test-suites"
-    },
-    {
-      "source": "/api/tests",
-      "destination": "/api/list-tests"
-    },
-    {
-      "source": "/api/runs",
-      "destination": "/api/list-runs"
-    },
-    {
-      "source": "/api/graders",
-      "destination": "/api/list-graders"
-    },
-    {
-      "source": "/api/grader-library",
-      "destination": "/api/list-grader-library"
-    },
-    {
-      "source": "/api/monitoring",
-      "destination": "/api/start-monitoring"
-    },
-    {
-      "source": "/api/traces",
-      "destination": "/api/list-traces"
-    },
-    {
-      "source": "/api/api-keys",
-      "destination": "/api/list-api-keys"
-    },
-    {
-      "source": "/api/members",
-      "destination": "/api/list-members"
-    },
-    {
-      "source": "/tools/skills-overview",
-      "destination": "/tools/skills"
-    },
-    {
-      "source": "/tools/install-skills",
-      "destination": "/tools/skills#install-the-skills"
-    },
-    {
-      "source": "/tools/integrate-an-agent",
-      "destination": "/tools/skills"
-    },
-    {
-      "source": "/tools/write-tests",
-      "destination": "/tools/skills"
-    },
-    {
-      "source": "/tools/cli-overview",
-      "destination": "/tools/cli"
-    },
-    {
-      "source": "/tools/install-the-cli",
-      "destination": "/tools/cli"
-    },
-    {
-      "source": "/tools/commands",
-      "destination": "/tools/cli"
-    },
-    {
-      "source": "/tools/configuration",
-      "destination": "/tools/cli"
-    },
-    {
-      "source": "/tools/test-files",
-      "destination": "/guides/write-a-test"
-    },
-    {
-      "source": "/self-hosting/hosting-overview",
-      "destination": "/self-hosting/get-started"
-    },
-    {
-      "source": "/self-hosting/model-providers",
-      "destination": "/self-hosting/configuration"
-    },
-    {
-      "source": "/api/first-api-run",
-      "destination": "/api/overview"
-    },
-    {
-      "source": "/docs/grader-scope",
-      "destination": "/guides/configure-graders#choose-the-scope"
-    },
-    {
-      "source": "/docs/regrade-a-conversation",
-      "destination": "/guides/configure-graders#regrade-a-simulation"
-    },
-    {
-      "source": "/docs/overview",
-      "destination": "/guides/overview"
-    },
-    {
-      "source": "/docs/quickstart",
-      "destination": "/guides/overview#quickstart"
-    },
-    {
-      "source": "/docs/retell",
-      "destination": "/guides/retell"
-    },
-    {
-      "source": "/docs/livekit",
-      "destination": "/guides/livekit"
-    },
-    {
-      "source": "/docs/write-a-test",
-      "destination": "/guides/write-a-test"
-    },
-    {
-      "source": "/docs/test-suites",
-      "destination": "/guides/test-suites"
-    },
-    {
-      "source": "/docs/personas",
-      "destination": "/guides/personas"
-    },
-    {
-      "source": "/docs/mock-tool-responses",
-      "destination": "/guides/mock-tool-responses"
-    },
-    {
-      "source": "/docs/start-and-follow-a-run",
-      "destination": "/guides/start-and-follow-a-run"
-    },
-    {
-      "source": "/docs/automate-tests-in-ci",
-      "destination": "/guides/automate-tests-in-ci"
-    },
-    {
-      "source": "/docs/set-up-monitoring",
-      "destination": "/guides/set-up-monitoring"
-    },
-    {
-      "source": "/docs/built-in-graders",
-      "destination": "/guides/built-in-graders"
-    },
-    {
-      "source": "/docs/custom-graders",
-      "destination": "/guides/custom-graders"
-    },
-    {
-      "source": "/docs/configure-graders",
-      "destination": "/guides/configure-graders"
-    },
-    {
-      "source": "/docs/scores-and-thresholds",
-      "destination": "/guides/scores-and-thresholds"
-    },
-    {
-      "source": "/api/personas",
-      "destination": "/api/list-personas"
-    },
-    {
-      "source": "/concepts/personas",
-      "destination": "/guides/personas"
-    },
-    {
-      "source": "/guides/quickstart",
-      "destination": "/guides/overview#quickstart"
+      "destination": "/docs/get-started/introduction"
     }
   ]
 }
