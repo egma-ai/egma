@@ -19,7 +19,10 @@ import {
   stripeMeterPeriods,
 } from "../../src/stripe/periods.ts";
 import { hourAround } from "../../src/stripe/facts.ts";
-import { adoptLegacyFeeProduct } from "../../src/stripe/setup.ts";
+import {
+  adoptLegacyFeeProduct,
+  PRODUCT_METADATA_KEY,
+} from "../../src/stripe/setup.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
