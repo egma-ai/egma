@@ -125,8 +125,11 @@ def test_no_module_imports_anything_from_outside_the_app():
     """Third-party imports are the declared ones; everything else is stdlib."""
     # Distribution names above are not always module names. The OTLP encoder's
     # generated protobuf types live under Google's shared namespace.
+    # Deepgram and websockets are locked by the declared Pipecat Deepgram extra
+    # and used directly only by its Daytona transport shim.
     allowed_modules = {
         "aiohttp",
+        "deepgram",
         "jsonschema",
         "pipecat",
         "loguru",
@@ -136,6 +139,7 @@ def test_no_module_imports_anything_from_outside_the_app():
         "boto3",
         "botocore",
         "opentelemetry",
+        "websockets",
         "google",
     }
     permitted = allowed_modules | set(sys.stdlib_module_names) | {"egma_simulator"}
