@@ -44,6 +44,7 @@ import {
 let api: TestApi;
 
 afterEach(async () => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   await api?.close();
 });
@@ -1248,6 +1249,7 @@ describe("one source of execution truth", () => {
     expect(daytonaClaimRuntime).toHaveBeenCalledWith(
       "daytona-runtime",
       expect.any(String),
+      expect.any(AbortSignal),
     );
   });
 
@@ -1301,6 +1303,47 @@ describe("one source of execution truth", () => {
       runtime: "daytona",
     });
     expect(retried.body.specs as unknown[]).toHaveLength(1);
+  });
+
+  it("expires Daytona runtime ownership before releasing timed-out work", async () => {
+    let receivedSignal: ((signal: AbortSignal) => void) | undefined;
+    const runtimeStarted = new Promise<AbortSignal>((resolve) => {
+      receivedSignal = resolve;
+    });
+    const daytonaClaimRuntime = vi.fn<DaytonaClaimRuntime>(
+      async (_claimant, _simulationId, signal) => {
+        receivedSignal?.(signal);
+        await new Promise<never>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        });
+      },
+    );
+    const { ada, key, connectionId, versionId } =
+      await aRealtimeVoiceCustomerReadyToRun(
+        "claims_daytona_runtime_deadline",
+        { daytonaClaimRuntime },
+      );
+    const { simulationId } = await aQueuedRun(key, connectionId, versionId);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    const claiming = claim(api.config.simulatorServiceToken, {
+      claimant: "egma-voice-runtime",
+      capacity: 1,
+      wait_seconds: 0,
+      modalities: ["voice"],
+      runtime: "daytona",
+    });
+    const ownership = await runtimeStarted;
+    await vi.advanceTimersByTimeAsync(28_000);
+    const deferred = await claiming;
+
+    expect(ownership.aborted).toBe(true);
+    expect(deferred.body.specs).toEqual([]);
+    expect(
+      (await getSimulation(contextFor(ada, "member"), simulationId))?.status,
+    ).toBe("queued");
   });
 
   it("releases Daytona work when claim-time authority violates the contract", async () => {

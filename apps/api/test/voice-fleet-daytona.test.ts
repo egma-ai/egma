@@ -40,7 +40,7 @@ const temporaryStorage = vi.fn(async () => ({
 
 describe("Daytona voice credentials", () => {
   it("keeps the STS session token and scopes the role session lifetime", async () => {
-    const send = vi.fn(async (_command: unknown) => ({
+    const send = vi.fn(async (_command: unknown, _options?: unknown) => ({
       Credentials: {
         AccessKeyId: "temporary-access",
         SecretAccessKey: "temporary-secret",
@@ -48,12 +48,14 @@ describe("Daytona voice credentials", () => {
       },
     }));
     const assume = awsRecordingRole({ send } as never);
+    const ownership = new AbortController();
 
     expect(await assume({
       roleArn: settings.recordingRoleArn,
       sessionName: "egma-daytona-runtime",
       durationSeconds: 1_200,
       policy: "scoped-policy",
+      signal: ownership.signal,
     })).toEqual({
       accessKeyId: "temporary-access",
       secretAccessKey: "temporary-secret",
@@ -67,6 +69,9 @@ describe("Daytona voice credentials", () => {
       RoleSessionName: "egma-daytona-runtime",
       DurationSeconds: 1_200,
       Policy: "scoped-policy",
+    });
+    expect(send.mock.calls.at(0)?.at(1)).toEqual({
+      abortSignal: ownership.signal,
     });
   });
 
@@ -133,7 +138,11 @@ describe("Daytona voice credentials", () => {
       recordAssignment,
     });
 
-    const runtime = await assign("egma-voice-runtime-1", "sim_123");
+    const runtime = await assign(
+      "egma-voice-runtime-1",
+      "sim_123",
+      new AbortController().signal,
+    );
 
     expect(client.get).toHaveBeenCalledWith("egma-voice-runtime-1");
     expect(sandbox.setLabels).toHaveBeenCalledWith({
@@ -171,6 +180,61 @@ describe("Daytona voice credentials", () => {
     });
   });
 
+  it("does not associate authority after ownership expires during issuance", async () => {
+    let finishCredentials: (() => void) | undefined;
+    let credentialsStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { credentialsStarted = resolve; });
+    const storage = new Promise<{
+      accessKeyId: string;
+      secretAccessKey: string;
+      sessionToken: string;
+    }>((resolve) => {
+      finishCredentials = () => resolve({
+        accessKeyId: "late-access",
+        secretAccessKey: "late-secret",
+        sessionToken: "late-session",
+      });
+    });
+    const assumeRole = vi.fn(async () => {
+      credentialsStarted?.();
+      return await storage;
+    });
+    const recordAssignment = vi.fn();
+    const sandbox = {
+      id: "sandbox-1",
+      labels: {
+        "egma.runtime": "voice-simulator",
+        "egma.release_sha": "a".repeat(40),
+        "egma.snapshot_id": "snapshot-exact",
+        "egma.runtime_id": "runtime-1",
+      },
+      process: { getEntrypointSession: vi.fn(async () => ({ commands: [] })) },
+      setLabels: vi.fn(async (labels: Record<string, string>) => labels),
+    };
+    const assign = daytonaClaimRuntime(settings, {
+      client: { get: vi.fn(async () => sandbox) } as unknown as DaytonaClient,
+      assumeRole,
+      recordAssignment,
+    });
+    const ownership = new AbortController();
+
+    const assigning = assign(
+      "egma-voice-runtime-1",
+      "sim_123",
+      ownership.signal,
+    );
+    await started;
+    ownership.abort(new Error("claim response deadline expired"));
+    finishCredentials?.();
+
+    await expect(assigning).rejects.toThrow("claim response deadline expired");
+    expect(assumeRole).toHaveBeenCalledWith(expect.objectContaining({
+      signal: ownership.signal,
+    }));
+    expect(sandbox.setLabels).not.toHaveBeenCalled();
+    expect(recordAssignment).not.toHaveBeenCalled();
+  });
+
   it("rejects claimants outside the exact active fleet before issuing authority", async () => {
     temporaryStorage.mockClear();
     const sandbox = {
@@ -189,7 +253,11 @@ describe("Daytona voice credentials", () => {
       assumeRole: temporaryStorage,
     });
 
-    await expect(assign("egma-voice-runtime-1", "sim_123")).rejects.toThrow(
+    await expect(assign(
+      "egma-voice-runtime-1",
+      "sim_123",
+      new AbortController().signal,
+    )).rejects.toThrow(
       "does not belong to the active voice fleet",
     );
     expect(temporaryStorage).not.toHaveBeenCalled();
@@ -215,7 +283,11 @@ describe("Daytona voice credentials", () => {
       assumeRole: temporaryStorage,
     });
 
-    await expect(assign("egma-voice-runtime-1", "sim_new")).rejects.toThrow(
+    await expect(assign(
+      "egma-voice-runtime-1",
+      "sim_new",
+      new AbortController().signal,
+    )).rejects.toThrow(
       "already assigned to another simulation",
     );
     expect(temporaryStorage).not.toHaveBeenCalled();

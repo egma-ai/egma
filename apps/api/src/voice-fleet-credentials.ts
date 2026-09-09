@@ -48,6 +48,7 @@ export type AssumeRecordingRole = (options: {
   readonly sessionName: string;
   readonly durationSeconds: number;
   readonly policy: string;
+  readonly signal?: AbortSignal | undefined;
 }) => Promise<{
   readonly accessKeyId: string;
   readonly secretAccessKey: string;
@@ -55,13 +56,13 @@ export type AssumeRecordingRole = (options: {
 }>;
 
 export function awsRecordingRole(client = new STSClient({})): AssumeRecordingRole {
-  return async ({ roleArn, sessionName, durationSeconds, policy }) => {
+  return async ({ roleArn, sessionName, durationSeconds, policy, signal }) => {
     const response = await client.send(new AssumeRoleCommand({
       RoleArn: roleArn,
       RoleSessionName: sessionName,
       DurationSeconds: durationSeconds,
       Policy: policy,
-    }));
+    }), signal === undefined ? undefined : { abortSignal: signal });
     const credentials = response.Credentials;
     if (!credentials?.AccessKeyId || !credentials.SecretAccessKey || !credentials.SessionToken) {
       throw new Error("the recording role returned incomplete temporary credentials");
@@ -79,8 +80,10 @@ export async function issueVoiceClaimCredentials(options: {
   readonly simulationId: string;
   readonly roomName: string;
   readonly assumeRole: AssumeRecordingRole;
+  readonly signal?: AbortSignal | undefined;
 }): Promise<VoiceClaimCredentials> {
   const { settings, simulationId, roomName } = options;
+  options.signal?.throwIfAborted();
   const participant = new AccessToken(settings.livekitApiKey, settings.livekitApiSecret, {
     identity: "egma-persona",
     ttl: VOICE_CREDENTIAL_TTL_SECONDS,
@@ -114,8 +117,10 @@ export async function issueVoiceClaimCredentials(options: {
           Resource: `${settings.recordingBucketArn}/${simulationId}/dual-channel.wav`,
         }],
       }),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
     }),
   ]);
+  options.signal?.throwIfAborted();
   return {
     roomName,
     roomToken,
@@ -130,6 +135,7 @@ export async function issueDaytonaVoiceRuntime(options: {
   readonly settings: VoiceCredentialSettings;
   readonly simulationId: string;
   readonly assumeRole: AssumeRecordingRole;
+  readonly signal?: AbortSignal | undefined;
 }): Promise<DaytonaVoiceRuntime> {
   const roomName = `egma-sim-${options.simulationId}`;
   const credentials = await issueVoiceClaimCredentials({

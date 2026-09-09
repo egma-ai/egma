@@ -65,6 +65,7 @@ export type ClaimRoutesOptions = {
   readonly daytonaClaimRuntime?: (
     claimant: string,
     simulationId: string,
+    signal: AbortSignal,
   ) => Promise<Record<string, unknown>>;
   /** The deployment's service token, from configuration. */
   readonly serviceToken: string;
@@ -109,17 +110,28 @@ const RECHECK_MILLISECONDS = 1_000;
 const CLAIM_RESPONSE_MILLISECONDS = 28_000;
 
 async function beforeResponseDeadline<T>(
-  operation: Promise<T>,
+  operation: (signal: AbortSignal) => Promise<T>,
   deadline: number,
 ): Promise<T> {
-  return await Promise.race([
-    operation,
-    sleep(Math.max(1, deadline - Date.now()), undefined, { ref: false }).then(
-      () => {
-        throw new Error("claim response deadline expired");
-      },
-    ),
-  ]);
+  const ownership = new AbortController();
+  const timeout = globalThis.setTimeout(() => {
+    ownership.abort(new Error("claim response deadline expired"));
+  }, Math.max(1, deadline - Date.now()));
+  if (typeof timeout === "object") timeout.unref();
+  try {
+    return await Promise.race([
+      operation(ownership.signal),
+      new Promise<never>((_resolve, reject) => {
+        ownership.signal.addEventListener(
+          "abort",
+          () => reject(ownership.signal.reason),
+          { once: true },
+        );
+      }),
+    ]);
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
 }
 
 /**
@@ -842,7 +854,8 @@ export async function claimRoutes(
                 ) {
                   return spec;
                 }
-                if (options.daytonaClaimRuntime === undefined) {
+                const daytonaClaimRuntime = options.daytonaClaimRuntime;
+                if (daytonaClaimRuntime === undefined) {
                   return {
                     retryable: "the Daytona claim runtime is not configured",
                     deferredBy: "runtime" as const,
@@ -852,7 +865,11 @@ export async function claimRoutes(
                   const completed = {
                     ...spec,
                     runtime: await beforeResponseDeadline(
-                      options.daytonaClaimRuntime(ask.claimant, claim.id),
+                      (signal) => daytonaClaimRuntime(
+                        ask.claimant,
+                        claim.id,
+                        signal,
+                      ),
                       responseDeadline,
                     ),
                   };

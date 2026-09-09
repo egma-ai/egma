@@ -38,6 +38,7 @@ export type DaytonaClient = {
 export type DaytonaClaimRuntime = (
   claimant: string,
   simulationId: string,
+  signal: AbortSignal,
 ) => Promise<DaytonaVoiceRuntime>;
 
 const FLEET_LABELS = { "egma.runtime": "voice-simulator" };
@@ -217,8 +218,10 @@ export function daytonaClaimRuntime(
 ): DaytonaClaimRuntime {
   const assumeRole = options.assumeRole ?? awsRecordingRole();
   const recordAssignment = options.recordAssignment ?? recordDaytonaAssignment;
-  return async (claimant, simulationId) => {
+  return async (claimant, simulationId, signal) => {
+    signal.throwIfAborted();
     const sandbox = await options.client.get(claimant);
+    signal.throwIfAborted();
     const labels = sandbox.labels ?? {};
     const runtimeId = labels["egma.runtime_id"];
     const expectedName = runtimeId === undefined ? undefined : `egma-voice-${runtimeId}`.slice(0, 63);
@@ -236,11 +239,18 @@ export function daytonaClaimRuntime(
     if (assignedSimulation !== undefined && assignedSimulation !== simulationId) {
       throw new Error("Daytona claimant is already assigned to another simulation");
     }
-    const runtime = await issueDaytonaVoiceRuntime({ settings, simulationId, assumeRole });
+    const runtime = await issueDaytonaVoiceRuntime({
+      settings,
+      simulationId,
+      assumeRole,
+      signal,
+    });
+    signal.throwIfAborted();
     await sandbox.setLabels({
       ...labels,
       "egma.simulation_id": simulationId,
     });
+    signal.throwIfAborted();
     recordAssignment({
       simulationId,
       sandboxId: sandbox.id,
