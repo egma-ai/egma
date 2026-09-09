@@ -4,7 +4,6 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   useParams,
   usePathname,
-  useRouter,
   useSearchParams,
 } from "next/navigation";
 import { toast } from "sonner";
@@ -31,7 +30,6 @@ export default function UsageAndBillingPage() {
 
 function UsageAndBillingBody({ projectId }: { readonly projectId: string }) {
   const pathname = usePathname();
-  const router = useRouter();
   const search = useSearchParams();
   const returnedPlan = search.get("plan");
   const returnedCredit = search.get("credit");
@@ -110,7 +108,9 @@ function UsageAndBillingBody({ projectId }: { readonly projectId: string }) {
     const nextSearch = new URLSearchParams(search.toString());
     nextSearch.delete("plan");
     nextSearch.delete("credit");
-    router.replace(
+    globalThis.history.replaceState(
+      globalThis.history.state,
+      "",
       nextSearch.size === 0 ? pathname : `${pathname}?${nextSearch.toString()}`,
     );
   }, [
@@ -121,7 +121,6 @@ function UsageAndBillingBody({ projectId }: { readonly projectId: string }) {
     refresh,
     returnedCredit,
     returnedPlan,
-    router,
     search,
   ]);
 

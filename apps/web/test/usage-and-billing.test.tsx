@@ -8,7 +8,6 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { toast } from "sonner";
 import UsageAndBillingPage from "../app/projects/[projectId]/settings/billing/page.tsx";
 import OrganizationSettingsPage from "../app/projects/[projectId]/settings/organization/page.tsx";
 import { HOBBY, PRO, USAGE, memberSession } from "./usage-billing-fixtures.ts";
@@ -278,18 +277,20 @@ it("loads another ledger page without losing history when a retry is needed", as
   ).toBe("older/+page");
 });
 it("toasts a completed credit checkout once, clears its query, and lets the toast refresh", async () => {
-  const notice = vi.spyOn(toast, "info");
+  const replaceState = vi.spyOn(globalThis.history, "replaceState");
   routed.search = "credit=bought";
   open();
-  await waitFor(() =>
-    expect(notice).toHaveBeenCalledWith(
+  expect(
+    await screen.findByText(
       "Check billing history for your payment. If it has not appeared yet, refresh in a moment.",
-      expect.objectContaining({ action: expect.any(Object) }),
     ),
-  );
-  expect(routed.router.replace).toHaveBeenCalledWith(
+  ).toBeTruthy();
+  expect(replaceState).toHaveBeenCalledWith(
+    globalThis.history.state,
+    "",
     "/projects/prj_1/settings/billing",
   );
+  expect(routed.router.replace).not.toHaveBeenCalled();
   expect(screen.queryByText("Credit purchase")).toBeNull();
   responses["/api/organization/billing"] = {
     status: 200,
@@ -310,47 +311,49 @@ it("toasts a completed credit checkout once, clears its query, and lets the toas
       },
     },
   };
-  const options = notice.mock.calls[0]?.[1] as unknown as {
-    readonly action: {
-      readonly onClick: (event: never) => void;
-    };
-  };
-  options.action.onClick(new MouseEvent("click") as never);
+  fireEvent.click(screen.getByRole("button", { name: "Check again" }));
   expect(await screen.findByText("$29.25")).toBeTruthy();
   expect(screen.getByText("Credit purchase")).toBeTruthy();
   expect(
     requests.filter((request) => request.path === "/api/organization/billing"),
   ).toHaveLength(2);
-  notice.mockRestore();
+  replaceState.mockRestore();
 });
 it("does not upgrade the displayed plan merely from a return parameter", async () => {
-  const notice = vi.spyOn(toast, "warning");
+  const replaceState = vi.spyOn(globalThis.history, "replaceState");
   routed.search = "plan=pro";
   open();
-  await waitFor(() =>
-    expect(notice).toHaveBeenCalledWith(
+  expect(
+    await screen.findByText(
       "Pro is not active yet. Refresh after checkout finishes.",
-      expect.objectContaining({ action: expect.any(Object) }),
     ),
-  );
+  ).toBeTruthy();
   expect(screen.getByText("Hobby")).toBeTruthy();
-  expect(routed.router.replace).toHaveBeenCalledWith(
+  expect(replaceState).toHaveBeenCalledWith(
+    globalThis.history.state,
+    "",
     "/projects/prj_1/settings/billing",
   );
-  notice.mockRestore();
+  expect(routed.router.replace).not.toHaveBeenCalled();
+  replaceState.mockRestore();
 });
-it("toasts a closed checkout while showing actual account facts", async () => {
-  const notice = vi.spyOn(toast, "info");
-  routed.search = "credit=cancelled";
+it("keeps a closed-plan toast visible after removing the return query", async () => {
+  const replaceState = vi.spyOn(globalThis.history, "replaceState");
+  routed.search = "plan=cancelled";
   open();
-  await waitFor(() =>
-    expect(notice).toHaveBeenCalledWith(
+  expect(
+    await screen.findByText(
       "Checkout closed. Your current billing details are shown below.",
-      expect.objectContaining({ action: expect.any(Object) }),
     ),
-  );
+  ).toBeTruthy();
   expect(screen.getByText("$4.25")).toBeTruthy();
-  notice.mockRestore();
+  expect(replaceState).toHaveBeenCalledWith(
+    globalThis.history.state,
+    "",
+    "/projects/prj_1/settings/billing",
+  );
+  expect(routed.router.replace).not.toHaveBeenCalled();
+  replaceState.mockRestore();
 });
 it("buys a preset and preserves an action failure", async () => {
   open();
