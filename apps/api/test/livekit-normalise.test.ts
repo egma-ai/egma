@@ -153,6 +153,36 @@ describe("LiveKit Agents 1.7 trace attributes", () => {
     );
   });
 
+  it("keeps empty native agent records out of the conversation and keeps response errors on the native record", () => {
+    const failedResponse = span("0011223344556603", "agent_turn", {
+      "lk.pii.user_input": "Please try that.",
+    });
+    failedResponse.status = {
+      code: "STATUS_CODE_ERROR",
+      message: "the response failed",
+    };
+    const continuation = span("0011223344556613", "agent_turn", {});
+
+    const result = normalise(
+      { "lk.pii.room_name": "egma-sim-chat-sim_empty" },
+      [failedResponse, continuation],
+      "1.7.1",
+      "chat",
+    );
+
+    expect(result.spans).toMatchObject([
+      {
+        kind: "turn:human",
+        text: "Please try that.",
+        status: "unset",
+        durationNanoseconds: 0n,
+      },
+      { kind: "other", text: "", status: "error" },
+      { kind: "other", text: "", status: "unset" },
+    ]);
+    expect(result.spans[1]?.payload).toContain('"message":"the response failed"');
+  });
+
   it("uses voice user turns across separate reversed exports without deriving duplicates", () => {
     const resource = { "lk.pii.room_name": "egma-sim-sim_voice" };
     const accepted = span("0011223344556606", "agent_turn", {
@@ -169,7 +199,7 @@ describe("LiveKit Agents 1.7 trace attributes", () => {
 
     expect(acceptedFirst.spans).toHaveLength(1);
     expect(acceptedFirst.spans[0]).toMatchObject({
-      kind: "turn:agent",
+      kind: "other",
       text: "",
     });
     expect(transcriptLater.spans[0]).toMatchObject({
@@ -194,7 +224,7 @@ describe("LiveKit Agents 1.7 trace attributes", () => {
       ],
     );
 
-    expect(result.spans[0]).toMatchObject({ kind: "turn:agent", text: "" });
+    expect(result.spans[0]).toMatchObject({ kind: "other", text: "" });
   });
 
   it.each([

@@ -778,6 +778,12 @@ export function normaliseOtlpExport(
           scope?.name === LIVEKIT_SCOPE && span.name === "agent_turn"
             ? firstAttribute([attributes], LIVEKIT_CALLER_INPUT)
             : "";
+        const native =
+          scope?.name === LIVEKIT_SCOPE &&
+          span.name === "agent_turn" &&
+          normalised.text === ""
+            ? { ...normalised, kind: "other" }
+            : normalised;
         if (callerInput !== "" && attribution.modality === "chat") {
           const caller: NewSpan = {
             ...normalised,
@@ -786,18 +792,16 @@ export function normaliseOtlpExport(
             // includes response work and is not a caller-input duration.
             durationNanoseconds: 0n,
             kind: "turn:human",
+            // This row records accepted caller input. A later agent response
+            // error belongs to the native span, not to what the caller said.
+            status: "unset",
             text: callerInput,
             payload: callerInputPayload(payload),
             endsTrace: false,
           };
-          append([
-            caller,
-            normalised.text === ""
-              ? { ...normalised, kind: "other" }
-              : normalised,
-          ]);
+          append([caller, native]);
         } else {
-          append([normalised]);
+          append([native]);
         }
       }
     }
