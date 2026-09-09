@@ -23,8 +23,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = Path(__file__).resolve().parent
 SIMULATOR_PYTHON = ROOT / "apps/simulator/.venv/bin/python"
-LIVEKIT_KEY = "devkey"
-LIVEKIT_SECRET = "secret"
+LIVEKIT_KEY = "fixturekey"
+LIVEKIT_SECRET = "fixture-secret-0123456789abcdef0123456789abcdef"
 PROJECT_KEY = "egma_sk_" + "a" * 43
 START_SECONDS = 60
 SIMULATION_SECONDS = 150
@@ -200,6 +200,8 @@ def start_livekit(directory: Path) -> LiveKitServer:
     name = f"egma-livekit-e2e-{os.getpid()}-{http_port}"
     config = (
         f"port: {http_port}\n"
+        "keys:\n"
+        f"  {LIVEKIT_KEY}: {LIVEKIT_SECRET}\n"
         "rtc:\n"
         f"  tcp_port: {tcp_port}\n"
         f"  udp_port: {udp_port}\n"
@@ -223,7 +225,6 @@ def start_livekit(directory: Path) -> LiveKitServer:
             "--env",
             f"LIVEKIT_CONFIG={config}",
             pinned_livekit_image(),
-            "--dev",
             "--bind",
             "0.0.0.0",
         ],
