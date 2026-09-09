@@ -4,6 +4,7 @@ Readers can use nested fields without repeating schema checks.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -155,7 +156,7 @@ class SelectedModels:
                 provider=tts["provider"],
                 model=tts["model"],
                 adapter=tts["adapter"],
-                key=tts.get("key"),
+                key=_provider_key(tts),
                 funding_receipt=tts.get("funding_receipt"),
                 voice_id=tts["voice_id"],
                 speed=float(tts["speed"]),
@@ -169,9 +170,34 @@ def _selection(written: Any) -> ModelSelection:
         model=written["model"],
         adapter=written["adapter"],
         reasoning_effort=written.get("reasoning_effort"),
-        key=written.get("key"),
+        key=_provider_key(written),
         funding_receipt=written.get("funding_receipt"),
     )
+
+
+_PROVIDER_SECRET_ENVIRONMENT = {
+    "openai": "EGMA_OPENAI_API_KEY",
+    "deepgram": "EGMA_DEEPGRAM_API_KEY",
+    "cartesia": "EGMA_CARTESIA_API_KEY",
+}
+
+
+def _provider_key(written: Any) -> str | None:
+    """Resolve only the deployment provider references the API may issue."""
+    key = written.get("key")
+    if not isinstance(key, str) or not key.startswith("env:"):
+        return key
+    variable = _PROVIDER_SECRET_ENVIRONMENT.get(written.get("provider"))
+    if variable is None or key != f"env:{variable}":
+        raise ValueError(
+            "the work order names an unsupported provider secret reference"
+        )
+    value = os.environ.get(variable, "").strip()
+    if not value:
+        raise ValueError(
+            f"the work order needs {variable}, but the sandbox has no value"
+        )
+    return value
 
 
 @dataclass(frozen=True)

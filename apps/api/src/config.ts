@@ -14,7 +14,7 @@ import type { SmtpSettings } from "./auth/email.ts";
 import { loadIngestionSettings, type IngestionSettings } from "@egma/ingestion";
 export type { IngestionSettings } from "@egma/ingestion";
 import type { BlobStore } from "./recordings/signed-link.ts";
-import type { AwsVoiceFleetSettings } from "./voice-fleet.ts";
+import type { VoiceFleetSettings } from "./voice-fleet.ts";
 
 /** The one deployment-owned route used for phone simulations. */
 export type CarrierRoute = {
@@ -132,8 +132,8 @@ export type Config = {
   readonly providerCredentials: ProviderCredentialSource;
   /** Optional deployment-wide simulation and speech-provider concurrency caps. */
   readonly simulationConcurrencyCaps: SimulationConcurrencyCaps;
-  /** Hosted voice compute. Unset self-hosts never import the AWS adapter. */
-  readonly voiceFleet: AwsVoiceFleetSettings | undefined;
+  /** Hosted voice compute. Unset self-hosts never import the Daytona adapter. */
+  readonly voiceFleet: VoiceFleetSettings | undefined;
   /** Immutable public commit running in this task, exposed by `/health`. */
   readonly releaseSha: string | undefined;
   /**
@@ -288,30 +288,59 @@ function simulationConcurrencyCaps(
   };
 }
 
-function jsonStringList(environment: NodeJS.ProcessEnv, name: string): string[] {
+const DAYTONA_PROVIDER_SECRET_ENVIRONMENT = new Set([
+  "EGMA_OPENAI_API_KEY",
+  "EGMA_DEEPGRAM_API_KEY",
+  "EGMA_CARTESIA_API_KEY",
+]);
+const REQUIRED_DAYTONA_PROVIDER_SECRET_ENVIRONMENT = [
+  "EGMA_OPENAI_API_KEY",
+  "EGMA_DEEPGRAM_API_KEY",
+  "EGMA_CARTESIA_API_KEY",
+] as const;
+
+function jsonStringMap(
+  environment: NodeJS.ProcessEnv,
+  name: string,
+): Record<string, string> {
   const raw = environment[name]?.trim();
-  if (!raw) throw new Error(`${name} is required by EGMA_VOICE_FLEET_LAUNCHER`);
+  if (!raw) return {};
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    throw new Error(`${name} must be a JSON array of non-empty strings`);
+    throw new Error(`${name} must be a JSON object of environment variables to secret names`);
   }
   if (
-    !Array.isArray(parsed) || parsed.length === 0 ||
-    parsed.some((value) => typeof value !== "string" || value.trim() === "")
+    typeof parsed !== "object" || parsed === null || Array.isArray(parsed) ||
+    Object.entries(parsed).some(
+      ([variable, secret]) =>
+        !DAYTONA_PROVIDER_SECRET_ENVIRONMENT.has(variable) ||
+        typeof secret !== "string" || secret.trim() === "",
+    )
   ) {
-    throw new Error(`${name} must be a non-empty JSON array of non-empty strings`);
+    throw new Error(
+      `${name} supports only EGMA_OPENAI_API_KEY, EGMA_DEEPGRAM_API_KEY, and EGMA_CARTESIA_API_KEY with non-empty secret names`,
+    );
   }
-  return parsed.map((value) => value.trim());
+  return Object.fromEntries(
+    Object.entries(parsed).map(([variable, secret]) => [
+      variable,
+      (secret as string).trim(),
+    ]),
+  );
 }
 
 function voiceFleetSettings(
   environment: NodeJS.ProcessEnv,
-): AwsVoiceFleetSettings | undefined {
+  context: {
+    readonly baseUrl: string;
+    readonly releaseSha: string | undefined;
+  },
+): VoiceFleetSettings | undefined {
   const kind = environment.EGMA_VOICE_FLEET_LAUNCHER?.trim();
   if (!kind) return undefined;
-  if (kind !== "aws-ecs") {
+  if (kind !== "daytona") {
     throw new Error(`EGMA_VOICE_FLEET_LAUNCHER does not support ${kind}`);
   }
   const required = (name: string): string => {
@@ -319,16 +348,41 @@ function voiceFleetSettings(
     if (!value) throw new Error(`${name} is required by EGMA_VOICE_FLEET_LAUNCHER`);
     return value;
   };
+  if (context.releaseSha === undefined) {
+    throw new Error("EGMA_RELEASE_SHA is required by EGMA_VOICE_FLEET_LAUNCHER");
+  }
+  const ttlMinutes = positiveWhole(environment, "DAYTONA_SANDBOX_TTL_MINUTES") ?? 30;
+  const providerSecrets = jsonStringMap(environment, "DAYTONA_SANDBOX_SECRETS");
+  const missingProviderSecrets = REQUIRED_DAYTONA_PROVIDER_SECRET_ENVIRONMENT.filter(
+    (variable) => providerSecrets[variable] === undefined,
+  );
+  if (missingProviderSecrets.length > 0) {
+    throw new Error(
+      `DAYTONA_SANDBOX_SECRETS must map ${missingProviderSecrets.join(", ")}`,
+    );
+  }
   return {
     kind,
-    cluster: required("EGMA_VOICE_FLEET_CLUSTER"),
-    taskDefinition: required("EGMA_VOICE_FLEET_TASK_DEFINITION"),
-    containerName: "simulator",
-    subnets: jsonStringList(environment, "EGMA_VOICE_FLEET_SUBNETS"),
-    securityGroups: jsonStringList(
-      environment,
-      "EGMA_VOICE_FLEET_SECURITY_GROUPS",
-    ),
+    apiKey: required("DAYTONA_API_KEY"),
+    ...(environment.DAYTONA_API_URL?.trim()
+      ? { apiUrl: environment.DAYTONA_API_URL.trim() }
+      : {}),
+    ...(environment.DAYTONA_TARGET?.trim()
+      ? { target: environment.DAYTONA_TARGET.trim() }
+      : {}),
+    snapshot: required("DAYTONA_SNAPSHOT_ID"),
+    releaseSha: context.releaseSha,
+    ttlMinutes,
+    serviceTokenSecret: required("DAYTONA_SERVICE_TOKEN_SECRET"),
+    providerSecrets,
+    controlPlaneUrl: context.baseUrl,
+    livekitUrl: required("EGMA_SIMULATOR_LIVEKIT_URL"),
+    livekitApiKey: required("EGMA_SIMULATOR_LIVEKIT_API_KEY"),
+    livekitApiSecret: required("EGMA_SIMULATOR_LIVEKIT_API_SECRET"),
+    s3Endpoint: required("EGMA_SIMULATOR_S3_ENDPOINT"),
+    s3Bucket: required("EGMA_SIMULATOR_S3_BUCKET"),
+    s3Region: required("EGMA_SIMULATOR_S3_REGION"),
+    recordingRoleArn: required("EGMA_DAYTONA_RECORDING_ROLE_ARN"),
   };
 }
 
@@ -511,6 +565,7 @@ export function loadConfig(
     );
   }
   const baseUrl = parsedBaseUrl.origin;
+  const currentReleaseSha = releaseSha(environment);
 
   return {
     smtp: smtpSettings(environment, baseUrl),
@@ -527,8 +582,11 @@ export function loadConfig(
     simulatorServiceToken,
     providerCredentials: providerCredentialSource(environment),
     simulationConcurrencyCaps: simulationConcurrencyCaps(environment),
-    voiceFleet: voiceFleetSettings(environment),
-    releaseSha: releaseSha(environment),
+    voiceFleet: voiceFleetSettings(environment, {
+      baseUrl,
+      releaseSha: currentReleaseSha,
+    }),
+    releaseSha: currentReleaseSha,
     // The open plug-in, always, and the one setting that can replace it. A
     // deployment that named a Stripe secret has the cloud adapter installed
     // over this at boot; see `billing.ts` and `index.ts`.

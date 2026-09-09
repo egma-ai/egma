@@ -17,6 +17,10 @@ endpoint of yours for one scoped token per simulation.** The secret that signs
 tokens for your whole LiveKit project never leaves your side. Egma holds a token
 that opens one room, as one participant, for one conversation.
 
+For this authentication path, your endpoint owns the room lifecycle. It
+prepares the room, dispatches the requested worker, and cleans the room up after
+Egma leaves.
+
 ## The contract is LiveKit's own
 
 Egma speaks [LiveKit's standard token endpoint
@@ -80,11 +84,14 @@ What you can hold Egma to:
 - **One join, over TLS, to a public server.** Egma joins once, as that
   identity, to that room, at the server URL you return. It holds that URL to the
   rule it holds your endpoint to: `wss://` or `https://`, and a host that
-  resolves to a public address. It publishes and subscribes audio. It waits 30
-  seconds for your worker to join and speak, then ends the simulation as
-  `agent_never_joined`.
+  resolves to a public address. A voice simulation publishes and subscribes to
+  audio. A chat simulation joins as one text-only client: it publishes no media
+  tracks, subscribes to no audio, and performs no audio decoding, STT, TTS,
+  recording, or voice processing. It waits 30 seconds for your worker to join
+  and answer, then ends the simulation as `agent_never_joined`.
 - **Leave, never delete.** Egma leaves when the conversation ends. It never
-  deletes the room, and it never uses the token again.
+  deletes the room, and it never uses the token again. Your token endpoint owns
+  cleanup for this room.
 
 ## What your endpoint returns
 
@@ -121,12 +128,13 @@ Your endpoint must also:
 - Check the auth header on every request, in constant time. Answer 401 or 403
   otherwise.
 - Refuse a `room_name` that does not start with `egma-sim-`. Answer 4xx.
-- Copy `room_config` into the token, or answer 4xx if you do not let a client
+- Copy `room_config` into the token so LiveKit prepares the room and dispatches
+  the requested worker, or answer 4xx if you do not let a client
   name the worker. LiveKit's own rule is 4xx for fields a client may not set. If
   you refuse it, your side must dispatch the worker another way: automatic
   dispatch, or an `AgentDispatchService` call in the same handler.
-- Keep a short empty timeout on your project, so the room closes after Egma
-  leaves.
+- Clean up the room after Egma leaves. A short empty timeout on your project is
+  one way to do this.
 
 ## A complete handler
 

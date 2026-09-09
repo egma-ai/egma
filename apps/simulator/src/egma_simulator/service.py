@@ -22,7 +22,6 @@ from .client import ClaimedSpec, ClaimFailure, ControlPlaneClient, HeartbeatFail
 from .config import MediaSettings, SimulatorConfig
 from .contract import ContractViolation
 from .conversation import Conducted, ConversationControls, conduct
-from .fleet import FleetMetadataFailure, fleet_identity_for
 from .model import build_model_client
 from .persona import Persona
 from .pipeline import Assembled, assemble
@@ -63,6 +62,7 @@ def blob_store_for(config: SimulatorConfig) -> BlobStore:
         bucket=store.bucket,
         access_key_id=store.access_key_id,
         secret_access_key=store.secret_access_key,
+        session_token=store.session_token,
         region=store.region,
     )
 
@@ -570,24 +570,11 @@ class SimulatorService:
         records what a disappearing simulator means.
         """
         config = self._config
-        metadata_uri = os.environ.get("ECS_CONTAINER_METADATA_URI_V4")
-        try:
-            identity = await fleet_identity_for(config.mode, metadata_uri)
-        except FleetMetadataFailure as error:
-            log_event(
-                logger,
-                logging.ERROR,
-                "egma.service.fleet_metadata_failed",
-                "hosted simulator could not read its ECS task identity",
-                attributes={"error.type": type(error).__name__},
-            )
-            raise
-        fleet = None if identity is None else identity.document()
         async with ControlPlaneClient(
             config.control_plane_url,
             claim_wait_seconds=config.claim_wait_seconds,
             service_token=config.service_token,
-            fleet=fleet,
+            runtime=config.runtime,
         ) as client:
             executor = AsyncioExecutor(
                 config.capacity,
@@ -688,36 +675,12 @@ class SimulatorService:
                     )
                 except ClaimFailure as failure:
                     self._note_claim_failure(str(failure))
-                    if self._config.mode == "one-shot":
-                        return
-                    await asyncio.sleep(CLAIM_RETRY_SECONDS)
-                    continue
+                    return
                 self._last_claim_failure = None
                 self._accept(specs, executor)
-                if client.retire_requested:
-                    log_event(
-                        logger,
-                        logging.INFO,
-                        "egma.service.retired",
-                        "hosted simulator retired before claiming work",
-                    )
-                    return
-                if specs or self._config.mode == "one-shot":
-                    return
+                return
 
-        if self._config.mode == "standby":
-            try:
-                async with asyncio.timeout(self._config.standby_seconds):
-                    await claim_until_work()
-            except TimeoutError:
-                log_event(
-                    logger,
-                    logging.INFO,
-                    "egma.service.standby_expired",
-                    "standby simulator idle limit expired",
-                )
-        else:
-            await claim_until_work()
+        await claim_until_work()
 
     def _note_claim_failure(self, failure: str) -> None:
         """Say a claim failure when it is new, and once a minute after that.

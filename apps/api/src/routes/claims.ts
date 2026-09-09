@@ -1,4 +1,3 @@
-import type { VoiceFleetReadiness } from "../voice-fleet-readiness.ts";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import {
@@ -65,8 +64,8 @@ import {
  */
 
 export type ClaimRoutesOptions = {
-  readonly voiceFleetReadiness?: VoiceFleetReadiness | undefined;
   readonly wakeVoiceFleet?: (() => void) | undefined;
+  readonly daytonaProviderSecretEnvironment?: Readonly<Record<string, string>>;
   /** The deployment's service token, from configuration. */
   readonly serviceToken: string;
   /**
@@ -165,6 +164,7 @@ async function modelsBlock(
   models: PersonaModels,
   source: ProviderCredentialSource,
   claim: SimulationClaim,
+  deploymentSecretEnvironment?: Readonly<Record<string, string>>,
 ): Promise<Record<string, unknown>> {
   const entryFor = <Job extends "llm" | "stt" | "tts">(
     job: Job,
@@ -215,8 +215,13 @@ async function modelsBlock(
           }),
         };
   };
-  const keyFor = (provider: PersonaModels["llm"]["provider"]): string =>
+  const keyFor = (provider: PersonaModels["llm"]["provider"]): string => {
+    const direct = customer[provider];
+    if (direct !== undefined) return direct.key;
     credentialFor(credentials, provider);
+    const variable = deploymentSecretEnvironment?.[provider];
+    return variable === undefined ? credentialFor(credentials, provider) : `env:${variable}`;
+  };
   const speechKey = (
     provider: PersonaModels["llm"]["provider"],
   ): Record<string, string> =>
@@ -349,6 +354,7 @@ type ClaimAsk = {
   /** Seconds this request may be held; already bounded by the cap. */
   readonly holdSeconds: number;
   readonly modalities?: readonly ("voice" | "chat")[] | undefined;
+  readonly runtime?: "daytona" | undefined;
 };
 
 /**
@@ -437,6 +443,11 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
     modalities = [...new Set(offeredModalities)];
   }
 
+  const runtime = body.runtime;
+  if (runtime !== undefined && runtime !== "daytona") {
+    return { refusal: "runtime must be daytona when it is present" };
+  }
+
   return {
     claimant: claimant.trim(),
     capacity: Math.min(capacity, LARGEST_CLAIM_CAPACITY),
@@ -445,6 +456,7 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
       LONGEST_HOLD_SECONDS,
     ),
     ...(modalities === undefined ? {} : { modalities }),
+    ...(runtime === undefined ? {} : { runtime }),
   };
 }
 
@@ -474,6 +486,7 @@ async function assembledSpec(
   baseUrl: string,
   retellFetch?: typeof fetch,
   responseDeadline = Date.now() + CLAIM_RESPONSE_MILLISECONDS,
+  deploymentSecretEnvironment?: Readonly<Record<string, string>>,
 ): Promise<
   | Record<string, unknown>
   | { readonly unbuildable: string; readonly providerKeyUnavailable?: boolean }
@@ -563,6 +576,7 @@ async function assembledSpec(
       personaModelsOfParameters(validatePersonaParameterValues(personaVersion.parameterContract, claim.personaParameterValues)),
       providerCredentials,
       claim,
+      deploymentSecretEnvironment,
     );
   } catch (fault) {
     if (fault instanceof ProviderKeyUnavailableError)
@@ -684,15 +698,6 @@ export async function claimRoutes(
   app.post(CLAIMS_PATH, async (request, reply) => {
     const ask = claimAsk((request.body ?? {}) as Body);
     if ("refusal" in ask) return invalid(reply, ask.refusal);
-    const fleet = options.voiceFleetReadiness;
-    const identity = fleet?.identity(((request.body ?? {}) as Body).fleet);
-    if (identity !== undefined) {
-      fleet?.waiting(identity);
-      options.wakeVoiceFleet?.();
-      if (fleet?.shouldRetire(identity)) {
-        return reply.send({ specs: [], retire: true });
-      }
-    }
 
     // A client that hangs up mid-hold should stop being worked for: rows
     // claimed for nobody would sit claimed until the sweep called them
@@ -724,9 +729,6 @@ export async function claimRoutes(
           Math.min(RECHECK_MILLISECONDS, holdDeadline - Date.now()),
         );
         if (gone) break;
-        if (identity !== undefined && fleet?.shouldRetire(identity)) {
-          return reply.send({ specs: [], retire: true });
-        }
         claims = await claimSimulations({
           claimant: ask.claimant,
           capacity: ask.capacity,
@@ -832,6 +834,9 @@ export async function claimRoutes(
                 options.baseUrl,
                 options.retellFetch,
                 responseDeadline,
+                ask.runtime === "daytona"
+                  ? options.daytonaProviderSecretEnvironment
+                  : undefined,
               ).catch(
                 (_fault: unknown): { readonly unbuildable: string } => ({
                   // This broad catch can hold dependency or credential errors.
@@ -1015,14 +1020,7 @@ export async function claimRoutes(
         );
       }
 
-      if (identity !== undefined) {
-        if (dispatchedVoice) {
-          fleet?.busy(identity);
-          options.wakeVoiceFleet?.();
-        } else {
-          fleet?.unclaimed(identity);
-        }
-      }
+      if (dispatchedVoice) options.wakeVoiceFleet?.();
       return await reply.send({ specs, claimed_at: claimedAt });
     } finally {
       // Taken back off rather than left behind: a keep-alive socket outlives

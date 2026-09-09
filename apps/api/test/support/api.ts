@@ -73,6 +73,7 @@ export type TestApi = {
 
 export type TestApiOptions = {
   readonly singleOrganization?: boolean;
+  readonly voiceFleet?: Config["voiceFleet"];
   /**
    * The deployment-owned phone route this instance starts with.
    *
@@ -105,7 +106,6 @@ export type TestApiOptions = {
   /** A sweep cadence short enough to observe, for the tests about the sweep. */
   readonly orphanSweepIntervalMilliseconds?: number;
   readonly wakeVoiceFleet?: ServerOptions["wakeVoiceFleet"];
-  readonly voiceFleetReadiness?: ServerOptions["voiceFleetReadiness"];
   /** Where Retell answers. A test stands a Retell-shaped server on loopback. */
   readonly retellReach?: ServerOptions["retellReach"];
   /**
@@ -291,6 +291,7 @@ export async function createApi(
     ...(options.providerCredentials === undefined
       ? {}
       : { providerCredentials: options.providerCredentials }),
+    ...(options.voiceFleet === undefined ? {} : { voiceFleet: options.voiceFleet }),
     ...(options.billing === undefined ? {} : { billing: options.billing }),
   });
   const config: Config =
@@ -340,9 +341,6 @@ export async function createApi(
       : undefined;
 
   const { app, identity, drainer } = buildApi({
-    ...(options.voiceFleetReadiness === undefined
-      ? {}
-      : { voiceFleetReadiness: options.voiceFleetReadiness }),
     config,
     drainsPendingEvidence: options.drainsPendingEvidence ?? false,
     ...(options.ingestionShutdownTimeoutMilliseconds === undefined

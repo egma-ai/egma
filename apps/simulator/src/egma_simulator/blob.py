@@ -118,6 +118,7 @@ class S3BlobStore:
         bucket: str,
         access_key_id: str,
         secret_access_key: str,
+        session_token: str | None = None,
         region: str,
     ) -> None:
         # The client is imported here rather than at the top of this file,
@@ -142,6 +143,7 @@ class S3BlobStore:
             endpoint_url=endpoint,
             aws_access_key_id=access_key_id,
             aws_secret_access_key=secret_access_key,
+            aws_session_token=session_token,
             region_name=region,
             config=BotoConfig(
                 signature_version="s3v4",

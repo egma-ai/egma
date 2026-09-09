@@ -1,4 +1,3 @@
-import { createVoiceFleetReadiness } from "../src/voice-fleet-readiness.ts";
 import {
   createPersona,
   resolveSimulationStanding,
@@ -1497,6 +1496,57 @@ describe("one source of execution truth", () => {
     expect(JSON.stringify(first)).not.toContain("cartesia-first");
   });
 
+  it("sends Daytona references for platform fallback keys", async () => {
+    const load = vi.fn(async () => ({
+      openai: "platform-openai",
+      deepgram: "platform-deepgram",
+      cartesia: "platform-cartesia",
+    }));
+    const voiceFleet = {
+      kind: "daytona" as const,
+      apiKey: "control",
+      snapshot: "snapshot",
+      releaseSha: "a".repeat(40),
+      ttlMinutes: 30,
+      serviceTokenSecret: "service-token",
+      providerSecrets: {
+        EGMA_OPENAI_API_KEY: "openai-secret",
+        EGMA_DEEPGRAM_API_KEY: "deepgram-secret",
+        EGMA_CARTESIA_API_KEY: "cartesia-secret",
+      },
+      controlPlaneUrl: "https://egma.example",
+      livekitUrl: "wss://livekit.example",
+      livekitApiKey: "key",
+      livekitApiSecret: "secret",
+      s3Endpoint: "https://s3.example",
+      s3Bucket: "recordings",
+      s3Region: "us-east-1",
+      recordingRoleArn: "arn:aws:iam::123:role/recording",
+    };
+    const { key, connectionId, versionId } = await aRealtimeVoiceCustomerReadyToRun(
+      "claims_daytona_provider_secrets",
+      { providerCredentials: { load }, voiceFleet },
+    );
+    await aQueuedRun(key, connectionId, versionId);
+
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "daytona-runtime",
+      capacity: 1,
+      wait_seconds: 0,
+      modalities: ["voice"],
+      runtime: "daytona",
+    });
+    const models = (answered.body.specs as Record<string, unknown>[])[0]?.models;
+
+    expect(models).toMatchObject({
+      llm: { key: "env:EGMA_OPENAI_API_KEY" },
+      stt: { key: "env:EGMA_OPENAI_API_KEY" },
+      tts: { key: "env:EGMA_CARTESIA_API_KEY" },
+    });
+    expect(JSON.stringify(models)).not.toContain("platform-openai");
+    expect(JSON.stringify(models)).not.toContain("platform-cartesia");
+  });
+
   it("releases work when the current AWS bundle cannot be read", async () => {
     const load = vi
       .fn()
@@ -1712,49 +1762,4 @@ it("names an unreadable customer key at dispatch and does not fall back to the d
   expect(row?.executionFailure).toContain("OpenAI API key");
   expect(row?.executionFailure).not.toContain("not-a-sealed-credential");
   expect(load).not.toHaveBeenCalled();
-});
-
-
-describe("hosted voice standby claims", () => {
-  const prefix = "arn:aws:ecs:us-east-1:123456789012";
-  const taskDefinition = `${prefix}:task-definition/egma-voice:2`;
-  const fleetIdentity = { taskArn: `${prefix}:task/egma/worker`, taskDefinition };
-
-  it("marks a voice claimant busy and wakes replacement capacity before returning its spec", async () => {
-    const readiness = createVoiceFleetReadiness({ taskDefinition });
-    const wakeVoiceFleet = vi.fn();
-    const { key, connectionId, versionId } = await aRealtimeVoiceCustomerReadyToRun(
-      "claims_ready_standby", { voiceFleetReadiness: readiness, wakeVoiceFleet },
-    );
-    readiness.observeTasks([{ id: fleetIdentity.taskArn, taskDefinition, mode: "standby", createdAt: Date.now() }]);
-    await aQueuedRun(key, connectionId, versionId);
-    wakeVoiceFleet.mockClear();
-    const answered = await claim(api.config.simulatorServiceToken, {
-      claimant: "standby-under-test", capacity: 1, wait_seconds: 0, modalities: ["voice"], fleet: fleetIdentity,
-    });
-    expect(answered.statusCode).toBe(200);
-    expect(answered.body.specs).toHaveLength(1);
-    expect(readiness.snapshot().readyStandbys).toBe(0);
-    expect(wakeVoiceFleet).toHaveBeenCalledTimes(2);
-  });
-
-  it("retires an old idle revision without taking queued work once replacement standbys are ready", async () => {
-    const readiness = createVoiceFleetReadiness({ taskDefinition });
-    const { key, connectionId, versionId } = await aRealtimeVoiceCustomerReadyToRun(
-      "claims_retire_standby", { voiceFleetReadiness: readiness },
-    );
-    const old = { ...fleetIdentity, taskDefinition: `${prefix}:task-definition/egma-voice:1` };
-    const replacements = ["ready-a", "ready-b"].map((id) => ({ taskArn: `${prefix}:task/egma/${id}`, taskDefinition }));
-    readiness.observeTasks([old, ...replacements].map((item) => ({id: item.taskArn, taskDefinition: item.taskDefinition, mode: "standby", createdAt: Date.now()})));
-    replacements.forEach((item) => readiness.waiting(item));
-    const { simulationId } = await aQueuedRun(key, connectionId, versionId);
-    const answered = await claim(api.config.simulatorServiceToken, {
-      claimant: "old-standby", capacity: 1, wait_seconds: 0, modalities: ["voice"], fleet: old,
-    });
-    expect(answered.body).toEqual({ specs: [], retire: true });
-    const fresh = await claim(api.config.simulatorServiceToken, {
-      claimant: "new-standby", capacity: 1, wait_seconds: 0, modalities: ["voice"], fleet: replacements[0],
-    });
-    expect((fresh.body.specs as Record<string, unknown>[])[0]?.simulation_id).toBe(simulationId);
-  });
 });

@@ -9,8 +9,9 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@aws-sdk/client-ecs": "^3.1127.0",
     "@aws-sdk/client-s3": "^3.1116.0",
+    "@aws-sdk/client-sts": "^3.1127.0",
+    "@daytona/sdk": "0.211.2",
     "@egma/db": "workspace:*",
     "@egma/ids": "workspace:*",
     "@egma/ingestion": "workspace:*",
@@ -28,6 +29,7 @@
     "@opentelemetry/sdk-node": "^0.221.0",
     "better-auth": "^1.6.25",
     "fastify": "^5.12.1",
+    "livekit-server-sdk": "^2.18.0",
     "nodemailer": "^9.0.3",
     "posthog-node": "^5.49.1",
     "protobufjs": "^8.7.1"

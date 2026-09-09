@@ -423,7 +423,6 @@ services:
       EGMA_SIMULATOR_MODE: ${EGMA_SIMULATOR_MODE:-}
       EGMA_SIMULATOR_MODALITIES: ${EGMA_SIMULATOR_MODALITIES:-}
       EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS: ${EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS:-}
-      EGMA_SIMULATOR_STANDBY_SECONDS: ${EGMA_SIMULATOR_STANDBY_SECONDS:-}
       EGMA_SIMULATOR_THREAD_POOL_WORKERS: ${EGMA_SIMULATOR_THREAD_POOL_WORKERS:-}
       # No model, voice or provider key is container configuration. The pinned
       # persona version supplies one complete selection, and the claim adds only

@@ -295,11 +295,10 @@ transport and process settings only.
 | `EGMA_SIMULATOR_CONTROL_PLANE_URL` | (required) | Where to claim, heartbeat, and report. |
 | `EGMA_SIMULATOR_SERVICE_TOKEN` | (none) | Sent as `Authorization: Bearer` on every outbound call. The real control plane requires it and checks it against its own `EGMA_SIMULATOR_SERVICE_TOKEN`. `egma self-host up` generates one private workspace value and gives the same value to both containers; an advanced deployment must supply the matching value to both processes. The claim answers carry live provider credentials. The workbench asks for none. |
 | `EGMA_SIMULATOR_CAPACITY` | `2` | Most simulations conducted at once. Compose passes an unset value through, so this process owns the default in every deployment. A voice simulation costs a channel on the deployment's carrier trunk, so raise it only as far as the trunk allows. |
-| `EGMA_SIMULATOR_MODE` | `persistent` | Keep the pull loop, claim once with `one-shot`, or wait for one voice simulation with `standby`. One-shot and standby modes default to capacity one and voice only. |
-| `EGMA_SIMULATOR_MODALITIES` | mode-dependent | Comma-separated `voice,chat`. Unset accepts both in persistent mode and voice only in one-shot or standby mode. |
-| `EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS` | `900` | One-shot and standby deadline from claim through setup, call, upload, report retries, and teardown. Persistent mode does not use this deadline. |
-| `EGMA_SIMULATOR_STANDBY_SECONDS` | `1800` | Maximum idle claim wait in standby mode. A claim starts the separate execution deadline. |
-| `EGMA_SIMULATOR_THREAD_POOL_WORKERS` | mode-dependent | Native thread pool size. Defaults to one in one-shot/standby mode; persistent mode retains its existing pool settings. |
+| `EGMA_SIMULATOR_MODE` | `persistent` | Keep the pull loop, or claim once with `one-shot`. One-shot mode defaults to capacity one and voice only. |
+| `EGMA_SIMULATOR_MODALITIES` | mode-dependent | Comma-separated `voice,chat`. Unset accepts both in persistent mode and voice only in one-shot mode. |
+| `EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS` | `900` | One-shot deadline from claim through setup, call, upload, report retries, and teardown. Persistent mode does not use this deadline. |
+| `EGMA_SIMULATOR_THREAD_POOL_WORKERS` | mode-dependent | Native thread pool size. Defaults to one in one-shot mode; persistent mode retains its existing pool settings. |
 | `EGMA_SIMULATOR_CLAIMANT` | `egma-simulator-<host>-<pid>` | The name stamped on claims. |
 | `EGMA_SIMULATOR_HEARTBEAT_SECONDS` | `5` | Beat interval per running simulation. |
 | `EGMA_SIMULATOR_CLAIM_WAIT_SECONDS` | `30` | How long one claim request is willing to hang, sent as the claim's `wait_seconds` so the control plane holds no longer than the client will wait. The control plane caps its own hold below this default. |
@@ -309,12 +308,17 @@ transport and process settings only.
 | `EGMA_SIMULATOR_LIVEKIT_URL` | (required for `livekit`) | The LiveKit server — self-hosted or Cloud, only the URL differs. |
 | `EGMA_SIMULATOR_LIVEKIT_API_KEY` | (required for `livekit`) | The LiveKit API key. |
 | `EGMA_SIMULATOR_LIVEKIT_API_SECRET` | (required for `livekit`) | The LiveKit API secret. Never logged. |
+| `EGMA_SIMULATOR_LIVEKIT_ROOM_NAME` | hosted only | The room assigned to one Daytona voice simulation. |
+| `EGMA_SIMULATOR_LIVEKIT_ROOM_TOKEN` | hosted only | A short-lived participant token scoped to that room. |
+| `EGMA_SIMULATOR_LIVEKIT_API_TOKEN` | hosted only | A short-lived room-admin and SIP token scoped to that room. |
+| `EGMA_SIMULATOR_RUNTIME` | (none) | The hosted claimant marker. Daytona sandboxes set it to `daytona`. |
 | `EGMA_SIMULATOR_WAL_DIR` | `.egma-simulator/wal` | Where report documents land before sending. |
 | `EGMA_SIMULATOR_S3_ENDPOINT` | (none) | Where the object store recordings go to answers, on the deployment's own network. Naming it is the whole of what selects object storage, and what makes the two credentials below required; naming none keeps the filesystem store, so a checkout needs no container. |
 | `EGMA_SIMULATOR_S3_BUCKET` | `egma-recordings` | The bucket recordings land in. The deployment creates it on first start. |
 | `EGMA_SIMULATOR_S3_REGION` | `us-east-1` | What requests are signed for. MinIO ignores it; a bucket at a real provider does not. |
 | `EGMA_SIMULATOR_S3_ACCESS_KEY_ID` | (required with an endpoint) | The write credential's key id. Never logged. |
 | `EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY` | (required with an endpoint) | The write credential's secret. Never logged. |
+| `EGMA_SIMULATOR_S3_SESSION_TOKEN` | hosted only | The session token paired with the short-lived recording credentials. |
 | `EGMA_SIMULATOR_BLOB_DIR` | `.egma-simulator/blobs` | Where recordings land when no endpoint above names an object store. Unread, and not even created, when one does. |
 | `EGMA_SIMULATOR_LOG_LEVEL` | `INFO` | The usual levels: `CRITICAL`, `ERROR`, `WARNING`, `INFO`, `DEBUG`. |
 | `EGMA_SIMULATION_CONTRACT_DIR` | auto-located | The contract package, when the repo layout isn't around it. |
