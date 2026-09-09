@@ -177,6 +177,7 @@ export async function openCreditCheckout(
         mode: "payment",
         customer: customerId,
         client_reference_id: auth.organizationId,
+        allow_promotion_codes: true,
         automatic_tax: { enabled: true },
         // Stripe Tax needs an address to work out a rate, and a returning
         // customer should not retype one they have already given.
@@ -258,13 +259,14 @@ export async function openUpgradeCheckout(
         mode: "subscription",
         customer: customerId,
         client_reference_id: auth.organizationId,
+        allow_promotion_codes: true,
         automatic_tax: { enabled: true },
         customer_update: { address: "auto", name: "auto" },
         line_items: [
           { price: prices.fee, quantity: 1 },
           // A metered item carries no quantity: the meter is what says how much.
-          { price: prices.webCall },
           { price: prices.phone },
+          { price: prices.webCall },
         ],
         subscription_data: {
           // What the invoice and the dashboard say this subscription is for.

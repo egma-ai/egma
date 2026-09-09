@@ -16,29 +16,22 @@ import {
 } from "../lib/billing.ts";
 import { asListInstant } from "../lib/instants.ts";
 import { Dialog } from "./dialog.tsx";
-import { Facts, Section } from "./section.tsx";
 
 export function BillingAccountSections({
   account,
   onRefresh,
-  onBusyChange,
 }: {
   readonly account: BillingAccount;
   readonly onRefresh: () => void;
-  readonly onBusyChange: (busy: boolean) => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [said, setSaid] = useState<{
-    readonly section: "plan" | "credit";
+    readonly section: "plan" | "credit" | "payments";
     readonly message: string;
   } | null>(null);
   const [picking, setPicking] = useState(false);
   const [stopping, setStopping] = useState(false);
   const actions = account.actions;
-  useEffect(() => {
-    onBusyChange(busy !== null);
-    return () => onBusyChange(false);
-  }, [busy, onBusyChange]);
   useEffect(() => {
     const returned = () => {
       setBusy(null);
@@ -71,7 +64,8 @@ export function BillingAccountSections({
       } catch {
         setBusy(null);
         setSaid({
-          section: what === "credit" ? "credit" : "plan",
+          section:
+            what === "credit" ? "credit" : what === "portal" ? "payments" : "plan",
           message: "The payment page could not open. Try again.",
         });
         return;
@@ -79,7 +73,8 @@ export function BillingAccountSections({
     }
     setBusy(null);
     setSaid({
-      section: what === "credit" ? "credit" : "plan",
+      section:
+        what === "credit" ? "credit" : what === "portal" ? "payments" : "plan",
       message:
         answer.status === "signed-out"
           ? "Sign in again to change this organization's billing."
@@ -105,130 +100,160 @@ export function BillingAccountSections({
     });
   };
 
+  const paymentMessage = !account.mayManageBilling
+    ? "An organization admin can manage the plan and payments."
+    : !actions.available
+      ? "Payment actions are unavailable. Ask your administrator to check billing setup."
+      : null;
+
   return (
-    <>
-      <Section title="Plan">
-        <Card>
-          <Facts facts={[{ label: "Plan", value: account.plan.name }]} />
-        </Card>
-        {account.scheduledDowngradeAt === null ? null : (
-          <p className="m-0 text-sm text-muted-foreground" role="status">
-            Pro stops on{" "}
-            <time
-              className="tabular-nums"
-              dateTime={account.scheduledDowngradeAt}
-            >
-              {asListInstant(account.scheduledDowngradeAt)}
-            </time>
-            . Everything it includes stays available until then.
-          </p>
-        )}
-        {!account.mayManageBilling ? (
-          <p className="m-0 text-sm text-muted-foreground">
-            An organization admin can manage the plan and payments.
-          </p>
-        ) : !actions.available ? (
-          <p className="m-0 text-sm text-muted-foreground">
-            Payment actions are unavailable. Ask your administrator to check
-            billing setup.
-          </p>
-        ) : (
-          <div className="flex flex-wrap items-center gap-2">
-            {onPro ? null : (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={busy !== null}
-                onClick={() => void follow("upgrade", upgradeToPro)}
+    <div className="mt-8 flex flex-col gap-8">
+      <div className="grid gap-4 md:grid-cols-2">
+        <section aria-labelledby="billing-current-plan">
+          <Card className="h-full">
+            <div className="flex flex-col gap-2">
+              <h2
+                className="m-0 text-base font-medium"
+                id="billing-current-plan"
               >
-                {busy === "upgrade" ? "Opening Stripe…" : "Upgrade to Pro"}
-              </Button>
+                Current plan
+              </h2>
+              <p className="m-0 text-xl font-medium">{account.plan.name}</p>
+            </div>
+            {account.scheduledDowngradeAt === null ? null : (
+              <p className="m-0 text-sm text-muted-foreground" role="status">
+                Pro stops on{" "}
+                <time
+                  className="tabular-nums"
+                  dateTime={account.scheduledDowngradeAt}
+                >
+                  {asListInstant(account.scheduledDowngradeAt)}
+                </time>
+                . Everything it includes stays available until then.
+              </p>
             )}
+            {paymentMessage === null ? (
+              <div className="mt-auto flex flex-wrap items-center gap-2">
+                {onPro ? null : (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={busy !== null}
+                    onClick={() => void follow("upgrade", upgradeToPro)}
+                  >
+                    {busy === "upgrade" ? "Opening Stripe…" : "Upgrade to Pro"}
+                  </Button>
+                )}
+                {onPro && downgradeScheduled ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto"
+                    disabled={busy !== null}
+                    onClick={() => void follow("portal", openPaymentPortal)}
+                  >
+                    Keep Pro in Stripe
+                  </Button>
+                ) : onPro ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto text-destructive"
+                    disabled={busy !== null}
+                    onClick={() => {
+                      setSaid(null);
+                      setStopping(true);
+                    }}
+                  >
+                    {busy === "downgrade"
+                      ? "Asking Stripe…"
+                      : "Downgrade at period end"}
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            {said?.section === "plan" ? (
+              <p className="m-0 text-sm text-muted-foreground" role="status">
+                {said.message}
+              </p>
+            ) : null}
+          </Card>
+        </section>
+
+        <section aria-labelledby="billing-inference-credit">
+          <Card className="h-full">
+            <div className="flex flex-col gap-2">
+              <h2
+                className="m-0 text-base font-medium"
+                id="billing-inference-credit"
+              >
+                Inference credit
+              </h2>
+              <p className="m-0 text-xl font-medium tabular-nums">
+                {moneyLabel(account.balanceMicros)}
+              </p>
+              <p className="m-0 text-sm text-muted-foreground">
+                Pays for model usage made with Egma provider keys.
+              </p>
+            </div>
+            {account.mayManageBilling && actions.available ? (
+              <div className="mt-auto">
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={busy !== null}
+                  onClick={() => {
+                    setSaid(null);
+                    setPicking(true);
+                  }}
+                >
+                  Buy credit
+                </Button>
+              </div>
+            ) : null}
+            {said?.section === "credit" ? (
+              <p className="m-0 text-sm text-muted-foreground" role="status">
+                {said.message}
+              </p>
+            ) : null}
+          </Card>
+        </section>
+      </div>
+
+      <section aria-labelledby="billing-payments">
+        <Card className="flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-1">
+            <h2 className="m-0 text-base font-medium" id="billing-payments">
+              Payments
+            </h2>
+            <p className="m-0 text-sm text-muted-foreground">
+              Update payment methods and download invoices in Stripe.
+            </p>
+          </div>
+          {paymentMessage === null ? (
             <Button
               type="button"
               variant="secondary"
-              size="sm"
               disabled={busy !== null}
               onClick={() => void follow("portal", openPaymentPortal)}
             >
               {busy === "portal"
                 ? "Opening Stripe…"
-                : "Manage payment and invoices"}
+                : "Payment methods and invoices"}
             </Button>
-            {onPro && downgradeScheduled ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="ml-auto"
-                disabled={busy !== null}
-                onClick={() => void follow("portal", openPaymentPortal)}
-              >
-                Keep Pro in Stripe
-              </Button>
-            ) : onPro ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="ml-auto text-destructive"
-                disabled={busy !== null}
-                onClick={() => {
-                  setSaid(null);
-                  setStopping(true);
-                }}
-              >
-                {busy === "downgrade"
-                  ? "Asking Stripe…"
-                  : "Downgrade at period end"}
-              </Button>
-            ) : null}
-          </div>
-        )}
-        {said?.section === "plan" ? (
-          <p className="m-0 text-sm text-muted-foreground" role="status">
-            {said.message}
-          </p>
-        ) : null}
-      </Section>
-
-      <Section title="Inference balance">
-        <Card>
-          <Facts
-            facts={[
-              {
-                label: "Balance",
-                value: (
-                  <span className="tabular-nums">
-                    {moneyLabel(account.balanceMicros)}
-                  </span>
-                ),
-              },
-            ]}
-          />
+          ) : (
+            <p className="m-0 text-sm text-muted-foreground">{paymentMessage}</p>
+          )}
+          {said?.section === "payments" ? (
+            <p className="m-0 text-sm text-muted-foreground" role="status">
+              {said.message}
+            </p>
+          ) : null}
         </Card>
-        {account.mayManageBilling && actions.available ? (
-          <div>
-            <Button
-              type="button"
-              size="sm"
-              disabled={busy !== null}
-              onClick={() => {
-                setSaid(null);
-                setPicking(true);
-              }}
-            >
-              Buy credit
-            </Button>
-          </div>
-        ) : null}
-        {said?.section === "credit" ? (
-          <p className="m-0 text-sm text-muted-foreground" role="status">
-            {said.message}
-          </p>
-        ) : null}
-      </Section>
+      </section>
 
       {picking ? (
         <BuyCreditDialog
@@ -252,7 +277,7 @@ export function BillingAccountSections({
           }}
         />
       ) : null}
-    </>
+    </div>
   );
 }
 

@@ -19,6 +19,7 @@ import {
   stripeMeterPeriods,
 } from "../../src/stripe/periods.ts";
 import { hourAround } from "../../src/stripe/facts.ts";
+import { adoptLegacyFeeProduct } from "../../src/stripe/setup.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -553,7 +554,48 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
     expect(again.productId).toBe(first.productId);
     expect(again.feePriceId).toBe(first.feePriceId);
     expect(again.webCallMeterPriceId).toBe(first.webCallMeterPriceId);
+
+    const products = await Promise.all(
+      [
+        first.feePriceId,
+        first.webCallMeterPriceId,
+        first.phoneMeterPriceId,
+      ].map(async (priceId) => {
+        const price = await stripe.prices.retrieve(priceId);
+        const productId =
+          typeof price.product === "string" ? price.product : price.product.id;
+        return stripe.products.retrieve(productId);
+      }),
+    );
+    expect(products.map((product) => product.name).sort()).toEqual([
+      "Egma Pro",
+      "Phone minutes",
+      "Web call minutes",
+    ]);
+    expect(new Set(products.map((product) => product.id)).size).toBe(3);
+    expect(products.every((product) => product.description === null)).toBe(true);
   }, 120_000);
+
+  it("adopts the legacy Pro product instead of creating another one", async () => {
+    const legacy = await stripe.products.create({
+      name: "Legacy Pro",
+      description: "A description that Checkout must not show",
+      metadata: { egma_plan: "pro" },
+    });
+    const before = await stripe.products.list({ limit: 100 });
+
+    const adopted = await adoptLegacyFeeProduct(gateway, legacy);
+    const after = await stripe.products.list({ limit: 100 });
+
+    expect(adopted.id).toBe(legacy.id);
+    expect(adopted.name).toBe("Egma Pro");
+    expect(adopted.description).toBeNull();
+    expect(adopted.metadata.egma_plan).toBe("pro");
+    expect(adopted.metadata[PRODUCT_METADATA_KEY]).toBe("pro_monthly_fee");
+    expect(after.data.map((product) => product.id).sort()).toEqual(
+      before.data.map((product) => product.id).sort(),
+    );
+  }, 60_000);
 
   it("prices the allowance at nothing and everything past it at the overage", async () => {
     const found = await stripe.prices.list({
@@ -601,6 +643,7 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
     const session = sessions.data[0];
     expect(session?.mode).toBe("payment");
     expect(session?.automatic_tax.enabled).toBe(true);
+    expect(session?.allow_promotion_codes).toBe(true);
     expect(session?.client_reference_id).toBe(paying.organizationId);
     expect(session?.amount_subtotal).toBe(2_500);
     if (session === undefined) throw new Error("Checkout Session is missing");
@@ -660,13 +703,21 @@ describe.skipIf(!RUNNING).sequential("the Stripe sandbox, for real", () => {
     const session = sessions.data.find((one) => one.mode === "subscription");
     if (session === undefined)
       throw new Error("Upgrade did not create a real subscription Checkout");
+    expect(session.allow_promotion_codes).toBe(true);
     const lines = await stripe.checkout.sessions.listLineItems(session.id, {
       limit: 100,
     });
     const prices = await proPrices();
-    expect(lines.data.map((line) => line.price?.id).sort()).toEqual(
-      [prices.fee, prices.webCall, prices.phone].sort(),
-    );
+    expect(lines.data.map((line) => line.price?.id)).toEqual([
+      prices.fee,
+      prices.phone,
+      prices.webCall,
+    ]);
+    expect(lines.data.map((line) => line.description)).toEqual([
+      "Egma Pro",
+      "Phone minutes",
+      "Web call minutes",
+    ]);
     await stripe.checkout.sessions.expire(session.id);
   }, 120_000);
 
