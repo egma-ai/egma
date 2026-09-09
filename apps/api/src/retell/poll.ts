@@ -25,6 +25,25 @@ function waiting(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds).unref());
 }
 
+async function waitUnlessCanceled(
+  sleep: (milliseconds: number) => Promise<void>,
+  milliseconds: number,
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  if (signal === undefined) return sleep(milliseconds);
+  if (signal.aborted) return;
+  let canceled = (): void => undefined;
+  const aborted = new Promise<void>((resolve) => {
+    canceled = resolve;
+    signal.addEventListener("abort", canceled, { once: true });
+  });
+  try {
+    await Promise.race([sleep(milliseconds), aborted]);
+  } finally {
+    signal.removeEventListener("abort", canceled);
+  }
+}
+
 /** Bound both the request and its response body with the same abort signal. */
 async function askWithin(
   apiKey: string,
@@ -77,7 +96,7 @@ export async function* pollRetellSimulationCall(
     ) continue;
     if (plannedAt < retryAfter) continue;
     const wait = attempt === 0 ? 0 : plannedAt - Date.now();
-    if (wait > 0) await sleep(wait);
+    if (wait > 0) await waitUnlessCanceled(sleep, wait, reach.signal);
     const requestedAt = Date.now();
     const remaining = deadline - requestedAt;
     if (canceled() || remaining <= 0) return;

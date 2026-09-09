@@ -6,6 +6,10 @@ import type { NextConfig } from "next";
  * the default is the local API port.
  */
 const api = process.env.EGMA_API_ORIGIN ?? "http://127.0.0.1:3100";
+const configuredOrigin = process.env.EGMA_BASE_URL;
+const allowedDevOrigin = configuredOrigin === undefined
+  ? undefined
+  : new URL(configuredOrigin).hostname;
 
 /**
  * Produce standalone output for self-hosted runtime images. Vercel builds
@@ -14,6 +18,7 @@ const api = process.env.EGMA_API_ORIGIN ?? "http://127.0.0.1:3100";
 const forSelfHosting = !process.env.VERCEL;
 
 const config: NextConfig = {
+  ...(allowedDevOrigin === undefined ? {} : { allowedDevOrigins: [allowedDevOrigin] }),
   ...(forSelfHosting ? { output: "standalone" as const } : {}),
   outputFileTracingRoot: new URL("../../", import.meta.url).pathname,
 

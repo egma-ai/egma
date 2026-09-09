@@ -23,8 +23,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE = Path(__file__).resolve().parent
 SIMULATOR_PYTHON = ROOT / "apps/simulator/.venv/bin/python"
-LIVEKIT_KEY = "devkey"
-LIVEKIT_SECRET = "secret"
+LIVEKIT_KEY = "fixturekey"
+LIVEKIT_SECRET = "fixture-secret-0123456789abcdef0123456789abcdef"
 PROJECT_KEY = "egma_sk_" + "a" * 43
 START_SECONDS = 60
 SIMULATION_SECONDS = 150
@@ -60,6 +60,31 @@ def request_json(url: str, *, body: dict | None = None) -> tuple[int, dict]:
     except urllib.error.HTTPError as error:
         message = error.read().decode(errors="replace")
         raise RuntimeError(f"{url} answered {error.code}: {message[:500]}") from error
+
+
+def validate_fixture_spec(spec: dict) -> None:
+    """Refuse an invalid fixture before it can spend provider credit."""
+    checked = subprocess.run(
+        [
+            str(SIMULATOR_PYTHON),
+            "-c",
+            (
+                "import json,sys; "
+                "from egma_simulator.contract import validate_spec; "
+                "validate_spec(json.load(sys.stdin))"
+            ),
+        ],
+        cwd=ROOT / "apps/simulator",
+        input=json.dumps(spec),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if checked.returncode != 0:
+        raise RuntimeError(
+            "fixture simulation spec violates the contract:\n"
+            + redacted(checked.stderr[-4000:])
+        )
 
 
 def wait_http(url: str, process: ManagedProcess | None = None) -> None:
@@ -200,6 +225,8 @@ def start_livekit(directory: Path) -> LiveKitServer:
     name = f"egma-livekit-e2e-{os.getpid()}-{http_port}"
     config = (
         f"port: {http_port}\n"
+        "keys:\n"
+        f"  {LIVEKIT_KEY}: {LIVEKIT_SECRET}\n"
         "rtc:\n"
         f"  tcp_port: {tcp_port}\n"
         f"  udp_port: {udp_port}\n"
@@ -223,7 +250,6 @@ def start_livekit(directory: Path) -> LiveKitServer:
             "--env",
             f"LIVEKIT_CONFIG={config}",
             pinned_livekit_image(),
-            "--dev",
             "--bind",
             "0.0.0.0",
         ],
@@ -284,6 +310,9 @@ def python_worker_environment(directory: Path) -> tuple[Path, SDKArtifact]:
         wheels = list(wheel_dir.glob("*.whl"))
     if len(wheels) != 1:
         raise RuntimeError(f"expected one Python wheel, found {wheels}")
+    agents_version = os.environ.get(
+        "LIVEKIT_E2E_PYTHON_AGENTS_VERSION", "1.7.1"
+    ).strip()
     checked(
         ["uv", "venv", "--python", "3.11", str(venv)],
         cwd=ROOT,
@@ -297,7 +326,7 @@ def python_worker_environment(directory: Path) -> tuple[Path, SDKArtifact]:
             "--python",
             str(venv / "bin/python"),
             str(wheels[0]),
-            "livekit-agents[openai,silero]==1.7.1",
+            f"livekit-agents[openai,silero]=={agents_version}",
         ],
         cwd=ROOT,
         log_path=directory / "python-install.log",
@@ -356,12 +385,24 @@ def javascript_worker_environment(directory: Path) -> tuple[list[str], SDKArtifa
     if len(packages) != 1:
         raise RuntimeError(f"expected one JavaScript package, found {packages}")
     package = packages[0]
+    install_package = worker_dir / "egma-livekit.tgz"
+    shutil.copy2(package, install_package)
     package_json = json.loads((FIXTURE / "package.json").read_text(encoding="utf-8"))
-    package_json["dependencies"]["@egma/livekit"] = f"file:{package}"
+    agents_version = os.environ.get(
+        "LIVEKIT_E2E_JAVASCRIPT_AGENTS_VERSION", "1.7.1"
+    ).strip()
+    package_json["dependencies"]["@egma/livekit"] = "file:./egma-livekit.tgz"
+    for dependency in (
+        "@livekit/agents",
+        "@livekit/agents-plugin-openai",
+        "@livekit/agents-plugin-silero",
+    ):
+        package_json["dependencies"][dependency] = agents_version
     (worker_dir / "package.json").write_text(
         json.dumps(package_json, indent=2) + "\n", encoding="utf-8"
     )
-    shutil.copy2(FIXTURE / "javascript_worker.mjs", worker_dir)
+    worker_script = worker_dir / "javascript_worker.mjs"
+    shutil.copy2(FIXTURE / "javascript_worker.mjs", worker_script)
     checked(
         [
             "pnpm",
@@ -388,13 +429,21 @@ def javascript_worker_environment(directory: Path) -> tuple[list[str], SDKArtifa
         cwd=worker_dir,
         log_path=directory / "javascript-package-check.log",
     )
+    entrypoint_log = directory / "javascript-entrypoint-check.log"
+    checked(
+        ["node", str(worker_script), "--help"],
+        cwd=worker_dir,
+        log_path=entrypoint_log,
+    )
+    if "LiveKit Agents CLI" not in entrypoint_log.read_text(encoding="utf-8"):
+        raise RuntimeError("the JavaScript worker entrypoint did not start its CLI")
     version = package.name.removesuffix(".tgz").rsplit("-", 1)[-1]
     artifact = SDKArtifact(
         path=package,
         version=version,
         sha256=hashlib.sha256(package.read_bytes()).hexdigest(),
     )
-    return ["node", str(worker_dir / "javascript_worker.mjs"), "start"], artifact
+    return ["node", str(worker_script), "start"], artifact
 
 
 def direct_models(openai_key: str, modality: str) -> dict:
@@ -532,7 +581,20 @@ def wait_for_agent_spans(
         ):
             return records
         time.sleep(0.1)
-    raise AssertionError("the SDK sent no attributed OTLP spans within 30s")
+    observed_counts: dict[str, int] = {}
+    for record in records:
+        name = str(record.get("name", "<missing>"))
+        observed_counts[name] = observed_counts.get(name, 0) + 1
+    observed_names = set(observed_counts)
+    missing_names = sorted(required_names - observed_names)
+    mismatched_references = sum(
+        record.get("provider_reference") != provider_reference for record in records
+    )
+    raise AssertionError(
+        "the SDK did not send all required attributed OTLP spans within 30s; "
+        f"missing names: {missing_names}; observed counts: {observed_counts}; "
+        f"provider-reference mismatches: {mismatched_references}"
+    )
 
 
 def assert_no_secret_in_artifacts(directory: Path) -> None:
@@ -736,19 +798,16 @@ def run_workbench_case(
         agent_name = f"egma-{language}-{modality}-e2e"
         simulation_id = f"sim-livekit-{language}-{modality}-delayed"
         spec_path = directory / f"{language}-{modality}-spec.json"
-        spec_path.write_text(
-            json.dumps(
-                simulation_spec(
-                    simulation_id=simulation_id,
-                    agent_name=agent_name,
-                    livekit_url=livekit.url,
-                    openai_key=openai_key,
-                    modality=modality,
-                    language=language,
-                )
-            ),
-            encoding="utf-8",
+        spec = simulation_spec(
+            simulation_id=simulation_id,
+            agent_name=agent_name,
+            livekit_url=livekit.url,
+            openai_key=openai_key,
+            modality=modality,
+            language=language,
         )
+        validate_fixture_spec(spec)
+        spec_path.write_text(json.dumps(spec), encoding="utf-8")
         spec_path.chmod(0o600)
 
         workbench = start_process(
@@ -786,6 +845,7 @@ def run_workbench_case(
         wait_http(f"{otlp_url}/health", collector)
 
         sentinel = directory / "real-tool-called"
+        record_request_sentinel = directory / "record-request-called"
         worker_env = os.environ | {
             "PYTHONUNBUFFERED": "1",
             "LIVEKIT_URL": livekit.url,
@@ -798,7 +858,11 @@ def run_workbench_case(
             "EGMA_E2E_SETUP_DELAY_MS": "50",
             "EGMA_E2E_SESSION_DELAY_MS": "10000",
             "EGMA_E2E_SILENT_START": "1",
+            # Match customer workers that keep their entry point alive until
+            # AgentSession closes. Completion must not depend on entry return.
+            "EGMA_E2E_LONG_LIVED_ENTRY": "1" if language == "javascript" else "0",
             "EGMA_E2E_REAL_TOOL_SENTINEL": str(sentinel),
+            "EGMA_E2E_RECORD_REQUEST_SENTINEL": str(record_request_sentinel),
         }
         worker = start_process(
             f"{language} worker",
@@ -859,6 +923,12 @@ def run_workbench_case(
             raise AssertionError(f"{language} {modality} had no exchange: {terminal}")
         if sentinel.exists():
             raise AssertionError("the mocked real tool implementation executed")
+        wait_for_file(record_request_sentinel, worker)
+        recorded_input = json.loads(record_request_sentinel.read_text(encoding="utf-8"))
+        if recorded_input != {"day": "Tuesday", "kind": "reschedule"}:
+            raise AssertionError(
+                f"the real record_request tool received {recorded_input}"
+            )
 
         simulator_spans = [
             record
@@ -893,18 +963,42 @@ def run_workbench_case(
             raise AssertionError("terminal turn count does not match the trace")
 
         provider_reference = terminal["facts"]["provider_reference"]
-        required_names = {"llm_request", "function_tool"}
-        if language == "python":
-            required_names.add("agent_session")
+        caller_span_name = "agent_turn" if modality == "chat" else "user_turn"
+        required_names = {
+            "agent_session",
+            "llm_request",
+            "function_tool",
+            caller_span_name,
+        }
         agent_spans = wait_for_agent_spans(
             otlp_records, provider_reference, required_names
         )
+        # The final customer evidence must arrive while the worker still owns
+        # the job. A process exit is not a completion protocol.
+        worker.require_running()
+        caller_inputs = [
+            record["attributes"].get(
+                "lk.pii.user_input"
+                if modality == "chat"
+                else "lk.pii.user_transcript"
+            )
+            for record in agent_spans
+            if record["name"] == caller_span_name
+        ]
+        if not any(
+            isinstance(text, str) and "tuesday" in text.lower()
+            for text in caller_inputs
+        ):
+            raise AssertionError(
+                f"agent evidence omitted the caller input: {caller_inputs}"
+            )
         tool_spans = [
             record for record in agent_spans if record["name"] == "function_tool"
         ]
-        expected_output = (
+        expected_answer = (
             "Tuesday is completely full. The next opening is Thursday morning."
         )
+        expected_output = expected_answer
         successful_mock_calls = [
             record
             for record in tool_spans
@@ -912,9 +1006,20 @@ def run_workbench_case(
             and decoded_tool_output(record) == expected_output
             and record["attributes"].get("lk.function_tool.is_error") is False
         ]
-        if not successful_mock_calls or len(successful_mock_calls) != len(tool_spans):
+        recorded_requests = [
+            record
+            for record in tool_spans
+            if record["attributes"].get("lk.function_tool.name") == "record_request"
+            and isinstance(decoded_tool_output(record), dict)
+            and decoded_tool_output(record).get("recorded") is True
+            and decoded_tool_output(record).get("reference") == "fixture-request-1"
+            and record["attributes"].get("lk.function_tool.is_error") is False
+        ]
+        if len(successful_mock_calls) != 1 or len(recorded_requests) != 1:
             raise AssertionError(
-                f"expected every tool span to use the configured mock: {tool_spans}"
+                "expected one mocked availability lookup and one real recorded "
+                f"request; observed tool names: "
+                f"{[record['attributes'].get('lk.function_tool.name') for record in tool_spans]}"
             )
         names = {record["name"] for record in agent_spans}
         if not required_names.issubset(names):
@@ -935,7 +1040,10 @@ def run_workbench_case(
             "turn_count": terminal["facts"]["turn_count"],
             "mock_call": True,
             "mock_call_count": len(successful_mock_calls),
+            "real_tool_call": True,
+            "real_tool_call_count": len(recorded_requests),
             "sdk_span_count": len(agent_spans),
+            "worker_alive_after_final_evidence": True,
             "provider_reference": provider_reference,
         }
         (directory / f"{language}-{modality}-proof-summary.json").write_text(
@@ -983,11 +1091,15 @@ def main() -> int:
         os.environ.get("LIVEKIT_E2E_OPENAI_API_KEY", "").strip()
         or os.environ.get("OPENAI_API_KEY", "").strip()
     )
-    if not openai_key:
+    if not openai_key and args.case != "production-inert":
         raise RuntimeError(
             "LIVEKIT_E2E_OPENAI_API_KEY is required; this lane cannot skip "
             "its real model proof"
         )
+    if not openai_key:
+        # The production-inert fixture constructs the provider client but returns
+        # before session startup and calls its local tool directly.
+        openai_key = "unused-production-inert-openai-key"
     if not SIMULATOR_PYTHON.exists():
         raise RuntimeError("run `uv sync --frozen` in apps/simulator before this lane")
 

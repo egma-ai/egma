@@ -118,6 +118,10 @@ Egma exchanges messages with the Retell voice agent in text. Egma places no call
 so a suite can finish quickly. The connection stores the Retell agent ID and a
 sealed API key.
 
+Egma records the complete API exchange, including the tool results Retell
+returns. This is the exchange Egma conducted, not a separate native Retell agent
+trace.
+
 Its public CLI choices are Access `retell-api-key` and Modality `chat`.
 
 A custom LLM that keeps its words and tools outside Retell prevents text mode.

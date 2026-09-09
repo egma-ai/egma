@@ -1,10 +1,12 @@
 /** Packaged JavaScript SDK worker used by the LiveKit end-to-end lane. */
 
 import { writeFile } from "node:fs/promises";
+import { chmodSync, realpathSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { simulation } from "@egma/livekit";
 import {
+  AgentSessionEventTypes,
   WorkerOptions,
   cli,
   defineAgent,
@@ -35,6 +37,27 @@ const checkAvailability = llm.tool({
   },
 });
 
+const recordRequest = llm.tool({
+  name: "record_request",
+  description: "Record the appointment request after availability was checked.",
+  parameters: z.object({
+    day: z.string().describe("The requested appointment day."),
+    kind: z.literal("reschedule").describe("The kind of appointment request."),
+  }),
+  execute: async ({ day, kind }) => {
+    const sentinel = process.env.EGMA_E2E_RECORD_REQUEST_SENTINEL;
+    if (sentinel) {
+      await writeFile(sentinel, JSON.stringify({ day, kind }), "utf8");
+    }
+    return {
+      recorded: true,
+      reference: "fixture-request-1",
+      day,
+      kind,
+    };
+  },
+});
+
 export default defineAgent({
   prewarm: async (proc) => {
     proc.userData.vad = await silero.VAD.load();
@@ -45,9 +68,14 @@ export default defineAgent({
 
     const agent = voice.Agent.create({
       instructions:
-        "You schedule dental appointments. Always call check_availability " +
-        "before you say whether Tuesday is free. Keep each reply short.",
-      tools: [checkAvailability],
+        "You schedule dental appointments. On the caller's first request, call " +
+        "check_availability with day Tuesday, then immediately call record_request " +
+        "with day Tuesday and kind reschedule. Each call is required exactly once, " +
+        "even when Tuesday is full. Do not ask for confirmation and never check " +
+        "another day. After both tools return, relay the complete availability " +
+        "result as provided, including any next opening, then confirm the request " +
+        "was recorded and end the conversation. Keep the reply short.",
+      tools: [checkAvailability, recordRequest],
     });
     const session = new voice.AgentSession({
       vad: ctx.proc.userData.vad,
@@ -55,6 +83,13 @@ export default defineAgent({
       stt: new openai.STT({ model: "whisper-1", useRealtime: false }),
       tts: new openai.TTS({ model: "tts-1", voice: "alloy" }),
     });
+    const historyPath = process.env.EGMA_E2E_NATIVE_HISTORY;
+    if (historyPath) {
+      session.on(AgentSessionEventTypes.Close, () => {
+        writeFileSync(historyPath, JSON.stringify(session.history.toJSON()), "utf8");
+        chmodSync(historyPath, 0o600);
+      });
+    }
 
     await simulation(agent, ctx, session);
     await delayFrom("EGMA_E2E_SESSION_DELAY_MS");
@@ -79,10 +114,19 @@ export default defineAgent({
         instructions: "Greet the caller and ask which appointment day they need.",
       });
     }
+
+    if (process.env.EGMA_E2E_LONG_LIVED_ENTRY === "1") {
+      await new Promise((resolve) =>
+        session.once(AgentSessionEventTypes.Close, resolve),
+      );
+    }
   },
 });
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+) {
   cli.runApp(
     new WorkerOptions({
       agent: import.meta.filename,

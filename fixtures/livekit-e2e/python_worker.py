@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from pathlib import Path
+from typing import Literal
 
 from egma import simulation
 from livekit import agents
@@ -16,9 +18,14 @@ class AppointmentAgent(Agent):
     def __init__(self) -> None:
         super().__init__(
             instructions=(
-                "You schedule dental appointments. Always call "
-                "check_availability before you say whether Tuesday is free. "
-                "Keep each reply short."
+                "You schedule dental appointments. On the caller's first request, "
+                "call check_availability with day Tuesday, then immediately call "
+                "record_request with day Tuesday and kind reschedule. Each call is "
+                "required exactly once, even when Tuesday is full. Do not ask for "
+                "confirmation and never check another day. After both tools return, "
+                "relay the complete availability result as provided, including any "
+                "next opening, then confirm the request was recorded and end the "
+                "conversation. Keep the reply short."
             )
         )
 
@@ -33,6 +40,30 @@ class AppointmentAgent(Agent):
         if sentinel:
             await asyncio.to_thread(Path(sentinel).write_text, day, encoding="utf-8")
         return "The real calendar has a Tuesday appointment at 9:40."
+
+    @function_tool
+    async def record_request(self, day: str, kind: Literal["reschedule"]) -> str:
+        """Record an appointment request after availability was checked.
+
+        Args:
+            day: The requested appointment day.
+            kind: The kind of appointment request.
+        """
+        sentinel = os.environ.get("EGMA_E2E_RECORD_REQUEST_SENTINEL", "")
+        if sentinel:
+            await asyncio.to_thread(
+                Path(sentinel).write_text,
+                json.dumps({"day": day, "kind": kind}),
+                encoding="utf-8",
+            )
+        return json.dumps(
+            {
+                "recorded": True,
+                "reference": "fixture-request-1",
+                "day": day,
+                "kind": kind,
+            }
+        )
 
 
 async def entrypoint(ctx: agents.JobContext) -> None:
@@ -53,6 +84,15 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             tts=openai.TTS(model="gpt-4o-mini-tts", voice="ash"),
         )
     )
+    history_path = os.environ.get("EGMA_E2E_NATIVE_HISTORY", "")
+    if history_path:
+        def capture_history(_event: object) -> None:
+            Path(history_path).write_text(
+                json.dumps(session.history.to_dict()), encoding="utf-8"
+            )
+            Path(history_path).chmod(0o600)
+
+        session.on("close", capture_history)
     await simulation(agent, ctx, session)
 
     production_marker = os.environ.get("EGMA_E2E_PRODUCTION_INERT_MARKER", "")

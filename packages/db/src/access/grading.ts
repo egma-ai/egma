@@ -10,6 +10,7 @@ import {
   eq,
   gt,
   inArray,
+  isNotNull,
   isNull,
   lt,
   or,
@@ -21,7 +22,7 @@ import { FundingRefusedError } from "./errors.ts";
 import { billing } from "../billing/ports.ts";
 import { traceStore } from "../clickhouse/client.ts";
 import { graderModelOfParameters } from "../grader-library/parameters.ts";
-import { db, listen, type Listening, type Queryable } from "../client.ts";
+import { db, dedicatedConnection, listen, type Listening, type Queryable } from "../client.ts";
 import { combinedGradeScore } from "../grading/results.ts";
 import type { PlanGroup } from "../grading/plan.ts";
 import { graderDefinition, projectGrader } from "../schema/graders.ts";
@@ -34,7 +35,10 @@ import {
 } from "../schema/grading.ts";
 import { run, simulation } from "../schema/runs.ts";
 import { validClaimant } from "./claimants.ts";
-import { AGENT_EVIDENCE_COMPLETE_SQL } from "./agent-evidence.ts";
+import {
+  AGENT_EVIDENCE_COMPLETE_SQL,
+  AGENT_EVIDENCE_GROUP_COMPLETE_SQL,
+} from "./agent-evidence.ts";
 import type { AuthContext } from "./context.ts";
 import {
   readCurrentSimulationGradeFacts,
@@ -532,7 +536,7 @@ export async function traceEvidenceStartedAt(
     return `${whole.replace("T", " ")}.${remainder.toString().padStart(6, "0")}`;
   };
   const answered = await traceStore().query({
-    query: `select toString(toUnixTimestamp64Micro(started_at)) as started_at_micros
+    query: `select toString(toUnixTimestamp64Micro(min(started_at))) as started_at_micros
               from spans
              where organization_id = {organization_id:String}
                and project_id = {project_id:String}
@@ -543,8 +547,9 @@ export async function traceEvidenceStartedAt(
                and (${input.runId === undefined ? "1" : "run_id = {run_id:String}"})
                and kind != 'provider_usage'
                and (${input.emitter === undefined ? "1" : "emitter = {emitter:String}"})
-               and (${input.requireAgentCompletion === true ? AGENT_EVIDENCE_COMPLETE_SQL : "1"})
-             order by started_at
+             group by trace_id, run_id, provider_call_id
+             having (${input.requireAgentCompletion === true ? AGENT_EVIDENCE_GROUP_COMPLETE_SQL : "1"})
+             order by min(started_at)
              limit 1`,
     query_params: {
       organization_id: auth.organizationId,
@@ -575,18 +580,22 @@ export const AGENT_POV_BOUND_SECONDS = 245;
 /**
  * Evidence readiness and agent POV availability. Without an expected agent POV,
  * wait for any visible evidence and leave agentPovFiled false. Otherwise, become
- * ready when agent evidence is visible or the wait expires.
+ * ready only when final agent evidence is visible and separately report an
+ * exhausted recovery window.
  */
 export type SimulationEvidenceReadiness = {
   readonly ready: boolean;
   readonly agentPovFiled: boolean;
+  /** The recovery window ended without the required final agent record. */
+  readonly exhausted: boolean;
   /** The earliest span of this trace, whichever POV wrote it. */
   readonly traceStartedAt: Date | undefined;
 };
 
 /**
  * Probe expected agent evidence first. If present, also read the earliest span
- * across both POVs. After the wait expires, return readiness even without an agent POV.
+ * across both POVs. After the wait expires, retain any partial trace start only
+ * for the evidence error record; incomplete evidence is not gradeable.
  */
 export async function simulationEvidenceReadiness(
   auth: AuthContext,
@@ -619,6 +628,7 @@ export async function simulationEvidenceReadiness(
     return {
       ready: traceStartedAt !== undefined,
       agentPovFiled: false,
+      exhausted: false,
       traceStartedAt,
     };
   }
@@ -629,6 +639,7 @@ export async function simulationEvidenceReadiness(
     return {
       ready: true,
       agentPovFiled: true,
+      exhausted: false,
       traceStartedAt: traceStartedAt ?? agentPovStartedAt,
     };
   }
@@ -636,11 +647,17 @@ export async function simulationEvidenceReadiness(
   const now = input.now ?? new Date();
   const waited = now.getTime() - input.completedAt.getTime();
   if (waited < (input.boundSeconds ?? AGENT_POV_BOUND_SECONDS) * 1_000) {
-    return { ready: false, agentPovFiled: false, traceStartedAt: undefined };
+    return {
+      ready: false,
+      agentPovFiled: false,
+      exhausted: false,
+      traceStartedAt: undefined,
+    };
   }
   return {
-    ready: true,
+    ready: false,
     agentPovFiled: false,
+    exhausted: true,
     traceStartedAt: await probe(),
   };
 }
@@ -678,6 +695,88 @@ function simulationTracesIn(
     }
   }
   return traces;
+}
+
+export const SIMULATION_EVIDENCE_COLLECTION_ERROR = {
+  error: "evidence_collection_error",
+  message:
+    "Egma could not collect the agent's complete evidence before the recovery window ended.",
+} as const;
+
+/**
+ * Persist a terminal evidence error without asking a model to judge incomplete
+ * evidence. The terminal Postgres row is the idempotency record across process
+ * restarts and is never visible to worker claims.
+ */
+async function recordSimulationEvidenceError(
+  auth: AuthContext,
+  input: {
+    readonly simulationId: string;
+    readonly traceId: string;
+    readonly traceStartedAt: Date;
+    readonly runId: string;
+  },
+): Promise<boolean> {
+  return db().transaction(async (on) => {
+    await lockTrace(on, auth, input.traceId);
+    const [row] = await on
+      .select({ status: simulation.status, runId: simulation.runId })
+      .from(simulation)
+      .where(within(auth, simulation, eq(simulation.id, input.simulationId)))
+      .limit(1)
+      .for("share");
+    if (
+      row === undefined ||
+      row.status !== "completed" ||
+      row.runId !== input.runId
+    ) {
+      return false;
+    }
+    if (await jobForTrace(on, auth, input.traceId) !== undefined) return false;
+
+    const resolved = await pinnedSimulationGradersOn(
+      auth,
+      on,
+      input.simulationId,
+    );
+    if (resolved === undefined) {
+      throw new Error(
+        `completed simulation ${input.simulationId} has no grading plan`,
+      );
+    }
+    if (resolved.length === 0) return false;
+
+    const grades = await readTraceGrades(auth, {
+      source: "simulation",
+      traceId: input.traceId,
+      runId: input.runId,
+    });
+    if (allEntriesHaveResults(resolved.map(frozen), grades.current).complete) {
+      return false;
+    }
+
+    const [inserted] = await on
+      .insert(gradingJob)
+      .values({
+        id: newId("gjb"),
+        organizationId: auth.organizationId,
+        projectId: projectOf(auth),
+        source: "simulation",
+        simulationId: input.simulationId,
+        traceId: input.traceId,
+        traceStartedAt: input.traceStartedAt,
+        runId: input.runId,
+        entries: resolved.map(frozen),
+        sequenceBase: maximumGradingSequence(grades.history),
+        attempts: 0,
+        status: "abandoned",
+        lastError: SIMULATION_EVIDENCE_COLLECTION_ERROR.error,
+        finishedAt: new Date(),
+      })
+      .onConflictDoNothing()
+      .returning({ id: gradingJob.id });
+    return inserted !== undefined;
+  });
 }
 
 /**
@@ -725,6 +824,17 @@ export async function recordSimulationTraces(
       producesAnAgentPov: simulationExpectsAnAgentPov(row),
       completedAt: theWaitBeganAt(row),
     });
+    if (readiness.exhausted) {
+      await recordSimulationEvidenceError(auth, {
+        simulationId: row.id,
+        traceId: trace.traceId,
+        traceStartedAt: readiness.traceStartedAt ?? new Date(
+          Number(trace.latestAtMicroseconds / 1_000n),
+        ),
+        runId: row.runId,
+      });
+      continue;
+    }
     if (!readiness.ready) continue;
     if (readiness.traceStartedAt === undefined) {
       throw new Error(
@@ -789,14 +899,134 @@ function connectionTypeOf(snapshot: unknown): string {
 export type SimulationPastTheAgentPovBound = {
   readonly id: string;
   readonly runId: string;
+  readonly outcome: "queued" | "evidence_error";
   /**
-   * Whether the agent's own account was there after all. `false` is the
-   * ordinary answer here and the one worth saying out loud — a conversation
-   * graded without it. `true` happens where the account landed but the drain's
-   * own handoff never ran, and the sweep is the backstop that notices.
+   * Whether the agent's own account was there after all. `false` accompanies
+   * an evidence error. `true` means the account landed but the drain's own
+   * handoff never ran, and the sweep queued normal grading as a backstop.
    */
   readonly agentPovFiled: boolean;
 };
+
+export type PendingRetellSimulationCollection = {
+  readonly id: string;
+  readonly auth: AuthContext;
+};
+
+export type RetellSimulationCollectionLease = {
+  readonly signal: AbortSignal;
+  release(): Promise<void>;
+};
+
+/**
+ * Try to own one simulation's provider pull across API replicas. The lock lives
+ * on its own Postgres session and is released when that session closes, including
+ * when a process or connection disappears during background polling.
+ */
+export async function takeRetellSimulationCollectionLease(
+  auth: AuthContext,
+  simulationId: string,
+): Promise<RetellSimulationCollectionLease | undefined> {
+  const connection = dedicatedConnection();
+  const lost = new AbortController();
+  connection.on("error", (cause) => lost.abort(cause));
+  connection.on("end", () => lost.abort(new Error("the Retell collection lease connection ended")));
+  try {
+    await connection.connect();
+    const answer = await connection.query<{ taken: boolean }>(
+      "select pg_try_advisory_lock(hashtextextended($1::text, 0)) as taken",
+      [`egma:retell-simulation-collection:${auth.organizationId}:${auth.projectId ?? ""}:${simulationId}`],
+    );
+    if (answer.rows[0]?.taken !== true) {
+      await connection.end().catch(() => undefined);
+      return undefined;
+    }
+  } catch (cause) {
+    await connection.end().catch(() => undefined);
+    throw cause;
+  }
+  let released = false;
+  return {
+    signal: lost.signal,
+    async release() {
+      if (released) return;
+      released = true;
+      lost.abort(new Error("the Retell collection lease was released"));
+      await connection.end().catch(() => undefined);
+    },
+  };
+}
+
+let retellCollectionCursor: string | undefined;
+
+/**
+ * Find completed Retell web calls still inside their original evidence deadline
+ * whose final agent record is not query-visible. The simulation row is the durable
+ * recovery record; no grading-job state is used because completed jobs are deleted.
+ */
+export async function sweepPendingRetellSimulationCollections(): Promise<
+  readonly PendingRetellSimulationCollection[]
+> {
+  const now = new Date();
+  const notBefore = new Date(now.getTime() - AGENT_POV_BOUND_SECONDS * 1_000);
+  const page = async (after: string | undefined) => db()
+    .select({
+      id: simulation.id,
+      runId: simulation.runId,
+      organizationId: simulation.organizationId,
+      projectId: simulation.projectId,
+      startedAt: simulation.startedAt,
+      completedAt: simulation.heartbeatAt,
+      providerReference: simulation.providerReference,
+      connectionSnapshot: run.connectionSnapshot,
+    })
+    .from(simulation)
+    .innerJoin(run, eq(run.id, simulation.runId))
+    .where(and(
+      eq(simulation.status, "completed"),
+      isNotNull(simulation.providerReference),
+      gt(simulation.heartbeatAt, notBefore),
+      sql`${run.connectionSnapshot}->>'connectionType' = 'retell_web_call'`,
+      ...(after === undefined ? [] : [gt(simulation.id, after)]),
+    ))
+    .orderBy(asc(simulation.id))
+    .limit(MOST_ROWS_PER_BOUND_SWEEP);
+  let rows = await page(retellCollectionCursor);
+  if (rows.length === 0 && retellCollectionCursor !== undefined) {
+    retellCollectionCursor = undefined;
+    rows = await page(undefined);
+  }
+  retellCollectionCursor = rows.length < MOST_ROWS_PER_BOUND_SWEEP
+    ? undefined
+    : rows.at(-1)?.id;
+
+  const pending: PendingRetellSimulationCollection[] = [];
+  for (const row of rows) {
+    if (row.completedAt === null || row.providerReference === null) continue;
+    const auth: AuthContext = {
+      userId: "retell-simulation-recovery",
+      organizationId: row.organizationId,
+      projectId: row.projectId,
+      role: "viewer",
+      via: "simulator",
+    };
+    const traceId = traceIdOfSimulation(row.id);
+    if (traceId === undefined) continue;
+    const readiness = await simulationEvidenceReadiness(auth, {
+      traceId,
+      runId: row.runId,
+      window: {
+        from: BigInt((row.startedAt ?? row.completedAt).getTime() - 5 * 60 * 1_000) * 1_000n,
+        to: BigInt(now.getTime() + 1_000) * 1_000n,
+      },
+      producesAnAgentPov: true,
+      completedAt: row.completedAt,
+      now,
+    });
+    if (!readiness.agentPovFiled) pending.push({ id: row.id, auth });
+  }
+  return pending;
+}
 
 /**
  * Check completed simulations without queued grading jobs across all organizations.
@@ -876,6 +1106,23 @@ export async function settleSimulationsPastTheAgentPovBound(options?: {
       now,
       boundSeconds,
     });
+    if (readiness.exhausted) {
+      const filed = await recordSimulationEvidenceError(auth, {
+        simulationId: row.id,
+        traceId,
+        traceStartedAt: readiness.traceStartedAt ?? row.startedAt ?? completedAt,
+        runId: row.runId,
+      });
+      if (filed) {
+        settled.push({
+          id: row.id,
+          runId: row.runId,
+          agentPovFiled: false,
+          outcome: "evidence_error",
+        });
+      }
+      continue;
+    }
     // Not ready is a row still inside its bound, which waits for a later tick.
     if (!readiness.ready) continue;
     const asked = await requestGrading(auth, {
@@ -894,6 +1141,7 @@ export async function settleSimulationsPastTheAgentPovBound(options?: {
         id: row.id,
         runId: row.runId,
         agentPovFiled: readiness.agentPovFiled,
+        outcome: "queued",
       });
     }
   }
@@ -918,7 +1166,6 @@ function supportedProductionEndModality(
 ): "chat" | "voice" | undefined {
   if (span.source !== "production" || !span.endsTrace) return undefined;
   if (span.agentPlatform === "retell") {
-    if (span.connectionType === "retell_chat_api") return "chat";
     if (span.connectionType === "" || span.connectionType === "phone_number") {
       return "voice";
     }
@@ -1359,6 +1606,10 @@ export type TraceGrading = {
   readonly current: readonly NamedCurrentGrade[];
   readonly combinedScore: number | null;
   readonly workBlock: { readonly error: "providers_unfunded"; readonly message: string } | null;
+  readonly evidenceError: {
+    readonly error: "evidence_collection_error";
+    readonly message: string;
+  } | null;
 };
 
 export type TraceGradingRef = {
@@ -1414,6 +1665,12 @@ export async function readTraceGrading(
   const entries = await selectedEntries(db(), auth, ref);
   const grades = await readTraceGrades(auth, ref);
   const job = await jobForTrace(db(), auth, ref.traceId);
+  const evidenceError: TraceGrading["evidenceError"] =
+    job?.status === "abandoned" &&
+    job.attempts === 0 &&
+    job.lastError === SIMULATION_EVIDENCE_COLLECTION_ERROR.error
+      ? SIMULATION_EVIDENCE_COLLECTION_ERROR
+      : null;
 
   let workBlock: TraceGrading["workBlock"] = null;
   if (ref.source === "production" && entries !== undefined && entries.length > 0 && job?.status === "pending") {
@@ -1432,7 +1689,14 @@ export async function readTraceGrading(
   // handshake freezes selection. That is pending, not an empty decision.
   if (entries === undefined) {
     if (ref.source === "simulation") return undefined;
-    return { workBlock, state: "pending", history: [], current: [], combinedScore: null };
+    return {
+      workBlock,
+      evidenceError,
+      state: "pending",
+      history: [],
+      current: [],
+      combinedScore: null,
+    };
   }
 
   const names = await namesFor(
@@ -1452,18 +1716,40 @@ export async function readTraceGrading(
   const current = grades.current.map(named);
 
   if (entries.length === 0) {
-    return { workBlock, state: "not_requested", history, current, combinedScore: null };
+    return {
+      workBlock,
+      evidenceError,
+      state: "not_requested",
+      history,
+      current,
+      combinedScore: null,
+    };
   }
   if (job?.status === "claimed") {
-    return { workBlock, state: "running", history, current, combinedScore: null };
+    return {
+      workBlock,
+      evidenceError,
+      state: "running",
+      history,
+      current,
+      combinedScore: null,
+    };
   }
   if (job?.status === "pending") {
-    return { workBlock, state: "pending", history, current, combinedScore: null };
+    return {
+      workBlock,
+      evidenceError,
+      state: "pending",
+      history,
+      current,
+      combinedScore: null,
+    };
   }
   const terminal = allEntriesHaveResults(entries, grades.current);
   if (!terminal.complete) {
     return {
       workBlock,
+      evidenceError,
       state: job?.status === "abandoned" ? "error" : "pending",
       history,
       current,
@@ -1471,10 +1757,18 @@ export async function readTraceGrading(
     };
   }
   if (terminal.errored) {
-    return { workBlock, state: "error", history, current, combinedScore: null };
+    return {
+      workBlock,
+      evidenceError,
+      state: "error",
+      history,
+      current,
+      combinedScore: null,
+    };
   }
   return {
     workBlock,
+    evidenceError,
     state: "complete",
     history,
     current,

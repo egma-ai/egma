@@ -11,6 +11,7 @@ import {
   disconnectClickHouse,
   reconcileGraderCatalog,
   seedPersonaLibrary,
+  upsertRateCard,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
@@ -64,6 +65,8 @@ export type Instance = {
 };
 
 export type InstanceOptions = {
+  /** Public deployment origin used in callback URLs while tests reach the local listener. */
+  readonly baseUrl?: string;
   /**
    * Whether the trace store gets its schema. Off by default: creating and
    * migrating one costs a second, and a flow that reads no telemetry only needs
@@ -89,6 +92,12 @@ export type InstanceOptions = {
   readonly ingestStore?: IngestionStore;
   /** Deployment credential required by flows that exercise the phone adapter. */
   readonly carrierRoute?: Config["carrierRoute"];
+  /** Real provider keys for an explicit live-provider fixture. */
+  readonly providerKeys?: {
+    readonly openai?: string;
+    readonly deepgram?: string;
+    readonly cartesia?: string;
+  };
   /**
    * Every raw HTTP request, before Fastify or authentication can refuse it.
    * Test evidence only: this listener changes no production server.
@@ -184,6 +193,7 @@ export async function startInstance(
   // before it serves a request.
   await seedPersonaLibrary();
   await reconcileGraderCatalog();
+  await upsertRateCard();
 
   const withPages = options.web ?? true;
   const apiPort = await freePort();
@@ -205,14 +215,17 @@ export async function startInstance(
       EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
       EGMA_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
       EGMA_SIMULATOR_SERVICE_TOKEN: "egma_st_held-by-this-test-suite-alone",
-      EGMA_BASE_URL: origin,
+      EGMA_BASE_URL: options.baseUrl ?? origin,
       EGMA_SINGLE_ORGANIZATION: "false",
       // A self-host test deployment with one explicit key per provider
       // account. They are nonsense and never reach a provider. Claim tests
       // still exercise the real selection-to-credential path.
-      EGMA_OPENAI_API_KEY: "openai-key-held-by-this-test-instance",
-      EGMA_DEEPGRAM_API_KEY: "deepgram-key-held-by-this-test-instance",
-      EGMA_CARTESIA_API_KEY: "cartesia-key-held-by-this-test-instance",
+      EGMA_OPENAI_API_KEY:
+        options.providerKeys?.openai ?? "openai-key-held-by-this-test-instance",
+      EGMA_DEEPGRAM_API_KEY:
+        options.providerKeys?.deepgram ?? "deepgram-key-held-by-this-test-instance",
+      EGMA_CARTESIA_API_KEY:
+        options.providerKeys?.cartesia ?? "cartesia-key-held-by-this-test-instance",
     }),
     ...(options.blob === undefined ? {} : { blob: options.blob }),
     ...(options.carrierRoute === undefined
@@ -284,6 +297,7 @@ export async function startInstance(
           env: {
             ...process.env,
             EGMA_API_ORIGIN: `http://127.0.0.1:${apiPort}`,
+            ...(options.baseUrl === undefined ? {} : { EGMA_BASE_URL: options.baseUrl }),
             NODE_ENV: "development",
           },
           stdio: "ignore",

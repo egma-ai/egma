@@ -71,15 +71,15 @@ beforeAll(async () => {
   // guarded lifecycle update and run finalization.
 
   const created = await createAgent(auth, {
-    agentPlatform: "retell",
+    agentPlatform: "livekit",
     name: "Front desk",
     connection: {
-      agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
       modality: "chat",
-      config: { retellAgentId: "agent_in_retell_1" },
-      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      config: { url: "wss://test.livekit.cloud", agentName: "agent_in_retell_1" },
+      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ", apiSecret: "livekit-secret-A1B2C3D4WXYZ" },
     },
   });
   agentId = created.id;

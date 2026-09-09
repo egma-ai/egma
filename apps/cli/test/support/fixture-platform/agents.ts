@@ -308,29 +308,6 @@ function authHeadersJson(what: string, field: string, value: unknown): string {
  * quietly demand what the real thing is happy to do without.
  */
 const REGISTRY: Readonly<Record<string, Descriptor>> = {
-  retell_chat_api: {
-    modalities: ["chat"],
-    topology: "hosted-broker",
-    accessVariants: [
-      {
-        id: "retell_chat_api.api_key",
-        named: "a Retell chat connection",
-        config: { retellAgentId: nonEmptyString },
-        credentials: {
-          required: true,
-          fields: ["apiKey"],
-          hint: lastFourOf("apiKey"),
-        },
-      },
-    ],
-    // The provider's own agent id: the simple case the mechanism was built
-    // for, where one config key compared as it was stored is the identity.
-    reuse: {
-      matchedKeys: ["retellAgentId"],
-      identityOf: (config) => config["retellAgentId"],
-    },
-    simulatorAdapter: true,
-  },
   retell_text_mode: {
     // Chat, and a chat with a voice agent: text mode door a Retell voice
     // agent otherwise has none of. Voice is never admitted here — text mode
@@ -490,13 +467,6 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
 const CONNECTION_TYPES = Object.keys(REGISTRY);
 
 const CONNECTION_OPTIONS = [
-  {
-    agentPlatform: "retell",
-    connectionType: "retell_chat_api",
-    accessVariant: "retell_chat_api.api_key",
-    modality: "chat",
-    productLabel: "Retell chat",
-  },
   {
     agentPlatform: "retell",
     connectionType: "retell_text_mode",

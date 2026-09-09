@@ -677,7 +677,7 @@ describe("the two schemas, as one contract", () => {
       string,
       unknown
     >;
-    connection.connection_type = "retell_chat_api";
+    connection.connection_type = "retell_text_mode";
     expect(validators.spec(nonPhoneWithCarrier)).toBe(false);
     expect(validators.spec.errors).toContainEqual(
       expect.objectContaining({
@@ -930,7 +930,7 @@ describe("the report schema structurally forbids credential material", () => {
   });
 
   it("rejects a report smuggling the spec's credential block, wherever it rides", async () => {
-    const spec = await readJson("fixtures", "spec", "valid", "chat-retell.json");
+    const spec = await readJson("fixtures", "spec", "valid", "chat-retell-text-mode-api.json");
     const connection = spec.connection as Record<string, unknown>;
     expect(connection.credentials).toBeDefined();
 

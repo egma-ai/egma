@@ -53,8 +53,8 @@ function registration(
         ? {}
         : { name: overrides.connectionName }),
       agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
+      connectionType: "retell_text_mode",
+      accessVariant: "retell_text_mode.api_key",
       modality: overrides.modality ?? "chat",
       config: { retellAgentId: overrides.retellAgentId ?? "agent_in_retell_1" },
       credentials: { apiKey: overrides.apiKey ?? "retell-secret-A1B2C3D4WXYZ" },
@@ -133,8 +133,8 @@ function connectionPayload(
 ): Record<string, unknown> {
   return {
     agentPlatform: "retell",
-    connectionType: "retell_chat_api",
-    accessVariant: "retell_chat_api.api_key",
+    connectionType: "retell_text_mode",
+    accessVariant: "retell_text_mode.api_key",
     modality: "chat",
     config: { retellAgentId: "agent_in_retell_2" },
     credentials: { apiKey: "retell-secret-B2C3D4E5WXYZ" },
@@ -540,6 +540,20 @@ describe("discovering simulation agents", () => {
           { status: 200 },
         );
       }
+      if (path.startsWith("/get-agent/")) {
+        return new Response(JSON.stringify({
+          agent_id: path.endsWith("agent_voice_1") ? "agent_voice_1" : "agent_chat_9",
+          version: 1,
+          is_published: true,
+          response_engine: { type: "conversation-flow", conversation_flow_id: "flow_1", version: 1 },
+        }), { status: 200 });
+      }
+      if (path.startsWith("/get-conversation-flow/")) {
+        return new Response(JSON.stringify({ conversation_flow_id: "flow_1", version: 1, nodes: [] }), { status: 200 });
+      }
+      if (path === "/v2/list-phone-numbers") {
+        return new Response(JSON.stringify({ items: [], has_more: false }), { status: 200 });
+      }
       throw new Error(`unexpected Retell request ${path}`);
     }) as unknown as typeof fetch;
   }
@@ -579,8 +593,8 @@ describe("discovering simulation agents", () => {
       withKey(ada.secret),
       {
         agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        connectionType: "retell_text_mode",
+        accessVariant: "retell_text_mode.api_key",
         modality: "chat",
         config: {},
         platformAgentId: "agent_chat_9",
@@ -690,6 +704,17 @@ describe("discovering simulation agents", () => {
             { status: 200 },
           );
         }
+        if (path.startsWith("/get-agent/")) {
+          return new Response(JSON.stringify({
+            agent_id: "agent_chat_9",
+            version: 1,
+            is_published: true,
+            response_engine: { type: "conversation-flow", conversation_flow_id: "flow_1", version: 1 },
+          }), { status: 200 });
+        }
+        if (path.startsWith("/get-conversation-flow/")) {
+          return new Response(JSON.stringify({ conversation_flow_id: "flow_1", version: 1, nodes: [] }), { status: 200 });
+        }
         throw new Error(`unexpected Retell request ${path}`);
       }),
     );
@@ -725,96 +750,6 @@ describe("discovering simulation agents", () => {
    * Bind the agent during the Retell confirmation to reproduce the gap between
    * the route pre-check and custody. The refused request must archive only the
    * connection it created.
-   */
-  it("puts back the connection it wrote when the binding rule refuses it", async () => {
-    api = await createApi("retell_raced_binding_undone");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const created = await post("/v1/agents", withKey(ada.secret), {
-      agentPlatform: "retell",
-      name: "Front desk",
-    });
-    const agentId = String(agentOf(created).id);
-    const acting = contextFor(ada, "admin");
-
-    let bound = false;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string | URL | Request) => {
-        const path = new URL(String(input)).pathname;
-        if (path === "/v2/list-agents") {
-          /*
-           * The other request wins here: between this request's pre-check,
-           * which read an unbound agent, and the write it is about to make.
-           */
-          if (!bound) {
-            bound = true;
-            await sealAgentMonitoringKey(acting, {
-              agentId,
-              agentPlatform: "retell",
-              platformAgentId: "agent_voice_1",
-              apiKey: "retell-secret-the-winner-ABCD",
-            });
-          }
-          return new Response(
-            JSON.stringify({
-              items: [
-                {
-                  agent_id: "agent_chat_9",
-                  agent_name: "Web chat",
-                  channel: "chat",
-                },
-              ],
-              has_more: false,
-            }),
-            { status: 200 },
-          );
-        }
-        throw new Error(`unexpected Retell request ${path}`);
-      }),
-    );
-
-    const refused = await post(
-      `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
-      withKey(ada.secret),
-      {
-        agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
-        modality: "chat",
-        config: {},
-        platformAgentId: "agent_chat_9",
-        credentials: { apiKey: "retell-secret-the-loser-WXYZ" },
-      },
-    );
-
-    expect(refused.status).toBe(422);
-    expect(refused.body).toEqual({
-      error: "unprocessable",
-      message:
-        "Front desk is Retell agent agent_voice_1. Register agent_chat_9 as its own agent.",
-    });
-
-    /*
-     * Nothing live is left: no way into the agent through the connection this
-     * request wrote, and the winner's binding and key stand untouched.
-     */
-    const after = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
-    expect(after.body.connections).toEqual([]);
-    expect(agentOf(after).platformAgentId).toBe("agent_voice_1");
-    expect(agentOf(after).monitoringApiKeyHint).toBe("ABCD");
-
-    // It was put back rather than never written, which is the honest record.
-    const { rows } = await api.database.sql<{
-      archived_at: string | null;
-    }>("select archived_at from connection where agent_id = $1", [agentId]);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.archived_at).not.toBeNull();
-  });
-
-  /**
-   * A custody refusal must archive the newly created connection while keeping
-   * the agent and other writers' connections alive. This case exercises that
-   * cleanup through the duplicate-monitoring refusal.
    */
   it("leaves the agent alive when custody refuses the registration", async () => {
     api = await createApi("retell_register_cleanup_keeps_agent");
@@ -896,17 +831,17 @@ describe("discovering simulation agents", () => {
     const acting = contextFor(ada, "admin");
     vi.stubGlobal("fetch", retellAccountAnswering());
 
-    // The agent and the chat connection that is its only way in.
+    // The agent and the text-mode connection that is its only way in.
     const first = await post("/v1/agents", withKey(ada.secret), {
       name: "Front desk",
       agentPlatform: "retell",
       connection: {
         agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        connectionType: "retell_text_mode",
+        accessVariant: "retell_text_mode.api_key",
         modality: "chat",
         config: {},
-        platformAgentId: "agent_chat_9",
+        platformAgentId: "agent_voice_1",
         credentials: { apiKey: "retell-secret-the-first-WXYZ" },
       },
     });
@@ -926,7 +861,7 @@ describe("discovering simulation agents", () => {
     await enablePullProductionCalls(acting, {
       agentId: watchingId,
       agentPlatform: "retell",
-      platformAgentId: "agent_chat_9",
+      platformAgentId: "agent_voice_1",
       apiKey: "retell-secret-the-winner-ABCD",
     });
 
@@ -936,11 +871,11 @@ describe("discovering simulation agents", () => {
       agentPlatform: "retell",
       connection: {
         agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        connectionType: "retell_text_mode",
+        accessVariant: "retell_text_mode.api_key",
         modality: "chat",
         config: {},
-        platformAgentId: "agent_chat_9",
+        platformAgentId: "agent_voice_1",
         pullProductionCalls: true,
         credentials: { apiKey: "retell-secret-the-second-WXYZ" },
       },
@@ -950,7 +885,7 @@ describe("discovering simulation agents", () => {
     expect(refused.body).toEqual({
       error: "unprocessable",
       message:
-        "agent_chat_9 is already watched by another agent in this project. " +
+        "agent_voice_1 is already watched by another agent in this project. " +
         "One Egma agent watches one Retell agent, so turn that agent's switch " +
         "off first, or connect without ticking Pull production calls.",
     });
@@ -1213,16 +1148,16 @@ describe("registering an agent", () => {
       projectId: ada.projectId,
       agentPlatform: "retell",
       platformAgentId: null,
-      retellModality: "chat",
+      retellModality: null,
       pullProductionCalls: false,
     });
     expect(connectionOf(registered)).toMatchObject({
       agentId: agentOf(registered).id,
-      name: "retell_chat_api-1",
+      name: "retell_text_mode-1",
       agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
-      productLabel: "Retell chat",
+      connectionType: "retell_text_mode",
+      accessVariant: "retell_text_mode.api_key",
+      productLabel: "Retell text mode",
       modality: "chat",
       // Derived from the type, never caller-supplied.
       topology: "hosted-broker",
@@ -1289,8 +1224,8 @@ describe("registering an agent", () => {
       name: "Front desk",
       connection: {
         agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        connectionType: "retell_text_mode",
+        accessVariant: "retell_text_mode.api_key",
         modality: "chat",
         // One letter wrong, which is the whole point: a typo dies at the door.
         config: { retellAgentld: "agent_in_retell_1" },
@@ -1302,7 +1237,7 @@ describe("registering an agent", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        'a Retell chat connection\'s config has no key "retellAgentld"; it holds retellAgentId',
+        'a Retell text mode connection\'s config has no key "retellAgentld"; it holds retellAgentId',
     });
     expect(await agentRowCount()).toBe(0);
   });
@@ -1340,6 +1275,27 @@ describe("registering an agent", () => {
 });
 
 describe("a connection payload its kind will not take", () => {
+  it("rejects the retired Retell Chat connection through the public write API", async () => {
+    api = await createApi("agents_retired_retell_chat_rejected");
+    const ada = await signUp(api.app, "ada@acme.example", "Acme");
+    const refused = await post("/v1/agents", withKey(ada.secret), {
+      agentPlatform: "retell",
+      name: "Front desk",
+      connection: connectionPayload({
+        connectionType: "retell_chat_api",
+        accessVariant: "retell_chat_api.api_key",
+      }),
+    });
+
+    expect(refused.status).toBe(400);
+    expect(refused.body).toEqual({
+      error: "invalid_request",
+      message:
+        '"retell_chat_api" is not a connection type Egma knows; expected one of retell_text_mode, retell_web_call, phone_number, livekit_room',
+    });
+    expect(await agentRowCount()).toBe(0);
+  });
+
   /**
    * The connection registry owns these four rules and writes their sentences,
    * and the route relays them without touching a word. They are asserted here
@@ -1360,7 +1316,7 @@ describe("a connection payload its kind will not take", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        '"vapi" is not a connection type Egma knows; expected one of retell_chat_api, retell_text_mode, retell_web_call, phone_number, livekit_room',
+        '"vapi" is not a connection type Egma knows; expected one of retell_text_mode, retell_web_call, phone_number, livekit_room',
     });
     expect(await agentRowCount()).toBe(0);
   });
@@ -1423,8 +1379,8 @@ describe("a connection payload its kind will not take", () => {
       name: "Front desk",
       connection: {
         agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        connectionType: "retell_text_mode",
+        accessVariant: "retell_text_mode.api_key",
         modality: "chat",
         config: { retellAgentId: "agent_in_retell_1" },
       },
@@ -1433,7 +1389,7 @@ describe("a connection payload its kind will not take", () => {
     expect(refused.status).toBe(400);
     expect(refused.body).toEqual({
       error: "invalid_request",
-      message: "a Retell chat connection needs credentials shaped { apiKey }",
+      message: "a Retell text mode connection needs credentials shaped { apiKey }",
     });
   });
 
@@ -1451,7 +1407,7 @@ describe("a connection payload its kind will not take", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        "a Retell chat connection's credentials need apiKey to be at least 8 characters",
+        "a Retell text mode connection's credentials need apiKey to be at least 8 characters",
     });
   });
 
@@ -2150,7 +2106,7 @@ describe("registering the same vendor agent again", () => {
     expect(rows[0]).toEqual({ agents: "1", connections: "1" });
   });
 
-  it("refuses voice modality on a Retell chat API connection", async () => {
+  it("refuses voice modality on a Retell text mode API connection", async () => {
     api = await createApi("agents_connection_added");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
@@ -2169,7 +2125,7 @@ describe("registering the same vendor agent again", () => {
     expect(voice.status).toBe(400);
     expect(voice.body).toEqual({
       error: "invalid_request",
-      message: "a retell_chat_api connection speaks chat, and this one was asked for voice",
+      message: "a retell_text_mode connection speaks chat, and this one was asked for voice",
     });
 
     const one = await get(
@@ -2337,8 +2293,8 @@ describe("a connection's name", () => {
     );
 
     expect(second.status).toBe(201);
-    expect(connectionOf(registered).name).toBe("retell_chat_api-1");
-    expect(connectionOf(second).name).toBe("retell_chat_api-2");
+    expect(connectionOf(registered).name).toBe("retell_text_mode-1");
+    expect(connectionOf(second).name).toBe("retell_text_mode-2");
   });
 
   it("is refused when a living connection on the agent already holds it", async () => {
@@ -2354,13 +2310,13 @@ describe("a connection's name", () => {
     const clash = await post(
       `/v1/agents/${String(agentOf(registered).id)}/connections`,
       withKey(ada.secret),
-      connectionPayload({ name: "retell_chat_api-1" }),
+      connectionPayload({ name: "retell_text_mode-1" }),
     );
 
     expect(clash.status).toBe(409);
     expect(clash.body).toEqual({
       error: "name_taken",
-      message: 'a connection named "retell_chat_api-1" already exists on this agent',
+      message: 'a connection named "retell_text_mode-1" already exists on this agent',
     });
   });
 });

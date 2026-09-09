@@ -507,9 +507,8 @@ describe.skipIf(!storage.available)("LiveKit evidence while the call is running"
       payload: { claimant: CONDUCTOR, provider_reference: `egma-sim-${simulationId}` } });
     expect((await register(canceled.simulationId)).statusCode).toBe(409);
     const otherLane = await aLandedSimulation(acme, "non-livekit registration", "", {
-      agentPlatform: "retell", connectionType: "retell_chat_api", accessVariant: "retell_chat_api.api_key",
-      modality: "chat", config: { retellAgentId: "agent_non_livekit_registration" },
-      credentials: { apiKey: "retell-secret-for-registration-test" },
+      agentPlatform: "retell", connectionType: "phone_number", accessVariant: "phone_number.public_e164",
+      modality: "voice", config: { phoneNumber: "+15551230000" },
     }, undefined, [], false);
     expect((await register(otherLane.simulationId)).statusCode).toBe(409);
   });
@@ -999,7 +998,7 @@ describe.skipIf(!storage.available)("a reference that names no simulation", () =
 });
 
 describe.skipIf(!storage.available)("the row caps, across an export naming two", () => {
-  it("bounds the request rather than each simulation it names", async () => {
+  it("refuses the full simulation export before a completion record can land", async () => {
     // Two conversations of this project, and one export speaking for both.
     // Each simulation is normalised on its own — two must never be blended —
     // so before the budget was carried, each got the whole ten thousand and an
@@ -1050,23 +1049,22 @@ describe.skipIf(!storage.available)("the row caps, across an export naming two",
       }),
       acmeKey,
     );
-    expect(answered.statusCode, answered.body).toBe(200);
-    const partial = answered.json() as {
-      partialSuccess?: { rejectedSpans: string; errorMessage: string };
-    };
-    // Six over the one bound, reported once — not zero, which is what two
-    // fresh budgets would have answered.
-    expect(partial.partialSuccess?.rejectedSpans).toBe("6");
-    expect(partial.partialSuccess?.errorMessage).toContain("10,000");
+    expect(answered.statusCode, answered.body).toBe(400);
+    const refused = answered.json() as { code: number; message: string };
+    expect(refused.code).toBe(3);
+    expect(refused.message).toContain("6 simulation evidence records");
+    expect(refused.message).toContain("10,000");
+    expect(refused.message).toContain("No record from this request was stored");
     await api.drainEvidence();
 
-    // And what was stored is the bound, counted across both conversations.
+    // No partial simulation can claim completion while a sibling record was
+    // rejected. Pure production exports keep OTLP partial-success behavior.
     expect(
       await countOf(
         `select count() as n from spans final
          where trace_id in ('${first.traceId}', '${second.traceId}')`,
       ),
-    ).toBe(10_000);
+    ).toBe(0);
   }, 120_000);
 });
 
@@ -1131,7 +1129,7 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
    * on an interval is the API's, and what is proved here is the seam's own
    * decision.
    */
-  it("stops waiting at the bound, grades anyway, and says the POV is incomplete", async () => {
+  it("stops waiting at the bound with an evidence error and no model work", async () => {
     const room = "egma-grading-bound-1";
     const landed = await aLandedSimulation(acme, "bound", room, {
       ...A_LIVEKIT_AGENT,
@@ -1142,24 +1140,106 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
 
     advancePastEvidenceWait();
     const settled = await settleSimulationsPastTheAgentPovBound();
-    expect(settled.map((one) => one.id)).toContain(landed.simulationId);
-    expect(
-      settled.find((one) => one.id === landed.simulationId)?.agentPovFiled,
-    ).toBe(false);
+    expect(settled).toContainEqual({
+      id: landed.simulationId,
+      runId: landed.runId,
+      agentPovFiled: false,
+      outcome: "evidence_error",
+    });
 
     const job = await getGradingJobForTrace(auth, landed.traceId);
-    expect(job?.traceId).toBe(landed.traceId);
-    // **And the read says so**, which is the half a reader needs: a view that
-    // shows the agent's POV would otherwise show whatever fragment arrived as
-    // if it were the whole conversation.
-    expect(await agentPovIncompleteOf(landed.simulationId)).toBe(true);
+    expect(job).toMatchObject({
+      traceId: landed.traceId,
+      status: "abandoned",
+      attempts: 0,
+      lastError: "evidence_collection_error",
+    });
+    const read = await api.app.inject({
+      method: "GET",
+      url: `/v1/simulations/${landed.simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` },
+    });
+    expect(read.statusCode, read.body).toBe(200);
+    expect(read.json()).toMatchObject({
+      gradingState: "error",
+      agentPovIncomplete: true,
+      evidenceError: {
+        error: "evidence_collection_error",
+        message: expect.stringContaining("complete evidence"),
+      },
+      grades: [],
+      gradeHistory: [],
+    });
 
-    // **And it settles nothing a second time.** The queue row is the record of
-    // grading having been asked for, so a later tick reads it and passes the
-    // row over — which is what keeps one conversation to one handoff however
-    // many replicas are reading the clock.
+    // The terminal Postgres row is the durable idempotency record, so another
+    // replica or a restarted sweep cannot create work or another error.
     const again = await settleSimulationsPastTheAgentPovBound();
     expect(again.map((one) => one.id)).not.toContain(landed.simulationId);
+    expect((await getGradingJobForTrace(auth, landed.traceId))?.id).toBe(job?.id);
+  }, 120_000);
+
+  it("ends the evidence wait at the bound when no graders were selected", async () => {
+    const room = "egma-no-graders-bound-1";
+    const landed = await aLandedSimulation(
+      acme,
+      "no-graders-bound",
+      room,
+      {
+        ...A_LIVEKIT_AGENT,
+        config: {
+          url: "wss://acme.livekit.cloud",
+          agentName: "front-desk-no-graders",
+        },
+      },
+      {
+        startedAt: CONVERSATION_STARTED_AT,
+        endedAt: CONVERSATION_ENDED_AT,
+      },
+      [],
+      false,
+    );
+    const auth = contextFor(acme, "member");
+    // Historical and explicitly ungraded runs can have no selected entries.
+    // Preserve the real frozen plan shape and empty only this test's selection.
+    await api.database.sql("alter table run disable trigger run_grading_plan_guard");
+    try {
+      await api.database.sql(
+        `update run
+         set grading_plan = jsonb_set(grading_plan, '{groups,0,items}', '[]'::jsonb)
+         where id = $1`,
+        [landed.runId],
+      );
+    } finally {
+      await api.database.sql("alter table run enable trigger run_grading_plan_guard");
+    }
+    await completeSimulation(auth, landed.simulationId, CONDUCTOR, {
+      endingReason: "agent_ended",
+      turnCount: 2,
+      providerReference: room,
+      startedAt: CONVERSATION_STARTED_AT,
+      endedAt: CONVERSATION_ENDED_AT,
+    });
+
+    advancePastEvidenceWait();
+    await settleSimulationsPastTheAgentPovBound();
+
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+    const read = await api.app.inject({
+      method: "GET",
+      url: `/v1/simulations/${landed.simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` },
+    });
+    expect(read.statusCode, read.body).toBe(200);
+    expect(read.json()).toMatchObject({
+      gradingState: "not_requested",
+      agentPovIncomplete: true,
+      evidenceError: {
+        error: "evidence_collection_error",
+        message: expect.stringContaining("complete evidence"),
+      },
+      grades: [],
+      gradeHistory: [],
+    });
   }, 120_000);
 
   /**
@@ -1222,23 +1302,18 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
     expect(bounded.map((one) => one.id)).not.toContain(landed.simulationId);
   }, 120_000);
 
-  /**
-   * Retell chat API and text mode do not produce the separately fetched agent
-   * POV. Their readable simulator evidence can trigger grading after completion
-   * without that wait. Exercise chat through the API and check text-mode classification.
-   */
-  it("grades a chat-lane landing off egma's own POV, with no bound in between", async () => {
+  /** A persona-POV lane can grade without a separately fetched agent POV. */
+  it("grades a persona-POV landing off egma's own evidence, with no bound in between", async () => {
     const landed = await aLandedSimulation(
       acme,
-      "chatlane",
-      "chat_5d1f9a3b7c",
+      "persona-pov lane",
+      "call_5d1f9a3b7c",
       {
         agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
-        modality: "chat",
-        config: { retellAgentId: "agent_chat_lane" },
-        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+15551230001" },
       },
     );
     const auth = contextFor(acme, "member");
@@ -1253,9 +1328,8 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
     // And nothing is missing, because nothing was owed.
     expect(await agentPovIncompleteOf(landed.simulationId)).toBe(false);
 
-    // The same decision about the lane beside it, and about the two that can.
+    // The same decision about the active lanes beside it.
     expect(laneProducesAnAgentPov("retell_text_mode")).toBe(false);
-    expect(laneProducesAnAgentPov("retell_chat_api")).toBe(false);
     expect(laneProducesAnAgentPov("livekit_room")).toBe(true);
     expect(laneProducesAnAgentPov("retell_web_call")).toBe(true);
   }, 120_000);
@@ -1867,8 +1941,8 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
       name: `Retell terminal ${label}`,
       connection: {
         agentPlatform: "retell",
-        connectionType: webCall ? "retell_web_call" : "retell_chat_api",
-        accessVariant: webCall ? "retell_web_call.api_key" : "retell_chat_api.api_key",
+        connectionType: webCall ? "retell_web_call" : "retell_text_mode",
+        accessVariant: webCall ? "retell_web_call.api_key" : "retell_text_mode.api_key",
         modality: webCall ? "voice" : "chat",
         config: { retellAgentId: "agent_front_desk" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },

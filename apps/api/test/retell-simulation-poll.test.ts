@@ -273,4 +273,23 @@ describe("waiting for Retell's final simulation record", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("stops a collector while it is waiting for its next retry", async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify(PENDING_CALL))) as unknown as typeof fetch;
+    const done = collect(pollRetellSimulationCall("retell-key", "call_waiting", {
+      fetchImpl,
+      signal: controller.signal,
+    }, {
+      completionReceivedAtMilliseconds: Date.now(),
+      retryWaitsMilliseconds: [60_000],
+      sleep: async () => new Promise<void>(() => undefined),
+    }));
+
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+    controller.abort();
+
+    await expect(done).resolves.toHaveLength(1);
+  });
+
 });

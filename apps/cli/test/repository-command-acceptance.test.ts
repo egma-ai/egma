@@ -58,15 +58,15 @@ it("creates a suite first, pushes the complete folder atomically, and runs that 
       },
       body: JSON.stringify({
         name: "Front desk",
-        agentPlatform: "retell",
+        agentPlatform: "livekit",
         connection: {
           name: "Fixture chat",
-          agentPlatform: "retell",
-          connectionType: "retell_chat_api",
-          accessVariant: "retell_chat_api.api_key",
+          agentPlatform: "livekit",
+          connectionType: "livekit_room",
+          accessVariant: "livekit_room.project_credentials",
           modality: "chat",
-          config: { retellAgentId: "complete-suite-agent" },
-          credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+          config: { url: "wss://fixture.livekit.cloud", agentName: "complete-suite-agent" },
+          credentials: { apiKey: "APIfixture12345678", apiSecret: "livekit-secret-fixture" },
         },
       }),
     });

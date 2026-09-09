@@ -65,7 +65,7 @@ try {
   );
   assert.equal(
     installedEgma.peerDependencies["@livekit/agents"],
-    ">=1.5.0 <2",
+    ">=1.5.5 <2",
   );
 
   const installedLiveKit = JSON.parse(

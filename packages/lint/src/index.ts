@@ -137,6 +137,10 @@ const WORK_DISPATCHING = [
   // has no Egma credential. Return only the live-run association, pinned mock
   // tools, and narrowed AuthContext; accept no customer selector.
   "resolveMockToolCall",
+  // Find completed Retell web calls that still owe their provider record.
+  // The caller supplies no customer selector; each answer carries the row's
+  // narrowed AuthContext for the provider read and evidence filing.
+  "sweepPendingRetellSimulationCollections",
   // Bound the wait for the agent's POV across completed simulations. Each
   // grading request uses that simulation's narrowed AuthContext. Inputs are
   // time limits, not customer selectors; outputs contain IDs, not content.

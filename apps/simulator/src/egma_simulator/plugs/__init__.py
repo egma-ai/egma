@@ -236,7 +236,6 @@ def plug_for(connection_type: str) -> PlugFactory | None:
     """
     from .loopback import LoopbackCounterpart
     from .phone import PhoneCall
-    from .retell import RetellChat
     from .retell_text_mode import RetellTextMode
     from .retell_web_call import RetellWebCall
     from .scripted import ScriptedCounterpart
@@ -245,7 +244,6 @@ def plug_for(connection_type: str) -> PlugFactory | None:
         "livekit_room": _livekit_room,
         "loopback": LoopbackCounterpart,
         "phone_number": PhoneCall,
-        "retell_chat_api": RetellChat,
         "retell_text_mode": RetellTextMode,
         "retell_web_call": RetellWebCall,
         "scripted": ScriptedCounterpart,

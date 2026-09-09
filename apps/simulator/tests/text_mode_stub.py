@@ -38,6 +38,11 @@ class ToolTurn:
     the customer's own implementation running, which is what an uncovered
     tool does on this lane."""
 
+    reported_result: str | None = None
+    """Override the result returned by the platform, including for a mocked
+    name. This lets the adapter prove that it records the provider response,
+    rather than reconstructing it from the answer submitted in the request."""
+
 
 @dataclass(frozen=True)
 class Reply:
@@ -255,7 +260,9 @@ class TextModeStub:
                     "role": "tool_call_result",
                     "tool_call_id": call_id,
                     "content": (
-                        tool.real_result if mock is None else mock.get("output")
+                        tool.reported_result
+                        if tool.reported_result is not None
+                        else (tool.real_result if mock is None else mock.get("output"))
                     ),
                     "created_timestamp": _now_ms(),
                 }

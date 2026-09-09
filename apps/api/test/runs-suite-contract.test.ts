@@ -27,13 +27,13 @@ afterEach(async () => {
   await api?.close();
 });
 
-const RETELL = {
-  agentPlatform: "retell",
-  connectionType: "retell_chat_api",
-  accessVariant: "retell_chat_api.api_key",
+const LIVEKIT_CHAT = {
+  agentPlatform: "livekit",
+  connectionType: "livekit_room",
+  accessVariant: "livekit_room.project_credentials",
   modality: "chat",
-  config: { retellAgentId: "agent_in_retell_run_contract" },
-  credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+  config: { url: "wss://fixture.livekit.cloud", agentName: "agent_in_retell_run_contract" },
+  credentials: { apiKey: "APIfixture12345678", apiSecret: "livekit-secret-fixture" },
 } as const;
 
 const PHONE = {
@@ -62,7 +62,7 @@ type ReadyRun = {
 
 async function readyToRun(
   label: string,
-  connection: Record<string, unknown> = RETELL,
+  connection: Record<string, unknown> = LIVEKIT_CHAT,
   options: TestApiOptions = {},
 ): Promise<ReadyRun> {
   api = await createApi(label, { traceStore: true, ...options });
@@ -85,7 +85,7 @@ async function readyToRun(
   expect(test.statusCode, JSON.stringify(test.body)).toBe(201);
 
   const registered = await request(api.app, "POST", "/v1/agents", key, {
-    agentPlatform: "retell",
+    agentPlatform: "livekit",
     name: "Front desk",
     connection,
   });
@@ -122,7 +122,7 @@ async function listedRunIds(key: string, query: string): Promise<readonly string
 
 describe("suite-selected run reads", () => {
   it("keeps every active list filter exact", async () => {
-    const ready = await readyToRun("run_suite_filters", RETELL, {
+    const ready = await readyToRun("run_suite_filters", LIVEKIT_CHAT, {
       traceStore: true,
     });
     const started = await start(ready);

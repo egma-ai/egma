@@ -164,15 +164,15 @@ async function aCustomerWhoRan(
   });
 
   const registered = await ask(api.app, "POST", "/v1/agents", key, {
-    agentPlatform: "retell",
+    agentPlatform: "livekit",
     name: "Front desk",
     connection: {
-      agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
       modality: "chat",
-      config: { retellAgentId: "agent_in_retell_1" },
-      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      config: { url: "wss://fixture.livekit.cloud", agentName: "agent_in_retell_1" },
+      credentials: { apiKey: "APIfixture12345678", apiSecret: "livekit-secret-fixture" },
     },
   });
   expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);

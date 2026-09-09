@@ -47,10 +47,6 @@ import type { CarrierRoute } from "../config.ts";
 import { invalid, notTheService } from "../http/refusals.ts";
 import { mockToolBase } from "./mock-endpoint.ts";
 import { platformEvent, safeExceptionType } from "../platform-log.ts";
-import {
-  verifyRetellChatAgent,
-  type RetellDirectTargetCheck,
-} from "../providers/retell.ts";
 
 /**
  * Internal simulation claims require the deployment service token and bypass
@@ -92,8 +88,6 @@ export type ClaimRoutesOptions = {
   readonly entitlements: EntitlementSource;
   /** Optional deployment caps enforced in the claim transaction. */
   readonly caps?: SimulationConcurrencyCaps | undefined;
-  /** Test seam for Retell's read-only dispatch preflight. */
-  readonly retellFetch?: typeof fetch | undefined;
 };
 
 export const CLAIMS_PATH = "/v1/claims";
@@ -505,12 +499,10 @@ async function assembledSpec(
    * the claim's stored scope. Do not retain the cache across requests.
    */
   runs: Map<string, Run | undefined>,
-  retellTargets: Map<string, Promise<RetellDirectTargetCheck>>,
   providerCredentials: ProviderCredentialSource,
   carrierRoute: CarrierRoute | undefined,
   /** Where the mock endpoint answers, for the routing variables below. */
   baseUrl: string,
-  retellFetch?: typeof fetch,
   responseDeadline = Date.now() + CLAIM_RESPONSE_MILLISECONDS,
   deploymentSecretEnvironment?: Readonly<Record<string, string>>,
 ): Promise<
@@ -535,30 +527,8 @@ async function assembledSpec(
     };
   }
 
-  if (connection.connectionType === "retell_chat_api") {
-    const apiKey = connection.credentials?.["apiKey"] ?? "";
-    const agentId = connection.config["retellAgentId"] ?? "";
-    let checked = retellTargets.get(connection.connectionId);
-    if (checked === undefined) {
-      checked = verifyRetellChatAgent(
-        apiKey,
-        agentId,
-        retellFetch,
-        Math.max(1, responseDeadline - Date.now() - 500),
-      );
-      retellTargets.set(connection.connectionId, checked);
-    }
-    const target = await checked;
-    if (target.kind === "blocked") {
-      return { unbuildable: target.message };
-    }
-    if (target.kind === "retryable") {
-      return { retryable: target.message };
-    }
-  }
-
-  // Add the deployment carrier route only for `phone_number`. A Retell chat or
-  // LiveKit room claim must not carry a SIP password it cannot use.
+  // Add the deployment carrier route only for `phone_number`. Other claims
+  // must not carry a SIP password they cannot use.
   const platform =
     connectionTypeUsesPlatformCarrier(connection.connectionType)
       ? platformBlock(carrierRoute)
@@ -836,13 +806,8 @@ export async function claimRoutes(
       // One read of each run, however many of its conversations this batch
       // took. Lives exactly as long as this response.
       const runs = new Map<string, Run | undefined>();
-      const retellTargets = new Map<
-        string,
-        Promise<RetellDirectTargetCheck>
-      >();
-      // Every spec, and every unique Retell check cached inside them, starts
-      // together. A batch of fifty must not spend one provider timeout fifty
-      // times or break the route's sub-30-second response promise.
+      // Every spec starts together. A batch of fifty must not serialize its
+      // database reads and break the route's sub-30-second response promise.
       const assembled = await Promise.all(
         claims.map(async (claim) =>
           // A withheld conversation is never assembled: it is going back on
@@ -854,11 +819,9 @@ export async function claimRoutes(
                 claim,
                 pinned.get(claim.id),
                 runs,
-                retellTargets,
                 options.providerCredentials,
                 options.carrierRoute,
                 options.baseUrl,
-                options.retellFetch,
                 responseDeadline,
                 ask.runtime === "daytona"
                   ? options.daytonaProviderSecretEnvironment

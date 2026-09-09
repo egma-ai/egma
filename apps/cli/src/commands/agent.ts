@@ -227,9 +227,7 @@ async function prepare(options: CommandIO): Promise<Ready | Stop> {
 function publicAccess(option: ConnectionOption): string | null {
   if (
     option.agentPlatform === "retell" &&
-    ((option.connectionType === "retell_chat_api" &&
-      option.accessVariant === "retell_chat_api.api_key") ||
-      (option.connectionType === "retell_text_mode" &&
+    ((option.connectionType === "retell_text_mode" &&
         option.accessVariant === "retell_text_mode.api_key") ||
       (option.connectionType === "retell_web_call" &&
         option.accessVariant === "retell_web_call.api_key"))

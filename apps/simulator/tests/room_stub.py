@@ -291,7 +291,7 @@ class StubRoom:
             return
         self.carrying_audio.set()
         if self._startup is not None:
-            self._startup.participant_audio(AGENT_IDENTITY)
+            self._startup.participant_audio_track(AGENT_IDENTITY)
         self._activation = asyncio.create_task(
             transport.activate(), name="room-stub-transport"
         )

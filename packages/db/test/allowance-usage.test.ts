@@ -74,10 +74,6 @@ const LANES: Readonly<
     { readonly accessVariant: string; readonly modality: Modality }
   >
 > = {
-  retell_chat_api: {
-    accessVariant: "retell_chat_api.api_key",
-    modality: "chat",
-  },
   retell_text_mode: {
     accessVariant: "retell_text_mode.api_key",
     modality: "chat",
@@ -123,26 +119,26 @@ async function seedRun(
   const auth = { ...sessionOf(who), projectId };
   const label = newId("run").slice(-8);
   const created = await createAgent(auth, {
-    agentPlatform: "retell",
+    agentPlatform: "livekit",
     name: `Front desk ${label}`,
     connection: {
-      agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
       modality: "chat",
-      config: { retellAgentId: `agent_${label}` },
-      credentials: { apiKey: `retell-secret-${label}` },
+      config: { url: "wss://test.livekit.cloud", agentName: `agent_${label}` },
+      credentials: { apiKey: `livekit-key-${label}`, apiSecret: `livekit-secret-${label}` },
     },
   });
   const connections = new Map<ConnectionType, string>([
-    ["retell_chat_api", created.connection?.id ?? ""],
+    ["livekit_room", created.connection?.id ?? ""],
   ]);
   // The other four lanes go in by raw SQL. What is under test is how a span is
   // counted, not what the connection registry admits, and a fixture that had
   // to satisfy every lane's own credential rule would be a fixture about
   // connections.
   for (const [connectionType, lane] of Object.entries(LANES)) {
-    if (connectionType === "retell_chat_api") continue;
+    if (connectionType === "livekit_room") continue;
     const id = newId("con");
     await database.sql(
       `insert into connection
@@ -182,7 +178,7 @@ async function seedRun(
   const started = await startRun(auth, {
     suiteId: suite.id,
     agentId: created.id,
-    connectionId: connections.get("retell_chat_api") ?? "",
+    connectionId: connections.get("livekit_room") ?? "",
   });
   const one = (await listSimulations(auth, started.id))?.items[0];
   if (one === undefined) throw new Error("the run has no simulation");
@@ -311,7 +307,7 @@ describe("what one organization used this period", () => {
     const inside = new Date("2026-09-18T09:00:00.000Z");
 
     // Two chats, counted as conversations however long they lasted.
-    await conversation(seeded, acme, "retell_chat_api", {
+    await conversation(seeded, acme, "retell_text_mode", {
       startedAt: inside,
       seconds: 12,
     });

@@ -240,23 +240,28 @@ class MockToolSeam:
             for mock in self._answers.values()
         )
 
-    def reported(self, name: str, *, arguments: str | None = None) -> None:
+    def reported(
+        self,
+        name: str,
+        *,
+        arguments: str | None = None,
+        result: str | None = None,
+    ) -> None:
         """Record a platform-reported tool call at one instant; no duration was
         observed.
-        For covered names, include Egma's rendered answer instead of the platform echo.
-        For uncovered names, record the name and arguments without a result.
+        Preserve the result the platform says the tool received. Mock provenance is
+        derived from the pinned test, so the observed value is never replaced here.
         """
         called = name.strip()
         if not called:
             raise ValueError("a tool call the platform reported must name a tool")
         if called not in self._discovered:
             self._discovered = (*self._discovered, called)
-        mock = self._answers.get(called)
         self._reported.append(
             ReportedToolCall(
                 name=called,
                 arguments=arguments,
-                answer=None if mock is None else _recorded(mock),
+                answer=result,
                 at_unix_nano=self._clock(),
             )
         )

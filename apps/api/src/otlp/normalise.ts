@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { NewSpan, SpanEmitter, SpanSource } from "@egma/db";
 import { TIMING_SPAN_MEASURES } from "@egma/metrics";
 
@@ -29,6 +31,7 @@ import type {
 export type SpanAttribution = {
   readonly source: SpanSource;
   readonly emitter: SpanEmitter;
+  readonly modality?: "chat" | "voice";
   readonly runId: string;
   readonly agentId: string;
   readonly testVersionId: string;
@@ -101,6 +104,8 @@ const PROVIDER_CALL_ID_ATTRIBUTES = [
  * Unknown names remain other with their payload retained.
  */
 const LIVEKIT_SCOPE = "livekit-agents";
+const LANGFUSE_SCOPE = "langfuse-sdk";
+const LANGFUSE_OBSERVATION_TYPE = "langfuse.observation.type";
 
 const LIVEKIT_KINDS: Readonly<Record<string, string>> = {
   // The one span the whole trace happened inside. Its kind is `root` rather
@@ -134,6 +139,27 @@ const LIVEKIT_TURN_TEXT: Readonly<Record<string, readonly string[]>> = {
   agent_turn: ["lk.pii.response.text", "lk.response.text"],
 };
 
+const LIVEKIT_CALLER_INPUT = ["lk.pii.user_input", "lk.user_input"];
+
+/**
+ * Give the normalized caller fact a stable identity derived from its exact
+ * native source. The native span keeps its own identity unchanged.
+ */
+function callerInputSpanId(traceId: string, spanId: string): string {
+  return createHash("sha256")
+    .update(`${traceId}:${spanId}:lk.pii.user_input`)
+    .digest("hex")
+    .slice(0, 16);
+}
+
+/** Mark a derived row while retaining the complete decoded native payload. */
+function callerInputPayload(payload: string): string {
+  return (
+    `{"egma.projection":{"source":"lk.pii.user_input","duration":"unmeasured"},` +
+    payload.slice(1)
+  );
+}
+
 const LIVEKIT_TOOL = {
   name: ["lk.function_tool.name"],
   arguments: [
@@ -141,6 +167,12 @@ const LIVEKIT_TOOL = {
     "lk.function_tool.arguments",
   ],
   result: ["lk.pii.function_tool.output", "lk.function_tool.output"],
+} as const;
+
+const LANGFUSE_TOOL = {
+  name: [] as const,
+  arguments: ["langfuse.observation.input"],
+  result: ["langfuse.observation.output"],
 } as const;
 
 /**
@@ -429,6 +461,15 @@ const KINDS_BY_SCOPE: Readonly<
 };
 
 function kindOf(scope: OtlpScope | undefined, span: OtlpSpan): string {
+  if (scope?.name === LANGFUSE_SCOPE) {
+    const observationType = attribute(
+      span.attributes,
+      LANGFUSE_OBSERVATION_TYPE,
+    );
+    if (observationType === "tool") return "tool";
+    if (observationType === "generation") return "model";
+    return "other";
+  }
   const known = KINDS_BY_SCOPE[scope?.name ?? ""]?.[span.name ?? ""];
   if (known !== undefined) return known;
   // A scope this table does not know is `other`, including one emitting the
@@ -467,6 +508,7 @@ const TOOL_KEYS_BY_SCOPE: Readonly<
   >
 > = {
   [LIVEKIT_SCOPE]: LIVEKIT_TOOL,
+  [LANGFUSE_SCOPE]: LANGFUSE_TOOL,
   [SIMULATOR_SCOPE]: SIMULATOR_TOOL,
 };
 
@@ -615,17 +657,19 @@ export function normaliseOtlpExport(
 
         const attributes = span.attributes;
         const kind = kindOf(scope, span);
-        const tool = TOOL_KEYS_BY_SCOPE[scope?.name ?? ""];
+        const tool =
+          kind === "tool"
+            ? TOOL_KEYS_BY_SCOPE[scope?.name ?? ""]
+            : undefined;
         const agentPlatform = AGENT_PLATFORM_BY_SCOPE[scope?.name ?? ""] ?? "";
 
         payloadPrefix ??= payloadPrefixFor(resourceSpans, scopeSpans);
         const payload = `${payloadPrefix}${JSON.stringify(span)}}`;
-        // Bytes rather than code units, because bytes are what the store holds
-        // and what the memory this bounds is made of.
-        budget.bytes += Buffer.byteLength(payload);
-        budget.spans += 1;
-
-        spans.push({
+        const providerCallId = firstAttribute(
+          [attributes, resourceSpans.resource?.attributes],
+          PROVIDER_CALL_ID_ATTRIBUTES,
+        );
+        const normalised: NewSpan = {
           traceId,
           spanId,
           // A parent that is not a usable id is dropped to `''`, which is how a
@@ -652,7 +696,10 @@ export function normaliseOtlpExport(
           toolName:
             tool === undefined
               ? ""
-              : firstAttribute([attributes], tool.name),
+              : firstAttribute([attributes], tool.name) ||
+                (scope?.name === LANGFUSE_SCOPE && kind === "tool"
+                  ? (span.name ?? "")
+                  : ""),
           toolArguments:
             tool === undefined
               ? ""
@@ -661,10 +708,7 @@ export function normaliseOtlpExport(
             tool?.result === undefined
               ? ""
               : firstAttribute([attributes], tool.result),
-          providerCallId: firstAttribute(
-            [attributes, resourceSpans.resource?.attributes],
-            PROVIDER_CALL_ID_ATTRIBUTES,
-          ),
+          providerCallId,
           agentPlatform,
           platformAgentId: firstAttribute(
             [attributes, resourceSpans.resource?.attributes],
@@ -705,7 +749,62 @@ export function normaliseOtlpExport(
            * marker because its lifecycle report controls completion.
            */
           endsTrace: kind === "root" && agentPlatform !== "",
-        });
+        };
+
+        const append = (rows: readonly NewSpan[]): void => {
+          const bytes = rows.reduce(
+            (total, row) => total + Buffer.byteLength(row.payload),
+            0,
+          );
+          const tooManySpans =
+            budget.spans + rows.length > MAXIMUM_SPANS_PER_REQUEST;
+          const tooManyBytes =
+            budget.bytes + bytes > MAXIMUM_NORMALISED_BYTES;
+          if (tooManySpans || tooManyBytes) {
+            excess ??= {
+              reason: tooManySpans ? TOO_MANY_SPANS : TOO_MANY_BYTES,
+            };
+            // OTLP counts the one wire span that could not be accepted, not
+            // the number of rows its normalization would have produced.
+            rejected.push(excess);
+            return;
+          }
+          budget.bytes += bytes;
+          budget.spans += rows.length;
+          spans.push(...rows);
+        };
+
+        const callerInput =
+          scope?.name === LIVEKIT_SCOPE && span.name === "agent_turn"
+            ? firstAttribute([attributes], LIVEKIT_CALLER_INPUT)
+            : "";
+        // Retain blank native turn records and their children as raw evidence,
+        // outside the spoken transcript.
+        const native =
+          scope?.name === LIVEKIT_SCOPE &&
+          (span.name === "agent_turn" || span.name === "user_turn") &&
+          normalised.text.trim() === ""
+            ? { ...normalised, kind: "other" }
+            : normalised;
+        if (callerInput !== "" && attribution.modality === "chat") {
+          const caller: NewSpan = {
+            ...normalised,
+            spanId: callerInputSpanId(traceId, spanId),
+            // LiveKit timestamps acceptance on the agent turn. Its duration
+            // includes response work and is not a caller-input duration.
+            durationNanoseconds: 0n,
+            kind: "turn:human",
+            // This row records accepted caller input. A later agent response
+            // error belongs to the native span, not to what the caller said.
+            status: "unset",
+            text: callerInput,
+            payload: callerInputPayload(payload),
+            endsTrace: false,
+          };
+          append([caller, native]);
+        } else {
+          append([native]);
+        }
       }
     }
   }

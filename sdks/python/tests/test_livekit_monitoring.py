@@ -9,13 +9,14 @@ import queue
 import threading
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from livekit.agents.telemetry import tracer as livekit_tracer
 from opentelemetry import trace
 from opentelemetry.sdk.trace import SpanProcessor, TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExportResult
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
@@ -26,6 +27,127 @@ from egma.export import PROVIDER_REFERENCE
 
 PROJECT_KEY = f"egma_sk_{'a' * 43}"
 A_SIMULATION_ROOM = SIMULATION_ROOM
+
+
+class ScriptedExporter:
+    def __init__(self, results: list[SpanExportResult]) -> None:
+        self.results = iter(results)
+        self.batches: list[list[str]] = []
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.block = False
+        self.flushed = False
+        self.stopped = False
+
+    def export(self, spans) -> SpanExportResult:
+        self.batches.append([span.name for span in spans])
+        self.entered.set()
+        if self.block:
+            assert self.release.wait(1)
+        return next(self.results, SpanExportResult.SUCCESS)
+
+    def force_flush(self, timeout_millis=30_000) -> bool:
+        self.flushed = True
+        return True
+
+    def shutdown(self) -> None:
+        self.stopped = True
+
+
+def named(name: str):
+    return SimpleNamespace(name=name)
+
+
+def finished_spans(*names: str):
+    provider = TracerProvider()
+    memory = InMemorySpanExporter()
+    provider.add_span_processor(SimpleSpanProcessor(memory))
+    tracer = provider.get_tracer("livekit-agents")
+    for name in names:
+        with tracer.start_as_current_span(name):
+            pass
+    spans = memory.get_finished_spans()
+    provider.shutdown()
+    return spans
+
+
+def test_simulation_export_orders_children_before_root_and_latches_failure():
+    delegate = ScriptedExporter([
+        SpanExportResult.FAILURE,
+        SpanExportResult.SUCCESS,
+    ])
+    exporter = export._SimulationEvidenceExporter(delegate)
+
+    first = exporter.export([named("agent_turn"), named("agent_session")])
+    assert first == SpanExportResult.FAILURE
+    assert exporter.export([named("tool_call")]) == SpanExportResult.SUCCESS
+    final = exporter.export([named("llm_request"), named("agent_session")])
+    assert final == SpanExportResult.FAILURE
+
+    assert delegate.batches == [
+        ["agent_turn"],
+        ["tool_call"],
+        ["llm_request"],
+    ]
+
+
+def test_real_transport_retries_before_the_simulation_root(monkeypatch):
+    responses: queue.Queue[int] = queue.Queue()
+    for status in (503, 200, 200):
+        responses.put(status)
+    received: list[bytes] = []
+
+    class Collector(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802
+            received.append(self.rfile.read(int(self.headers["content-length"])))
+            self.send_response(responses.get_nowait())
+            self.end_headers()
+
+        def log_message(self, _format: str, *_args: Any) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Collector)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setattr("random.uniform", lambda _low, _high: 0)
+    try:
+        native = export._build_exporter(
+            f"http://127.0.0.1:{server.server_port}/v1/traces",
+            PROJECT_KEY,
+            "egma.simulation",
+        )
+        exporter = export._SimulationEvidenceExporter(native)
+        child, root = finished_spans("agent_turn", "agent_session")
+        assert exporter.export([child, root]) == SpanExportResult.SUCCESS
+        assert len(received) == 3
+        exporter.shutdown()
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.mark.parametrize("operation", ["force_flush", "shutdown"])
+def test_simulation_export_completion_waits_for_inflight_work(operation: str):
+    delegate = ScriptedExporter([SpanExportResult.SUCCESS])
+    delegate.block = True
+    exporter = export._SimulationEvidenceExporter(delegate)
+    exporting = threading.Thread(target=lambda: exporter.export([named("agent_turn")]))
+    exporting.start()
+    assert delegate.entered.wait(1)
+
+    completed = threading.Event()
+    waiting = threading.Thread(
+        target=lambda: (getattr(exporter, operation)(), completed.set())
+    )
+    waiting.start()
+    assert not completed.wait(0.05)
+    delegate.release.set()
+    exporting.join(1)
+    waiting.join(1)
+
+    assert completed.is_set()
+    assert delegate.flushed is (operation == "force_flush")
+    assert delegate.stopped is (operation == "shutdown")
 
 
 @dataclass
