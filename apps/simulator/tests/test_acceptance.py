@@ -26,7 +26,6 @@ from conftest import (
     measures_for,
     milliseconds_of,
     phone_spec,
-    retell_spec,
     scripted_spec,
     span_attribute,
     spans_for,
@@ -585,11 +584,11 @@ async def test_a_plug_refusal_is_an_honest_failure_on_the_record(
     assert [record for record in records if record["kind"] == "refusal"] == []
 
 
-async def test_a_retell_chat_spec_conducts_a_multi_turn_exchange(
-    workbench, start_simulator, start_retell_stub
+async def test_a_retell_text_mode_spec_conducts_a_multi_turn_exchange(
+    workbench, start_simulator, start_text_mode_stub
 ):
-    """The first real platform, black-box: a spec carrying a Retell chat
-    connection block goes in, and a multi-turn transcript against a
+    """The Retell text-mode platform, black-box: an active connection block
+    goes in, and a multi-turn transcript against a
     Retell-shaped platform comes back — with the credential used and never
     written down anywhere.
 
@@ -597,15 +596,15 @@ async def test_a_retell_chat_spec_conducts_a_multi_turn_exchange(
     scripted one, which is the whole extensibility claim.
     """
     sentinel = "SENTINEL-retell-key-c1d4e7f0a3b6"
-    running = await start_retell_stub(
+    running = await start_text_mode_stub(
         api_key=sentinel,
-        greeting="Lakeside Dental, how can I help?",
         replies=[
-            "Of course — could I take your name?",
-            "Done: Thursday at half past two.",
+            Reply(words="Lakeside Dental, how can I help?"),
+            Reply(words="Of course — could I take your name?"),
+            Reply(words="Done: Thursday at half past two."),
         ],
     )
-    spec = retell_spec(
+    spec = text_mode_spec(
         "sim-retell-001",
         base_url=running.base_url,
         api_key=sentinel,
@@ -634,20 +633,16 @@ async def test_a_retell_chat_spec_conducts_a_multi_turn_exchange(
     assert terminal["status"] == "completed"
     assert terminal["facts"]["ending"] == "persona_concluded"
     assert terminal["facts"]["turn_count"] == len(turns)
-    # The join to the platform's own telemetry is Retell's chat id.
-    assert terminal["facts"]["provider_reference"] == running.stub.chat_ids()[0]
+    # Text mode returns no durable Retell call reference.
+    assert terminal["facts"]["provider_reference"] is None
 
-    # And the platform's side of the same story: one chat opened against the
-    # agent the connection block named, the persona's turns delivered in
-    # order, the chat ended rather than left ongoing.
+    # And the platform's side of the same story: every completion addressed
+    # the agent the connection block named, with persona turns in order.
     stub = running.stub
-    assert [call["endpoint"] for call in stub.calls] == [
-        "create-chat",
-        "create-chat-completion",
-        "create-chat-completion",
-        "end-chat",
-    ]
-    assert stub.calls[0]["agent_id"] == "agent_lakeside_chat"
+    assert len(stub.requests) == 3
+    assert all(
+        request["agent_id"] == "agent_lakeside_chat" for request in stub.requests
+    )
     assert stub.delivered() == [
         "I need to move my Tuesday cleaning to Thursday.",
         "My name is Margaret Hale.",
@@ -658,14 +653,14 @@ async def test_a_retell_chat_spec_conducts_a_multi_turn_exchange(
 
 
 async def test_a_retell_key_the_platform_refuses_fails_honestly_and_silently(
-    workbench, start_simulator, start_retell_stub
+    workbench, start_simulator, start_text_mode_stub
 ):
     """The failure path a wrong credential takes: the simulation ends failed
     with a reason naming what the platform said, and the key appears
     nowhere — not in the report, not in a log line, not in the log on disk."""
     sentinel = "SENTINEL-retell-key-wrong-8e2a5c9f"
-    running = await start_retell_stub(api_key="the-only-key-this-stub-honors")
-    spec = retell_spec(
+    running = await start_text_mode_stub(api_key="the-only-key-this-stub-honors")
+    spec = text_mode_spec(
         "sim-retell-badkey", base_url=running.base_url, api_key=sentinel
     )
     await workbench.offer(spec)
@@ -686,7 +681,7 @@ async def test_a_retell_key_the_platform_refuses_fails_honestly_and_silently(
 
 
 async def test_a_platform_that_says_the_key_back_still_leaks_nothing(
-    workbench, start_simulator, start_retell_stub
+    workbench, start_simulator, start_text_mode_stub
 ):
     """The reason a plug gives carries the platform's own words, and a
     careless platform's own words can include the key it was just given.
@@ -694,10 +689,10 @@ async def test_a_platform_that_says_the_key_back_still_leaks_nothing(
     report, not the log line, not the traceback under it — may repeat a
     secret because somebody else did first."""
     sentinel = "SENTINEL-retell-key-echoed-3d6f0b21"
-    running = await start_retell_stub(
+    running = await start_text_mode_stub(
         api_key="the-only-key-this-stub-honors", echo_key_in_refusal=True
     )
-    spec = retell_spec(
+    spec = text_mode_spec(
         "sim-retell-echoed", base_url=running.base_url, api_key=sentinel
     )
     await workbench.offer(spec)
@@ -716,7 +711,7 @@ async def test_a_retell_endpoint_that_answers_nowhere_fails_honestly(
     """The other absence: nothing listening at all. Same honesty, same
     silence about the key."""
     sentinel = "SENTINEL-retell-key-unreachable-77b1"
-    spec = retell_spec(
+    spec = text_mode_spec(
         "sim-retell-nowhere",
         base_url="http://127.0.0.1:1",
         api_key=sentinel,
@@ -826,9 +821,8 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
     # Egma runs inside a Retell agent and this lane offers no provider
     # reference, so no report of the agent's own ever arrives: the seam's
     # own record is this lane's whole tool record. The call the test named
-    # carries what Egma answered with; the other carries the name and the
-    # arguments alone, which is the record's own way of saying a real
-    # backend did the work.
+    # carries what Egma answered with; the other carries the real backend's
+    # answer. The mock stamp below is what distinguishes who did the work.
     calls = [span for span in spans if span["name"] == "tool_call"]
     assert [span_attribute(span, "egma.tool.name") for span in calls] == [
         "get_availability",
@@ -838,7 +832,7 @@ async def test_a_retell_voice_agent_is_conducted_in_text_and_reads_back(
     assert span_attribute(mocked, "egma.tool.arguments") == '{"day":"thursday"}'
     assert span_attribute(mocked, "egma.tool.result") == '{"slots":["thu-1430"]}'
     assert span_attribute(real, "egma.tool.arguments") == '{"phone":"+15551234567"}'
-    assert span_attribute(real, "egma.tool.result") is None
+    assert span_attribute(real, "egma.tool.result") == '{"customer_id":"cus_9931"}'
     # And no stamp anywhere saying who answered: that is read at display
     # time, by name, from the pinned test version's mock tools.
     for span in calls:
