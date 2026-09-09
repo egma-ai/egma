@@ -22,22 +22,36 @@ import { METER_EVENT_NAMES } from "./meter.ts";
  * **Why it exists at all.** The Stripe objects are not in `plans.json` and
  * cannot be: a product id and a price id are made by Stripe and belong to one
  * account, so a fresh sandbox, a second sandbox and a live account each need
- * their own. A dashboard click-through would put six identifiers in a runbook
- * nobody re-reads. This is one command whose result is the same however many
- * times it runs.
+ * their own. A dashboard click-through would put the catalog identifiers in a
+ * runbook nobody re-reads. This is one command whose result is the same however
+ * many times it runs.
  *
  * **Nothing here is on a request path**, and nothing on one calls it.
  */
 
-/** Where the fee and the two metered prices are found again, by lookup key. */
+/**
+ * Where the current prices are found again.
+ *
+ * The v2 meter keys leave the original shared-product keys in place, so an
+ * older setup binary can still restore its own catalog after a rollback.
+ */
 export const PRICE_LOOKUP_KEYS = {
   fee: "egma_pro_fee_monthly",
-  web_call_minutes: "egma_pro_web_call_minutes",
-  phone_minutes: "egma_pro_phone_minutes",
+  web_call_minutes: "egma_pro_web_call_minutes_v2",
+  phone_minutes: "egma_pro_phone_minutes_v2",
 } as const;
 
-/** What names the Pro product on the Stripe account, so it can be found again. */
-export const PRODUCT_METADATA_KEY = "egma_plan";
+/** What identifies each product in Egma's Checkout catalog. */
+export const PRODUCT_METADATA_KEY = "egma_catalog_item";
+
+/** The metadata on the original shared Pro product. */
+const LEGACY_PRODUCT_METADATA_KEY = "egma_plan";
+
+const PRODUCT_METADATA_VALUES = {
+  fee: "pro_monthly_fee",
+  webCall: "web_call_minutes",
+  phone: "phone_minutes",
+} as const;
 
 /** The business address Stripe Tax works a rate out from. */
 export type HeadOffice = {
@@ -66,19 +80,20 @@ export type StripeSetupOptions = {
 /** What one run of the setup found or made. */
 export type StripeSetup = {
   readonly taxStatus: "active" | "pending" | "skipped";
+  /** The Egma Pro product. The price columns record the other catalog items. */
   readonly productId: string;
   readonly feePriceId: string;
   readonly webCallMeterId: string;
   readonly phoneMeterId: string;
   readonly webCallMeterPriceId: string;
   readonly phoneMeterPriceId: string;
-  /** Which of the six this run created rather than found. */
+  /** Which catalog objects this run created rather than found. */
   readonly created: readonly string[];
 };
 
 /**
- * Set this Stripe account up to sell Pro, and write the object ids onto the
- * plan row.
+ * Set this Stripe account up to sell Pro, and write the current price ids onto
+ * the plan row.
  *
  * The plan rows are seeded first, because the prices are made from Pro's fee,
  * its two allowances and its two overage prices — and a price created from a
@@ -118,17 +133,37 @@ export async function setUpStripe(
     say,
   );
 
-  const product = await findOrCreateProduct(gateway, pro, created, say);
+  const feeProduct = await findOrCreateProduct(
+    gateway,
+    PRODUCT_METADATA_VALUES.fee,
+    "Egma Pro",
+    created,
+    say,
+  );
+  const webCallProduct = await findOrCreateProduct(
+    gateway,
+    PRODUCT_METADATA_VALUES.webCall,
+    "Web call minutes",
+    created,
+    say,
+  );
+  const phoneProduct = await findOrCreateProduct(
+    gateway,
+    PRODUCT_METADATA_VALUES.phone,
+    "Phone minutes",
+    created,
+    say,
+  );
   const feePrice = await findOrCreateFeePrice(
     gateway,
-    product.id,
+    feeProduct.id,
     pro,
     created,
     say,
   );
   const webCallPrice = await findOrCreateMeteredPrice(
     gateway,
-    product.id,
+    webCallProduct.id,
     {
       lookupKey: PRICE_LOOKUP_KEYS.web_call_minutes,
       nickname: "Pro web-call minutes",
@@ -141,7 +176,7 @@ export async function setUpStripe(
   );
   const phonePrice = await findOrCreateMeteredPrice(
     gateway,
-    product.id,
+    phoneProduct.id,
     {
       lookupKey: PRICE_LOOKUP_KEYS.phone_minutes,
       nickname: "Pro phone minutes",
@@ -155,7 +190,7 @@ export async function setUpStripe(
 
   const objects = {
     planCode: "pro",
-    productId: product.id,
+    productId: feeProduct.id,
     feePriceId: feePrice.id,
     webCallMeterId: webCallMeter.id,
     phoneMeterId: phoneMeter.id,
@@ -163,7 +198,7 @@ export async function setUpStripe(
     phoneMeterPriceId: phonePrice.id,
   } as const;
   await recordStripePlanObjects(objects);
-  say(`Wrote the six Stripe object ids onto the ${objects.planCode} plan row.`);
+  say(`Wrote the current Stripe price ids onto the ${objects.planCode} plan row.`);
 
   return { taxStatus, created, ...objects };
 }
@@ -259,30 +294,67 @@ async function findOrCreateMeter(
   return meter;
 }
 
-/** The Pro product, found by its metadata or made. */
+/** One Checkout product, found by its catalog metadata or made. */
 async function findOrCreateProduct(
   gateway: StripeGateway,
-  plan: CloudPlan,
+  catalogItem: (typeof PRODUCT_METADATA_VALUES)[keyof typeof PRODUCT_METADATA_VALUES],
+  name: string,
   created: string[],
   say: (message: string) => void,
 ): Promise<Stripe.Product> {
-  const found = await findProduct(gateway, plan.code);
+  const found = await findProduct(gateway, catalogItem);
   if (found !== undefined) return found;
 
+  if (catalogItem === PRODUCT_METADATA_VALUES.fee) {
+    const legacy = await findLegacyProProduct(gateway);
+    if (legacy !== undefined) return adoptLegacyFeeProduct(gateway, legacy);
+  }
+
   const product = await gateway.api.products.create({
-    name: `Egma ${plan.name}`,
-    description:
-      "The Egma Pro plan: unlimited chat simulations, included web-call and " +
-      "phone minutes, and per-minute overage past them.",
-    metadata: { [PRODUCT_METADATA_KEY]: plan.code },
+    name,
+    metadata: {
+      [PRODUCT_METADATA_KEY]: catalogItem,
+      ...(catalogItem === PRODUCT_METADATA_VALUES.fee
+        ? { [LEGACY_PRODUCT_METADATA_KEY]: "pro" }
+        : {}),
+    },
   });
-  created.push(`product ${plan.code}`);
-  say(`Created the ${plan.name} product (${product.id}).`);
+  created.push(`product ${catalogItem}`);
+  say(`Created the ${name} product (${product.id}).`);
   return product;
 }
 
 /**
- * The product whose metadata names this plan.
+ * Turn the original shared Pro product into the fee product.
+ *
+ * Its prices remain on the product, so existing subscriptions retain exactly
+ * the price ids they already have. The fee lookup key moves only when setup
+ * creates the replacement price for new Checkout Sessions.
+ */
+export async function adoptLegacyFeeProduct(
+  gateway: StripeGateway,
+  legacy: Stripe.Product,
+): Promise<Stripe.Product> {
+  return gateway.api.products.update(legacy.id, {
+    name: "Egma Pro",
+    // Stripe clears an optional text field when it receives an empty string.
+    description: "",
+    metadata: {
+      ...legacy.metadata,
+      [PRODUCT_METADATA_KEY]: PRODUCT_METADATA_VALUES.fee,
+    },
+  });
+}
+
+/** Find the original shared product, before it gains its catalog marker. */
+async function findLegacyProProduct(
+  gateway: StripeGateway,
+): Promise<Stripe.Product | undefined> {
+  return findProductByMetadata(gateway, LEGACY_PRODUCT_METADATA_KEY, "pro");
+}
+
+/**
+ * The product whose metadata names this Checkout catalog item.
  *
  * Search first, because that is what the metadata index is for; then a bounded
  * list, because search is eventually consistent and a product created a minute
@@ -291,11 +363,20 @@ async function findOrCreateProduct(
  */
 async function findProduct(
   gateway: StripeGateway,
-  planCode: string,
+  catalogItem: (typeof PRODUCT_METADATA_VALUES)[keyof typeof PRODUCT_METADATA_VALUES],
+): Promise<Stripe.Product | undefined> {
+  return findProductByMetadata(gateway, PRODUCT_METADATA_KEY, catalogItem);
+}
+
+/** Find the product whose metadata identifies one Egma catalog item. */
+async function findProductByMetadata(
+  gateway: StripeGateway,
+  metadataKey: string,
+  metadataValue: string,
 ): Promise<Stripe.Product | undefined> {
   try {
     const searched = await gateway.api.products.search({
-      query: `metadata['${PRODUCT_METADATA_KEY}']:'${planCode}'`,
+      query: `metadata['${metadataKey}']:'${metadataValue}'`,
       limit: 1,
     });
     const first = searched.data[0];
@@ -307,7 +388,7 @@ async function findProduct(
 
   let seen = 0;
   for await (const product of gateway.api.products.list({ limit: 100 })) {
-    if (product.metadata[PRODUCT_METADATA_KEY] === planCode) return product;
+    if (product.metadata[metadataKey] === metadataValue) return product;
     seen += 1;
     // A bound, so a very large account cannot turn a setup into a full scan.
     // A product this deployment made is one of the newest, and the list comes

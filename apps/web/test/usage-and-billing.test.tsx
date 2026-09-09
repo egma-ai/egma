@@ -8,6 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { toast } from "sonner";
 import UsageAndBillingPage from "../app/projects/[projectId]/settings/billing/page.tsx";
 import OrganizationSettingsPage from "../app/projects/[projectId]/settings/organization/page.tsx";
 import { HOBBY, PRO, USAGE, memberSession } from "./usage-billing-fixtures.ts";
@@ -89,6 +90,9 @@ beforeEach(() => {
   requests.length = 0;
   for (const key of Object.keys(responses)) delete responses[key];
   routed.search = "";
+  routed.router.push.mockReset();
+  routed.router.replace.mockReset();
+  routed.router.back.mockReset();
   vi.stubGlobal("scrollTo", vi.fn());
   vi.stubGlobal("location", { assign: vi.fn(), href: "http://localhost/" });
 });
@@ -121,30 +125,35 @@ it("puts all billing facts on the named settings page and uses the activation bo
       .getAttribute("aria-current"),
   ).toBe("page");
 });
-it("groups plan controls separately from the inference balance and credit purchase", async () => {
+it("puts the plan and inference credit in separate summary cards before payments", async () => {
   open();
   await screen.findByText("$4.25");
   const plan = screen
-    .getByRole("heading", { name: "Plan", level: 2 })
+    .getByRole("heading", { name: "Current plan", level: 2 })
     .closest("section")!;
-  const balance = screen
-    .getByRole("heading", { name: "Inference balance", level: 2 })
+  const credit = screen
+    .getByRole("heading", { name: "Inference credit", level: 2 })
+    .closest("section")!;
+  const payments = screen
+    .getByRole("heading", { name: "Payments", level: 2 })
     .closest("section")!;
   expect(within(plan).getByText("Hobby")).toBeTruthy();
+  expect(within(plan).queryByText("Free")).toBeNull();
+  expect(within(plan).queryByText("$50.00")).toBeNull();
   expect(within(plan).getByRole("button", { name: "Upgrade to Pro" })).toBeTruthy();
-  expect(
-    within(plan).getByRole("button", { name: "Manage payment and invoices" }),
-  ).toBeTruthy();
   expect(within(plan).queryByRole("button", { name: "Buy credit" })).toBeNull();
   expect(within(plan).queryByText("$4.25")).toBeNull();
-  expect(within(balance).getByText("$4.25")).toBeTruthy();
-  expect(within(balance).getByRole("button", { name: "Buy credit" })).toBeTruthy();
+  expect(within(credit).getByText("$4.25")).toBeTruthy();
+  expect(within(credit).getByRole("button", { name: "Buy credit" })).toBeTruthy();
   expect(
-    within(balance).queryByRole("button", { name: "Manage payment and invoices" }),
+    within(credit).queryByRole("button", { name: "Payment methods and invoices" }),
   ).toBeNull();
   expect(
-    within(balance).queryByRole("button", { name: "Upgrade to Pro" }),
+    within(credit).queryByRole("button", { name: "Upgrade to Pro" }),
   ).toBeNull();
+  expect(
+    within(payments).getByRole("button", { name: "Payment methods and invoices" }),
+  ).toBeTruthy();
 });
 it("lets members read provider costs and all history without payment actions", async () => {
   open({ ...HOBBY, mayManageBilling: false }, "member");
@@ -161,7 +170,7 @@ it("shows OSS usage without a pretend plan or balance", async () => {
   expect(await screen.findByText("128 simulations")).toBeTruthy();
   expect(screen.getByText("41.5 minutes")).toBeTruthy();
   expect(screen.getByText("openai/gpt-4o-mini")).toBeTruthy();
-  expect(screen.queryByText("Inference balance")).toBeNull();
+  expect(screen.queryByText("Inference credit")).toBeNull();
   expect(
     requests.find((request) => request.path === "/api/organization/usage")
       ?.address.search,
@@ -268,15 +277,19 @@ it("loads another ledger page without losing history when a retry is needed", as
       ?.address.searchParams.get("cursor"),
   ).toBe("older/+page");
 });
-it("keeps checkout-return facts visible and refreshes them from the billing controls", async () => {
+it("toasts a completed credit checkout once, clears its query, and lets the toast refresh", async () => {
+  const notice = vi.spyOn(toast, "info");
   routed.search = "credit=bought";
   open();
-  expect(
-    await screen.findByText(
+  await waitFor(() =>
+    expect(notice).toHaveBeenCalledWith(
       "Check billing history for your payment. If it has not appeared yet, refresh in a moment.",
+      expect.objectContaining({ action: expect.any(Object) }),
     ),
-  ).toBeTruthy();
-  expect(screen.queryByText(/payment successful/i)).toBeNull();
+  );
+  expect(routed.router.replace).toHaveBeenCalledWith(
+    "/projects/prj_1/settings/billing",
+  );
   expect(screen.queryByText("Credit purchase")).toBeNull();
   responses["/api/organization/billing"] = {
     status: 200,
@@ -297,30 +310,47 @@ it("keeps checkout-return facts visible and refreshes them from the billing cont
       },
     },
   };
-  fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+  const options = notice.mock.calls[0]?.[1] as unknown as {
+    readonly action: {
+      readonly onClick: (event: never) => void;
+    };
+  };
+  options.action.onClick(new MouseEvent("click") as never);
   expect(await screen.findByText("$29.25")).toBeTruthy();
   expect(screen.getByText("Credit purchase")).toBeTruthy();
+  expect(
+    requests.filter((request) => request.path === "/api/organization/billing"),
+  ).toHaveLength(2);
+  notice.mockRestore();
 });
 it("does not upgrade the displayed plan merely from a return parameter", async () => {
+  const notice = vi.spyOn(toast, "warning");
   routed.search = "plan=pro";
   open();
-  expect(
-    await screen.findByText(
+  await waitFor(() =>
+    expect(notice).toHaveBeenCalledWith(
       "Pro is not active yet. Refresh after checkout finishes.",
+      expect.objectContaining({ action: expect.any(Object) }),
     ),
-  ).toBeTruthy();
+  );
   expect(screen.getByText("Hobby")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
+  expect(routed.router.replace).toHaveBeenCalledWith(
+    "/projects/prj_1/settings/billing",
+  );
+  notice.mockRestore();
 });
-it("says checkout closed on cancellation while showing actual account facts", async () => {
+it("toasts a closed checkout while showing actual account facts", async () => {
+  const notice = vi.spyOn(toast, "info");
   routed.search = "credit=cancelled";
   open();
-  expect(
-    await screen.findByText(
+  await waitFor(() =>
+    expect(notice).toHaveBeenCalledWith(
       "Checkout closed. Your current billing details are shown below.",
+      expect.objectContaining({ action: expect.any(Object) }),
     ),
-  ).toBeTruthy();
+  );
   expect(screen.getByText("$4.25")).toBeTruthy();
+  notice.mockRestore();
 });
 it("buys a preset and preserves an action failure", async () => {
   open();
@@ -337,7 +367,7 @@ it("buys a preset and preserves an action failure", async () => {
     await screen.findByText("Checkout could not open. Try again."),
   ).toBeTruthy();
   const balance = screen
-    .getByRole("heading", { name: "Inference balance", level: 2 })
+    .getByRole("heading", { name: "Inference credit", level: 2 })
     .closest("section")!;
   expect(within(balance).getByRole("status").textContent).toBe(
     "Checkout could not open. Try again.",
@@ -393,7 +423,7 @@ it("blocks duplicate upgrade actions while their result is pending", async () =>
     await screen.findByText("Upgrade could not open. Try again."),
   ).toBeTruthy();
   const plan = screen
-    .getByRole("heading", { name: "Plan", level: 2 })
+    .getByRole("heading", { name: "Current plan", level: 2 })
     .closest("section")!;
   expect(within(plan).getByRole("status").textContent).toBe(
     "Upgrade could not open. Try again.",
@@ -424,7 +454,7 @@ it("confirms a downgrade and reports its actual scheduled date", async () => {
   );
   expect(screen.queryByRole("button", { name: "Downgrade at period end" })).toBeNull();
   const plan = screen
-    .getByRole("heading", { name: "Plan", level: 2 })
+    .getByRole("heading", { name: "Current plan", level: 2 })
     .closest("section")!;
   expect(within(plan).getByText(/Pro stops on/)).toBeTruthy();
   expect(
@@ -458,7 +488,7 @@ it("opens the existing payment portal action", async () => {
     body: { url: "https://billing.stripe.com/test" },
   };
   fireEvent.click(
-    await screen.findByRole("button", { name: "Manage payment and invoices" }),
+    await screen.findByRole("button", { name: "Payment methods and invoices" }),
   );
   await waitFor(() =>
     expect(window.location.assign).toHaveBeenCalledWith(
@@ -474,7 +504,7 @@ it("keeps usage out of the organization name form", async () => {
   expect(
     requests.some((request) => request.path.startsWith("/api/organization/")),
   ).toBe(false);
-  expect(screen.queryByText("Inference balance")).toBeNull();
+  expect(screen.queryByText("Inference credit")).toBeNull();
   routed.pathname = "/projects/prj_1/settings/billing";
 });
 
@@ -485,7 +515,7 @@ it("clears pending navigation when the browser returns to the page", async () =>
     body: { url: "https://billing.stripe.com/test" },
   };
   fireEvent.click(
-    await screen.findByRole("button", { name: "Manage payment and invoices" }),
+    await screen.findByRole("button", { name: "Payment methods and invoices" }),
   );
   await waitFor(() => expect(window.location.assign).toHaveBeenCalled());
   fireEvent(window, new Event("pageshow"));

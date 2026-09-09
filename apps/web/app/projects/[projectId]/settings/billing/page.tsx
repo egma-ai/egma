@@ -1,8 +1,13 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
-import { Button } from "@/components/ui/button";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import {
+  useParams,
+  usePathname,
+  useRouter,
+  useSearchParams,
+} from "next/navigation";
+import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import type { Answer } from "@/lib/api";
 import { readBillingAccount, type BillingAccount } from "@/lib/billing";
@@ -25,13 +30,16 @@ export default function UsageAndBillingPage() {
 }
 
 function UsageAndBillingBody({ projectId }: { readonly projectId: string }) {
+  const pathname = usePathname();
+  const router = useRouter();
   const search = useSearchParams();
-  const returned = search.has("credit") || search.has("plan");
+  const returnedPlan = search.get("plan");
+  const returnedCredit = search.get("credit");
+  const handledReturn = useRef<string | null>(null);
   const [billing, setBilling] = useState<
     Answer<BillingAccount> | null | undefined
   >();
   const [usage, setUsage] = useState<Answer<PeriodUsage> | null>(null);
-  const [actionBusy, setActionBusy] = useState(false);
   const [revision, setRevision] = useState(0);
   const refresh = useCallback(() => setRevision((value) => value + 1), []);
 
@@ -66,79 +74,96 @@ function UsageAndBillingBody({ projectId }: { readonly projectId: string }) {
     billing !== undefined && billing !== null && billing.status !== "ready"
       ? billing
       : null;
-  const reading = billing === undefined || (failure === null && usage === null);
-  const returnMessage = reading
-    ? "Checking your current billing details…"
-    : failure !== null
-      ? "Your billing details could not be checked. Refresh to try again."
-      : search.get("plan") === "pro" && account?.plan.code === "pro"
-        ? "Your organization is on Pro."
-        : search.get("plan") === "pro"
-          ? "Pro is not active yet. Refresh after checkout finishes."
-          : search.get("credit") === "bought"
-            ? "Check billing history for your payment. If it has not appeared yet, refresh in a moment."
-            : "Checkout closed. Your current billing details are shown below.";
+  useEffect(() => {
+    if (
+      billing === undefined ||
+      (returnedPlan === null && returnedCredit === null)
+    ) {
+      return;
+    }
+
+    const returnKey = `${returnedPlan ?? ""}\u0000${returnedCredit ?? ""}`;
+    if (handledReturn.current === returnKey) return;
+    handledReturn.current = returnKey;
+
+    const action = { label: "Check again", onClick: refresh };
+    if (failure !== null) {
+      toast.error("Your billing details could not be checked.", { action });
+    } else if (returnedPlan === "pro" && account?.plan.code === "pro") {
+      toast.success("Your organization is on Pro.", { action });
+    } else if (returnedPlan === "pro") {
+      toast.warning("Pro is not active yet. Refresh after checkout finishes.", {
+        action,
+      });
+    } else if (returnedCredit === "bought") {
+      toast.info(
+        "Check billing history for your payment. If it has not appeared yet, refresh in a moment.",
+        { action },
+      );
+    } else {
+      toast.info(
+        "Checkout closed. Your current billing details are shown below.",
+        { action },
+      );
+    }
+
+    const nextSearch = new URLSearchParams(search.toString());
+    nextSearch.delete("plan");
+    nextSearch.delete("credit");
+    router.replace(
+      nextSearch.size === 0 ? pathname : `${pathname}?${nextSearch.toString()}`,
+    );
+  }, [
+    account?.plan.code,
+    billing,
+    failure,
+    pathname,
+    refresh,
+    returnedCredit,
+    returnedPlan,
+    router,
+    search,
+  ]);
 
   return (
     <>
-          {returned ? (
-            <div className="flex items-center gap-3">
-              <p className="m-0 text-sm text-muted-foreground" role="status">
-                {returnMessage}
+      {billing === undefined ? (
+        <Loading what="usage and billing" />
+      ) : failure !== null ? (
+        <Failure
+          title="Billing details are unavailable."
+          message={
+            failure.status === "signed-out"
+              ? "Sign in again to read usage and billing."
+              : failure.refusal.message
+          }
+          onRetry={refresh}
+        />
+      ) : (
+        <>
+          {account === null ? (
+            <Card>
+              <p className="m-0 text-base">
+                Billing is not enabled on this deployment.
               </p>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={refresh}
-                disabled={reading || actionBusy}
-              >
-                Check again
-              </Button>
-            </div>
-          ) : null}
-          {billing === undefined ? (
-            <Loading what="usage and billing" />
-          ) : failure !== null ? (
-            <Failure
-              title="Billing details are unavailable."
-              message={
-                failure.status === "signed-out"
-                  ? "Sign in again to read usage and billing."
-                  : failure.refusal.message
-              }
-              onRetry={refresh}
-            />
+              <p className="m-0 text-sm text-muted-foreground">
+                Usage and provider costs are available below. There is no plan
+                or inference balance.
+              </p>
+            </Card>
           ) : (
-            <>
-              {account === null ? (
-                <Card>
-                  <p className="m-0 text-base">
-                    Billing is not enabled on this deployment.
-                  </p>
-                  <p className="m-0 text-sm text-muted-foreground">
-                    Usage and provider costs are available below. There is no
-                    plan or inference balance.
-                  </p>
-                </Card>
-              ) : (
-                <BillingAccountSections
-                  account={account}
-                  onRefresh={refresh}
-                  onBusyChange={setActionBusy}
-                />
-              )}
-              <UsageAllowances
-                account={account}
-                usage={usage}
-                onRetry={refresh}
-              />
-              <ProviderUsage usage={usage} onRetry={refresh} />
-              {account === null ? null : (
-                <BillingHistory key={revision} initial={account.ledger} />
-              )}
-            </>
+            <BillingAccountSections account={account} onRefresh={refresh} />
           )}
+          <UsageAllowances account={account} usage={usage} onRetry={refresh} />
+          <ProviderUsage usage={usage} onRetry={refresh} />
+          {account === null ? null : (
+            <BillingHistory
+              key={JSON.stringify(account.ledger.entries.map((entry) => entry.id))}
+              initial={account.ledger}
+            />
+          )}
+        </>
+      )}
     </>
   );
 }
