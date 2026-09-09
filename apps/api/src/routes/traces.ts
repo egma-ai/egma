@@ -20,6 +20,7 @@ import {
 import {
   attributionOf,
   fileSimulationEvidence,
+  SimulationEvidenceRefusedError,
   type SimulationFiling,
 } from "../ingestion/simulation-ingestion.ts";
 import {
@@ -182,6 +183,23 @@ function exportResponse(
     .code(200)
     .type("application/x-protobuf")
     .send(Buffer.from(EXPORT_TRACE_SERVICE_RESPONSE.encode(message).finish()));
+}
+
+function refusedSimulationEvidence(
+  reply: FastifyReply,
+  encoding: OtlpEncoding,
+  count: number,
+  firstReason: string,
+): FastifyReply {
+  const records = count === 1 ? "record" : "records";
+  return statusResponse(
+    reply,
+    encoding,
+    400,
+    RPC_INVALID_ARGUMENT,
+    `Egma refused ${String(count)} simulation evidence ${records}: ${firstReason} ` +
+      "No record from this request was stored.",
+  );
 }
 
 /**
@@ -422,6 +440,14 @@ async function simulatorExport(
     rejected,
     budgetForOneRequest(),
   );
+  if (rejected.count > 0) {
+    return refusedSimulationEvidence(
+      reply,
+      encoding,
+      rejected.count,
+      rejected.firstReason,
+    );
+  }
 
   const unreadableBills: string[] = [];
   const usageBySimulation = new Map<string, ReadonlyMap<string, ReturnType<typeof providerUsageSpan>>>();
@@ -448,6 +474,14 @@ async function simulatorExport(
   try {
     accepted = await fileSimulationEvidence(measuredFilings);
   } catch (cause) {
+    if (cause instanceof SimulationEvidenceRefusedError) {
+      return refusedSimulationEvidence(
+        reply,
+        encoding,
+        cause.count,
+        cause.firstReason,
+      );
+    }
     if (!(cause instanceof IngestionUnavailableError)) throw cause;
     return unavailable(request, reply, encoding, cause);
   }
@@ -820,14 +854,25 @@ export async function traceRoutes(
     rejected.firstReason ||= production.rejected[0]?.reason ?? "";
     const alongside: EvidenceGroup[] = [{ auth, spans: production.spans }];
 
+    const simulationRejections = { count: 0, firstReason: "" };
     const filings = normalisedFilings(
       gatheredBySimulation(naming, (resourceSpans) =>
         carriers.get(named(resourceSpans)),
       ),
       "agent",
-      rejected,
+      simulationRejections,
       budget,
     );
+    rejected.count += simulationRejections.count;
+    rejected.firstReason ||= simulationRejections.firstReason;
+    if (simulationRejections.count > 0) {
+      return refusedSimulationEvidence(
+        reply,
+        encoding,
+        simulationRejections.count,
+        simulationRejections.firstReason,
+      );
+    }
 
     // Handed over once and complete, and answered only when it is durable in
     // the ingestion object store. Monitoring health and the grader-owned
@@ -838,6 +883,14 @@ export async function traceRoutes(
     try {
       accepted = await fileSimulationEvidence(filings, alongside);
     } catch (cause) {
+      if (cause instanceof SimulationEvidenceRefusedError) {
+        return refusedSimulationEvidence(
+          reply,
+          encoding,
+          cause.count,
+          cause.firstReason,
+        );
+      }
       if (!(cause instanceof IngestionUnavailableError)) throw cause;
       return unavailable(request, reply, encoding, cause);
     }

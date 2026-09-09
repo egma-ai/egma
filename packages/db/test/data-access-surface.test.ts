@@ -98,6 +98,8 @@ const WORK_DISPATCHING = [
   "claimMockDraftFor",
   "owedMockCleanups",
   "sweepOrphanedSimulations",
+  "sweepPendingRetellSimulationCollections",
+  "takeRetellSimulationCollectionLease",
   // The agent-POV bound, read on the same clock and on the same terms: a POV
   // that never arrives sends nothing, so its absence is noticed by nobody in
   // particular. It moves rows egma's own claim machinery stamped and answers
@@ -676,7 +678,10 @@ const THE_GRADING_BUDGET = ["MOST_GRADING_ATTEMPTS", "MAX_GRADING_CLAIM_CAPACITY
  * bound on a clock lives in the API, and a number written in two places is a
  * number that will one day disagree with itself.
  */
-const THE_AGENT_POV_BOUND = ["AGENT_POV_BOUND_SECONDS"];
+const THE_AGENT_POV_BOUND = [
+  "AGENT_POV_BOUND_SECONDS",
+  "SIMULATION_EVIDENCE_COLLECTION_ERROR",
+];
 const THE_RETELL_BUDGET = ["MOST_RETELL_CALL_ATTEMPTS", "DRAIN_ADVISORY_LOCK"];
 
 /**

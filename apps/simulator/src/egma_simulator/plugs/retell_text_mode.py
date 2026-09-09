@@ -36,7 +36,7 @@ from . import (
     quotable,
     rendered_variables,
 )
-from .retell import CREDENTIAL_KEYS, DEFAULT_BASE_URL, END_TOOL_NAMES
+from .retell_common import CREDENTIAL_KEYS, DEFAULT_BASE_URL, END_TOOL_NAMES
 
 COMPLETION_PATH = "/agent-playground-completion"
 """Where the completion answers, before the agent's own id. Named here so a
@@ -224,6 +224,8 @@ class RetellTextMode:
         self._session: aiohttp.ClientSession | None = None
         self._history: list[Any] = []
         self._resume: dict[str, Any] = {}
+        self._pending_tools: dict[str, dict] = {}
+        self._completed_tools: set[str] = set()
         self._ended = False
 
     @property
@@ -282,6 +284,9 @@ class RetellTextMode:
         behind. Closing is closing the socket.
         """
         session, self._session = self._session, None
+        for invocation in self._pending_tools.values():
+            self._observed(invocation, None)
+        self._pending_tools.clear()
         if session is not None:
             await session.close()
 
@@ -348,7 +353,29 @@ class RetellTextMode:
                 if isinstance(spoken, str) and spoken.strip():
                     said.append(spoken.strip())
             elif role == INVOCATION_ROLE:
-                self._observed(message)
+                call_id = message.get("tool_call_id")
+                if isinstance(call_id, str) and call_id:
+                    if call_id not in self._completed_tools:
+                        self._pending_tools[call_id] = message
+                else:
+                    self._observed(message, None)
+            elif role == RESULT_ROLE:
+                call_id = message.get("tool_call_id")
+                if isinstance(call_id, str) and call_id in self._completed_tools:
+                    continue
+                invocation = (
+                    self._pending_tools.pop(call_id, None)
+                    if isinstance(call_id, str)
+                    else None
+                )
+                if invocation is not None:
+                    content = message.get("content")
+                    self._observed(
+                        invocation,
+                        content if isinstance(content, str) else None,
+                    )
+                    if isinstance(call_id, str):
+                        self._completed_tools.add(call_id)
 
         self._resume_from(answered)
         self._variables_from(answered)
@@ -364,11 +391,8 @@ class RetellTextMode:
             platform_notes=tuple(noted),
         )
 
-    def _observed(self, message: dict) -> None:
-        """Record a reported tool call through MockToolSeam. Covered names use the
-                authored answer; uncovered calls retain the name and arguments without
-                an answer.
-        """
+    def _observed(self, message: dict, result: str | None) -> None:
+        """Record the call and the result Retell says the tool received."""
         name = message.get("name")
         if not isinstance(name, str) or not name.strip():
             return
@@ -377,6 +401,7 @@ class RetellTextMode:
         self._mock_tools.reported(
             called,
             arguments=arguments if isinstance(arguments, str) and arguments else None,
+            result=result,
         )
 
     def _resume_from(self, answered: dict) -> None:

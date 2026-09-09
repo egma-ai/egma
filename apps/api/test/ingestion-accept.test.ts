@@ -6,7 +6,7 @@ import path from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import type { NewSpan } from "@egma/db";
+import type { NewSpan, SimulationStanding } from "@egma/db";
 
 import {
   acceptEvidenceForProjects,
@@ -16,6 +16,7 @@ import {
   type EvidenceGroup,
 } from "@egma/ingestion";
 import { buildApi } from "../src/server.ts";
+import { fileSimulationEvidence } from "../src/ingestion/simulation-ingestion.ts";
 import type { IngestionStore } from "@egma/ingestion";
 import { RECORD_FORMAT_VERSION } from "@egma/ingestion";
 import { PENDING_PREFIX } from "@egma/ingestion";
@@ -858,5 +859,78 @@ describe.skipIf(!storage.available)("a store that keeps refusing", () => {
       "select count() as n from spans final where span_id = '9c9c9c9c00000001'",
     );
     expect(Number(row?.n)).toBe(1);
+  });
+});
+
+describe.skipIf(!storage.available)("simulation completion filing", () => {
+  const running = storage as Extract<ObjectStorage, { available: true }>;
+
+  let refusing: RefusingStore;
+  let api: TestApi;
+  let acme: Customer;
+
+  beforeAll(async () => {
+    if (!storage.available) return;
+    refusing = await aStoreRefusingOnePut(running.ingestStore);
+    api = await createApi("simulation_completion_filing", {
+      ingestStore: refusing.store,
+      ingestionFlushMilliseconds: 100,
+      ingestionRequestTimeoutMilliseconds: 1_000,
+      ingestionShutdownTimeoutMilliseconds: 500,
+    });
+    acme = await signUp(api.app, "completion@acme.example", "Acme");
+  });
+
+  afterAll(async () => {
+    refusing?.stopRefusing();
+    await api?.app.close();
+    await drainPendingEvidence(running.ingestStore);
+    await api?.close();
+    refusing?.close();
+  });
+
+  it("never stages a root ahead of a child that storage has not accepted", async () => {
+    const root = aSpanOf("9e9e9e9e00000001");
+    const child: NewSpan = {
+      ...aSpanOf("9e9e9e9e00000002"),
+      name: "user_turn",
+      kind: "turn:human",
+      endsTrace: false,
+    };
+    const standing: SimulationStanding = {
+      id: "sim_01K3XQ7M4E8YB2FVN0H9TZQWER",
+      runId: "run_01K3XQ7M4E8YB2FVN0H9TZQWER",
+      agentId: "agent_01K3XQ7M4E8YB2FVN0H9TZQWER",
+      testVersionId: "testv_01K3XQ7M4E8YB2FVN0H9TZQWER",
+      personaVersionId: "persv_01K3XQ7M4E8YB2FVN0H9TZQWER",
+      modality: "chat",
+      status: "completed",
+      endingReason: null,
+      executionFailure: null,
+      claimedBy: "conductor",
+      claimedAt: new Date("2026-08-20T09:00:00Z"),
+      cancelRequestedAt: null,
+      auth: {
+        userId: acme.userId,
+        organizationId: acme.organizationId,
+        projectId: acme.projectId,
+        role: "member",
+        via: "api_key",
+      },
+    };
+    refusing.refuseEveryPutAfter(0);
+
+    await expect(
+      fileSimulationEvidence([
+        { standing, emitter: "agent", spans: [root, child] },
+      ]),
+    ).rejects.toBeInstanceOf(IngestionUnavailableError);
+
+    expect(stagedEvidence().map((one) => one.record.span_id)).toEqual([
+      child.spanId,
+    ]);
+    expect(
+      stagedEvidence().some((one) => one.record.span_id === root.spanId),
+    ).toBe(false);
   });
 });

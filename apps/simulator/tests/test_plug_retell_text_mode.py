@@ -11,7 +11,7 @@ from text_mode_stub import Reply, ToolTurn
 
 from egma_simulator.mock_tools import MockToolSeam
 from egma_simulator.plugs import AgentReply, PlugError, plug_for
-from egma_simulator.plugs.retell import DEFAULT_BASE_URL
+from egma_simulator.plugs.retell_common import DEFAULT_BASE_URL
 from egma_simulator.plugs.retell_text_mode import (
     RATE_LIMIT_RETRIES,
     RetellTextMode,
@@ -571,7 +571,7 @@ async def test_a_run_that_mocks_nothing_sends_no_mocks(start_text_mode_stub):
     assert "tool_mocks" not in running.stub.requests[0]["body"]
 
 
-async def test_a_covered_call_carries_egmas_answer_and_an_uncovered_one_does_not(
+async def test_tool_calls_preserve_the_result_the_platform_returned(
     start_text_mode_stub,
 ):
     """The whole honesty claim of this lane, at the tool grain: the platform
@@ -586,7 +586,11 @@ async def test_a_covered_call_carries_egmas_answer_and_an_uncovered_one_does_not
             Reply(
                 words="Thursday at half two?",
                 tools=[
-                    ToolTurn(name="check_calendar", arguments='{"day":"thu"}'),
+                    ToolTurn(
+                        name="check_calendar",
+                        arguments='{"day":"thu"}',
+                        reported_result='{"slots":["fri-0900"],"from":"retell"}',
+                    ),
                     ToolTurn(
                         name="lookup_customer",
                         arguments='{"phone":"+1"}',
@@ -610,11 +614,8 @@ async def test_a_covered_call_carries_egmas_answer_and_an_uncovered_one_does_not
 
     reported = answers.exchanged()
     assert [(call.name, call.answer) for call in reported] == [
-        ("check_calendar", '{"slots":["thu-1430"]}'),
-        # The call the test did not name is on the record as the observation
-        # it is: what was called, with what — and no answer, which is the
-        # record's own way of saying a real backend did the work.
-        ("lookup_customer", None),
+        ("check_calendar", '{"slots":["fri-0900"],"from":"retell"}'),
+        ("lookup_customer", '{"customer":"real"}'),
     ]
     assert [call.arguments for call in reported] == [
         '{"day":"thu"}',
@@ -642,7 +643,72 @@ async def test_a_mocked_failure_reads_back_as_a_failure_not_a_string(
     await plug.close()
 
     (call,) = answers.exchanged()
-    assert call.answer == '{"error":{"code":503}}'
+    assert call.answer == '{"code":503}'
+
+
+def test_a_tool_result_can_arrive_in_a_later_completion():
+    answers = seam(answering("check_calendar", {"slots": []}))
+    plug = text_mode({"retellAgentId": "agent_1"}, mock_tools=answers)
+
+    plug._read({
+        "messages": [{
+            "role": "tool_call_invocation",
+            "tool_call_id": "call_1",
+            "name": "check_calendar",
+            "arguments": '{"day":"thu"}',
+        }],
+        "call_ended": False,
+    })
+    assert answers.exchanged() == []
+
+    plug._read({
+        "messages": [{
+            "role": "tool_call_result",
+            "tool_call_id": "call_1",
+            "content": '{"slots":["thu-1430"]}',
+        }],
+        "call_ended": False,
+    })
+
+    (call,) = answers.exchanged()
+    assert call.answer == '{"slots":["thu-1430"]}'
+
+
+def test_an_unpaired_invocation_is_kept_without_an_invented_result():
+    answers = seam(answering("check_calendar", {"slots": ["authored"]}))
+    plug = text_mode({"retellAgentId": "agent_1"}, mock_tools=answers)
+
+    reply = {
+        "messages": [{
+            "role": "tool_call_invocation",
+            "name": "check_calendar",
+            "arguments": '{"day":"thu"}',
+        }],
+        "call_ended": False,
+    }
+    plug._read(reply)
+
+    (call,) = answers.exchanged()
+    assert call.answer is None
+
+
+def test_replayed_tool_messages_do_not_duplicate_a_completed_call():
+    answers = seam()
+    plug = text_mode({"retellAgentId": "agent_1"}, mock_tools=answers)
+    reply = {
+        "messages": [
+            {"role": "tool_call_invocation", "tool_call_id": "call_1",
+             "name": "lookup_customer"},
+            {"role": "tool_call_result", "tool_call_id": "call_1",
+             "content": '{"customer":"real"}'},
+        ],
+        "call_ended": False,
+    }
+
+    plug._read(reply)
+    plug._read(reply)
+
+    assert len(answers.exchanged()) == 1
 
 
 async def test_a_reported_call_is_one_instant_and_carries_no_stamp(

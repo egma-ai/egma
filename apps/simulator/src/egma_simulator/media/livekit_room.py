@@ -211,7 +211,7 @@ class LiveKitStartup:
         self._present: set[str] = set()
         self._seen: set[str] = set()
         self._states: dict[str, str] = {}
-        self._audio_identities: set[str] = set()
+        self._audio_track_identities: set[str] = set()
         self._reporting_identity: str | None = None
         self._accepted_identity: str | None = None
         self._refusal: str | None = None
@@ -272,11 +272,16 @@ class LiveKitStartup:
         self._states[identity] = state
         self._changed.set()
 
-    def participant_audio(self, identity: str) -> None:
-        """Record inbound audio under the participant that produced it."""
+    def participant_audio_track(self, identity: str) -> None:
+        """Record an inbound audio track subscribed for this participant."""
         if not identity or identity == PERSONA_IDENTITY:
             return
-        self._audio_identities.add(identity)
+        self._audio_track_identities.add(identity)
+        self._changed.set()
+
+    def participant_audio_track_left(self, identity: str) -> None:
+        """Clear readiness when the participant has no subscribed audio track."""
+        self._audio_track_identities.discard(identity)
         self._changed.set()
 
     def participant_left(self, identity: str) -> None:
@@ -286,7 +291,7 @@ class LiveKitStartup:
             self._relevant_departure = identity
         self._present.discard(identity)
         self._states.pop(identity, None)
-        self._audio_identities.discard(identity)
+        self._audio_track_identities.discard(identity)
         self._departed.add(identity)
         self._changed.set()
 
@@ -312,9 +317,9 @@ class LiveKitStartup:
 
     def _has_audio(self, room: Any) -> bool:
         if self._mock_tools is None:
-            return room.carrying_audio.is_set()
+            return bool(self._audio_track_identities)
         identity = self._accepted_identity
-        return identity is not None and identity in self._audio_identities
+        return identity is not None and identity in self._audio_track_identities
 
     @property
     def no_participant_seen(self) -> bool:
@@ -413,7 +418,7 @@ class LiveKitStartup:
 
     def _has_audio_for_duration(self) -> bool:
         identity = self._accepted_identity
-        return identity is not None and identity in self._audio_identities
+        return identity is not None and identity in self._audio_track_identities
 
     @staticmethod
     def _server(room: Any) -> str:

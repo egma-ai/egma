@@ -47,15 +47,18 @@ async function listAgentsAs(
 function registration(name: string, project: string): Record<string, unknown> {
   return {
     name,
-    agentPlatform: "retell",
+    agentPlatform: "livekit",
     projectId: project,
     connection: {
-      agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
       modality: "chat",
-      config: { retellAgentId: `agent_for_${name.replace(/\W/g, "")}` },
-      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      config: {
+        url: "wss://fixture.livekit.cloud",
+        agentName: `agent_for_${name.replace(/\W/g, "")}`,
+      },
+      credentials: { apiKey: "APIfixture12345678", apiSecret: "livekit-secret-fixture" },
     },
   };
 }
@@ -235,7 +238,7 @@ describe("a browser working in a project that is not the first", () => {
       headers: { cookie: ada.cookie },
       payload: {
         name: "Outbound desk",
-        agentPlatform: "retell",
+        agentPlatform: "livekit",
         projectId: outbound,
       },
     });
@@ -266,7 +269,7 @@ describe("a browser working in a project that is not the first", () => {
       method: "POST",
       url: `/v1/agents?projectId=${outbound}`,
       headers: { cookie: ada.cookie },
-      payload: { name: "Outbound desk", agentPlatform: "retell" },
+      payload: { name: "Outbound desk", agentPlatform: "livekit" },
     });
     expect(registered.statusCode, registered.body).toBe(201);
 
@@ -296,12 +299,12 @@ describe("a browser working in a project that is not the first", () => {
       agentPlatform: "livekit",
       name: "Outbound desk",
       connection: {
-        agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        agentPlatform: "livekit",
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
         modality: "chat",
-        config: { retellAgentId: "agent_in_retell_outbound" },
-        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+        config: { url: "wss://fixture.livekit.cloud", agentName: "agent_in_retell_outbound" },
+        credentials: { apiKey: "APIfixture12345678", apiSecret: "livekit-secret-fixture" },
       },
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
@@ -402,7 +405,7 @@ describe("a browser working in a project that is not the first", () => {
     );
 
     const registered = await ask(api.app, "POST", "/v1/agents", keyForOutbound, {
-      agentPlatform: "retell",
+      agentPlatform: "livekit",
       name: "Outbound desk",
       // Voice, because a chat has no audio and would be refused for that
       // reason instead — which is a different sentence and would not say
@@ -482,15 +485,15 @@ describe("a browser working in a project that is not the first", () => {
     );
 
     const registered = await ask(api.app, "POST", "/v1/agents", keyForOutbound, {
-      agentPlatform: "retell",
+      agentPlatform: "livekit",
       name: "Outbound desk",
       connection: {
-        agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        agentPlatform: "livekit",
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
         modality: "chat",
-        config: { retellAgentId: "agent_in_retell_unnamed" },
-        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+        config: { url: "wss://fixture.livekit.cloud", agentName: "agent_in_retell_unnamed" },
+        credentials: { apiKey: "APIfixture12345678", apiSecret: "livekit-secret-fixture" },
       },
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
@@ -553,14 +556,14 @@ describe("a browser working in a project that is not the first", () => {
     /* An agent and a connection to run against, in Outbound. */
     const registered = await asBrowser("POST", `/v1/agents?projectId=${outbound}`, {
       name: "Outbound desk",
-      agentPlatform: "retell",
+      agentPlatform: "livekit",
       connection: {
-        agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        agentPlatform: "livekit",
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
         modality: "chat",
-        config: { retellAgentId: "agent_in_retell_by_address" },
-        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+        config: { url: "wss://fixture.livekit.cloud", agentName: "agent_in_retell_by_address" },
+        credentials: { apiKey: "APIfixture12345678", apiSecret: "livekit-secret-fixture" },
       },
     });
     expect(registered.statusCode, registered.body).toBe(201);
@@ -731,18 +734,21 @@ describe("a key for the whole organization, where the organization holds two pro
     );
 
     const registered = await ask(api.app, "POST", "/v1/agents", keyForOutbound, {
-      agentPlatform: "retell",
+      agentPlatform: "livekit",
       name: "Outbound desk",
       connection:
         modality === "voice"
           ? LIVEKIT_VOICE
           : {
-              agentPlatform: "retell",
-              connectionType: "retell_chat_api",
-              accessVariant: "retell_chat_api.api_key",
+              agentPlatform: "livekit",
+              connectionType: "livekit_room",
+              accessVariant: "livekit_room.project_credentials",
               modality: "chat",
-              config: { retellAgentId: `agent_in_retell_${label}` },
-              credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+              config: {
+                url: "wss://fixture.livekit.cloud",
+                agentName: `agent_in_livekit_${label}`,
+              },
+              credentials: { apiKey: "APIfixture12345678", apiSecret: "livekit-secret-fixture" },
             },
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);

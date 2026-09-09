@@ -30,11 +30,10 @@ The package needs Node.js 22 or newer.
 | `simulation` | `>=1.5.5 <2` |
 | `monitor` | `>=1.5.5 <2` |
 
-The package peer range begins at `1.5.0` because that is the first stable
-LiveKit Agents JS release with its public mock-tool hook. Both verbs export
-spans, so both need `1.5.5`, the first release with LiveKit's public
-OpenTelemetry fan-out bridge. Calling either on an older supported version
-gives a direct version error. You do not need to pin to `1.6.4`.
+Both verbs export spans, so the package requires `1.5.5`, the first LiveKit
+Agents JS release with the public mock-tool hook and OpenTelemetry fan-out
+bridge. Calling either on an older version gives a direct version error. You
+do not need to pin to `1.6.4`.
 
 The upper bound is LiveKit's next major release, not its next minor release.
 Egma treats the public LiveKit v1 APIs as one compatible line. Its test matrix
@@ -124,6 +123,13 @@ agent state, such as `listening`, `thinking`, or `speaking`. Egma waits for that
 initialized state before it sends the first simulated input. This simulator-side
 wait is governed by the simulation's configured duration. You do not add another
 callback or readiness signal.
+
+When that simulation ends, Egma finishes pending output and its exact participant
+leaves the room. The SDK closes the `AgentSession` you supplied, which completes
+LiveKit's native session trace, flushes the final evidence, and releases entrypoint
+code that is waiting for session close. An abrupt room disconnect closes the
+session as well. These listeners are installed only after the Egma participant
+accepts the tool report in a simulation room.
 
 The worker reads the running test's `job_dispatch_metadata` at
 `ctx.job.metadata`, as one compact JSON string. With Project credentials, Egma

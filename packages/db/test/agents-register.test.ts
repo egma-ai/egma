@@ -44,10 +44,10 @@ function registration(overrides: {
   readonly modality?: "chat" | "voice";
   readonly retellAgentId?: string;
   readonly apiKey?: string;
-  /** Which Retell vendor-id door this registration takes, chat API by default. */
-  readonly lane?: "retell_chat_api" | "retell_text_mode" | "retell_web_call";
+  /** Which Retell vendor-id door this registration takes, text mode by default. */
+  readonly lane?: "retell_text_mode" | "retell_web_call";
 }): NewAgent {
-  const lane = overrides.lane ?? "retell_chat_api";
+  const lane = overrides.lane ?? "retell_text_mode";
   return {
     name: overrides.name ?? "Front desk",
     agentPlatform: "retell",

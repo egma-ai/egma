@@ -259,8 +259,8 @@ export type DiscoverAgentsResponses = {
             modality: 'chat' | 'voice';
             connectionCandidates: Array<{
                 agentPlatform: 'retell';
-                connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number';
-                accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164';
+                connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number';
+                accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164';
                 modality: 'chat' | 'voice';
                 productLabel: string;
                 config: {
@@ -301,8 +301,8 @@ export type ListConnectionOptionsResponses = {
         items: Array<{
             agentPlatform: 'retell' | 'livekit' | null;
             agentPlatformLabel: string;
-            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+            accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             accessVariantLabel: string;
             modality: 'voice' | 'chat';
             productLabel: string;
@@ -426,8 +426,8 @@ export type RegisterAgentData = {
         connection?: {
             name?: string;
             agentPlatform: 'retell' | 'livekit' | null;
-            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+            accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
             modality: 'voice' | 'chat';
             environment?: string;
             config?: {
@@ -761,8 +761,8 @@ export type AddConnectionData = {
     body: {
         name?: string;
         agentPlatform: 'retell' | 'livekit' | null;
-        connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
-        accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+        connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+        accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
         modality: 'voice' | 'chat';
         environment?: string;
         config?: {
@@ -4886,6 +4886,10 @@ export type GetSimulationResponses = {
             message: string;
         } | null;
         gradingState: 'not_requested' | 'pending' | 'running' | 'complete' | 'error' | null;
+        evidenceError: {
+            error: 'evidence_collection_error';
+            message: string;
+        } | null;
         grades: Array<{
             projectGraderId: string;
             graderDefinitionId: string;

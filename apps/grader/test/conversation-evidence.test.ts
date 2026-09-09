@@ -94,6 +94,30 @@ describe("the evidence used to grade a platform simulation", () => {
     expect(conversation.transcript).toHaveLength(1);
   });
 
+  it.each(["phone_number", "retell_text_mode"])(
+    "grades the persona's conversation and tools for %s when both accounts exist",
+    (lane) => {
+      const actual = span("agent", {
+        kind: "tool",
+        text: "",
+        toolName: "customer_internal_tool",
+        toolResult: '{"private":true}',
+      });
+      const conversation = conversationOfSimulation(
+        simulation,
+        trace(lane, [span("agent"), span("persona")], [actual, mock]),
+        lane,
+      );
+
+      expect(conversation.transcript).toEqual([
+        expect.objectContaining({ text: "Egma's speech recognition" }),
+      ]);
+      expect(conversation.events).toEqual([
+        expect.objectContaining({ name: "book_appointment" }),
+      ]);
+    },
+  );
+
   it.each(["retell_web_call", "livekit_room"])("uses the frozen %s lane when provider spans omit it", (lane) => {
     const providerTrace = trace("", [span("agent"), span("persona")], [mock]);
     expect(conversationOfSimulation(simulation, providerTrace, lane).events).toEqual([]);

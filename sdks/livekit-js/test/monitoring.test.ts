@@ -32,6 +32,7 @@ vi.mock("@livekit/agents", async (importOriginal) => {
 
 import {
   exportStateForTests as monitoringStateForTests,
+  installExport,
   projectKey,
   resetExportForTests as resetMonitoringForTests,
   traceEndpoint,
@@ -98,6 +99,77 @@ function context(
 
 function asJobContext(value: StubContext): JobContext {
   return value as unknown as JobContext;
+}
+
+type HeldAnswer = {
+  status: number;
+  answer(): void;
+};
+
+async function localCollector(autoStatuses: number[] = []): Promise<{
+  readonly endpoint: string;
+  readonly requests: readonly Buffer[];
+  readonly answerNext: (status?: number) => void;
+  readonly waitForRequests: (count: number) => Promise<void>;
+  readonly close: () => Promise<void>;
+}> {
+  const requests: Buffer[] = [];
+  const answers: HeldAnswer[] = [];
+  const waiting = new Set<() => void>();
+  const server = createServer((request, response) => {
+    const body: Buffer[] = [];
+    request.on("data", (piece: Buffer) => body.push(piece));
+    request.on("end", () => {
+      requests.push(Buffer.concat(body));
+      for (const ready of waiting) ready();
+      waiting.clear();
+      const held: HeldAnswer = {
+        status: 200,
+        answer() {
+          response.writeHead(this.status, {
+            "content-type": "application/x-protobuf",
+            ...(this.status === 503 ? { "retry-after": "0" } : {}),
+          });
+          response.end();
+        },
+      };
+      const status = autoStatuses.shift();
+      if (status === undefined) {
+        answers.push(held);
+      } else {
+        held.status = status;
+        held.answer();
+      }
+    });
+  });
+  await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening));
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("the local OTLP collector did not take a port");
+  }
+  return {
+    endpoint: `http://127.0.0.1:${address.port}`,
+    requests,
+    answerNext(status = 200) {
+      const held = answers.shift();
+      if (held === undefined) throw new Error("no OTLP request is waiting");
+      held.status = status;
+      held.answer();
+    },
+    async waitForRequests(count) {
+      while (requests.length < count) {
+        await new Promise<void>((resolve) => waiting.add(resolve));
+      }
+    },
+    close: async () => {
+      for (const held of answers.splice(0)) held.answer();
+      await new Promise<void>((closed) => server.close(() => closed()));
+    },
+  };
+}
+
+function carriesSpan(body: Buffer, name: string): boolean {
+  return body.includes(Buffer.from(name));
 }
 
 function unusedProviders() {
@@ -517,6 +589,86 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)("egma.monitor", () => {
     await provider.shutdown();
   });
 });
+
+describe.runIf(SUPPORTS_SHARED_TELEMETRY)(
+  "simulation evidence delivery",
+  () => {
+    function installedCollector(
+      endpoint: string,
+    ): { readonly processor: ReturnType<typeof installExport>; readonly provider: NodeTracerProvider } {
+      const { global } = unusedProviders();
+      vi.spyOn(trace, "getTracerProvider").mockReturnValue(global);
+      const ctx = context("egma-sim-chat-delivery");
+      const processor = installExport(
+        asJobContext(ctx),
+        { endpoint, apiKey: PROJECT_KEY },
+        "simulation",
+        ctx.job.room.name,
+      );
+      const provider = monitoringStateForTests()?.provider as NodeTracerProvider | undefined;
+      if (provider === undefined) throw new Error("simulation exporter was not installed");
+      return { processor, provider };
+    }
+
+    it("files children before a root that reached one batch first", async () => {
+      const collector = await localCollector([200, 200]);
+      const { processor, provider } = installedCollector(collector.endpoint);
+      const tracer = provider.getTracer("delivery-proof");
+
+      tracer.startSpan("agent_session").end();
+      tracer.startSpan("user_turn").end();
+      await processor.forceFlush();
+
+      expect(carriesSpan(collector.requests[0]!, "user_turn")).toBe(true);
+      expect(carriesSpan(collector.requests[0]!, "agent_session")).toBe(false);
+      expect(carriesSpan(collector.requests[1]!, "agent_session")).toBe(true);
+
+      await provider.shutdown();
+      await collector.close();
+    });
+
+    it("retries a transient child delivery before filing the root", async () => {
+      const collector = await localCollector([503, 200, 200]);
+      const { processor, provider } = installedCollector(collector.endpoint);
+      const tracer = provider.getTracer("delivery-proof");
+
+      tracer.startSpan("llm_request").end();
+      tracer.startSpan("agent_session").end();
+      await processor.forceFlush();
+
+      expect(carriesSpan(collector.requests[0]!, "llm_request")).toBe(true);
+      expect(carriesSpan(collector.requests[1]!, "llm_request")).toBe(true);
+      expect(carriesSpan(collector.requests[1]!, "agent_session")).toBe(false);
+      expect(carriesSpan(collector.requests[2]!, "agent_session")).toBe(true);
+
+      await provider.shutdown();
+      await collector.close();
+    });
+
+    it("keeps later children but withholds the root after a permanent refusal", async () => {
+      const collector = await localCollector([400, 200]);
+      const { processor, provider } = installedCollector(collector.endpoint);
+      const tracer = provider.getTracer("delivery-proof");
+
+      tracer.startSpan("function_tool").end();
+      await expect(processor.forceFlush()).rejects.toThrow();
+
+      expect(carriesSpan(collector.requests[0]!, "function_tool")).toBe(true);
+
+      tracer.startSpan("agent_turn").end();
+      tracer.startSpan("agent_session").end();
+      await expect(processor.forceFlush()).rejects.toThrow();
+
+      expect(carriesSpan(collector.requests[1]!, "agent_turn")).toBe(true);
+      expect(carriesSpan(collector.requests[1]!, "agent_session")).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(collector.requests).toHaveLength(2);
+
+      await provider.shutdown().catch(() => undefined);
+      await collector.close();
+    });
+  },
+);
 
 describe.runIf(!SUPPORTS_SHARED_TELEMETRY)(
   "egma.monitor without LiveKit shared telemetry",

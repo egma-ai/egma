@@ -9,6 +9,7 @@ import {
   signUp,
   type Customer,
 } from "./support/traces.ts";
+import { FIXTURE_TRACE } from "./support/fixture.ts";
 
 /**
  * Replay captured LiveKit evidence through ingestion and compare API measures
@@ -44,7 +45,9 @@ const WINDOW = {
 /**
  * Expected values from the fixture, with span starts truncated to microseconds
  * and durations retained in nanoseconds. The capture contains five human turns
- * and eight agent turns.
+ * and four spoken agent turns. Four additional native agent records have no
+ * response text. They stay in the raw trace but do not become transcript turns
+ * or timing samples.
  */
 const HAND_COMPUTED = {
   /**
@@ -61,17 +64,15 @@ const HAND_COMPUTED = {
    * Measure from the final user_speaking end to agent speech, skipping interrupted
    * false starts and silent tool work. Start timestamps use stored microsecond
    * precision; durations remain exact. Hand-computed differences in ns:
-   *   human 1e6796c0e195e424, speech 149dcf2969e36b11 to 1b8cc4d1064a766d:
-   *     1785693904727004000 - 1785693901272396528 = 3454607472
+   *   human baac22a26a96fa9b to speech 1b8cc4d1064a766d:
+   *     1785693904727004000 - 1785693902380767362 = 2346236638
    *   human c35b92a87f8121a1, speech b30dd00e322f2443 to 42b9d5797f17aa9d:
    *     1785693924924691000 - 1785693922024241600 = 2900449400
    *   human 9839f5ef664bc919, speech 45e924b089cd919f to 11a1eaca219437a9:
    *     1785693946089613000 - 1785693943023019440 = 3066593560
-   * Human baac22a26a96fa9b has no speech child and overlaps an active agent turn,
-   * so it is treated as a continuation. Human f88cf2a243a38318 is unanswered.
-   * Neither contributes a sample.
+   * Human f88cf2a243a38318 is unanswered and contributes no sample.
    */
-  turn_response_latency: [3454.607472, 2900.4494, 3066.59356],
+  turn_response_latency: [2346.236638, 2900.4494, 3066.59356],
 
   /**
    * Each speaking agent turn has one agent_speaking child. Raw end minus start:
@@ -85,25 +86,20 @@ const HAND_COMPUTED = {
   ],
 
   /**
-   * Sum direct llm_node child durations per agent turn, converted from ns to ms.
-   * This capture has exactly one such child in each of its eight agent turns.
+   * Sum direct llm_node child durations per spoken agent turn, converted from
+   * ns to ms. Model work under the unspoken native records remains in the raw
+   * trace and does not become a transcript timing sample.
    */
-  llm_latency: [
-    7371.512989, 727.291266, 729.825817, 639.814725, 593.97443, 645.735577,
-    989.172921, 486.650077,
-  ],
+  llm_latency: [7371.512989, 639.814725, 645.735577, 486.650077],
 
   /**
-   * The same for the `tts_node` children. Two turns — the two that answered
-   * with a tool call and never spoke — carried no synthesis step and
-   * contribute no sample: absence, not zero.
+   * The same for the `tts_node` children of spoken turns. Synthesis work under
+   * unspoken native records remains in the raw trace and contributes no turn
+   * sample: absence, not zero.
    *
-   * 2623645092, 393177146, 3121186037, 2590796413, 1724987892, 2051012582 ns.
+   * 2623645092, 3121186037, 2590796413, 2051012582 ns.
    */
-  tts_latency: [
-    2623.645092, 393.177146, 3121.186037, 2590.796413, 1724.987892,
-    2051.012582,
-  ],
+  tts_latency: [2623.645092, 3121.186037, 2590.796413, 2051.012582],
 } as const;
 
 type ReadMeasure = {
@@ -204,7 +200,7 @@ describe.skipIf(!storage.available)("the captured LiveKit conversation, read bac
       "11a1eaca219437a9",
     ]);
     // The mean is the number the pages lead with, rounded once in the module
-    // — the average of the two waits above, to the nearest millisecond.
+    // — the average of the three waits above, to the nearest millisecond.
     expect(measured?.mean).toBe(
       Math.round(
         HAND_COMPUTED.turn_response_latency.reduce((sum, one) => sum + one, 0) /
@@ -234,16 +230,12 @@ describe.skipIf(!storage.available)("the captured LiveKit conversation, read bac
     const measured = measure(await measuresOfTheCapture(), "llm_latency");
 
     expect(measured?.samples).toEqual(HAND_COMPUTED.llm_latency);
-    // One sample per agent turn, citing the turn — the sum is the turn's and
-    // no single child holds it.
+    // One sample per spoken agent turn, citing the turn — the sum is the turn's
+    // and no single child holds it.
     expect(measured?.spanIds).toEqual([
       "0701cc09e5f3d203",
-      "9ac4333458575745",
-      "00820fa943b873e6",
       "b2444815bd74fb3b",
-      "674743df7fe60024",
       "2c8883b32dbc323c",
-      "cfbcc2e51885f0fa",
       "fe4af349db1e440f",
     ]);
   });
@@ -252,16 +244,27 @@ describe.skipIf(!storage.available)("the captured LiveKit conversation, read bac
     const measured = measure(await measuresOfTheCapture(), "tts_latency");
 
     expect(measured?.samples).toEqual(HAND_COMPUTED.tts_latency);
-    // The two tool-answering turns carried no synthesis step and are absent —
-    // a zero would measure something that never happened.
+    // Unspoken native records are absent. A zero would measure a transcript
+    // turn that never happened.
     expect(measured?.spanIds).toEqual([
       "0701cc09e5f3d203",
-      "9ac4333458575745",
       "b2444815bd74fb3b",
       "2c8883b32dbc323c",
-      "cfbcc2e51885f0fa",
       "fe4af349db1e440f",
     ]);
+  });
+
+  it("retains every raw span while measuring only spoken turns", async () => {
+    const read = await readTraceOverHttp(
+      api.app,
+      acme.secret,
+      FIXTURE_TRACE_ID,
+      WINDOW,
+    );
+    expect(read.statusCode).toBe(200);
+    const body = read.json() as { trace?: { spanCount?: number } };
+
+    expect(body.trace?.spanCount).toBe(FIXTURE_TRACE.spans);
   });
 
   /**

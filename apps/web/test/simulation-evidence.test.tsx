@@ -19,6 +19,7 @@ import {
   recordingOriginOf,
   recordingSpeakerTimeline,
   simulationToolCalls,
+  simulationTranscriptSourceLabel,
   transcriptToolCalls,
   type SimulationEvidenceRecording,
   useDirectEvidenceRecording,
@@ -240,8 +241,14 @@ function evidence(overrides: Record<string, unknown> = {}) {
       toolSpanCount: 0,
       erroredSpanCount: 0,
       turns: [
-        turn("span_human", "turn:human", "Move Thursday's clean.", 1),
-        turn("span_agent", "turn:agent", "You are all set for Tuesday.", 4),
+        {
+          ...turn("span_human", "turn:human", "Move Thursday's clean.", 1),
+          pov: "persona",
+        },
+        {
+          ...turn("span_agent", "turn:agent", "You are all set for Tuesday.", 4),
+          pov: "persona",
+        },
       ],
       spans: [],
       spansTruncated: false,
@@ -1122,6 +1129,63 @@ describe("the transcript time rail", () => {
     ).toBe(true);
   });
 
+  it("keeps a tool nested under an unspoken native agent record visible", () => {
+    const read = evidence();
+    const tool = {
+      spanId: "span_tool_only_reply",
+      parentSpanId: "span_native_tool_only_reply",
+      name: "function_tool",
+      kind: "tool" as const,
+      status: "ok" as const,
+      startedAt: "2026-08-15T10:00:06.000000Z",
+      durationNs: "60000000",
+      text: "",
+      audioUrl: "",
+      toolName: "check_availability",
+      toolArguments: '{"preferred_date":"Tuesday"}',
+      toolResult: "The next free slot is Thursday at 10:00 AM.",
+      pov: "persona" as const,
+      spans: [],
+    };
+    const nativeRecord = {
+      spanId: "span_native_tool_only_reply",
+      parentSpanId: "root",
+      name: "agent_turn",
+      kind: "other" as const,
+      status: "ok" as const,
+      startedAt: "2026-08-15T10:00:05.000000Z",
+      durationNs: "1000000000",
+      text: "",
+      audioUrl: "",
+      toolName: "",
+      toolArguments: "",
+      toolResult: "",
+      spans: [tool],
+    };
+    const transcript = {
+      ...read.transcript!,
+      spans: [nativeRecord],
+    };
+    const shownTools = simulationToolCalls({
+      ...read,
+      transcript,
+    } as never);
+
+    render(
+      <ChatTranscript
+        transcript={transcript as never}
+        toolCalls={shownTools}
+      />,
+    );
+
+    expect(shownTools.map((one) => one.spanId)).toEqual([
+      "span_tool_only_reply",
+    ]);
+    expect(
+      screen.getByLabelText("Tool call, check_availability"),
+    ).toBeTruthy();
+  });
+
   it("uses the recording span for transcript timestamps and seeking", () => {
     const read = evidence();
     const transcript = read.transcript as NonNullable<
@@ -1201,6 +1265,7 @@ describe("the transcript time rail", () => {
       toolName: "lookup_appointment",
       toolArguments: "{}",
       toolResult: "{}",
+      pov: "persona" as const,
       spans: [],
     };
     const firstTurn = transcript.turns[0];
@@ -1295,6 +1360,57 @@ describe("the agent's POV is what a reader is shown", () => {
       spans: [...tools],
     };
   }
+
+  it.each([
+    ["livekit_room", "Conversation recorded by the customer agent"],
+    ["retell_web_call", "Conversation from Retell"],
+    ["retell_text_mode", "Conversation from the Retell API"],
+    ["phone_number", "Conversation recorded by the persona"],
+  ] as const)("attributes the %s conversation source", async (connectionType, label) => {
+    const read = evidence({
+      agentPovComplete:
+        connectionType === "livekit_room" || connectionType === "retell_web_call",
+      connectionSnapshot: {
+        ...evidence().connectionSnapshot,
+        connectionType,
+      },
+    });
+    expect(simulationTranscriptSourceLabel(read as never)).toBe(label);
+    page({ read });
+    render(<SimulationEvidencePage />);
+
+    expect(await screen.findByText(label)).toBeTruthy();
+  });
+
+  it("shows only the persona's account under the phone source label", async () => {
+    page({
+      read: evidence({
+        connectionSnapshot: {
+          ...evidence().connectionSnapshot,
+          connectionType: "phone_number",
+        },
+        transcript: bothPovs([
+          toolCall({ toolName: "customer_internal_tool" }),
+          toolCall({
+            spanId: "persona_phone_tool",
+            toolName: "persona_observed_tool",
+            pov: "persona",
+          }),
+        ]),
+      }),
+    });
+    render(<SimulationEvidencePage />);
+
+    expect(
+      await screen.findByText("Conversation recorded by the persona"),
+    ).toBeTruthy();
+    expect(screen.getByText("Move Thursday's clean.")).toBeTruthy();
+    expect(screen.getByText("You are all set for Tuesday.")).toBeTruthy();
+    expect(screen.queryByText("Anything Tuesday?")).toBeNull();
+    expect(screen.queryByText("Tuesday is fully booked.")).toBeNull();
+    expect(screen.getByLabelText("Tool call, persona_observed_tool")).toBeTruthy();
+    expect(screen.queryByLabelText("Tool call, customer_internal_tool")).toBeNull();
+  });
 
   it("shows a failed Retell web call's missing transcript without simulator speech or mock rows", async () => {
     const read = evidence();

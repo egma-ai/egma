@@ -97,12 +97,12 @@ beforeAll(async () => {
     world.frontDesk,
     {
       name: "Suite test chat",
-      agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
       modality: "chat",
-      config: { retellAgentId: "suite_test_agent" },
-      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      config: { url: "wss://test.livekit.cloud", agentName: "suite_test_agent" },
+      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ", apiSecret: "livekit-secret-A1B2C3D4WXYZ" },
     },
   );
   if (connection === undefined) throw new Error("suite test connection was not created");
@@ -770,12 +770,12 @@ describe("unlimited execution with bounded reads", () => {
   it("archives a connection by settling a large suite in bounded batches", async () => {
     const dedicated = await addConnection(actingAsAcme(), world.frontDesk, {
       name: "Large archive target",
-      agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
       modality: "chat",
-      config: { retellAgentId: "suite_archive_target" },
-      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+      config: { url: "wss://test.livekit.cloud", agentName: "suite_archive_target" },
+      credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ", apiSecret: "livekit-secret-A1B2C3D4WXYZ" },
     });
     if (dedicated === undefined) throw new Error("archive target was not created");
     const suite = await createTestSuite(actingAsAcme(), { name: "Archive batch" });

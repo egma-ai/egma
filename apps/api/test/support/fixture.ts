@@ -28,7 +28,7 @@ export const FIXTURE_TRACE = {
   started_at: "2026-08-02T18:04:40.281989Z",
   spans: 133,
   humanTurns: 5,
-  agentTurns: 8,
+  agentTurns: 4,
   toolSpans: 2,
   erroredSpans: 3,
 } as const;
@@ -50,7 +50,8 @@ export const APPOINTMENT_TRACE = {
   wireTraceId: "4126ef5a2cfb0c71da235771e1be4ec4",
   spans: 104,
   humanTurns: 5,
-  agentTurns: 11,
+  // Six spoken replies; five additional native agent records contain no text.
+  agentTurns: 6,
   toolSpans: 3,
   /** The three calls, in the order the conversation made them. */
   tools: ["list_providers", "check_availability", "book_appointment"],

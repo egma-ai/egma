@@ -1,7 +1,7 @@
 import { loadIngestionSettings } from "@egma/ingestion";
 import { spawn, type ChildProcess } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { lookup } from "node:dns/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -27,11 +27,22 @@ import {
   type ObjectStorage,
 } from "./support/object-storage.ts";
 import { NEUTRAL_PERSON } from "./support/traces.ts";
+import { openBrowser } from "./support/browser.ts";
+import {
+  assertEvidencePage,
+  assertPublicEvidence,
+  assertValidGrade,
+  quickTunnelUrl,
+  startPublicTunnel,
+  startFullPathWorkers,
+  stopChild,
+} from "./support/simulation-proof.ts";
 
 /**
  * Run the shipped Python simulator against the API, Postgres, ClickHouse,
- * and a local Retell chat counterpart, then grade its stored evidence with
- * the real grader service and a scripted judge. No live provider is involved.
+ * and object storage. The deterministic Retell case uses a local text-mode
+ * counterpart and scripted judge. The opt-in LiveKit matrix uses packaged
+ * workers, public token endpoints where selected, and the live grader model.
  *
  * Hold the terminal report at the API while checking evidence visibility;
  * ordered sender acceptance alone does not imply immediate ClickHouse visibility.
@@ -45,6 +56,70 @@ const SIMULATOR_DIRECTORY = path.join(
   API_DIRECTORY,
   "../simulator",
 );
+const SIMULATOR_PYTHON = path.join(SIMULATOR_DIRECTORY, ".venv/bin/python");
+const LIVE_PROVIDER = process.env["SIMULATION_E2E_LIVE"] === "1";
+const LIVE_MODEL_KEY = process.env["LIVEKIT_E2E_OPENAI_API_KEY"]?.trim() ?? "";
+const LIVE_LANGUAGE = process.env["SIMULATION_E2E_LANGUAGE"] ?? "python";
+const LIVE_MODALITY = process.env["SIMULATION_E2E_MODALITY"] ?? "chat";
+const LIVE_MOCKS = process.env["SIMULATION_E2E_MOCKS"] !== "off";
+const LIVE_ACCESS = process.env["SIMULATION_E2E_ACCESS"] ?? "project_credentials";
+
+describe("quick tunnel output", () => {
+  it("does not mistake the Cloudflare API error address for a public tunnel", () => {
+    expect(quickTunnelUrl("request to https://api.trycloudflare.com failed")).toBeUndefined();
+    expect(quickTunnelUrl(
+      "Your quick Tunnel has been created! Visit it at:\n" +
+        "https://fixture-name.trycloudflare.com",
+    )).toBe("https://fixture-name.trycloudflare.com");
+  });
+});
+
+async function waitForTokenEndpoint(
+  endpoint: string,
+  auth: string,
+  tunnelOutput: () => string,
+): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  let lastAnswer = "no response";
+  for (;;) {
+    try {
+      const answer = await fetch(endpoint, {
+        method: "POST",
+        signal: AbortSignal.timeout(2_000),
+        headers: {
+          Authorization: `Bearer ${auth}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          room_name: "egma-token-endpoint-readiness",
+          participant_identity: "readiness-probe",
+          participant_name: "readiness-probe",
+          room_config: { agents: [] },
+        }),
+      });
+      if (answer.ok) return;
+      lastAnswer = `${String(answer.status)} ${await answer.text()}`;
+    } catch (fault) {
+      const causes: string[] = [];
+      let current: unknown = fault;
+      for (let depth = 0; current instanceof Error && depth < 4; depth++) {
+        causes.push(`${current.name}: ${current.message}`);
+        current = current.cause;
+      }
+      lastAnswer = causes.length > 0 ? causes.join("; caused by ") : String(fault);
+    }
+    if (Date.now() > deadline) {
+      const addresses = await lookup(new URL(endpoint).hostname, { all: true })
+        .then((resolved) => JSON.stringify(resolved))
+        .catch((fault: unknown) => fault instanceof Error ? fault.message : String(fault));
+      throw new Error(
+        "the public token endpoint did not become reachable within 60s; " +
+          `last answer: ${lastAnswer}; DNS: ${addresses}; cloudflared said:\n${tunnelOutput()}`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
 
 /** The token the instance support configures on the API's side. */
 const SERVICE_TOKEN = "egma_st_held-by-this-test-suite-alone";
@@ -60,24 +135,43 @@ const REFUSED_KEY = "retell-secret-NOBODY0000000";
  * passes this read, then the conversation endpoint refuses it, as can happen
  * when a provider credential is revoked between preflight and dispatch.
  */
-const RETELL_CHAT_PREFLIGHT: typeof fetch = async (input) => {
+const RETELL_TEXT_MODE_PREFLIGHT: typeof fetch = async (input) => {
   const url = String(input);
-  if (!url.includes("/v2/list-agents")) {
-    throw new Error(`unexpected Retell preflight read: ${url}`);
+  if (url.includes("/v2/list-phone-numbers")) {
+    return new Response(JSON.stringify({ items: [], has_more: false }), {
+      status: 200,
+    });
   }
-  return new Response(
-    JSON.stringify({
-      items: [
-        {
-          agent_id: "agent_under_test",
-          agent_name: "Front desk",
-          channel: "chat",
-        },
-      ],
+  if (url.includes("/get-agent/")) {
+    return new Response(JSON.stringify({
+      agent_id: "agent_under_test",
+      version: 7,
+      is_published: true,
+      response_engine: {
+        type: "conversation-flow",
+        conversation_flow_id: "flow_under_test",
+        version: 7,
+      },
+    }), { status: 200 });
+  }
+  if (url.includes("/get-conversation-flow/")) {
+    return new Response(JSON.stringify({
+      conversation_flow_id: "flow_under_test",
+      version: 7,
+      nodes: [],
+    }), { status: 200 });
+  }
+  if (url.includes("/v2/list-agents")) {
+    return new Response(JSON.stringify({
+      items: [{
+        agent_id: "agent_under_test",
+        agent_name: "Front desk",
+        channel: "voice",
+      }],
       has_more: false,
-    }),
-    { status: 200 },
-  );
+    }), { status: 200 });
+  }
+  throw new Error(`unexpected Retell preflight read: ${url}`);
 };
 
 /**
@@ -123,11 +217,8 @@ async function waitForSignal(
 }
 
 /**
- * A Retell-shaped chat platform on loopback: the three endpoints the shipped
- * plug speaks — create-chat, create-chat-completion, end-chat — with
- * Retell's own field names, bearer-key auth, and a scripted agent behind
- * them. Strict where the platform is: a wrong key answers 401, which is the
- * failed pass's whole way in.
+ * A Retell-shaped text-mode platform on loopback, with Retell's field names,
+ * bearer-key auth, full-history requests, and a scripted agent behind it.
  */
 class RetellCounterpart {
   private server: http.Server | undefined;
@@ -136,8 +227,6 @@ class RetellCounterpart {
     "Done: you are moved to Wednesday at half past two.",
   ];
 
-  /** Reply cursor per chat, so two exchanges cannot eat each other's script. */
-  private readonly delivered = new Map<string, number>();
   /**
    * Hold the first agent answer so the pass can inspect a stable, live
    * Simulation. Earlier evidence has flushed, but the conversation cannot
@@ -186,44 +275,24 @@ class RetellCounterpart {
     }
 
     const url = request.url ?? "";
-    if (request.method === "POST" && url === "/create-chat") {
-      const chatId = `chat_${randomUUID().replaceAll("-", "").slice(0, 10)}`;
-      this.delivered.set(chatId, 0);
-      send(201, {
-        chat_id: chatId,
-        message_with_tool_calls: [
-          { role: "agent", content: "Lakeside Dental, how can I help?" },
-        ],
-      });
-      return;
-    }
-    if (request.method === "POST" && url === "/create-chat-completion") {
-      const { chat_id: chatId } = JSON.parse(body) as { chat_id?: string };
-      const turn = chatId === undefined ? undefined : this.delivered.get(chatId);
-      if (chatId === undefined || turn === undefined) {
-        send(422, { error: "no such chat" });
-        return;
-      }
+    if (request.method === "POST" && url.startsWith("/agent-playground-completion/")) {
+      const asked = JSON.parse(body) as { messages?: unknown[] };
+      const turn = Math.max(0, Math.floor((asked.messages?.length ?? 0) / 2));
       const reply = this.replies[turn];
       if (reply === undefined) {
         send(422, { error: "the script ran dry" });
         return;
       }
       const answer = (): void => {
-        this.delivered.set(chatId, turn + 1);
         send(200, { messages: [{ role: "agent", content: reply }] });
       };
-      if (turn === 0 && !this.hasHeldFirstCompletion) {
+      if (turn === 1 && !this.hasHeldFirstCompletion) {
         this.hasHeldFirstCompletion = true;
         this.firstCompletionArrived.open();
         void this.firstCompletionCanAnswer.opened.then(answer);
         return;
       }
       answer();
-      return;
-    }
-    if (request.method === "PATCH" && url.startsWith("/end-chat/")) {
-      send(200, {});
       return;
     }
     send(404, { error: `nothing at ${url}` });
@@ -259,14 +328,14 @@ describe("the Retell-shaped counterpart", () => {
     await server.start();
     try {
       const response = await fetch(
-        `http://127.0.0.1:${server.port}/create-chat`,
+        `http://127.0.0.1:${server.port}/agent-playground-completion/agent_under_test`,
         {
           method: "POST",
           headers: {
             authorization: `Bearer ${COUNTERPART_KEY}`,
             "content-type": "application/json",
           },
-          body: JSON.stringify({ agent_id: "agent_under_test" }),
+          body: JSON.stringify({ messages: [] }),
         },
       );
       await response.body?.cancel();
@@ -292,7 +361,7 @@ const THE_BEHAVIOR = "confirms the new time back before finishing";
  * shown a transcript egma assembled out of the spans the simulator streamed,
  * and the turn it pointed at is the turn holding these words.
  */
-const THE_PHRASE = "Wednesday afternoon";
+const THE_PHRASE = "Wednesday at half past two";
 
 /**
  * The pass needs somewhere for evidence to become durable, because the whole of
@@ -352,6 +421,7 @@ async function call(
  */
 async function signedUpKey(): Promise<{
   key: string;
+  cookie: string;
   userId: string;
   organizationId: string;
   projectId: string;
@@ -378,6 +448,7 @@ async function signedUpKey(): Promise<{
   expect(minted.status, JSON.stringify(minted.body)).toBe(201);
   return {
     key: String(minted.body.secret),
+    cookie,
     userId: landed.userId,
     organizationId: landed.organization.id,
     projectId: landed.project.id,
@@ -438,7 +509,9 @@ async function storedSpans(traceId: string): Promise<StoredSpan[]> {
             parent_span_id, source, emitter, run_id, agent_id
        from spans
       where trace_id = '${traceId}'
-      order by started_at, span_id`,
+      order by started_at,
+               multiIf(kind = 'turn:human', 0, kind = 'turn:agent', 1, 2),
+               span_id`,
   );
 }
 
@@ -590,6 +663,52 @@ async function settledRun(
   }
 }
 
+async function nativeHistory(file: string): Promise<Record<string, unknown>[]> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    try {
+      const body = JSON.parse(await readFile(file, "utf8")) as { items?: Record<string, unknown>[] };
+      return body.items ?? [];
+    } catch {
+      if (Date.now() > deadline) throw new Error("the customer fixture did not save its native session history");
+      await new Promise((resume) => setTimeout(resume, 50));
+    }
+  }
+}
+
+function historyText(content: unknown): string {
+  return Array.isArray(content)
+    ? content.filter((part): part is string => typeof part === "string").join("\n").trim()
+    : "";
+}
+
+function compactText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function decodedHistory(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try { return JSON.parse(value) as unknown; } catch { return value; }
+}
+
+type PublicTool = {
+  spanId?: string;
+  startedAt?: string;
+  kind?: string;
+  toolName?: string;
+  toolArguments?: string;
+  toolResult?: string;
+  pov?: string;
+  spans?: PublicTool[];
+};
+
+function publicTools(spans: readonly PublicTool[]): PublicTool[] {
+  return spans.flatMap((span) => [
+    ...(span.kind === "tool" && span.pov === "agent" ? [span] : []),
+    ...publicTools(span.spans ?? []),
+  ]);
+}
+
 beforeAll(async () => {
   scratch = await mkdtemp(path.join(os.tmpdir(), "egma-simulator-pass-"));
   counterpart = new RetellCounterpart();
@@ -597,10 +716,14 @@ beforeAll(async () => {
   // The trace store gets its schema here, because this pass reads the
   // conversation back out of it rather than only off the row.
   instance = await startInstance("simulator_pass", {
-    web: false,
+    web: LIVE_PROVIDER,
     traces: true,
-    retellFetch: RETELL_CHAT_PREFLIGHT,
+    ...(LIVE_PROVIDER && LIVE_MODEL_KEY !== ""
+      ? { providerKeys: { openai: LIVE_MODEL_KEY } }
+      : {}),
+    retellFetch: RETELL_TEXT_MODE_PREFLIGHT,
     ...(storage.available ? { ingestStore: storage.ingestStore } : {}),
+    ...(storage.available ? { blob: storage.store } : {}),
     beforeApiListen(api) {
       api.addHook("preHandler", async (request) => {
         if (
@@ -650,7 +773,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
     async () => {
       const { key, userId, organizationId, projectId } = await signedUpKey();
 
-      // The agent and the way to reach it — a retell chat connection whose
+      // The agent and the way to reach it — a Retell text-mode connection whose
       // key the counterpart accepts, and a second whose key it refuses.
       const registered = await call("POST", "/v1/agents", {
         key,
@@ -659,8 +782,8 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           name: "Front desk",
           connection: {
             agentPlatform: "retell",
-            connectionType: "retell_chat_api",
-            accessVariant: "retell_chat_api.api_key",
+            connectionType: "retell_text_mode",
+            accessVariant: "retell_text_mode.api_key",
             modality: "chat",
             config: { retellAgentId: "agent_under_test" },
             credentials: { apiKey: COUNTERPART_KEY },
@@ -675,8 +798,8 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         key,
         body: {
           agentPlatform: "retell",
-          connectionType: "retell_chat_api",
-          accessVariant: "retell_chat_api.api_key",
+          connectionType: "retell_text_mode",
+          accessVariant: "retell_text_mode.api_key",
           modality: "chat",
           config: { retellAgentId: "agent_under_test" },
           credentials: { apiKey: REFUSED_KEY },
@@ -915,8 +1038,8 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       // Greeting, the scenario's one sentence, the scripted answer, and the
       // persona's goodbye: four turns, counted by the simulator itself.
       expect(row.turn_count).toBe(4);
-      // Retell's own id for the exchange, echoed off the counterpart.
-      expect(String(row.provider_reference)).toMatch(/^chat_/);
+      // Text mode creates no retained provider-side conversation identifier.
+      expect(row.provider_reference).toBe(null);
       const startedAt = new Date(String(row.started_at));
       const endedAt = new Date(String(row.ended_at));
       expect(startedAt.getTime()).toBeLessThanOrEqual(endedAt.getTime());
@@ -942,14 +1065,17 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           .filter((span) => span.name.endsWith("_turn"))
           .map((span) => [span.name, span.text]),
       ).toEqual([
-        ["agent_turn", "Lakeside Dental, how can I help?"],
+        [
+          "agent_turn",
+          "Of course — we have Tuesday and Wednesday afternoon free next week.",
+        ],
         [
           "human_turn",
           "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
         ],
         [
           "agent_turn",
-          "Of course — we have Tuesday and Wednesday afternoon free next week.",
+          "Done: you are moved to Wednesday at half past two.",
         ],
         ["human_turn", "That covers everything I needed. Thank you, goodbye."],
       ]);
@@ -1061,6 +1187,60 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         turns: 4,
       });
 
+      // Read the same durable evidence through the public route used by the
+      // product. Raw store rows alone do not prove the customer can retrieve
+      // the conversation or its finished grade.
+      const publicResult = await call(
+        "GET",
+        `/v1/simulations/${conducted.simulationId}`,
+        { key },
+      );
+      expect(publicResult.status, JSON.stringify(publicResult.body)).toBe(200);
+      expect(publicResult.body).toMatchObject({
+        id: conducted.simulationId,
+        status: "completed",
+        gradingState: "complete",
+        combinedScore: 1,
+        providerReference: null,
+        connectionSnapshot: {
+          agentPlatform: "retell",
+          connectionType: "retell_text_mode",
+          accessVariant: "retell_text_mode.api_key",
+          modality: "chat",
+        },
+      });
+      const publicTranscript = publicResult.body.transcript as {
+        turns?: Array<{ name?: string; text?: string; pov?: string }>;
+      };
+      expect(
+        publicTranscript.turns?.map((turn) => [
+          turn.name,
+          turn.text,
+          turn.pov,
+        ]),
+      ).toEqual([
+        [
+          "agent_turn",
+          "Of course — we have Tuesday and Wednesday afternoon free next week.",
+          "persona",
+        ],
+        [
+          "human_turn",
+          "Their cleaning is booked for Thursday morning and has to move to any afternoon next week.",
+          "persona",
+        ],
+        [
+          "agent_turn",
+          "Done: you are moved to Wednesday at half past two.",
+          "persona",
+        ],
+        [
+          "human_turn",
+          "That covers everything I needed. Thank you, goodbye.",
+          "persona",
+        ],
+      ]);
+
       // And the row it was all filed against holds no conversation, because
       // the table has nowhere left to put one. Asked of the schema rather
       // than of a row: a column nobody writes is not the same fact as a
@@ -1073,6 +1253,494 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             and column_name in ('transcript', 'events', 'metrics')`,
       );
       expect(gone).toEqual([]);
+    },
+  );
+
+  it.skipIf(!LIVE_PROVIDER)(
+    "runs a packaged LiveKit worker through storage, public reads, and grading",
+    { timeout: 420_000 },
+    async () => {
+      if (LIVE_MODEL_KEY === "") {
+        throw new Error("LIVEKIT_E2E_OPENAI_API_KEY is required for the live provider case");
+      }
+      const { key, cookie, userId, organizationId, projectId } = await signedUpKey();
+      expect(["python", "javascript"]).toContain(LIVE_LANGUAGE);
+      expect(["chat", "voice"]).toContain(LIVE_MODALITY);
+      expect(["project_credentials", "customer_token_endpoint"]).toContain(LIVE_ACCESS);
+      const expectedAvailability = LIVE_MOCKS
+        ? "Tuesday is completely full. The next opening is Thursday morning."
+        : "The real calendar has a Tuesday appointment at 9:40.";
+      const expectedAvailabilityResult = expectedAvailability;
+      const expectedBehavior = LIVE_MOCKS
+        ? "reports that Tuesday is full, Thursday morning is the next opening, and confirms the reschedule request was recorded"
+        : "reports that Tuesday has an appointment at 9:40 and confirms the reschedule request was recorded";
+      const caseId = `livekit-${LIVE_LANGUAGE}-${LIVE_MODALITY}-${LIVE_ACCESS.replaceAll("_", "-")}-${LIVE_MOCKS ? "mocked" : "unmocked"}`;
+      const proofDirectory = path.join(
+        import.meta.dirname,
+        "../../../.proofs/simulation-e2e",
+      );
+      const providerDirectory = path.join(scratch, `${caseId}-provider`);
+      const readyPath = path.join(providerDirectory, "ready.json");
+      const publicLivekitPath = path.join(providerDirectory, "public-livekit-url");
+      const tokenAuth = `simulation-token-${process.pid}-${LIVE_LANGUAGE}-${LIVE_MODALITY}`;
+      const provider = spawn(
+        SIMULATOR_PYTHON,
+        [path.join(import.meta.dirname, "../../../fixtures/simulation-e2e/livekit_provider.py")],
+        {
+          cwd: path.join(import.meta.dirname, "../../.."),
+          env: {
+            ...process.env,
+            SIMULATION_E2E_API_ORIGIN: instance.origin,
+            SIMULATION_E2E_PROJECT_KEY: key,
+            SIMULATION_E2E_PROVIDER_DIR: providerDirectory,
+            SIMULATION_E2E_PROVIDER_READY: readyPath,
+            SIMULATION_E2E_LANGUAGE: LIVE_LANGUAGE,
+            ...(LIVE_ACCESS === "customer_token_endpoint" ? {
+              SIMULATION_E2E_TOKEN_ENDPOINT: "1",
+              SIMULATION_E2E_PUBLIC_LIVEKIT_FILE: publicLivekitPath,
+              SIMULATION_E2E_TOKEN_AUTH: tokenAuth,
+            } : {}),
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let providerSaid = "";
+      provider.stdout?.on("data", (piece: Buffer) => {
+        providerSaid += piece.toString("utf8");
+      });
+      provider.stderr?.on("data", (piece: Buffer) => {
+        providerSaid += piece.toString("utf8");
+      });
+      let fullPathWorkers: ReturnType<typeof startFullPathWorkers> | undefined;
+      const tunnels: Array<{
+        process: ChildProcess;
+        output: () => string;
+      }> = [];
+      let artifact: { file: string; sha256: string; version: string } | undefined;
+      let runtime: { name: string; version: string } | undefined;
+      let diagnosticEvidence: Record<string, unknown> | undefined;
+      let diagnosticGrade: {
+        result: CurrentGrade["result"];
+        score: number | null;
+        passThreshold: number;
+        details: CurrentGrade["details"];
+      } | undefined;
+      try {
+        const readyBy = Date.now() + 180_000;
+        let ready: {
+          url: string;
+          apiKey: string;
+          apiSecret: string;
+          agentName: string;
+          artifact: { file: string; sha256: string; version: string };
+          runtime: { name: string; version: string };
+          localLivekitUrl: string;
+          localTokenEndpoint: string | null;
+        } | undefined;
+        while (ready === undefined && Date.now() <= readyBy) {
+          if (provider.exitCode !== null) {
+            throw new Error(`LiveKit provider exited early:\n${providerSaid}`);
+          }
+          try {
+            ready = JSON.parse(await readFile(readyPath, "utf8")) as typeof ready;
+          } catch {
+            await new Promise((resume) => setTimeout(resume, 100));
+          }
+        }
+        if (ready === undefined) {
+          throw new Error(`LiveKit provider did not become ready:\n${providerSaid}`);
+        }
+        artifact = ready.artifact;
+        runtime = ready.runtime;
+        let tokenEndpoint: string | undefined;
+        if (LIVE_ACCESS === "customer_token_endpoint") {
+          if (ready.localTokenEndpoint === null) {
+            throw new Error("provider did not expose its token endpoint");
+          }
+          const livekitTunnel = await startPublicTunnel(
+            ready.localLivekitUrl.replace("ws://", "http://"),
+          );
+          tunnels.push(livekitTunnel);
+          await writeFile(
+            publicLivekitPath,
+            livekitTunnel.url.replace("https://", "wss://"),
+            { encoding: "utf8", mode: 0o600 },
+          );
+          const localTokenEndpoint = new URL(ready.localTokenEndpoint);
+          const tokenTunnel = await startPublicTunnel(localTokenEndpoint.origin);
+          tunnels.push(tokenTunnel);
+          tokenEndpoint = `${tokenTunnel.url}${localTokenEndpoint.pathname}`;
+          await waitForTokenEndpoint(tokenEndpoint, tokenAuth, tokenTunnel.output);
+        }
+
+        const registered = await call("POST", "/v1/agents", {
+          key,
+          body: {
+            agentPlatform: "livekit",
+            name: `Packaged ${LIVE_LANGUAGE} appointment agent`,
+            connection: {
+              agentPlatform: "livekit",
+              connectionType: "livekit_room",
+              accessVariant: LIVE_ACCESS === "project_credentials"
+                ? "livekit_room.project_credentials"
+                : "livekit_room.customer_token_endpoint",
+              modality: LIVE_MODALITY,
+              config: LIVE_ACCESS === "project_credentials"
+                ? { url: ready.url, agentName: ready.agentName }
+                : { tokenEndpoint, agentName: ready.agentName },
+              credentials: LIVE_ACCESS === "project_credentials"
+                ? { apiKey: ready.apiKey, apiSecret: ready.apiSecret }
+                : { headers: JSON.stringify({ Authorization: `Bearer ${tokenAuth}` }) },
+            },
+          },
+        });
+        expect(registered.status, JSON.stringify(registered.body)).toBe(201);
+        const agentId = (registered.body.agent as { id: string }).id;
+        const connectionId = (registered.body.connection as { id: string }).id;
+        const auth: AuthContext = {
+          userId,
+          organizationId,
+          projectId,
+          role: "member",
+          via: "session",
+        };
+        await createPersona(auth, {
+          name: "Focused caller",
+          ...NEUTRAL_PERSON,
+          models: {
+            llm: { provider: "openai", model: "gpt-4o-mini" },
+            stt: { provider: "openai", model: "gpt-live-transcribe" },
+            tts: {
+              provider: "openai",
+              model: "tts-1",
+              voiceId: "alloy",
+              speed: 1,
+            },
+          },
+        });
+        const suite = await call("POST", "/v1/test-suites", {
+          key,
+          body: { name: "Packaged LiveKit appointment" },
+        });
+        expect(suite.status, JSON.stringify(suite.body)).toBe(201);
+        const suiteId = String(suite.body.id);
+        const pushed = await call("POST", "/v1/tests", {
+          key,
+          body: {
+            suiteId,
+            name: "Finds the mocked opening",
+            scenario:
+              "Ask whether Tuesday has an appointment available and ask the agent " +
+              "to record a reschedule request. After the agent gives the availability " +
+              "and confirms the request was recorded, thank them and end immediately. " +
+              "Do not negotiate, ask for another day, or ask follow-up questions.",
+            expectedBehaviors: [expectedBehavior],
+            personas: ["Focused caller"],
+            ...(LIVE_MOCKS ? {
+              mockTools: [{
+                tool: "check_availability",
+                answer: expectedAvailability,
+              }],
+            } : {}),
+          },
+        });
+        expect(pushed.status, JSON.stringify(pushed.body)).toBe(201);
+
+        fullPathWorkers = startFullPathWorkers({
+          apiOrigin: instance.origin,
+          serviceToken: SERVICE_TOKEN,
+          claimant: caseId,
+          simulatorDirectory: SIMULATOR_DIRECTORY,
+          walDirectory: path.join(scratch, `${caseId}-wal`),
+          recordingStore: (storage as Extract<ObjectStorage, { available: true }>).writeStore,
+          modelKey: LIVE_MODEL_KEY,
+        });
+
+        const started = await call("POST", "/v1/runs", {
+          key,
+          body: { suiteId, agentId, connectionId },
+        });
+        expect(started.status, JSON.stringify(started.body)).toBe(201);
+        const runId = String(started.body.id);
+        const page = await call("GET", `/v1/runs/${runId}/simulations?pageSize=1`, {
+          key,
+        });
+        const simulation = (page.body.simulations as Array<{ id: string }>)[0];
+        expect(simulation).toBeDefined();
+        const simulationId = simulation!.id;
+        const terminalStatus = await waitForTerminal(simulationId, 120_000);
+        if (terminalStatus !== "completed") {
+          const failed = await call("GET", `/v1/simulations/${simulationId}`, { key });
+          diagnosticEvidence = failed.body;
+          throw new Error(JSON.stringify({
+            status: failed.body.status,
+            reason: failed.body.reason,
+            executionFailure: failed.body.executionFailure,
+          }));
+        }
+        await instance.drainEvidence();
+        const grade = await gradesOn(auth, simulationId, runId, 1, 60_000);
+        diagnosticGrade = grade[0] === undefined ? undefined : {
+          result: grade[0].result,
+          score: grade[0].score,
+          passThreshold: grade[0].graderPassThreshold,
+          details: grade[0].details,
+        };
+        const detail = await call("GET", `/v1/simulations/${simulationId}`, { key });
+        diagnosticEvidence = detail.body;
+        expect(detail.status, JSON.stringify(detail.body)).toBe(200);
+        expect(detail.body).toMatchObject({
+          status: "completed",
+          gradingState: "complete",
+          agentPovComplete: true,
+          hasRecording: LIVE_MODALITY === "voice",
+        });
+        const validGrade = assertValidGrade(grade[0]!, detail.body);
+        const persistedAgentText = ((detail.body.transcript as {
+          turns?: Array<{ kind?: string; pov?: string; text?: string }>;
+        }).turns ?? []).find((turn) =>
+          turn.pov === "agent" && turn.kind === "turn:agent" && turn.text?.trim() !== ""
+        )?.text;
+        const persistedHumanText = ((detail.body.transcript as {
+          turns?: Array<{ kind?: string; pov?: string; text?: string }>;
+        }).turns ?? []).find((turn) =>
+          turn.pov === "agent" && turn.kind === "turn:human" && turn.text?.trim() !== ""
+        )?.text;
+        expect(persistedAgentText).toBeDefined();
+        expect(persistedHumanText).toBeDefined();
+        const agentNeedle = compactText(persistedAgentText ?? "").slice(0, 60).toLowerCase();
+        const humanNeedle = compactText(persistedHumanText ?? "").slice(0, 60).toLowerCase();
+        if (LIVE_MODALITY === "voice") {
+          const recording = await call(
+            "GET",
+            `/v1/simulations/${simulationId}/recording?projectId=${projectId}`,
+            { key },
+          );
+          expect(recording.status, JSON.stringify(recording.body)).toBe(200);
+          const recordingUrl = String(recording.body.url);
+          const audio = await fetch(recordingUrl);
+          expect(audio.status).toBe(200);
+          expect(audio.headers.get("content-type")).toContain("audio/wav");
+          const recordingBytes = new Uint8Array(await audio.arrayBuffer());
+          expect(recordingBytes.byteLength).toBeGreaterThan(44);
+          expect(new TextDecoder().decode(recordingBytes.slice(0, 4))).toBe("RIFF");
+        }
+        assertPublicEvidence(detail.body, {
+          pov: "agent",
+          humanIncludes: humanNeedle,
+          agentIncludes: agentNeedle,
+          recording: LIVE_MODALITY === "voice",
+          tools: [
+            {
+              name: "check_availability",
+              arguments: { day: "Tuesday" },
+              result: expectedAvailabilityResult,
+              ...(LIVE_MOCKS ? { provenance: "mocked" as const } : {}),
+            },
+            {
+              name: "record_request",
+              arguments: { day: "Tuesday", kind: "reschedule" },
+              result: {
+                recorded: true,
+                reference: "fixture-request-1",
+                day: "Tuesday",
+                kind: "reschedule",
+              },
+            },
+          ],
+        });
+        const storedCustomerTurns = (await storedSpans(traceIdOf(simulationId)))
+          .filter((span) =>
+            span.emitter === "agent" &&
+            (span.kind === "turn:human" || span.kind === "turn:agent") &&
+            span.text.trim() !== ""
+          )
+          .map((span) => ({
+            spanId: span.span_id,
+            kind: span.kind,
+            text: span.text,
+          }));
+        const publicCustomerTurns = ((detail.body.transcript as {
+          turns?: Array<{
+            spanId?: string;
+            kind?: string;
+            text?: string;
+            pov?: string;
+          }>;
+        }).turns ?? [])
+          .filter((turn) => turn.pov === "agent")
+          .map((turn) => ({
+            spanId: turn.spanId,
+            kind: turn.kind,
+            text: turn.text,
+          }));
+        expect(publicCustomerTurns).toEqual(storedCustomerTurns);
+        const history = await nativeHistory(path.join(providerDirectory, "native-history.json"));
+        const nativeTurns = history.flatMap((item) => {
+          if (item.type !== "message" || (item.role !== "user" && item.role !== "assistant")) return [];
+          const text = historyText(item.content);
+          return text === "" ? [] : [{
+            kind: item.role === "user" ? "turn:human" : "turn:agent",
+            text: compactText(text),
+          }];
+        });
+        expect(nativeTurns.some((turn) => turn.kind === "turn:human")).toBe(true);
+        expect(nativeTurns.some((turn) => turn.kind === "turn:agent")).toBe(true);
+        expect(publicCustomerTurns.map((turn) => ({
+          kind: turn.kind,
+          text: compactText(turn.text ?? ""),
+        }))).toEqual(nativeTurns);
+        const nativeCalls = history.filter((item) => item.type === "function_call");
+        const nativeOutputs = history.filter((item) => item.type === "function_call_output");
+        const outputsByCall = new Map(nativeOutputs.map((item) => [
+          String(item.call_id ?? item.callId),
+          item,
+        ]));
+        expect(nativeOutputs.length).toBe(nativeCalls.length);
+        const nativeToolSequence = nativeCalls.map((item) => {
+          const callId = String(item.call_id ?? item.callId);
+          const output = outputsByCall.get(callId);
+          expect(output, `native tool call ${callId} has no output`).toBeDefined();
+          return {
+            name: item.name,
+            arguments: decodedHistory(item.arguments ?? item.args),
+            result: decodedHistory(output?.output),
+          };
+        });
+        expect(outputsByCall.size).toBe(nativeCalls.length);
+        const transcript = detail.body.transcript as {
+          spans?: PublicTool[];
+          turns?: PublicTool[];
+        };
+        const publicToolSequence = publicTools([
+          ...(transcript.spans ?? []),
+          ...(transcript.turns ?? []),
+        ])
+          .sort((left, right) =>
+            String(left.startedAt).localeCompare(String(right.startedAt)) ||
+            String(left.spanId).localeCompare(String(right.spanId))
+          )
+          .map((tool) => ({
+            name: tool.toolName,
+            arguments: decodedHistory(tool.toolArguments),
+            result: decodedHistory(tool.toolResult),
+          }));
+        expect(publicToolSequence).toEqual(nativeToolSequence);
+
+        const browser = await openBrowser();
+        try {
+          const context = await browser.newContext();
+          await context.addCookies([{
+            name: cookie.slice(0, cookie.indexOf("=")),
+            value: cookie.slice(cookie.indexOf("=") + 1),
+            url: instance.origin,
+          }]);
+          const page = await context.newPage();
+          await page.goto(
+            `${instance.origin}/projects/${projectId}/runs/${runId}`,
+          );
+          await assertEvidencePage(page, {
+            humanIncludes: humanNeedle,
+            agentIncludes: agentNeedle,
+            recording: LIVE_MODALITY === "voice",
+            sourceLabel: "Conversation recorded by the customer agent",
+            gradeResult: validGrade.result,
+          });
+        } finally {
+          await browser.close();
+        }
+
+        await mkdir(proofDirectory, { recursive: true });
+        await writeFile(
+          path.join(proofDirectory, `${caseId}.json`),
+          JSON.stringify({
+            caseId,
+            commitSha: process.env["GITHUB_SHA"] ?? "local-working-tree",
+            artifact,
+            runtime,
+            outcomes: {
+              simulation: "completed",
+              publicRead: true,
+              storedToPublicProjection: true,
+              nativeHistoryToStorage: true,
+              agentPovComplete: true,
+              recording: LIVE_MODALITY === "voice",
+              grade: validGrade,
+              browser: { human: true, agent: true, source: true, grade: true },
+            },
+          }, null, 2) + "\n",
+          { encoding: "utf8", mode: 0o600 },
+        );
+      } catch (failure) {
+        await mkdir(proofDirectory, { recursive: true });
+        const diagnosticNativeHistory = await readFile(
+          path.join(providerDirectory, "native-history.json"),
+          "utf8",
+        ).catch(() => "");
+        const workerLogs = await Promise.all(
+          [
+            `${LIVE_LANGUAGE}-worker.log`,
+            "livekit.log",
+            "python-build.log",
+            "javascript-build.log",
+          ].map(async (name) =>
+            readFile(path.join(providerDirectory, name), "utf8").catch(() => "")
+          ),
+        );
+        const safeProviderLog = [
+          providerSaid,
+          fullPathWorkers?.output() ?? "",
+          ...tunnels.map((tunnel) => tunnel.output()),
+          ...workerLogs,
+          diagnosticNativeHistory === "" ? "" :
+            `native session history:\n${diagnosticNativeHistory}`,
+        ]
+          .join("\n")
+          .replaceAll(LIVE_MODEL_KEY, "[REDACTED]")
+          .replaceAll(key, "[REDACTED]");
+        await writeFile(
+          path.join(proofDirectory, `${caseId}.log`),
+          safeProviderLog,
+          { encoding: "utf8", mode: 0o600 },
+        );
+        const diagnosticManifest = JSON.stringify(
+          {
+            caseId,
+            commitSha: process.env["GITHUB_SHA"] ?? "local-working-tree",
+            ...(artifact === undefined ? {} : { artifact }),
+            ...(runtime === undefined ? {} : { runtime }),
+            outcomes: {
+              simulation: "failed",
+              failureType: failure instanceof Error ? failure.name : "unknown",
+            },
+            ...(diagnosticEvidence === undefined ? {} : {
+              evidence: {
+                status: diagnosticEvidence.status,
+                reason: diagnosticEvidence.reason,
+                agentPovComplete: diagnosticEvidence.agentPovComplete,
+                transcript: diagnosticEvidence.transcript,
+              },
+            }),
+            ...(diagnosticGrade === undefined ? {} : { grade: diagnosticGrade }),
+          },
+          null,
+          2,
+        )
+          .replaceAll(LIVE_MODEL_KEY, "[REDACTED]")
+          .replaceAll(key, "[REDACTED]") + "\n";
+        await writeFile(
+          path.join(proofDirectory, `${caseId}.json`),
+          diagnosticManifest,
+          { encoding: "utf8", mode: 0o600 },
+        );
+        throw failure;
+      } finally {
+        await fullPathWorkers?.stop();
+        await Promise.all([
+          stopChild(provider),
+          ...tunnels.map((tunnel) => stopChild(tunnel.process)),
+        ]);
+      }
     },
   );
 });

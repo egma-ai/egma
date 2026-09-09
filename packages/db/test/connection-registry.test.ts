@@ -166,8 +166,8 @@ describe("an access variant that narrows its kind's modalities", () => {
 
 describe("the types that carry no optional key", () => {
   it("still demand every key they hold, retell's and phone's alike", () => {
-    expect(() => validConfig("retell_chat_api", "retell_chat_api.api_key", {})).toThrow(
-      "a Retell chat connection's config needs retellAgentId",
+    expect(() => validConfig("retell_text_mode", "retell_text_mode.api_key", {})).toThrow(
+      "a Retell text mode connection's config needs retellAgentId",
     );
     expect(() => validConfig("phone_number", "phone_number.public_e164", {})).toThrow(
       "a phone-number connection's config needs phoneNumber",
@@ -175,13 +175,13 @@ describe("the types that carry no optional key", () => {
   });
 
   it("still list their keys without an optional marker anywhere", () => {
-    expect(() => validConfig("retell_chat_api", "retell_chat_api.api_key", { retellAgentld: "typo" })).toThrow(
-      'a Retell chat connection\'s config has no key "retellAgentld"; it holds retellAgentId',
+    expect(() => validConfig("retell_text_mode", "retell_text_mode.api_key", { retellAgentld: "typo" })).toThrow(
+      'a Retell text mode connection\'s config has no key "retellAgentld"; it holds retellAgentId',
     );
   });
 
   it("still answer the stored config for a payload they take", () => {
-    expect(validConfig("retell_chat_api", "retell_chat_api.api_key", { retellAgentId: "  agent_abc  " })).toEqual({
+    expect(validConfig("retell_text_mode", "retell_text_mode.api_key", { retellAgentId: "  agent_abc  " })).toEqual({
       retellAgentId: "agent_abc",
     });
     expect(validConfig("phone_number", "phone_number.public_e164", { phoneNumber: "+15551234567" })).toEqual({
@@ -579,9 +579,9 @@ describe("a LiveKit room connection's modality", () => {
       "a phone_number connection speaks voice, and this one was asked for chat",
     );
     expect(() =>
-      validModality("retell_chat_api", "retell_chat_api.api_key", "voice"),
+      validModality("retell_text_mode", "retell_text_mode.api_key", "voice"),
     ).toThrow(
-      "a retell_chat_api connection speaks chat, and this one was asked for voice",
+      "a retell_text_mode connection speaks chat, and this one was asked for voice",
     );
   });
 });
@@ -836,15 +836,15 @@ describe("what the shipped simulator can conduct", () => {
   it("checks the exact stored kind, access variant, and modality before dispatch", () => {
     expect(
       connectionIsConductable(
-        "retell_chat_api",
-        "retell_chat_api.api_key",
+        "retell_text_mode",
+        "retell_text_mode.api_key",
         "chat",
       ),
     ).toBe(true);
     expect(
       connectionIsConductable(
-        "retell_chat_api",
-        "retell_chat_api.api_key",
+        "retell_text_mode",
+        "retell_text_mode.api_key",
         "voice",
       ),
     ).toBe(false);
@@ -888,7 +888,6 @@ describe("what the shipped simulator can conduct", () => {
         `connection Egma conducts today: ${conductableConnectionTypes().join(", ")}.`,
     );
     expect(conductableConnectionTypes()).toEqual([
-      "retell_chat_api",
       // Text mode and the web call both joined the conductable list with
       // the plugs that place them, in the registry's own order.
       "retell_text_mode",
@@ -896,5 +895,16 @@ describe("what the shipped simulator can conduct", () => {
       "phone_number",
       "livekit_room",
     ]);
+  });
+
+  it("refuses the retired Retell Chat API lane", () => {
+    expect(connectionIsConductable(
+      "retell_chat_api",
+      "retell_chat_api.api_key",
+      "chat",
+    )).toBe(false);
+    expect(() => descriptorOf("retell_chat_api")).toThrow(
+      '"retell_chat_api" is not a connection type Egma knows',
+    );
   });
 });

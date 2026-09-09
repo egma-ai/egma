@@ -4,6 +4,7 @@ import { traceIdOfSimulation } from "@egma/simulation-contract";
 import { WIRE_TRACE_ID_PAYLOAD_KEY, type SpanAttribution } from "../otlp/normalise.ts";
 import {
   acceptEvidenceForProjects,
+  preflightEvidenceForProjects,
   type Acceptance,
   type EvidenceGroup,
 } from "@egma/ingestion";
@@ -34,6 +35,19 @@ export type SimulationFiling = {
   readonly spans: readonly NewSpan[];
 };
 
+/** A permanent simulation record refusal found before any record was staged. */
+export class SimulationEvidenceRefusedError extends Error {
+  readonly count: number;
+  readonly firstReason: string;
+
+  constructor(count: number, firstReason: string) {
+    super(firstReason);
+    this.name = "SimulationEvidenceRefusedError";
+    this.count = count;
+    this.firstReason = firstReason;
+  }
+}
+
 /**
  * Build simulation attribution from resolved storage state and the supplied
  * POV. OTLP normalization uses it before building spans; final filing applies
@@ -46,6 +60,7 @@ export function attributionOf(
   return {
     source: "simulation",
     emitter,
+    modality: standing.modality,
     runId: standing.runId,
     agentId: standing.agentId,
     testVersionId: standing.testVersionId,
@@ -116,7 +131,7 @@ export async function fileSimulationEvidence(
   filings: readonly SimulationFiling[],
   alongside: readonly EvidenceGroup[] = [],
 ): Promise<Acceptance> {
-  const groups: EvidenceGroup[] = [...alongside];
+  const groups: EvidenceGroup[] = [];
 
   for (const filing of filings) {
     let spans = filedUnderSimulation(filing);
@@ -129,5 +144,42 @@ export async function fileSimulationEvidence(
     groups.push({ auth: filing.standing.auth, spans });
   }
 
-  return acceptEvidenceForProjects(groups);
+  const refused = preflightEvidenceForProjects(groups);
+  if (refused.length > 0) {
+    throw new SimulationEvidenceRefusedError(
+      refused.length,
+      refused[0]?.reason ?? "Egma refused a simulation evidence record.",
+    );
+  }
+
+  const completion = (span: NewSpan) =>
+    span.kind === "root" && span.name === "agent_session";
+  const children = groups.map((group) => ({
+    ...group,
+    spans: group.spans.filter((span) => !completion(span)),
+  }));
+  const roots = groups.map((group) => ({
+    ...group,
+    spans: group.spans.filter(completion),
+  }));
+
+  let accepted = 0;
+  for (const ordered of [children, roots]) {
+    if (!ordered.some((group) => group.spans.length > 0)) continue;
+    const result = await acceptEvidenceForProjects(ordered);
+    accepted += result.accepted;
+    if (result.refused.length > 0) {
+      throw new SimulationEvidenceRefusedError(
+        result.refused.length,
+        result.refused[0]?.reason ?? "Egma refused a simulation evidence record.",
+      );
+    }
+  }
+
+  if (alongside.length === 0) return { accepted, refused: [] };
+  const production = await acceptEvidenceForProjects(alongside);
+  return {
+    accepted: accepted + production.accepted,
+    refused: production.refused,
+  };
 }

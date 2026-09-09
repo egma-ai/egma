@@ -233,7 +233,7 @@ export async function startObjectStorage(
   };
 
   const endpoint = `http://127.0.0.1:${port}`;
-  if (!(await answering(`${endpoint}/minio/health/live`, READY_MILLISECONDS))) {
+  if (!(await answering(`${endpoint}/minio/health/cluster`, READY_MILLISECONDS))) {
     stop();
     return absentObjectStorage(
       `${MINIO_IMAGE} started but never answered its health probe at ` +

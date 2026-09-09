@@ -609,6 +609,71 @@ describe("egma.simulation", () => {
     expect(refused.room.localParticipant.performRpc).not.toHaveBeenCalled();
   });
 
+  it("closes the session only when the exact Egma persona departs", async () => {
+    const agent = agentWithTool("check_calendar", async () => "real");
+    const ctx = context("egma-sim-sim_129_departure", {
+      personaIdentity: "egma-persona-sim_129_departure",
+    });
+    ctx.room.remoteParticipants.set("somebody-else", {
+      identity: "somebody-else",
+    });
+    const oneSession = session();
+    const shutdown = vi.spyOn(oneSession, "shutdown");
+
+    await simulation(agent, asJobContext(ctx), oneSession);
+    ctx.room.depart("somebody-else");
+    await Promise.resolve();
+    expect(shutdown).not.toHaveBeenCalled();
+
+    ctx.room.depart("egma-persona-sim_129_departure");
+    expect(shutdown).toHaveBeenCalledOnce();
+    expect(shutdown).toHaveBeenCalledWith({ drain: true });
+
+    await ctx.shutdownCallbacks.at(-1)!();
+    expect(ctx.room.eventNames()).toEqual([]);
+  });
+
+  it("closes the simulation session when the room is lost", async () => {
+    const agent = agentWithTool("check_calendar", async () => "real");
+    const ctx = context("egma-sim-sim_129_room_loss");
+    const oneSession = session();
+    const shutdown = vi.spyOn(oneSession, "shutdown");
+
+    await simulation(agent, asJobContext(ctx), oneSession);
+    ctx.room.disconnect();
+
+    expect(shutdown).toHaveBeenCalledOnce();
+    expect(shutdown).toHaveBeenCalledWith({ drain: true });
+    await ctx.shutdownCallbacks.at(-1)!();
+    expect(ctx.room.eventNames()).toEqual([]);
+  });
+
+  it("shares LiveKit's guarded shutdown when the caller departure reaches both listeners", async () => {
+    const agent = agentWithTool("check_calendar", async () => "real");
+    const ctx = context("egma-sim-sim_129_native_close");
+    const oneSession = session();
+    const closed: unknown[] = [];
+
+    await simulation(agent, asJobContext(ctx), oneSession);
+    const exported = whatEgmaExports();
+    await oneSession.start({ agent });
+    oneSession.on(voice.AgentSessionEventTypes.Close, (event) => {
+      closed.push(event);
+    });
+    ctx.room.on("participantDisconnected", () => {
+      (oneSession as unknown as {
+        _closeSoon(options: { reason: string }): void;
+      })._closeSoon({ reason: "participant_disconnected" });
+    });
+
+    ctx.room.depart("egma-persona");
+
+    await vi.waitFor(() => expect(closed).toHaveLength(1), { timeout: 5_000 });
+    expect(
+      exported.getFinishedSpans().filter(({ name }) => name === "agent_session"),
+    ).toHaveLength(1);
+  });
+
   it("refuses a second claimant that arrives as the selected persona is returned", async () => {
     const agent = agentWithTool("check_calendar", async () => "real");
     const ctx = context("egma-sim-sim_130_race", {
@@ -789,7 +854,7 @@ describe("egma.simulation", () => {
     expect(delay).toBe(SIMULATION_BATCH_MILLIS);
   });
 
-  it("flushes when the session closes and again when the job stops", async () => {
+  it("finishes the session-close flush before the job shutdown flush returns", async () => {
     const agent = agentWithTool("check_calendar", async () => "real");
     const ctx = context("egma-sim-sim_143", {
       mockedTools: ["check_calendar"],
@@ -798,19 +863,36 @@ describe("egma.simulation", () => {
 
     await simulation(agent, asJobContext(ctx), oneSession);
     const processor = exportStateForTests()!.processor;
-    const flushed = vi.spyOn(processor, "forceFlush");
+    let finishCloseFlush: (() => void) | undefined;
+    const closeFlush = new Promise<void>((resolve) => {
+      finishCloseFlush = resolve;
+    });
+    const flushed = vi
+      .spyOn(processor, "forceFlush")
+      .mockImplementationOnce(() => closeFlush)
+      .mockResolvedValue(undefined);
 
     await oneSession.start({ agent });
     await oneSession.close();
-    await vi.waitFor(() => expect(flushed).toHaveBeenCalled(), {
+    await vi.waitFor(() => expect(flushed).toHaveBeenCalledTimes(1), {
       timeout: 5_000,
     });
 
     // The job's own flush is the backstop, and it is the first callback
-    // the export registered.
-    await ctx.shutdownCallbacks[0]!();
+    // the export registered. It must wait for the HTTP export started at
+    // session close instead of letting the worker exit underneath it.
+    let shutdownFinished = false;
+    const shutdown = ctx.shutdownCallbacks[0]!().then(() => {
+      shutdownFinished = true;
+    });
+    await Promise.resolve();
+    expect(shutdownFinished).toBe(false);
+    expect(flushed).toHaveBeenCalledTimes(1);
 
-    expect(flushed.mock.calls.length).toBeGreaterThanOrEqual(2);
+    finishCloseFlush?.();
+    await shutdown;
+
+    expect(flushed).toHaveBeenCalledTimes(2);
   });
 
   it.each(["EGMA_URL", "EGMA_API_KEY"])(

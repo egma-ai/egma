@@ -142,15 +142,15 @@ async function seedRun(who: typeof acme): Promise<Seeded> {
   const auth = sessionOf(who);
   const label = newId("run").slice(-8).toLowerCase();
   const created = await createAgent(auth, {
-    agentPlatform: "retell",
+    agentPlatform: "livekit",
     name: `Front desk ${label}`,
     connection: {
-      agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
       modality: "chat",
-      config: { retellAgentId: `agent_${label}` },
-      credentials: { apiKey: `retell-secret-${label}` },
+      config: { url: "wss://test.livekit.cloud", agentName: `agent_${label}` },
+      credentials: { apiKey: `retell-secret-${label}`, apiSecret: "livekit-secret-A1B2C3D4WXYZ" },
     },
   });
   const chatConnectionId = created.connection?.id ?? "";
@@ -234,7 +234,7 @@ async function conversations(
   lane: {
     readonly count: number;
     readonly modality: "chat" | "voice";
-    readonly connectionType: "retell_chat_api" | "livekit_room" | "phone_number";
+    readonly connectionType: "livekit_room" | "livekit_room" | "phone_number";
     readonly startedAt: Date;
     readonly seconds: number;
   },
@@ -419,7 +419,7 @@ describe("whether an organization may start a kind of work", () => {
     await conversations(acme, {
       count: 500,
       modality: "chat",
-      connectionType: "retell_chat_api",
+      connectionType: "livekit_room",
       startedAt: new Date("2026-09-16T09:00:00.000Z"),
       seconds: 4,
     });
@@ -781,7 +781,7 @@ it("starts a fresh allowance tally at activation and assigns a crossing call to 
   await database.sql("update organization set created_at = $2 where id = $1", [who.organizationId, CREATED_AT]);
   await openBillingAccount(who.organizationId);
   await database.sql("update cloud_billing_account set activated_at = $2 where organization_id = $1", [who.organizationId, NOW]);
-  await conversations(who, { count: 500, modality: "chat", connectionType: "retell_chat_api", startedAt: new Date("2026-09-19T12:00:00Z"), seconds: 20 });
+  await conversations(who, { count: 500, modality: "chat", connectionType: "livekit_room", startedAt: new Date("2026-09-19T12:00:00Z"), seconds: 20 });
   await conversations(who, { count: 1, modality: "voice", connectionType: "phone_number", startedAt: new Date("2026-09-19T12:00:00Z"), seconds: 120 });
   await conversations(who, { count: 1, modality: "voice", connectionType: "phone_number", startedAt: NOW, seconds: 2 });
   await conversations(who, { count: 1, modality: "voice", connectionType: "phone_number", startedAt: new Date("2026-10-15T07:59:30Z"), seconds: 60 });

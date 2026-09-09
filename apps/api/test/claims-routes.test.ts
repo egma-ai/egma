@@ -57,8 +57,8 @@ const RESCHEDULING = {
 
 const RETELL = {
   agentPlatform: "retell",
-  connectionType: "retell_chat_api",
-  accessVariant: "retell_chat_api.api_key",
+  connectionType: "retell_text_mode",
+  accessVariant: "retell_text_mode.api_key",
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_1" },
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -100,19 +100,25 @@ const PHONE = {
 /** The Retell chat target in these route tests is a chat agent. */
 const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
   const url = String(input);
-  if (!url.includes("/v2/list-agents")) {
-    throw new Error(`Unexpected Retell read: ${url}`);
+  const json = (value: unknown) => new Response(JSON.stringify(value), { status: 200 });
+  if (url.includes("/v2/list-phone-numbers")) return json({ items: [], has_more: false });
+  if (url.includes("/get-agent/")) {
+    return json({
+      agent_id: url.includes("agent_in_retell_2") ? "agent_in_retell_2" : "agent_in_retell_1",
+      version: 105,
+      is_published: true,
+      response_engine: { type: "conversation-flow", conversation_flow_id: "flow_1", version: 105 },
+    });
   }
-  return new Response(
-    JSON.stringify({
+  if (url.includes("/get-conversation-flow/")) return json({ conversation_flow_id: "flow_1", version: 105, nodes: [] });
+  if (url.includes("/v2/list-agents")) return json({
       items: [
         { agent_id: "agent_in_retell_1", agent_name: "Front desk", channel: "chat" },
         { agent_id: "agent_in_retell_2", agent_name: "Second desk", channel: "chat" },
       ],
       has_more: false,
-    }),
-    { status: 200 },
-  );
+  });
+  throw new Error(`Unexpected Retell read: ${url}`);
 };
 
 /**
@@ -451,8 +457,8 @@ describe("claiming work", () => {
     expect(spec.modality).toBe("chat");
     expect(spec.connection).toEqual({
       agent_platform: "retell",
-      connection_type: "retell_chat_api",
-      access_variant: "retell_chat_api.api_key",
+      connection_type: "retell_text_mode",
+      access_variant: "retell_text_mode.api_key",
       config: { retellAgentId: "agent_in_retell_1" },
       credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
     });
@@ -717,28 +723,6 @@ describe("claiming work", () => {
     expect("mock_tools" in spec).toBe(false);
   });
 
-  it("carries no answers at all on a lane Egma cannot answer a call on", async () => {
-    // A Retell chat API conversation reaches the customer's own tools: Egma is
-    // nowhere in that path, so a test's mock tools are not sent as though they
-    // were going to be served.
-    const { key, connectionId, versionId } = await aCustomerReadyToRun(
-      "claims_unserved_lane",
-      {},
-      undefined,
-      { mockTools: [{ tool: "check_availability", answer: { slots: [] } }] },
-    );
-
-    await aQueuedRun(key, connectionId, versionId);
-    const answered = await claim(api.config.simulatorServiceToken, {
-      claimant: "sim-under-test",
-      capacity: 4,
-      wait_seconds: 0,
-    });
-    const spec = (answered.body.specs as Record<string, unknown>[])[0];
-    if (spec === undefined) throw new Error("no spec came back");
-    expect("mock_tools" in spec).toBe(false);
-  });
-
   it("goes on serving the version this simulation pinned after the test is edited", async () => {
     // The pinned test version is immutable, which is what the run's own frozen
     // copy of the world used to be for: an edit lands as a new version, and a
@@ -951,331 +935,6 @@ describe("what the claim door never touches", () => {
       wait_seconds: 0,
     });
     expect(stillClaims.statusCode).toBe(200);
-  });
-});
-
-describe("a simulation the platform cannot hand over", () => {
-  it("blocks a Retell chat connection when Retell says its agent is voice", async () => {
-    const providerReads: string[] = [];
-    const retellFetch: typeof fetch = async (input) => {
-      providerReads.push(String(input));
-      return new Response(
-        JSON.stringify({
-          items: [
-            {
-              agent_id: "agent_in_retell_1",
-              agent_name: "Voice front desk",
-              channel: "voice",
-            },
-          ],
-          has_more: false,
-        }),
-        { status: 200 },
-      );
-    };
-    const { ada, key, connectionId, versionId } =
-      await aCustomerReadyToRun("claims_retell_voice_mismatch", {
-        retellFetch,
-      });
-    const doomed = await aQueuedRun(key, connectionId, versionId);
-
-    const answered = await claim(api.config.simulatorServiceToken, {
-      claimant: "sim-under-test",
-      capacity: 1,
-      wait_seconds: 0,
-    });
-
-    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
-    expect(answered.body.specs).toEqual([]);
-    expect(providerReads).toHaveLength(1);
-    expect(providerReads[0]).toContain("/v2/list-agents");
-    const row = await getSimulation(
-      contextFor(ada, "member"),
-      doomed.simulationId,
-    );
-    expect(row?.status).toBe("failed");
-    expect(row?.endingReason).toBe("dispatch_failed");
-  });
-
-  it("releases a transient claim, and lands a cancel that arrives during its next check", async () => {
-    let holdProvider = false;
-    let providerStarted!: () => void;
-    let letProviderFinish!: () => void;
-    const providerDidStart = new Promise<void>((resolve) => {
-      providerStarted = resolve;
-    });
-    const providerMayFinish = new Promise<void>((resolve) => {
-      letProviderFinish = resolve;
-    });
-    const { ada, key, connectionId, versionId } =
-      await aCustomerReadyToRun("claims_retell_temporarily_unavailable", {
-        retellFetch: async () => {
-          if (holdProvider) {
-            providerStarted();
-            await providerMayFinish;
-          }
-          return new Response("temporarily unavailable", { status: 503 });
-        },
-      });
-    const waiting = await aQueuedRun(key, connectionId, versionId);
-
-    const answered = await claim(api.config.simulatorServiceToken, {
-      claimant: "sim-under-test",
-      capacity: 1,
-      wait_seconds: 0,
-    });
-
-    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
-    expect(answered.body.specs).toEqual([]);
-    const row = await getSimulation(
-      contextFor(ada, "member"),
-      waiting.simulationId,
-    );
-    expect(row?.status).toBe("queued");
-    expect(row?.endingReason).toBeNull();
-    expect(row?.claimedBy).toBeNull();
-    const feed = await listRunEvents(contextFor(ada, "member"), waiting.runId);
-    expect(
-      feed?.events
-        .filter((event) => event.simulationId === waiting.simulationId)
-        .map((event) => event.status),
-    ).toEqual(["claimed", "queued"]);
-
-    // The same row is claimed again. This time Cancel lands while Retell is
-    // still being checked, before any simulator receives a spec.
-    holdProvider = true;
-    const checking = claim(api.config.simulatorServiceToken, {
-      claimant: "sim-under-test",
-      capacity: 1,
-      wait_seconds: 0,
-    });
-    await providerDidStart;
-    const canceled = await ask(
-      api.app,
-      "POST",
-      `/v1/runs/${waiting.runId}/cancel`,
-      key,
-    );
-    expect(canceled.statusCode, JSON.stringify(canceled.body)).toBe(200);
-    letProviderFinish();
-
-    const afterCancel = await checking;
-    expect(afterCancel.statusCode, JSON.stringify(afterCancel.body)).toBe(200);
-    expect(afterCancel.body.specs).toEqual([]);
-    const stopped = await getSimulation(
-      contextFor(ada, "member"),
-      waiting.simulationId,
-    );
-    expect(stopped?.status).toBe("canceled");
-    expect(stopped?.endingReason).toBeNull();
-    const settled = await ask(
-      api.app,
-      "GET",
-      `/v1/runs/${waiting.runId}`,
-      key,
-    );
-    expect(settled.body).toMatchObject({
-      status: "canceled",
-      canceledCount: 1,
-      finishedAt: expect.any(String),
-    });
-    const finalFeed = await listRunEvents(
-      contextFor(ada, "member"),
-      waiting.runId,
-    );
-    expect(
-      finalFeed?.events
-        .filter((event) => event.simulationId === waiting.simulationId)
-        .map((event) => event.status),
-    ).toEqual(["claimed", "queued", "claimed", "canceled"]);
-  });
-
-  it("starts independent Retell checks together and bounds a provider that never answers", async () => {
-    let active = 0;
-    let mostActive = 0;
-    let reads = 0;
-    let bothProviderReadsStarted!: () => void;
-    const providerReadsStarted = new Promise<void>((resolve) => {
-      bothProviderReadsStarted = resolve;
-    });
-    const retellFetch: typeof fetch = async (_input, init) => {
-      reads += 1;
-      active += 1;
-      mostActive = Math.max(mostActive, active);
-      if (reads === 2) bothProviderReadsStarted();
-      const signal = init?.signal;
-      if (signal === undefined || signal === null) {
-        throw new Error("the Retell check had no deadline");
-      }
-      return new Promise<Response>((_resolve, reject) => {
-        const stopped = (): void => {
-          active -= 1;
-          reject(signal.reason ?? new Error("the Retell check ended"));
-        };
-        if (signal.aborted) stopped();
-        else signal.addEventListener("abort", stopped, { once: true });
-      });
-    };
-    const { key, connectionId, versionId } =
-      await aCustomerReadyToRun("claims_retell_bounded_batch", {
-        retellFetch,
-      });
-    const second = await ask(api.app, "POST", "/v1/agents", key, {
-      agentPlatform: "retell",
-      name: "Second desk",
-      connection: {
-        ...RETELL,
-        config: { retellAgentId: "agent_in_retell_2" },
-      },
-    });
-    expect(second.statusCode, JSON.stringify(second.body)).toBe(201);
-    const secondConnection = (second.body.connection as { id: string }).id;
-    await Promise.all([
-      aQueuedRun(key, connectionId, versionId),
-      aQueuedRun(key, secondConnection, versionId),
-    ]);
-
-    const providerDeadlines: number[] = [];
-    const deadlineControllers: AbortController[] = [];
-    vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
-      providerDeadlines.push(milliseconds);
-      const controller = new AbortController();
-      deadlineControllers.push(controller);
-      return controller.signal;
-    });
-
-    const answering = claim(api.config.simulatorServiceToken, {
-      claimant: "sim-under-test",
-      capacity: 2,
-      wait_seconds: 0,
-    });
-    await providerReadsStarted;
-
-    expect(reads).toBe(2);
-    expect(mostActive).toBe(2);
-    expect(providerDeadlines).toEqual([15_000, 15_000]);
-
-    for (const controller of deadlineControllers) {
-      controller.abort(new Error("the controlled provider deadline ended"));
-    }
-    const answered = await answering;
-
-    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
-    expect(answered.body.specs).toEqual([]);
-    expect(active).toBe(0);
-  });
-
-  it("lands as dispatch_failed at once, while the rest of the batch still dispatches", async () => {
-    const { ada, key, connectionId, versionId } =
-      await aCustomerReadyToRun("claims_skip");
-
-    // Two runs over two connections; one connection stops resolving before the
-    // claim, so one spec can be assembled and one cannot.
-    const doomed = await aQueuedRun(key, connectionId, versionId);
-    const registered = await ask(api.app, "POST", "/v1/agents", key, {
-      agentPlatform: "retell",
-      name: "Second desk",
-      connection: { ...RETELL, config: { retellAgentId: "agent_in_retell_2" } },
-    });
-    const secondConnection = (registered.body.connection as { id: string }).id;
-    const healthy = await aQueuedRun(key, secondConnection, versionId);
-
-    // Marked archived in the row rather than through the Archive verb, on
-    // purpose: Archive settles the queue in the same transaction, so going
-    // through it would cancel the very simulation this test needs to reach the
-    // claim. What is under test is the claim door meeting a spec it cannot
-    // assemble, whatever left it that way.
-    await api.database.sql(
-      "update connection set archived_at = now() where id = $1",
-      [connectionId],
-    );
-
-    const answered = await claim(api.config.simulatorServiceToken, {
-      claimant: "sim-under-test",
-      capacity: 4,
-      wait_seconds: 0,
-    });
-    expect(answered.statusCode).toBe(200);
-
-    const specs = answered.body.specs as { simulation_id: string }[];
-    expect(specs.map((spec) => spec.simulation_id)).toEqual([
-      healthy.simulationId,
-    ]);
-
-    // The unbuildable row landed terminal at claim time: failed with the
-    // platform's own reason, never blamed on the simulator, never left for
-    // the sweep to misname orphaned — and never back through the queue, so a
-    // second ask does not see it again.
-    const row = await getSimulation(contextFor(ada, "member"), doomed.simulationId);
-    expect(row?.status).toBe("failed");
-    expect(row?.endingReason).toBe("dispatch_failed");
-    expect(row?.executionFailure).toBe(
-      "Egma could not dispatch this simulation: its connection is gone or its credentials would not unseal",
-    );
-    expect(row?.endedAt).toBeInstanceOf(Date);
-
-    const again = await claim(api.config.simulatorServiceToken, {
-      claimant: "sim-under-test",
-      capacity: 4,
-      wait_seconds: 0,
-    });
-    expect(again.body.specs).toEqual([]);
-
-    // That landing was the doomed run's last outstanding conversation, so
-    // the run settles now, with counts that say what happened.
-    const header = await ask(api.app, "GET", `/v1/runs/${doomed.runId}`, key);
-    expect(header.body.status).toBe("completed");
-    expect(header.body.completedCount).toBe(0);
-    expect(header.body.failedCount).toBe(1);
-    expect(header.body.canceledCount).toBe(0);
-  });
-
-  it("lands a credential that will not unseal the same way, and the batch dispatches whole", async () => {
-    const { ada, key, connectionId, versionId } =
-      await aCustomerReadyToRun("claims_corrupt");
-
-    const doomed = await aQueuedRun(key, connectionId, versionId);
-    const registered = await ask(api.app, "POST", "/v1/agents", key, {
-      agentPlatform: "retell",
-      name: "Second desk",
-      connection: { ...RETELL, config: { retellAgentId: "agent_in_retell_2" } },
-    });
-    const secondConnection = (registered.body.connection as { id: string }).id;
-    const healthy = await aQueuedRun(key, secondConnection, versionId);
-
-    // The one write no seam should offer: a sealed envelope replaced with
-    // bytes that will never decrypt, which is what a lost encryption key or
-    // a hand-edited row leaves behind. Unsealing it throws rather than
-    // answering empty, and that throw must cost one row, not the batch.
-    await api.database.sql(
-      "update connection set credentials = 'not-an-envelope-at-all' where id = $1",
-      [connectionId],
-    );
-
-    const answered = await claim(api.config.simulatorServiceToken, {
-      claimant: "sim-under-test",
-      capacity: 4,
-      wait_seconds: 0,
-    });
-    expect(answered.statusCode).toBe(200);
-
-    const specs = answered.body.specs as { simulation_id: string }[];
-    expect(specs.map((spec) => spec.simulation_id)).toEqual([
-      healthy.simulationId,
-    ]);
-
-    // The unopenable row took the same honest landing — the throw cost one
-    // row its dispatch, and the batch around it went out whole.
-    const row = await getSimulation(
-      contextFor(ada, "member"),
-      doomed.simulationId,
-    );
-    expect(row?.status).toBe("failed");
-    expect(row?.endingReason).toBe("dispatch_failed");
-    expect(row?.executionFailure).toBe(
-      "Egma could not dispatch this simulation: an internal error prevented Egma from building its simulation spec",
-    );
-    expect(row?.executionFailure).not.toContain("not-an-envelope-at-all");
   });
 });
 

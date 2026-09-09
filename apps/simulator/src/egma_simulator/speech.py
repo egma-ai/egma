@@ -692,17 +692,32 @@ def _openai_mouth(
         async def run_tts(
             self, text: str, context_id: str
         ) -> AsyncGenerator[Frame, None]:
+            from pipecat.frames.frames import ErrorFrame
+
+            spoke = False
             try:
                 async for frame in super().run_tts(text, context_id):
+                    if isinstance(frame, ErrorFrame):
+                        yield frame
+                        await self.remove_audio_context(context_id)
+                        return
+                    spoke = spoke or isinstance(frame, TTSAudioRawFrame)
                     yield frame
+            except asyncio.CancelledError:
+                await self.remove_audio_context(context_id)
+                raise
             except Exception as fault:
                 if providers.tts_customer_funded and authentication_rejected(fault):
-                    from pipecat.frames.frames import ErrorFrame
-
                     failure = ProviderKeyUnavailable("openai")
                     yield ErrorFrame(error=str(failure), exception=fault)
+                    await self.remove_audio_context(context_id)
+                    return
                 else:
+                    await self.remove_audio_context(context_id)
                     raise
+            if not spoke:
+                await self.remove_audio_context(context_id)
+                raise SpeechFault("the openai speaking leg returned no audio")
 
     if not providers.tts_key:
         raise SpeechFault("the openai speaking leg was chosen without a key")
@@ -719,6 +734,9 @@ def _openai_mouth(
     leg = OpenAITTSService(
         api_key=providers.tts_key,
         settings=settings,
+        # OpenAI returns finite HTTP streams. Pipecat closes the turn after they
+        # finish; an idle timer can stop it while a response is still in flight.
+        stop_frame_timeout_s=None,
     )
     return leg, spoken_with, ()
 

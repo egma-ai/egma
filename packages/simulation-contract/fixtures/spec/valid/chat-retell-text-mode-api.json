@@ -1,22 +1,17 @@
 {
   "contract_version": 5,
-  "simulation_id": "sim_01K5T31D6PJ2A0YWQ8VE4NRK7M",
+  "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWER",
   "modality": "chat",
   "connection": {
     "agent_platform": "retell",
-    "connection_type": "retell_chat_api",
-    "access_variant": "retell_chat_api.api_key",
+    "connection_type": "retell_text_mode",
+    "access_variant": "retell_text_mode.api_key",
     "config": {
       "retellAgentId": "agent_2f6c9e8d7b5a4c3e2f1d0a9b8c"
     },
     "credentials": {
       "apiKey": "fixture-not-a-real-secret-0000000000000000"
     }
-  },
-  "agent_version": "latest",
-  "dynamic_variables": {
-    "account_id": "sim_01K5T31D6PJ2A0YWQ8VE4NRK7M",
-    "caller_name": ""
   },
   "persona": {
     "name": "Margaret",

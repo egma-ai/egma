@@ -647,7 +647,6 @@
                                 "connectionType": {
                                   "type": "string",
                                   "enum": [
-                                    "retell_chat_api",
                                     "retell_text_mode",
                                     "retell_web_call",
                                     "phone_number"
@@ -656,7 +655,6 @@
                                 "accessVariant": {
                                   "type": "string",
                                   "enum": [
-                                    "retell_chat_api.api_key",
                                     "retell_text_mode.api_key",
                                     "retell_web_call.api_key",
                                     "phone_number.public_e164"
@@ -829,7 +827,6 @@
                           "connectionType": {
                             "type": "string",
                             "enum": [
-                              "retell_chat_api",
                               "retell_text_mode",
                               "retell_web_call",
                               "phone_number",
@@ -839,7 +836,6 @@
                           "accessVariant": {
                             "type": "string",
                             "enum": [
-                              "retell_chat_api.api_key",
                               "retell_text_mode.api_key",
                               "retell_web_call.api_key",
                               "phone_number.public_e164",
@@ -1084,7 +1080,6 @@
                       "connectionType": {
                         "type": "string",
                         "enum": [
-                          "retell_chat_api",
                           "retell_text_mode",
                           "retell_web_call",
                           "phone_number",
@@ -1094,7 +1089,6 @@
                       "accessVariant": {
                         "type": "string",
                         "enum": [
-                          "retell_chat_api.api_key",
                           "retell_text_mode.api_key",
                           "retell_web_call.api_key",
                           "phone_number.public_e164",
@@ -2954,7 +2948,6 @@
                   "connectionType": {
                     "type": "string",
                     "enum": [
-                      "retell_chat_api",
                       "retell_text_mode",
                       "retell_web_call",
                       "phone_number",
@@ -2964,7 +2957,6 @@
                   "accessVariant": {
                     "type": "string",
                     "enum": [
-                      "retell_chat_api.api_key",
                       "retell_text_mode.api_key",
                       "retell_web_call.api_key",
                       "phone_number.public_e164",
@@ -18433,6 +18425,30 @@
                         }
                       ]
                     },
+                    "evidenceError": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "error": {
+                              "type": "string",
+                              "const": "evidence_collection_error"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "error",
+                            "message"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
                     "grades": {
                       "type": "array",
                       "items": {
@@ -19286,6 +19302,7 @@
                     "position",
                     "status",
                     "gradingState",
+                    "evidenceError",
                     "grades",
                     "gradeHistory",
                     "combinedScore",

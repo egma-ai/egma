@@ -188,7 +188,11 @@ def test_this_simulator_reads_one_version_and_refuses_the_one_before_it():
     refused as a document — there is no branch that would read it.
     """
     document = read_json(
-        contract_dir() / "fixtures" / "spec" / "valid" / "chat-retell.json"
+        contract_dir()
+        / "fixtures"
+        / "spec"
+        / "valid"
+        / "chat-retell-text-mode-plain.json"
     )
     assert document["contract_version"] == spec_contract_version() == 5
 
@@ -211,7 +215,11 @@ def test_a_persona_value_of_only_whitespace_is_refused_by_this_engine_too():
     and it would put "Your name is  ." in the prompt.
     """
     document = read_json(
-        contract_dir() / "fixtures" / "spec" / "valid" / "chat-retell.json"
+        contract_dir()
+        / "fixtures"
+        / "spec"
+        / "valid"
+        / "chat-retell-text-mode-plain.json"
     )
     persona = document["persona"]
 
@@ -238,7 +246,11 @@ def test_a_spec_carries_a_named_version_and_this_simulations_variables():
     An absent value differs from an explicitly empty string.
     """
     plain = read_json(
-        contract_dir() / "fixtures" / "spec" / "valid" / "chat-retell.json"
+        contract_dir()
+        / "fixtures"
+        / "spec"
+        / "valid"
+        / "chat-retell-text-mode-plain.json"
     )
     assert "agent_version" not in plain
     assert "dynamic_variables" not in plain
@@ -263,7 +275,7 @@ def test_a_spec_carries_a_named_version_and_this_simulations_variables():
         / "fixtures"
         / "spec"
         / "valid"
-        / "chat-retell-over-a-named-version.json"
+        / "chat-retell-text-mode-over-a-named-version.json"
     )
     spec = SimulationSpec.from_document(named)
     assert spec.agent_version == "latest"
@@ -442,7 +454,11 @@ def test_every_invalid_fixture_is_rejected_at_the_place_it_is_wrong(direction: s
 def test_the_report_schema_rejects_the_specs_credentials_wherever_they_ride():
     """The structural ban, exercised from the Python side too."""
     spec = read_json(
-        contract_dir() / "fixtures" / "spec" / "valid" / "chat-retell.json"
+        contract_dir()
+        / "fixtures"
+        / "spec"
+        / "valid"
+        / "chat-retell-text-mode-plain.json"
     )
     connection = spec["connection"]
     assert connection["credentials"]

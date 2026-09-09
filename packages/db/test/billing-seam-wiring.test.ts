@@ -137,15 +137,15 @@ async function readyToRun(who: typeof acme): Promise<{
   const auth = sessionOf(who);
   const label = newId("run").slice(-8);
   const created = await createAgent(auth, {
-    agentPlatform: "retell",
+    agentPlatform: "livekit",
     name: `Front desk ${label}`,
     connection: {
-      agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
+      agentPlatform: "livekit",
+      connectionType: "livekit_room",
+      accessVariant: "livekit_room.project_credentials",
       modality: "chat",
-      config: { retellAgentId: `agent_${label}` },
-      credentials: { apiKey: `retell-secret-${label}` },
+      config: { url: "wss://test.livekit.cloud", agentName: `agent_${label}` },
+      credentials: { apiKey: `livekit-key-${label}`, apiSecret: "livekit-secret-A1B2C3D4WXYZ" },
     },
   });
   const personaId = (

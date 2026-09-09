@@ -649,9 +649,7 @@ def a_joined_room() -> AJoinedRoom:
 
 
 async def test_voice_startup_uses_the_existing_identity_and_its_own_audio():
-    """RTC identity selects the worker while Pipecat labels audio with its SID."""
-    from pipecat.frames.frames import UserAudioRawFrame
-    from pipecat.processors.frame_processor import FrameDirection
+    """RTC identity selects the worker's subscribed track before it speaks."""
 
     startup = LiveKitStartup(MockToolSeam())
     room = JoinedRoom(url=A_URL, token=A_SECRET, room_name=A_SIMULATION)
@@ -670,32 +668,17 @@ async def test_voice_startup_uses_the_existing_identity_and_its_own_audio():
 
     connected = transport._event_handlers["on_connected"].handlers[0]
     await connected(transport)
+    assert not startup._has_audio(room)
     waiting = asyncio.create_task(startup.wait(room, require_audio=True))
 
-    arrival = media.input[1]
-
-    async def discard(*_args: object) -> None:
-        pass
-
-    arrival.push_frame = discard
-    bystander_audio = UserAudioRawFrame(
-        audio=bytes(320),
-        sample_rate=16000,
-        num_channels=1,
-        user_id="PA_bystander",
-    )
-    await arrival.process_frame(bystander_audio, FrameDirection.DOWNSTREAM)
+    room._audio_track_subscribed("PA_bystander", "PA_bystander:TR_audio")
     await asyncio.sleep(0)
     assert not waiting.done()
 
-    worker_audio = UserAudioRawFrame(
-        audio=bytes(320),
-        sample_rate=16000,
-        num_channels=1,
-        user_id=worker.sid,
-    )
-    await arrival.process_frame(worker_audio, FrameDirection.DOWNSTREAM)
+    room._audio_track_subscribed(worker.sid, f"{worker.sid}:TR_audio")
     await asyncio.wait_for(waiting, timeout=1)
+    room._audio_track_unsubscribed(worker.sid, f"{worker.sid}:TR_audio")
+    assert not startup._has_audio(room)
     await room.leave()
 
     assert all(
@@ -706,6 +689,30 @@ async def test_voice_startup_uses_the_existing_identity_and_its_own_audio():
             "participant_attributes_changed",
         )
     )
+
+
+async def test_voice_startup_censuses_a_track_subscribed_before_identity_watch():
+    """A silent initialized agent may publish its track before room listeners attach."""
+    startup = LiveKitStartup(MockToolSeam())
+    room = JoinedRoom(url=A_URL, token=A_SECRET, room_name=A_SIMULATION)
+    media = room.create_transport()
+    transport = room._transport
+    assert transport is not None
+    worker = StubParticipant(
+        AGENT_IDENTITY,
+        {AGENT_STATE_ATTRIBUTE: "listening"},
+    )
+    room._audio_track_subscribed(worker.sid, f"{worker.sid}:TR_audio")
+    room.watch_startup(startup)
+    wire = ScriptedRtcRoom()
+    wire.remote_participants[AGENT_IDENTITY] = worker
+    media.input[0]._client._room = wire
+    startup.report_accepted(RpcAsk(payload="{}"))
+
+    connected = transport._event_handlers["on_connected"].handlers[0]
+    await connected(transport)
+    await asyncio.wait_for(startup.wait(room, require_audio=True), timeout=1)
+    await room.leave()
 
 
 async def test_voice_startup_fails_when_the_reporting_identity_disconnects():

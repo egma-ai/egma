@@ -27,34 +27,15 @@ afterEach(async () => {
   await api?.close();
 });
 
-const RETELL = {
-  agentPlatform: "retell",
-  connectionType: "retell_chat_api",
-  accessVariant: "retell_chat_api.api_key",
+const LIVEKIT_CHAT = {
+  agentPlatform: "livekit",
+  connectionType: "livekit_room",
+  accessVariant: "livekit_room.project_credentials",
   modality: "chat",
-  config: { retellAgentId: "agent_in_retell_1" },
-  credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+  config: { url: "wss://fixture.livekit.cloud", agentName: "agent_in_retell_1" },
+  credentials: { apiKey: "APIfixture12345678", apiSecret: "livekit-secret-fixture" },
 } as const;
 
-const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
-  const url = String(input);
-  if (!url.includes("/v2/list-agents")) {
-    throw new Error(`Unexpected Retell read: ${url}`);
-  }
-  return new Response(
-    JSON.stringify({
-      items: [
-        {
-          agent_id: "agent_in_retell_1",
-          agent_name: "Front desk",
-          channel: "chat",
-        },
-      ],
-      has_more: false,
-    }),
-    { status: 200 },
-  );
-};
 
 /** The sealed platform key this agent's signature check would use. */
 const PLATFORM_KEY = "retell-platform-key-Z9Y8X7W6";
@@ -93,16 +74,15 @@ async function aRunningSimulation(
 ): Promise<Ready> {
   api = await createApi(label, {
     traceStore: true,
-    retellFetch: RETELL_CHAT_FETCH,
     ...(logTo === undefined ? {} : { logTo }),
   });
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
 
   const registered = await ask(api.app, "POST", "/v1/agents", key, {
-    agentPlatform: "retell",
+    agentPlatform: "livekit",
     name: "Front desk",
-    connection: RETELL,
+    connection: LIVEKIT_CHAT,
   });
   expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
   const agentId = (registered.body.agent as { id: string }).id;
@@ -153,7 +133,7 @@ async function aRunningSimulation(
   // the check rather than about how a key gets there.
   await sealAgentMonitoringKey(contextFor(ada, "admin"), {
     agentId,
-    agentPlatform: "retell",
+    agentPlatform: "livekit",
     platformAgentId: "agent_in_retell_1",
     apiKey: PLATFORM_KEY,
   });
@@ -598,15 +578,14 @@ describe("two tests of one run", () => {
   it("each answer for their own tools, and for nobody else's", async () => {
     api = await createApi("mock_endpoint_two_tests", {
       traceStore: true,
-      retellFetch: RETELL_CHAT_FETCH,
-    });
+      });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const key = await projectKeyFor(api.app, ada);
 
     const registered = await ask(api.app, "POST", "/v1/agents", key, {
-      agentPlatform: "retell",
+      agentPlatform: "livekit",
       name: "Front desk",
-      connection: RETELL,
+      connection: LIVEKIT_CHAT,
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
     const agentId = (registered.body.agent as { id: string }).id;

@@ -671,6 +671,8 @@ export function normaliseRetellCall(
         ...safeCall,
         egma_normalised: {
           degraded,
+          expected_span_count:
+            1 + transcript.turns.length + transcript.toolCalls.length,
           disconnection_reason: text(safeCall["disconnection_reason"]),
           latency: latencyOf(safeCall),
           // Under the contract's own key, never a spelling of egma's own: the

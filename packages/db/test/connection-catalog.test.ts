@@ -221,8 +221,8 @@ describe("what a browser is told about a simulation connection", () => {
   it("refuses a stored shape this egma has never heard of, naming what it holds", () => {
     // A row written by a later release. It is a fault rather than a refusal —
     // nothing the caller sent is wrong — and it says enough to go and find it.
-    expect(() => accessVariantById("retell_chat_api", "retell.oauth")).toThrow(
-      /retell\.oauth.*retell_chat_api\.api_key/s,
+    expect(() => accessVariantById("retell_chat_api" as never, "retell.oauth")).toThrow(
+      /retell_chat_api.*not a connection type/s,
     );
   });
 

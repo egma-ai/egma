@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import threading
+from collections.abc import Sequence
 from dataclasses import dataclass
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
@@ -27,8 +28,12 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
     OTLPSpanExporter,
 )
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
+from opentelemetry.sdk.trace.export import (
+    BatchSpanProcessor,
+    SpanExporter,
+    SpanExportResult,
+)
 
 logger = logging.getLogger("egma")
 
@@ -70,6 +75,47 @@ class _Export:
 
 _state: _Export | None = None
 _state_lock = threading.Lock()
+
+
+class _SimulationEvidenceExporter(SpanExporter):
+    """Keep a simulation completion root behind all earlier evidence."""
+
+    def __init__(self, delegate: SpanExporter) -> None:
+        self._delegate = delegate
+        self._serial = threading.Lock()
+        self._failed = False
+
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        with self._serial:
+            children = [span for span in spans if span.name != "agent_session"]
+            roots = [span for span in spans if span.name == "agent_session"]
+            if children:
+                result = self._send(children)
+                if result != SpanExportResult.SUCCESS:
+                    self._failed = True
+                    return SpanExportResult.FAILURE
+            if roots:
+                if self._failed:
+                    return SpanExportResult.FAILURE
+                result = self._send(roots)
+                if result != SpanExportResult.SUCCESS:
+                    self._failed = True
+                    return SpanExportResult.FAILURE
+            return SpanExportResult.SUCCESS
+
+    def _send(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        try:
+            return self._delegate.export(spans)
+        except Exception:
+            return SpanExportResult.FAILURE
+
+    def force_flush(self, timeout_millis: int = 30_000) -> bool:
+        with self._serial:
+            return self._delegate.force_flush(timeout_millis) is not False
+
+    def shutdown(self) -> None:
+        with self._serial:
+            self._delegate.shutdown()
 
 
 def install(
@@ -322,7 +368,12 @@ def _configure_provider(
 ) -> BatchSpanProcessor:
     """Attach one safe Egma processor and register its shared provider."""
 
-    exporter = _build_exporter(endpoint, api_key, verb)
+    native_exporter = _build_exporter(endpoint, api_key, verb)
+    exporter = (
+        _SimulationEvidenceExporter(native_exporter)
+        if provider_reference
+        else native_exporter
+    )
     try:
         processor = (
             BatchSpanProcessor(
