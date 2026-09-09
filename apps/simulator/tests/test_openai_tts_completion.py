@@ -158,7 +158,14 @@ def _openai_tts(response: _HeldResponse, *, customer_funded: bool = False):
 
 
 @pytest.mark.asyncio
-async def test_openai_http_tts_completes_on_eof_not_an_idle_gap() -> None:
+async def test_openai_http_tts_completes_on_eof_not_an_idle_gap(monkeypatch) -> None:
+    import pipecat.utils.string
+
+    monkeypatch.setattr(
+        pipecat.utils.string,
+        "sent_tokenize",
+        lambda text: [f"{part.strip()}." for part in text.split(".") if part.strip()],
+    )
     response = _HeldResponse()
     tts, create = _openai_tts(response)
     output = _AcceptedOutput()
