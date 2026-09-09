@@ -148,7 +148,8 @@
           "description": "The simulator-side recording when voice audio was captured; null when no recording was captured.",
           "oneOf": [{ "$ref": "#/$defs/audio_recording" }, { "type": "null" }]
         },
-        "provider_reference": { "$ref": "#/$defs/provider_reference" }
+        "provider_reference": { "$ref": "#/$defs/provider_reference" },
+        "evidence_error": { "$ref": "#/$defs/evidence_error" }
       }
     },
     "failed_facts": {
@@ -186,7 +187,8 @@
           "description": "The simulator-side recording when voice audio was captured; null when no recording was captured.",
           "oneOf": [{ "$ref": "#/$defs/audio_recording" }, { "type": "null" }]
         },
-        "provider_reference": { "$ref": "#/$defs/provider_reference" }
+        "provider_reference": { "$ref": "#/$defs/provider_reference" },
+        "evidence_error": { "$ref": "#/$defs/evidence_error" }
       }
     },
     "canceled_facts": {
@@ -224,12 +226,18 @@
           "description": "The simulator-side recording when voice audio was captured; null when no recording was captured.",
           "oneOf": [{ "$ref": "#/$defs/audio_recording" }, { "type": "null" }]
         },
-        "provider_reference": { "$ref": "#/$defs/provider_reference" }
+        "provider_reference": { "$ref": "#/$defs/provider_reference" },
+        "evidence_error": { "$ref": "#/$defs/evidence_error" }
       }
     },
     "provider_reference": {
       "description": "The platform's own identifier for this exchange on the connection's side — a Retell chat id, a telephony provider's id for the dialed leg. The only join between egma's record and the agent's own telemetry, since no trace context crosses an audio channel. Null when the plug has none to offer.",
       "type": ["string", "null"]
+    },
+    "evidence_error": {
+      "description": "A terminal simulator evidence handoff failure known before this ending was reported. Null means the ordered evidence delivery completed normally.",
+      "type": ["string", "null"],
+      "enum": ["evidence_collection_error", null]
     },
     "audio_recording": {
       "description": "The canonical simulator-side recording of a voice simulation. Its file header carries the sample rate needed for playback; its trace carries audio sample zero on the same clock as spoken turns.",

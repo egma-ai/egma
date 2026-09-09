@@ -298,6 +298,8 @@ class RunningSimulation:
             # Preparing clients and validating configuration is not execution.
             # Dialing and the normal wait for an answer begin with conducting.
             reporter.running()
+            conducted: Conducted | None = None
+            conducting_fault: BaseException | None = None
             try:
                 # Which of the two conductors this simulation gets was
                 # decided by assembly, from the spec alone. Both answer
@@ -331,25 +333,63 @@ class RunningSimulation:
                         controls=self._controls,
                         name=f"sim:{self.simulation_id}",
                     )
+            except BaseException as fault:
+                conducting_fault = fault
+                raise
             finally:
-                # Keep the platform call reference on every terminal report,
-                # including faults that stopped conducting before an ending.
-                conducting = assembled.conductor or assembled.plug
-                if conducting is not None and conducting.provider_reference is not None:
-                    reporter.provider_reference = conducting.provider_reference
-                # Conducting closed the pipeline on its way out, whatever
-                # happened, so whatever was recorded is measured by now.
-                recording = assembled.recording
-                reporter.audio = None if recording is None else recording.as_report()
-                if recording is not None:
-                    self._spans.recording(started_unix_nano=recording.started_unix_nano)
-                # The same moment for the same reason: the conversation is
-                # over, so every call a platform has reported is settled.
-                # Drained before anything is sealed, so a call reported in
-                # the last breath of a conversation is on the record rather
-                # than in a buffer nobody empties.
-                self._record_reported_tool_calls()
-                await model.close()
+                try:
+                    # Keep the platform call reference on every terminal report,
+                    # including faults that stopped conducting before an ending.
+                    conducting = assembled.conductor or assembled.plug
+                    if (
+                        conducting is not None
+                        and conducting.provider_reference is not None
+                    ):
+                        reporter.provider_reference = conducting.provider_reference
+                    # Conducting closed the pipeline on its way out, whatever
+                    # happened, so whatever was recorded is measured by now.
+                    recording = assembled.recording
+                    reporter.audio = (
+                        None if recording is None else recording.as_report()
+                    )
+                    if recording is not None:
+                        self._spans.recording(
+                            started_unix_nano=recording.started_unix_nano
+                        )
+                    # The same moment for the same reason: the conversation is
+                    # over, so every call a platform has reported is settled.
+                    self._record_reported_tool_calls()
+                except Exception as cleanup_fault:
+                    reporter.evidence_error = "evidence_collection_error"
+                    log_event(
+                        logger,
+                        logging.ERROR,
+                        "egma.simulation.cleanup_failed",
+                        "simulation metadata cleanup failed",
+                        attributes={
+                            "egma.cleanup_operation": "simulation_metadata",
+                            "error.type": type(cleanup_fault).__name__,
+                        },
+                        exc_info=True,
+                    )
+                    if conducted is None and conducting_fault is None:
+                        raise
+                try:
+                    await model.close()
+                except Exception as cleanup_fault:
+                    log_event(
+                        logger,
+                        logging.ERROR,
+                        "egma.simulation.cleanup_failed",
+                        "persona model cleanup failed",
+                        attributes={
+                            "egma.cleanup_operation": "persona_model_close",
+                            "error.type": type(cleanup_fault).__name__,
+                        },
+                        exc_info=True,
+                    )
+                    if conducted is None and conducting_fault is None:
+                        raise
         except asyncio.CancelledError:
             # The service itself is being torn down mid-conversation. Reporting a
             # terminal state now would be a guess; a simulation whose

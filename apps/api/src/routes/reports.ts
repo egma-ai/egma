@@ -90,6 +90,7 @@ type StatusEvent = {
       readonly recording: string;
     } | null;
     readonly provider_reference: string | null;
+    readonly evidence_error?: "evidence_collection_error" | null;
   };
 };
 
@@ -594,6 +595,9 @@ async function applyLanding(
   if (event.status === "completed") {
     return completeSimulation(standing.auth, standing.id, conductor, {
       endingReason: ending as CompletedEndingReason,
+      ...(event.facts?.evidence_error === "evidence_collection_error"
+        ? { evidenceError: event.facts.evidence_error }
+        : {}),
       ...facts,
     });
   }

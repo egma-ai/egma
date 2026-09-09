@@ -169,6 +169,26 @@ async def observe(
     )
 
 
+async def test_voice_cleanup_does_not_replace_a_normal_ending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    original_close = VoiceConductor.close
+
+    async def close_then_fail(conductor: VoiceConductor) -> None:
+        await original_close(conductor)
+        raise RuntimeError("voice resource cleanup failed")
+
+    monkeypatch.setattr(VoiceConductor, "close", close_then_fail)
+    observed = await voice_simulation(
+        tmp_path,
+        scenario="Confirm the greeting, then finish.",
+        replies=["Confirmed."],
+    )
+
+    assert observed.conducted.status == "completed"
+    assert observed.conducted.ending == "persona_concluded"
+
+
 # -- The codec ---------------------------------------------------------------
 
 

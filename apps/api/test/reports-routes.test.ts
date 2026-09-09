@@ -5,6 +5,8 @@ import {
   finishGradingJob,
   getSimulation,
   readUsageThisPeriod,
+  regradeTrace,
+  requestGrading,
   sweepOrphanedSimulations,
 } from "@egma/db";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
@@ -557,6 +559,95 @@ describe("the lifecycle lands", () => {
         combinedScore: 0,
         grades: [{ score: 0, result: "failed" }],
       });
+    },
+  );
+
+  it.skipIf(!storage.available)(
+    "lands a completed conversation with a known evidence error without grading",
+    async () => {
+      const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
+        "reports_evidence_rejected",
+        {
+          ingestStore: runningStorage().ingestStore,
+          carrierRoute: PHONE_IS_SET_UP,
+          retellFetch: RETELL_PHONE_FETCH,
+        },
+        RETELL_PHONE,
+      );
+      const { runId, simulationId } = await aRunningSimulation(
+        key,
+        connectionId,
+        versionId,
+      );
+
+      // This trace is otherwise ready. The explicit refusal must win over
+      // partial evidence that landed before the rejected final batch.
+      await fileTranscriptOf(
+        api,
+        simulationId,
+        { human: "Please move my appointment.", agent: "I moved it." },
+        new Date(STARTED_AT),
+      );
+      const terminal = terminalEvent("completed", "persona_concluded", {
+        evidence_error: "evidence_collection_error",
+      });
+      const answered = await report(simulationId, [terminal]);
+      expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
+      expect(answered.body.status).toBe("completed");
+
+      const { rows } = await api.database.sql<{
+        status: string;
+        last_error: string | null;
+      }>(
+        "select status, last_error from grading_job where simulation_id = $1",
+        [simulationId],
+      );
+      expect(rows).toEqual([
+        {
+          status: "abandoned",
+          last_error: "simulator_evidence_delivery_error",
+        },
+      ]);
+
+      const detail = await ask(
+        api.app,
+        "GET",
+        `/v1/simulations/${simulationId}`,
+        key,
+      );
+      expect(detail.body).toMatchObject({
+        status: "completed",
+        gradingState: "error",
+        evidenceError: {
+          error: "evidence_collection_error",
+        },
+      });
+      const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
+      expect(header.body.status).toBe("completed");
+
+      // The byte-identical terminal replay is absorbed and cannot reopen work.
+      expect((await report(simulationId, [terminal])).statusCode).toBe(200);
+      const traceId = traceIdOfSimulation(simulationId);
+      if (traceId === undefined) throw new Error("the simulation has no trace id");
+      expect(
+        await requestGrading(contextFor(ada, "member"), {
+          source: "simulation",
+          traceId,
+          traceStartedAt: new Date(STARTED_AT),
+          runId,
+          endsTrace: true,
+          modality: "voice",
+          evidenceReady: true,
+        }),
+      ).toEqual({ kind: "terminal", outcome: "error" });
+      expect(
+        await regradeTrace(contextFor(ada, "member"), {
+          source: "simulation",
+          traceId,
+          runId,
+        }),
+      ).toEqual({ kind: "waiting", for: "evidence" });
+      expect(await gradingJobsFor(simulationId)).toBe(1);
     },
   );
 
