@@ -437,10 +437,9 @@ class RunningSimulation:
 
     async def _report_terminal(self, conducted: Conducted) -> None:
         # Seal and wait first, always. The provider must hand every ended span
-        # to the WAL, and the ingest must accept every queued batch, before a
-        # terminal lifecycle document is even minted. A final rejection marks
-        # the reporter abandoned, so that later terminal stays in the WAL and
-        # never reaches the control plane.
+        # to the WAL, and each queued batch must settle before a terminal
+        # lifecycle document is minted. A refused batch records its evidence
+        # error on that terminal document; an outage abandons later delivery.
         self._spans.sealed()
         await self._reporter.drain()
         self._reporter.provider_reference = conducted.provider_reference

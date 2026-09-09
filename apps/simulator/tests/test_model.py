@@ -324,7 +324,7 @@ async def test_blank_completion_failure_keeps_only_safe_provider_metadata(
     assert "private refusal text" not in repr(caught.value.diagnostic_attributes)
 
 
-async def test_malformed_completion_metadata_does_not_hide_the_blank_failure(model_stub):
+async def test_malformed_metadata_does_not_hide_blank_failure(model_stub):
     model_stub.answers.append(
         web.json_response(
             {

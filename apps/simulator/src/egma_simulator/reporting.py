@@ -213,10 +213,9 @@ class Reporter:
                 return
             except DocumentRejected as refusal:
                 # The control plane refused the document outright. Resending
-                # the same bytes cannot succeed; the WAL holds the record. A
-                # refused span export ends ordered delivery, because sending a
-                # later terminal report would claim that incomplete evidence
-                # had already landed.
+                # the same bytes cannot succeed; the WAL holds the record.
+                # Continue with later documents, and record a refused span
+                # export on the terminal report as incomplete evidence.
                 if destination is Destination.SPANS:
                     self.evidence_error = "evidence_collection_error"
                 log_event(
