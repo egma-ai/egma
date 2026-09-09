@@ -2,6 +2,7 @@ import { TokenVerifier } from "livekit-server-sdk";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  DaytonaAssignmentUncertainError,
   daytonaClaimRuntime,
   daytonaVoiceFleet,
   type DaytonaClient,
@@ -233,6 +234,78 @@ describe("Daytona voice credentials", () => {
     }));
     expect(sandbox.setLabels).not.toHaveBeenCalled();
     expect(recordAssignment).not.toHaveBeenCalled();
+  });
+
+  it("finishes an assignment commit when ownership expires during label write", async () => {
+    let finishLabels: (() => void) | undefined;
+    let labelsStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { labelsStarted = resolve; });
+    const labelsWritten = new Promise<void>((resolve) => { finishLabels = resolve; });
+    const recordAssignment = vi.fn(() => {
+      throw new Error("telemetry is unavailable");
+    });
+    const sandbox = {
+      id: "sandbox-1",
+      labels: {
+        "egma.runtime": "voice-simulator",
+        "egma.release_sha": "a".repeat(40),
+        "egma.snapshot_id": "snapshot-exact",
+        "egma.runtime_id": "runtime-1",
+      },
+      process: { getEntrypointSession: vi.fn(async () => ({ commands: [] })) },
+      setLabels: vi.fn(async (labels: Record<string, string>) => {
+        labelsStarted?.();
+        await labelsWritten;
+        return labels;
+      }),
+    };
+    const assign = daytonaClaimRuntime(settings, {
+      client: { get: vi.fn(async () => sandbox) } as unknown as DaytonaClient,
+      assumeRole: temporaryStorage,
+      recordAssignment,
+    });
+    const ownership = new AbortController();
+
+    const assigning = assign(
+      "egma-voice-runtime-1",
+      "sim_123",
+      ownership.signal,
+    );
+    await started;
+    ownership.abort(new Error("claim response deadline expired"));
+    finishLabels?.();
+
+    await expect(assigning).resolves.toMatchObject({ kind: "daytona_voice" });
+    expect(sandbox.setLabels).toHaveBeenCalledWith(expect.objectContaining({
+      "egma.simulation_id": "sim_123",
+    }));
+    expect(recordAssignment).toHaveBeenCalledOnce();
+  });
+
+  it("marks an unresolved label write as an uncertain assignment", async () => {
+    const sandbox = {
+      id: "sandbox-1",
+      labels: {
+        "egma.runtime": "voice-simulator",
+        "egma.release_sha": "a".repeat(40),
+        "egma.snapshot_id": "snapshot-exact",
+        "egma.runtime_id": "runtime-1",
+      },
+      process: { getEntrypointSession: vi.fn(async () => ({ commands: [] })) },
+      setLabels: vi.fn(async () => {
+        throw new Error("the label response was lost");
+      }),
+    };
+    const assign = daytonaClaimRuntime(settings, {
+      client: { get: vi.fn(async () => sandbox) } as unknown as DaytonaClient,
+      assumeRole: temporaryStorage,
+    });
+
+    await expect(assign(
+      "egma-voice-runtime-1",
+      "sim_123",
+      new AbortController().signal,
+    )).rejects.toBeInstanceOf(DaytonaAssignmentUncertainError);
   });
 
   it("rejects claimants outside the exact active fleet before issuing authority", async () => {

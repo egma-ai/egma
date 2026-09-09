@@ -20,7 +20,10 @@ import {
 } from "../src/auth/service-token.ts";
 import { CLAIMS_PATH } from "../src/routes/claims.ts";
 import { fixedWindowRateLimit } from "../src/http/rate-limit.ts";
-import type { DaytonaClaimRuntime } from "../src/voice-fleet-daytona.ts";
+import {
+  DaytonaAssignmentUncertainError,
+  type DaytonaClaimRuntime,
+} from "../src/voice-fleet-daytona.ts";
 import {
   createApi,
   type TestApi,
@@ -1344,6 +1347,108 @@ describe("one source of execution truth", () => {
     expect(
       (await getSimulation(contextFor(ada, "member"), simulationId))?.status,
     ).toBe("queued");
+  });
+
+  it("keeps the claim when its Daytona assignment commits after the deadline", async () => {
+    let finishLabels: (() => void) | undefined;
+    let labelsStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { labelsStarted = resolve; });
+    const labelsWritten = new Promise<void>((resolve) => { finishLabels = resolve; });
+    let assignedSimulation: string | undefined;
+    const daytonaClaimRuntime = vi.fn<DaytonaClaimRuntime>(
+      async (_claimant, simulationId) => {
+        labelsStarted?.();
+        await labelsWritten;
+        assignedSimulation = simulationId;
+        return {
+          kind: "daytona_voice",
+          media: {
+            backend: "livekit",
+            livekit_url: "wss://livekit.example",
+            livekit_room_name: `egma-sim-${simulationId}`,
+            livekit_room_token: "room-token",
+            livekit_api_token: "api-token",
+          },
+          storage: {
+            backend: "s3",
+            endpoint: "https://s3.example",
+            bucket: "recordings",
+            region: "us-east-1",
+            access_key_id: "temporary-access",
+            secret_access_key: "temporary-secret",
+            session_token: "temporary-session",
+          },
+        };
+      },
+    );
+    const { ada, key, connectionId, versionId } =
+      await aRealtimeVoiceCustomerReadyToRun(
+        "claims_daytona_assignment_commit",
+        { daytonaClaimRuntime },
+      );
+    const { simulationId } = await aQueuedRun(key, connectionId, versionId);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    const claiming = claim(api.config.simulatorServiceToken, {
+      claimant: "egma-voice-runtime",
+      capacity: 1,
+      wait_seconds: 0,
+      modalities: ["voice"],
+      runtime: "daytona",
+    });
+    await started;
+    await vi.advanceTimersByTimeAsync(28_000);
+    finishLabels?.();
+    const answered = await claiming;
+
+    expect(answered.body.specs as unknown[]).toHaveLength(1);
+    expect(assignedSimulation).toBe(simulationId);
+    const row = await getSimulation(contextFor(ada, "member"), simulationId);
+    expect(row?.status).toBe("claimed");
+    expect(row?.claimedBy).toBe("egma-voice-runtime");
+  });
+
+  it("keeps the claim when a timed-out Daytona label result is uncertain", async () => {
+    let finishLabels: (() => void) | undefined;
+    let labelsStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { labelsStarted = resolve; });
+    const labelsWritten = new Promise<void>((resolve) => { finishLabels = resolve; });
+    let possiblyAssignedSimulation: string | undefined;
+    const daytonaClaimRuntime = vi.fn<DaytonaClaimRuntime>(
+      async (_claimant, simulationId) => {
+        labelsStarted?.();
+        await labelsWritten;
+        possiblyAssignedSimulation = simulationId;
+        throw new DaytonaAssignmentUncertainError(
+          new Error("the label response was lost"),
+        );
+      },
+    );
+    const { ada, key, connectionId, versionId } =
+      await aRealtimeVoiceCustomerReadyToRun(
+        "claims_daytona_assignment_uncertain",
+        { daytonaClaimRuntime },
+      );
+    const { simulationId } = await aQueuedRun(key, connectionId, versionId);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    const claiming = claim(api.config.simulatorServiceToken, {
+      claimant: "egma-voice-runtime",
+      capacity: 1,
+      wait_seconds: 0,
+      modalities: ["voice"],
+      runtime: "daytona",
+    });
+    await started;
+    await vi.advanceTimersByTimeAsync(28_000);
+    finishLabels?.();
+    const deferred = await claiming;
+
+    expect(deferred.body.specs).toEqual([]);
+    expect(possiblyAssignedSimulation).toBe(simulationId);
+    const row = await getSimulation(contextFor(ada, "member"), simulationId);
+    expect(row?.status).toBe("claimed");
+    expect(row?.claimedBy).toBe("egma-voice-runtime");
   });
 
   it("releases Daytona work when claim-time authority violates the contract", async () => {

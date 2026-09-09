@@ -47,6 +47,7 @@ import type { CarrierRoute } from "../config.ts";
 import { invalid, notTheService } from "../http/refusals.ts";
 import { mockToolBase } from "./mock-endpoint.ts";
 import { platformEvent, safeExceptionType } from "../platform-log.ts";
+import { DaytonaAssignmentUncertainError } from "../voice-fleet-daytona.ts";
 
 /**
  * Internal simulation claims require the deployment service token and bypass
@@ -106,9 +107,14 @@ const DEFAULT_HOLD_SECONDS = 15;
 /** How often a held claim re-asks the queue. The "about a second" promise. */
 const RECHECK_MILLISECONDS = 1_000;
 
-/** Hard wall for queue wait, provider checks, assembly, and the response. */
+/** Deadline for cancellable claim preparation before assignment commit. */
 const CLAIM_RESPONSE_MILLISECONDS = 28_000;
 
+/**
+ * Expire cancellable preparation at the response deadline. The operation owns
+ * any non-cancelable assignment commit it has already started and must settle
+ * that commit before this claim can be released or returned.
+ */
 async function beforeResponseDeadline<T>(
   operation: (signal: AbortSignal) => Promise<T>,
   deadline: number,
@@ -119,16 +125,7 @@ async function beforeResponseDeadline<T>(
   }, Math.max(1, deadline - Date.now()));
   if (typeof timeout === "object") timeout.unref();
   try {
-    return await Promise.race([
-      operation(ownership.signal),
-      new Promise<never>((_resolve, reject) => {
-        ownership.signal.addEventListener(
-          "abort",
-          () => reject(ownership.signal.reason),
-          { once: true },
-        );
-      }),
-    ]);
+    return await operation(ownership.signal);
   } finally {
     globalThis.clearTimeout(timeout);
   }
@@ -880,7 +877,10 @@ export async function claimRoutes(
                           "the Daytona sandbox received invalid simulation authority",
                         deferredBy: "runtime" as const,
                       };
-                } catch {
+                } catch (fault) {
+                  if (fault instanceof DaytonaAssignmentUncertainError) {
+                    return { runtimeAssignmentUncertain: true } as const;
+                  }
                   return {
                     retryable:
                       "the Daytona sandbox could not receive simulation authority",
@@ -949,6 +949,20 @@ export async function claimRoutes(
               );
             }
           }
+          continue;
+        }
+        if ("runtimeAssignmentUncertain" in spec) {
+          request.log.error(
+            platformEvent(
+              "egma.simulation.dispatch.assignment_uncertain",
+              "Daytona sandbox assignment could not be confirmed",
+              {
+                "egma.simulation_id": claim.id,
+                "egma.run_id": claim.runId,
+                "error.type": "daytona_assignment_uncertain",
+              },
+            ),
+          );
           continue;
         }
         if ("retryable" in spec) {

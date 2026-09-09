@@ -41,6 +41,13 @@ export type DaytonaClaimRuntime = (
   signal: AbortSignal,
 ) => Promise<DaytonaVoiceRuntime>;
 
+export class DaytonaAssignmentUncertainError extends Error {
+  constructor(cause: unknown) {
+    super("Daytona sandbox assignment outcome is uncertain", { cause });
+    this.name = "DaytonaAssignmentUncertainError";
+  }
+}
+
 const FLEET_LABELS = { "egma.runtime": "voice-simulator" };
 const DAYTONA_OTEL_SERVICE_NAME = "egma-voice-simulator";
 const assignmentTracer = trace.getTracer("egma-api.daytona-voice-fleet");
@@ -90,6 +97,18 @@ function isNotFound(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const value = err as { readonly status?: number; readonly statusCode?: number; readonly response?: { readonly status?: number } };
   return value.status === 404 || value.statusCode === 404 || value.response?.status === 404;
+}
+
+async function whileOwned<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted();
+  return await new Promise<T>((resolve, reject) => {
+    const aborted = (): void => reject(signal.reason);
+    signal.addEventListener("abort", aborted, { once: true });
+    if (signal.aborted) aborted();
+    void operation.then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", aborted);
+    });
+  });
 }
 
 export function daytonaVoiceFleet(
@@ -220,8 +239,7 @@ export function daytonaClaimRuntime(
   const recordAssignment = options.recordAssignment ?? recordDaytonaAssignment;
   return async (claimant, simulationId, signal) => {
     signal.throwIfAborted();
-    const sandbox = await options.client.get(claimant);
-    signal.throwIfAborted();
+    const sandbox = await whileOwned(options.client.get(claimant), signal);
     const labels = sandbox.labels ?? {};
     const runtimeId = labels["egma.runtime_id"];
     const expectedName = runtimeId === undefined ? undefined : `egma-voice-${runtimeId}`.slice(0, 63);
@@ -239,25 +257,35 @@ export function daytonaClaimRuntime(
     if (assignedSimulation !== undefined && assignedSimulation !== simulationId) {
       throw new Error("Daytona claimant is already assigned to another simulation");
     }
-    const runtime = await issueDaytonaVoiceRuntime({
-      settings,
-      simulationId,
-      assumeRole,
+    const runtime = await whileOwned(
+      issueDaytonaVoiceRuntime({
+        settings,
+        simulationId,
+        assumeRole,
+        signal,
+      }),
       signal,
-    });
+    );
     signal.throwIfAborted();
-    await sandbox.setLabels({
-      ...labels,
-      "egma.simulation_id": simulationId,
-    });
-    signal.throwIfAborted();
-    recordAssignment({
-      simulationId,
-      sandboxId: sandbox.id,
-      releaseSha: settings.releaseSha,
-      snapshotId: settings.snapshot,
-      runtimeId,
-    });
+    try {
+      await sandbox.setLabels({
+        ...labels,
+        "egma.simulation_id": simulationId,
+      });
+    } catch (fault) {
+      throw new DaytonaAssignmentUncertainError(fault);
+    }
+    try {
+      recordAssignment({
+        simulationId,
+        sandboxId: sandbox.id,
+        releaseSha: settings.releaseSha,
+        snapshotId: settings.snapshot,
+        runtimeId,
+      });
+    } catch {
+      // Telemetry cannot undo a committed sandbox assignment.
+    }
     return runtime;
   };
 }
