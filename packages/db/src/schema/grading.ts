@@ -103,7 +103,9 @@ export const gradingJob = pgTable(
     check(
       "grading_job_entries_are_a_nonempty_list",
       sql`jsonb_typeof(${table.entries}) = 'array'
-        and jsonb_array_length(${table.entries}) > 0`,
+        and (jsonb_array_length(${table.entries}) > 0
+          or (${table.status} = 'abandoned' and ${table.attempts} = 0
+            and ${table.lastError} = 'simulator_evidence_delivery_error'))`,
     ),
     check(
       "grading_job_claim_columns_agree",

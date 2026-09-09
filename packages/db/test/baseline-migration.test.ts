@@ -18,7 +18,8 @@ import {
 } from "./support/database.ts";
 
 const BASELINE = "0000_baseline.sql";
-const CURRENT_MIGRATIONS = [BASELINE];
+const EVIDENCE_ERROR_MIGRATION = "0001_amusing_silhouette.sql";
+const CURRENT_MIGRATIONS = [BASELINE, EVIDENCE_ERROR_MIGRATION];
 let database: EmptyDatabase;
 let store: SingleConnection;
 let directory: string;
@@ -90,7 +91,7 @@ describe("the fresh Postgres baseline", () => {
 
     expect(await runMigrations(database.url)).toEqual({
       applied: [],
-      alreadyApplied: [BASELINE],
+      alreadyApplied: CURRENT_MIGRATIONS,
     });
     expect((await store.sql(
       "select organization_id, provider, credentials, hint, revision from provider_key",
@@ -107,6 +108,43 @@ describe("the fresh Postgres baseline", () => {
     expect((await store.sql(
       "select is_nullable from information_schema.columns where table_name = 'cloud_billing_account' and column_name = 'stripe_cancel_at'",
     )).rows).toEqual([{ is_nullable: "YES" }]);
+  });
+
+  it("upgrades the baseline without changing an existing grading row", async () => {
+    const baselineSql = await readFile(
+      path.join(MIGRATIONS_DIRECTORY, BASELINE),
+      "utf8",
+    );
+    await writeFile(path.join(directory, BASELINE), baselineSql);
+    await runMigrations(database.url, directory);
+
+    const jobId = newId("gjb");
+    await store.sql("set session_replication_role = replica");
+    try {
+      await store.sql(
+        `insert into grading_job
+          (id, organization_id, project_id, source, trace_id,
+           trace_started_at, entries, status, sequence_base, attempts)
+         values ($1, $2, $3, 'production', 'trace-before-upgrade',
+           now(), '[{}]'::jsonb, 'pending', 0, 0)`,
+        [jobId, newId("org"), newId("prj")],
+      );
+    } finally {
+      await store.sql("set session_replication_role = origin");
+    }
+
+    expect(await runMigrations(database.url)).toEqual({
+      applied: [EVIDENCE_ERROR_MIGRATION],
+      alreadyApplied: [BASELINE],
+    });
+    expect(
+      (
+        await store.sql(
+          "select id, entries, status from grading_job where id = $1",
+          [jobId],
+        )
+      ).rows,
+    ).toEqual([{ id: jobId, entries: [{}], status: "pending" }]);
   });
 
   it("applies once when API instances boot concurrently", async () => {

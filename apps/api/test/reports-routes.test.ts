@@ -620,6 +620,7 @@ describe("the lifecycle lands", () => {
         gradingState: "error",
         evidenceError: {
           error: "evidence_collection_error",
+          message: "Egma could not collect the simulator's complete evidence.",
         },
       });
       const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
@@ -660,6 +661,70 @@ describe("the lifecycle lands", () => {
       expect(await gradingJobsFor(simulationId)).toBe(1);
     },
   );
+
+  it("retains a simulator evidence failure when no graders were selected", async () => {
+    const { key, connectionId, versionId } = await aCustomerReadyToRun(
+      "reports_evidence_rejected_without_graders",
+      {
+        carrierRoute: PHONE_IS_SET_UP,
+        retellFetch: RETELL_PHONE_FETCH,
+      },
+      RETELL_PHONE,
+    );
+    const { runId, simulationId } = await aRunningSimulation(
+      key,
+      connectionId,
+      versionId,
+    );
+    await api.database.sql("alter table run disable trigger run_grading_plan_guard");
+    try {
+      await api.database.sql(
+        `update run
+         set grading_plan = jsonb_set(grading_plan, '{groups,0,items}', '[]'::jsonb)
+         where id = $1`,
+        [runId],
+      );
+    } finally {
+      await api.database.sql("alter table run enable trigger run_grading_plan_guard");
+    }
+    const answered = await report(simulationId, [
+      terminalEvent("completed", "persona_concluded", {
+        evidence_error: "evidence_collection_error",
+      }),
+    ]);
+    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
+
+    const { rows } = await api.database.sql<{
+      entries: unknown;
+      status: string;
+      last_error: string | null;
+    }>(
+      "select entries, status, last_error from grading_job where simulation_id = $1",
+      [simulationId],
+    );
+    expect(rows).toEqual([
+      {
+        entries: [],
+        status: "abandoned",
+        last_error: "simulator_evidence_delivery_error",
+      },
+    ]);
+
+    const detail = await ask(
+      api.app,
+      "GET",
+      `/v1/simulations/${simulationId}`,
+      key,
+    );
+    expect(detail.body).toMatchObject({
+      status: "completed",
+      gradingState: "not_requested",
+      evidenceError: {
+        error: "evidence_collection_error",
+        message: "Egma could not collect the simulator's complete evidence.",
+      },
+    });
+  });
 
   it("closes the lifecycle without measured duration when reported moments cannot be true", async () => {
     const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(

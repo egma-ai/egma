@@ -706,6 +706,10 @@ export const SIMULATION_EVIDENCE_COLLECTION_ERROR = {
 
 export const SIMULATOR_EVIDENCE_DELIVERY_ERROR =
   "simulator_evidence_delivery_error";
+const SIMULATOR_EVIDENCE_COLLECTION_ERROR = {
+  error: "evidence_collection_error",
+  message: "Egma could not collect the simulator's complete evidence.",
+} as const;
 
 /**
  * Persist a terminal evidence error without asking a model to judge incomplete
@@ -733,14 +737,16 @@ export async function recordSimulationEvidenceErrorIn(
       `completed simulation ${input.simulationId} has no grading plan`,
     );
   }
-  if (resolved.length === 0) return false;
 
   const grades = await readTraceGrades(auth, {
     source: "simulation",
     traceId: input.traceId,
     runId: input.runId,
   });
-  if (allEntriesHaveResults(resolved.map(frozen), grades.current).complete) {
+  if (
+    resolved.length > 0 &&
+    allEntriesHaveResults(resolved.map(frozen), grades.current).complete
+  ) {
     return false;
   }
 
@@ -1689,13 +1695,19 @@ export async function readTraceGrading(
   const entries = await selectedEntries(db(), auth, ref);
   const grades = await readTraceGrades(auth, ref);
   const job = await jobForTrace(db(), auth, ref.traceId);
-  const evidenceError: TraceGrading["evidenceError"] =
+  let evidenceError: TraceGrading["evidenceError"] =
     job?.status === "abandoned" &&
     job.attempts === 0 &&
-    (job.lastError === SIMULATION_EVIDENCE_COLLECTION_ERROR.error ||
-      job.lastError === SIMULATOR_EVIDENCE_DELIVERY_ERROR)
+    job.lastError === SIMULATION_EVIDENCE_COLLECTION_ERROR.error
       ? SIMULATION_EVIDENCE_COLLECTION_ERROR
       : null;
+  if (
+    job?.status === "abandoned" &&
+    job.attempts === 0 &&
+    job.lastError === SIMULATOR_EVIDENCE_DELIVERY_ERROR
+  ) {
+    evidenceError = SIMULATOR_EVIDENCE_COLLECTION_ERROR;
+  }
 
   let workBlock: TraceGrading["workBlock"] = null;
   if (ref.source === "production" && entries !== undefined && entries.length > 0 && job?.status === "pending") {
