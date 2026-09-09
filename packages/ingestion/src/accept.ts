@@ -781,20 +781,29 @@ export function acceptEvidence(
   return acceptEvidenceForProjects([{ auth: options.auth, spans }]);
 }
 
-/**
- * Accept trusted multi-project batches using separate segments per project.
- * Resolve only after all non-rejected records are durable. A failed request
- * can have partial durable progress; retries retain stable span identities.
- */
-export async function acceptEvidenceForProjects(
-  groups: readonly EvidenceGroup[],
-): Promise<Acceptance> {
-  const held = standing;
-  if (held === undefined) throw new IngestionUnavailableError(NO_ACCEPTANCE);
+type PreparedEvidence = {
+  readonly refused: readonly RefusedRecord[];
+  readonly staging: readonly {
+    readonly scope: SegmentScope;
+    readonly record: IngestionRecord;
+  }[];
+};
 
+/** Validate a complete request before a completion marker may be staged. */
+export function preflightEvidenceForProjects(
+  groups: readonly EvidenceGroup[],
+): readonly RefusedRecord[] {
+  return preparedEvidenceForProjects(groups).refused;
+}
+
+function preparedEvidenceForProjects(
+  groups: readonly EvidenceGroup[],
+): PreparedEvidence {
   const refused: RefusedRecord[] = [];
-  const staging: { readonly scope: SegmentScope; readonly record: IngestionRecord }[] =
-    [];
+  const staging: {
+    readonly scope: SegmentScope;
+    readonly record: IngestionRecord;
+  }[] = [];
 
   for (const group of groups) {
     const { organizationId, projectId } = group.auth;
@@ -805,11 +814,6 @@ export async function acceptEvidenceForProjects(
 
     for (const span of group.spans) {
       try {
-        // Before anything is staged, so a record Egma will not store never
-        // enters the log, never rides a segment, and is reported to whoever
-        // sent it while their request is still open. Two doors: a field over a
-        // documented bound, and a span whose instant the store cannot hold —
-        // one seals into a segment the drainer then cannot read back.
         refuseOversizeRecord(span);
         refuseUnstorableInstant(span);
       } catch (cause) {
@@ -825,6 +829,25 @@ export async function acceptEvidenceForProjects(
       staging.push({ scope, record: recordFor(span) });
     }
   }
+
+  return { refused, staging };
+}
+
+/**
+ * Accept trusted multi-project batches using separate segments per project.
+ * Resolve only after all non-rejected records are durable. A failed request
+ * can have partial durable progress; retries retain stable span identities.
+ */
+export async function acceptEvidenceForProjects(
+  groups: readonly EvidenceGroup[],
+): Promise<Acceptance> {
+  const held = standing;
+  if (held === undefined) throw new IngestionUnavailableError(NO_ACCEPTANCE);
+
+  // Before anything is staged, so a record Egma will not store never enters
+  // the log or rides a segment. Simulation callers use the same preflight
+  // separately to keep their completion root behind the complete request.
+  const { refused, staging } = preparedEvidenceForProjects(groups);
 
   if (staging.length === 0) return { accepted: 0, refused };
 

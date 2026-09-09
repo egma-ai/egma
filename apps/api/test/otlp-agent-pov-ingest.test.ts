@@ -507,9 +507,8 @@ describe.skipIf(!storage.available)("LiveKit evidence while the call is running"
       payload: { claimant: CONDUCTOR, provider_reference: `egma-sim-${simulationId}` } });
     expect((await register(canceled.simulationId)).statusCode).toBe(409);
     const otherLane = await aLandedSimulation(acme, "non-livekit registration", "", {
-      agentPlatform: "retell", connectionType: "retell_chat_api", accessVariant: "retell_chat_api.api_key",
-      modality: "chat", config: { retellAgentId: "agent_non_livekit_registration" },
-      credentials: { apiKey: "retell-secret-for-registration-test" },
+      agentPlatform: "retell", connectionType: "phone_number", accessVariant: "phone_number.public_e164",
+      modality: "voice", config: { phoneNumber: "+15551230000" },
     }, undefined, [], false);
     expect((await register(otherLane.simulationId)).statusCode).toBe(409);
   });
@@ -999,7 +998,7 @@ describe.skipIf(!storage.available)("a reference that names no simulation", () =
 });
 
 describe.skipIf(!storage.available)("the row caps, across an export naming two", () => {
-  it("bounds the request rather than each simulation it names", async () => {
+  it("refuses the full simulation export before a completion record can land", async () => {
     // Two conversations of this project, and one export speaking for both.
     // Each simulation is normalised on its own — two must never be blended —
     // so before the budget was carried, each got the whole ten thousand and an
@@ -1050,23 +1049,22 @@ describe.skipIf(!storage.available)("the row caps, across an export naming two",
       }),
       acmeKey,
     );
-    expect(answered.statusCode, answered.body).toBe(200);
-    const partial = answered.json() as {
-      partialSuccess?: { rejectedSpans: string; errorMessage: string };
-    };
-    // Six over the one bound, reported once — not zero, which is what two
-    // fresh budgets would have answered.
-    expect(partial.partialSuccess?.rejectedSpans).toBe("6");
-    expect(partial.partialSuccess?.errorMessage).toContain("10,000");
+    expect(answered.statusCode, answered.body).toBe(400);
+    const refused = answered.json() as { code: number; message: string };
+    expect(refused.code).toBe(3);
+    expect(refused.message).toContain("6 simulation evidence records");
+    expect(refused.message).toContain("10,000");
+    expect(refused.message).toContain("No record from this request was stored");
     await api.drainEvidence();
 
-    // And what was stored is the bound, counted across both conversations.
+    // No partial simulation can claim completion while a sibling record was
+    // rejected. Pure production exports keep OTLP partial-success behavior.
     expect(
       await countOf(
         `select count() as n from spans final
          where trace_id in ('${first.traceId}', '${second.traceId}')`,
       ),
-    ).toBe(10_000);
+    ).toBe(0);
   }, 120_000);
 });
 
@@ -1304,23 +1302,18 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
     expect(bounded.map((one) => one.id)).not.toContain(landed.simulationId);
   }, 120_000);
 
-  /**
-   * Retell chat API and text mode do not produce the separately fetched agent
-   * POV. Their readable simulator evidence can trigger grading after completion
-   * without that wait. Exercise chat through the API and check text-mode classification.
-   */
-  it("grades a chat-lane landing off egma's own POV, with no bound in between", async () => {
+  /** A persona-POV lane can grade without a separately fetched agent POV. */
+  it("grades a persona-POV landing off egma's own evidence, with no bound in between", async () => {
     const landed = await aLandedSimulation(
       acme,
-      "chatlane",
-      "chat_5d1f9a3b7c",
+      "persona-pov lane",
+      "call_5d1f9a3b7c",
       {
         agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
-        modality: "chat",
-        config: { retellAgentId: "agent_chat_lane" },
-        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+        connectionType: "phone_number",
+        accessVariant: "phone_number.public_e164",
+        modality: "voice",
+        config: { phoneNumber: "+15551230001" },
       },
     );
     const auth = contextFor(acme, "member");
@@ -1335,9 +1328,8 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
     // And nothing is missing, because nothing was owed.
     expect(await agentPovIncompleteOf(landed.simulationId)).toBe(false);
 
-    // The same decision about the lane beside it, and about the two that can.
+    // The same decision about the active lanes beside it.
     expect(laneProducesAnAgentPov("retell_text_mode")).toBe(false);
-    expect(laneProducesAnAgentPov("retell_chat_api")).toBe(false);
     expect(laneProducesAnAgentPov("livekit_room")).toBe(true);
     expect(laneProducesAnAgentPov("retell_web_call")).toBe(true);
   }, 120_000);
