@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { assertValidGrade } from "./support/simulation-proof.ts";
+import { assertPublicEvidence, assertValidGrade } from "./support/simulation-proof.ts";
 
 function grade(result: "passed" | "failed" | "errored", score: number | null) {
   return {
@@ -31,5 +31,25 @@ describe("full-path grade proof", () => {
     expect(() => assertValidGrade(grade("passed", 0.6), {
       grades: [{ result: "passed", score: 0.6, passThreshold: 0.7 }],
     })).toThrow();
+  });
+});
+
+describe("full-path transcript proof", () => {
+  it("compares transcript excerpts with whitespace normalized", () => {
+    expect(() => assertPublicEvidence({
+      status: "completed",
+      gradingState: "complete",
+      hasRecording: false,
+      transcript: { turns: [
+        { spanId: "human", kind: "turn:human", text: "Tuesday please", pov: "persona", startedAt: "2026-01-01T00:00:00Z" },
+        { spanId: "agent", kind: "turn:agent", text: "The slot is\n11:20 AM", pov: "persona", startedAt: "2026-01-01T00:00:01Z" },
+      ] },
+    }, {
+      pov: "persona",
+      humanIncludes: "tuesday please",
+      agentIncludes: "the slot is 11:20 am",
+      tools: [],
+      recording: false,
+    })).not.toThrow();
   });
 });

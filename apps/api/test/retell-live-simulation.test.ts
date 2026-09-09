@@ -11,7 +11,7 @@ import { afterAll, expect, it } from "vitest";
 
 import { startInstance, type Instance } from "./support/instance.ts";
 import { openBrowser } from "./support/browser.ts";
-import { startObjectStorage } from "./support/object-storage.ts";
+import { BUCKET, startObjectStorage } from "./support/object-storage.ts";
 import { NEUTRAL_PERSON } from "./support/traces.ts";
 import {
   assertEvidencePage,
@@ -191,10 +191,12 @@ async function callbackServer(token: string): Promise<{
   origin: string;
   calls: ToolRequest[];
   setMockOrigin(origin: string): void;
+  setRecordingOrigin(origin: string): void;
   close(): Promise<void>;
 }> {
   const calls: ToolRequest[] = [];
   let mockOrigin: string | undefined;
+  let recordingOrigin: string | undefined;
   const server = http.createServer((request, response) => {
     let raw = "";
     request.on("data", (piece: Buffer) => { raw += piece.toString("utf8"); });
@@ -207,12 +209,17 @@ async function callbackServer(token: string): Promise<{
       const providerCallback = requestPath === "/check-availability" ||
         requestPath === "/record-request";
       if (!providerCallback && mockOrigin !== undefined) {
-        const target = new URL(requestPath, mockOrigin);
+        const recordingRequest = new URL(requestPath, "http://fixture.invalid").pathname
+          .startsWith(`/${BUCKET}/`);
+        const target = new URL(
+          requestPath,
+          recordingRequest && recordingOrigin !== undefined ? recordingOrigin : mockOrigin,
+        );
         const forwarded = http.request(target, {
           method: request.method ?? "GET",
           headers: {
             ...request.headers,
-            host: target.host,
+            host: recordingRequest ? request.headers.host : target.host,
             ...(request.headers.host === undefined ? {} : { "x-forwarded-host": request.headers.host }),
             "x-forwarded-proto": "https",
           },
@@ -276,6 +283,7 @@ async function callbackServer(token: string): Promise<{
     origin: `http://127.0.0.1:${address.port}`,
     calls,
     setMockOrigin(origin: string) { mockOrigin = origin; },
+    setRecordingOrigin(origin: string) { recordingOrigin = origin; },
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }
@@ -413,9 +421,10 @@ it.skipIf(!ENABLED || storage?.available !== true)(
         traces: true,
         providerKeys: { openai: MODEL_KEY },
         ingestStore: liveStorage().ingestStore,
-        blob: liveStorage().store,
+        blob: { ...liveStorage().store, publicUrl: tunnel.url },
       });
       callback.setMockOrigin(instance.origin);
+      callback.setRecordingOrigin(liveStorage().store.publicUrl);
       const signup = await request(tunnel.url, "POST", "/api/signup", { body: {
         email: "retell-e2e@acme.example",
         password: "a-password-long-enough-1",

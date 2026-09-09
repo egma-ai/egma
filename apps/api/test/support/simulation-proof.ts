@@ -219,6 +219,10 @@ function decode(value: string | undefined): unknown {
   return decoded;
 }
 
+function comparableText(value: string): string {
+  return value.replace(/\s+/gu, " ").trim().toLowerCase();
+}
+
 /** Assert the provider POV that the product displays, including exact tools. */
 export function assertPublicEvidence(
   body: Record<string, unknown>,
@@ -249,11 +253,13 @@ export function assertPublicEvidence(
   expect(turns.every((turn, index) =>
     index === 0 || Date.parse(turn.startedAt ?? "") >= Date.parse(turns[index - 1]?.startedAt ?? "")
   )).toBe(true);
+  const humanNeedle = comparableText(expected.humanIncludes);
+  const agentNeedle = comparableText(expected.agentIncludes);
   expect(turns.some((turn) =>
-    turn.kind === "turn:human" && turn.text?.toLowerCase().includes(expected.humanIncludes)
+    turn.kind === "turn:human" && comparableText(turn.text ?? "").includes(humanNeedle)
   )).toBe(true);
   expect(turns.some((turn) =>
-    turn.kind === "turn:agent" && turn.text?.toLowerCase().includes(expected.agentIncludes)
+    turn.kind === "turn:agent" && comparableText(turn.text ?? "").includes(agentNeedle)
   )).toBe(true);
 
   const tools = flatten([
@@ -304,8 +310,8 @@ export async function assertEvidencePage(
   expect(shown).toContain("User");
   expect(shown).toContain("Agent");
   expect(shown).toContain(expected.sourceLabel);
-  expect(shown.toLowerCase()).toContain(expected.humanIncludes);
-  expect(shown.toLowerCase()).toContain(expected.agentIncludes);
+  expect(comparableText(shown)).toContain(comparableText(expected.humanIncludes));
+  expect(comparableText(shown)).toContain(comparableText(expected.agentIncludes));
   expect(shown).not.toContain("LiveKit transcript unavailable");
   if (expected.recording) {
     const player = transcriptPanel.getByLabel("Simulation recording");
