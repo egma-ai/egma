@@ -111,9 +111,9 @@ A custom clone of that prompt can produce the same multi-criterion result.
 
 The executor makes one model request per trace. It sends the saved instruction
 as `instruction_1`, the simulation's frozen expected behaviors as
-`behavior_1..N`, and the existing transcript, ending outcome, tool names and
-arguments, and observed metrics. Production sends no test behaviors. Tool
-return payloads are excluded.
+`behavior_1..N`, and the existing transcript, tool names and arguments, and
+observed metrics. Production sends no test behaviors. Tool return payloads are
+excluded.
 
 The provider response must be exactly a `results` array whose entries have
 `id`, `decision`, `rationale`, and `cited_turns`. Validation accepts either the

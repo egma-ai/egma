@@ -81,8 +81,7 @@ const COPY = {
     "This grader judges every conversation in its scope. For something one " +
     "test must do, write an expected behavior on that test instead.",
   evidence:
-    "The judge reads the transcript, the outcome, the tool calls, and the " +
-    "metrics of one conversation.",
+    "The judge reads the transcript, tool calls, and metrics of one conversation.",
   productionCost: "Each sampled transcript costs one judge call.",
 } as const;
 
