@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
@@ -206,47 +207,24 @@ async function callbackServer(token: string): Promise<{
       const providerCallback = requestPath === "/check-availability" ||
         requestPath === "/record-request";
       if (!providerCallback && mockOrigin !== undefined) {
-        void fetch(`${mockOrigin}${requestPath}`, {
+        const target = new URL(requestPath, mockOrigin);
+        const forwarded = http.request(target, {
           method: request.method ?? "GET",
           headers: {
-            ...(request.headers["content-type"] === undefined
-              ? {}
-              : { "content-type": request.headers["content-type"] }),
-            ...(request.headers.cookie === undefined ? {} : { cookie: request.headers.cookie }),
-            ...(request.headers.authorization === undefined
-              ? {}
-              : { authorization: request.headers.authorization }),
-            ...(request.headers.origin === undefined ? {} : { origin: request.headers.origin }),
-            ...(request.headers.referer === undefined ? {} : { referer: request.headers.referer }),
-            ...(request.headers.range === undefined ? {} : { range: request.headers.range }),
-            ...(request.headers.host === undefined
-              ? {}
-              : { "x-forwarded-host": request.headers.host }),
+            ...request.headers,
+            host: target.host,
+            ...(request.headers.host === undefined ? {} : { "x-forwarded-host": request.headers.host }),
             "x-forwarded-proto": "https",
           },
-          ...(raw === "" ? {} : { body: raw }),
-          redirect: "manual",
-        }).then(async (answer) => {
-          response.writeHead(answer.status, {
-            "content-type": answer.headers.get("content-type") ?? "application/json",
-            ...(answer.headers.get("location") === null
-              ? {}
-              : { location: answer.headers.get("location")! }),
-            ...(answer.headers.getSetCookie().length === 0
-              ? {}
-              : { "set-cookie": answer.headers.getSetCookie() }),
-            ...(answer.headers.get("accept-ranges") === null
-              ? {}
-              : { "accept-ranges": answer.headers.get("accept-ranges")! }),
-            ...(answer.headers.get("content-range") === null
-              ? {}
-              : { "content-range": answer.headers.get("content-range")! }),
-          });
-          response.end(Buffer.from(await answer.arrayBuffer()));
-        }).catch((error: unknown) => {
-          response.writeHead(502, { "content-type": "application/json" });
-          response.end(JSON.stringify({ error: error instanceof Error ? error.name : "proxy_failed" }));
+        }, (answer) => {
+          response.writeHead(answer.statusCode ?? 502, answer.headers);
+          answer.pipe(response);
         });
+        forwarded.on("error", (error: Error) => {
+          response.writeHead(502, { "content-type": "application/json" });
+          response.end(JSON.stringify({ error: error.name }));
+        });
+        forwarded.end(raw);
         return;
       }
       if (request.headers.authorization !== `Bearer ${token}`) {
@@ -264,6 +242,32 @@ async function callbackServer(token: string): Promise<{
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify(result));
     });
+  });
+  server.on("upgrade", (request, socket, head) => {
+    if (mockOrigin === undefined) {
+      socket.destroy();
+      return;
+    }
+    const target = new URL(request.url ?? "/", mockOrigin);
+    const upstream = net.connect(Number(target.port), target.hostname, () => {
+      const headers: string[] = [];
+      for (let index = 0; index < request.rawHeaders.length; index += 2) {
+        const name = request.rawHeaders[index]!;
+        if (name.toLowerCase() === "host") continue;
+        headers.push(`${name}: ${request.rawHeaders[index + 1] ?? ""}`);
+      }
+      headers.push(`Host: ${target.host}`);
+      if (request.headers.host !== undefined) headers.push(`X-Forwarded-Host: ${request.headers.host}`);
+      headers.push("X-Forwarded-Proto: https");
+      upstream.write(
+        `${request.method ?? "GET"} ${target.pathname}${target.search} HTTP/${request.httpVersion}\r\n` +
+        `${headers.join("\r\n")}\r\n\r\n`,
+      );
+      if (head.length > 0) upstream.write(head);
+      socket.pipe(upstream).pipe(socket);
+    });
+    upstream.on("error", () => socket.destroy());
+    socket.on("error", () => upstream.destroy());
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -356,7 +360,7 @@ async function proveAuthenticatedBrowser(
       throw new Error(`the authenticated page answered ${String(response?.status())}`);
     }
     await page.getByRole("heading", { name: "Agents", exact: true }).waitFor();
-    await page.locator('[data-slot="project-name"]', { hasText: projectName }).waitFor();
+    await page.locator('[data-slot="project-name"]', { hasText: projectName }).first().waitFor();
     expect(page.url()).toContain(`/projects/${projectId}/agents`);
   } catch (cause) {
     throw new Error(
