@@ -2290,8 +2290,8 @@ describe("the project grader library", () => {
         "Maximum acceptable response latency: 3 seconds by default",
       );
       await details.getByRole("button", { name: "Use in project" }).click();
-      await details.getByLabel("Grades simulations").click();
-      await details.getByLabel("All simulations").click();
+      expect(await details.getByLabel("Grades simulations").isChecked()).toBe(true);
+      expect(await details.getByLabel("All simulations").isChecked()).toBe(true);
       await details
         .getByRole("spinbutton", {
           name: "Maximum acceptable response latency*",
@@ -5171,8 +5171,8 @@ describe("project grader model settings", () => {
       const use = proof.getByRole("dialog", { name: "Model proof grader" });
       await use.getByRole("button", { name: "Use in project" }).click();
       await use.getByLabel("Language model").selectOption("openai/gpt-4o-mini");
-      await use.getByLabel("Grades simulations").click();
-      await use.getByLabel("All simulations").click();
+      expect(await use.getByLabel("Grades simulations").isChecked()).toBe(true);
+      expect(await use.getByLabel("All simulations").isChecked()).toBe(true);
       await use.getByRole("button", { name: "Use in project" }).click();
       await use.waitFor({ state: "hidden" });
       async function openApplied() {
