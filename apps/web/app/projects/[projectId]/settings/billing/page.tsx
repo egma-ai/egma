@@ -109,7 +109,7 @@ function UsageAndBillingBody({ projectId }: { readonly projectId: string }) {
     nextSearch.delete("plan");
     nextSearch.delete("credit");
     globalThis.history.replaceState(
-      globalThis.history.state,
+      null,
       "",
       nextSearch.size === 0 ? pathname : `${pathname}?${nextSearch.toString()}`,
     );

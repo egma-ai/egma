@@ -286,7 +286,7 @@ it("toasts a completed credit checkout once, clears its query, and lets the toas
     ),
   ).toBeTruthy();
   expect(replaceState).toHaveBeenCalledWith(
-    globalThis.history.state,
+    null,
     "",
     "/projects/prj_1/settings/billing",
   );
@@ -330,7 +330,7 @@ it("does not upgrade the displayed plan merely from a return parameter", async (
   ).toBeTruthy();
   expect(screen.getByText("Hobby")).toBeTruthy();
   expect(replaceState).toHaveBeenCalledWith(
-    globalThis.history.state,
+    null,
     "",
     "/projects/prj_1/settings/billing",
   );
@@ -348,7 +348,7 @@ it("keeps a closed-plan toast visible after removing the return query", async ()
   ).toBeTruthy();
   expect(screen.getByText("$4.25")).toBeTruthy();
   expect(replaceState).toHaveBeenCalledWith(
-    globalThis.history.state,
+    null,
     "",
     "/projects/prj_1/settings/billing",
   );
