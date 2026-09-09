@@ -154,12 +154,14 @@ describe("LiveKit Agents 1.7 trace attributes", () => {
   });
 
   it("keeps empty native agent records out of the conversation and keeps response errors on the native record", () => {
-    const failedResponse = span("0011223344556603", "agent_turn", {
-      "lk.pii.user_input": "Please try that.",
-    });
-    failedResponse.status = {
-      code: "STATUS_CODE_ERROR",
-      message: "the response failed",
+    const failedResponse: OtlpSpan = {
+      ...span("0011223344556603", "agent_turn", {
+        "lk.pii.user_input": "Please try that.",
+      }),
+      status: {
+        code: "STATUS_CODE_ERROR",
+        message: "the response failed",
+      },
     };
     const continuation = span("0011223344556613", "agent_turn", {});
 
