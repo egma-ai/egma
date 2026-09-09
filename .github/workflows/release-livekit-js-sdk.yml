@@ -183,10 +183,10 @@ jobs:
             exit 1
           fi
           package="$(realpath "$LIVEKIT_E2E_JAVASCRIPT_PACKAGE")"
+          version="1.7.1"
 
           run_case() {
-            version="$1"
-            modality="$2"
+            modality="$1"
             rm -rf .proofs/simulation-e2e
             set +e
             EGMA_REQUIRE_OBJECT_STORAGE=1 \
@@ -210,10 +210,8 @@ jobs:
             return "$status"
           }
 
-          for version in 1.7.1; do
-            for modality in chat voice; do
-              run_case "$version" "$modality"
-            done
+          for modality in chat voice; do
+            run_case "$modality"
           done
 
       - name: Upload redacted full-path proof manifests

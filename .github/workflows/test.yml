@@ -384,7 +384,7 @@ jobs:
           retention-days: 7
 
   simulation-e2e-livekit:
-    name: Simulation to grade (${{ matrix.language }}, LiveKit ${{ matrix.runtime }}, ${{ matrix.modality }}, project credentials, mocks ${{ matrix.mocks }})
+    name: Simulation to grade (${{ matrix.language }}, LiveKit 1.7.1, ${{ matrix.modality }}, project credentials, mocks on)
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'workflow_dispatch' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
@@ -393,8 +393,6 @@ jobs:
       matrix:
         language: [python, javascript]
         modality: [chat, voice]
-        mocks: [on]
-        runtime: [1.7.1]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -448,7 +446,7 @@ jobs:
       - name: Warm the object-store image
         run: docker pull "$(awk '/^  minio:/{found=1} found && /image:/{print $2; exit}' docker-compose.yml)"
 
-      - name: Run Python chat from simulation through browser-visible grade
+      - name: Run packaged SDK through simulation and grading
         env:
           EGMA_REQUIRE_OBJECT_STORAGE: "1"
           LIVEKIT_E2E_OPENAI_API_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
@@ -456,9 +454,9 @@ jobs:
           SIMULATION_E2E_LANGUAGE: ${{ matrix.language }}
           SIMULATION_E2E_MODALITY: ${{ matrix.modality }}
           SIMULATION_E2E_ACCESS: project_credentials
-          SIMULATION_E2E_MOCKS: ${{ matrix.mocks }}
-          LIVEKIT_E2E_PYTHON_AGENTS_VERSION: ${{ matrix.runtime }}
-          LIVEKIT_E2E_JAVASCRIPT_AGENTS_VERSION: ${{ matrix.runtime }}
+          SIMULATION_E2E_MOCKS: "on"
+          LIVEKIT_E2E_PYTHON_AGENTS_VERSION: "1.7.1"
+          LIVEKIT_E2E_JAVASCRIPT_AGENTS_VERSION: "1.7.1"
           EGMA_E2E_SESSION_DELAY_MS: "10000"
         run: >-
           pnpm exec vitest run --project fast
@@ -469,14 +467,14 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: simulation-e2e-${{ matrix.language }}-livekit-${{ matrix.runtime }}-${{ matrix.modality }}-project-credentials-${{ matrix.mocks }}-${{ github.sha }}
+          name: simulation-e2e-${{ matrix.language }}-livekit-1.7.1-${{ matrix.modality }}-project-credentials-on-${{ github.sha }}
           path: .proofs/simulation-e2e/*
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
 
   simulation-e2e-retell:
-    name: Simulation to grade (Retell ${{ matrix.connection }}, mocks ${{ matrix.mocks }})
+    name: Simulation to grade (Retell ${{ matrix.connection }}, mocks on)
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'workflow_dispatch' }}
     # GitHub's runner resolves newly announced public callback hostnames reliably.
     runs-on: ubuntu-latest
@@ -485,7 +483,6 @@ jobs:
       fail-fast: false
       matrix:
         connection: [text, web]
-        mocks: [on]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
@@ -534,7 +531,7 @@ jobs:
           EGMA_REQUIRE_OBJECT_STORAGE: "1"
           SIMULATION_E2E_RETELL: "1"
           SIMULATION_E2E_RETELL_CONNECTION: ${{ matrix.connection }}
-          SIMULATION_E2E_MOCKS: ${{ matrix.mocks }}
+          SIMULATION_E2E_MOCKS: "on"
           SIMULATION_E2E_RETELL_API_KEY: ${{ secrets.SIMULATION_E2E_RETELL_API_KEY }}
           SIMULATION_E2E_MODEL_API_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
         run: >-
@@ -545,7 +542,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: simulation-e2e-retell-${{ matrix.connection }}-${{ matrix.mocks }}-${{ github.sha }}
+          name: simulation-e2e-retell-${{ matrix.connection }}-on-${{ github.sha }}
           path: .proofs/simulation-e2e/*
           include-hidden-files: true
           if-no-files-found: error

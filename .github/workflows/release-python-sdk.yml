@@ -155,10 +155,10 @@ jobs:
             exit 1
           fi
           wheel="$(realpath "$(find sdks/python/dist -maxdepth 1 -name '*.whl' -print -quit)")"
+          version="1.7.1"
 
           run_case() {
-            version="$1"
-            modality="$2"
+            modality="$1"
             rm -rf .proofs/simulation-e2e
             set +e
             EGMA_REQUIRE_OBJECT_STORAGE=1 \
@@ -182,10 +182,8 @@ jobs:
             return "$status"
           }
 
-          for version in 1.7.1; do
-            for modality in chat voice; do
-              run_case "$version" "$modality"
-            done
+          for modality in chat voice; do
+            run_case "$modality"
           done
 
       - name: Upload redacted full-path proof manifests
