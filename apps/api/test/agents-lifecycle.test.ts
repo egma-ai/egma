@@ -92,8 +92,8 @@ async function aConnection(
     who,
     {
       agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
+      connectionType: "retell_text_mode",
+      accessVariant: "retell_text_mode.api_key",
       modality: "chat",
       config: { retellAgentId: "agent_in_retell_1" },
       credentials: { apiKey: RETELL_KEY },
@@ -222,14 +222,14 @@ describe("the Egma-owned half of an agent", () => {
     expect(String(tried.body.message)).toContain("prompt");
   });
 
-  it("keeps Retell Chat after its active connection is archived", async () => {
+  it("does not infer Retell voice modality from a text-mode connection", async () => {
     api = await createApi("agents_browser_retell_modality_history");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const agent = await anAgent(ada, "Front desk");
     const chat = await aConnection(ada, agent.id);
 
     const active = await browser("GET", `/v1/agents/${agent.id}`, ada);
-    expect(held<AgentBody>(active, "agent").retellModality).toBe("chat");
+    expect(held<AgentBody>(active, "agent").retellModality).toBeNull();
 
     const archived = await browser(
       "POST",
@@ -240,14 +240,14 @@ describe("the Egma-owned half of an agent", () => {
     expect(archived.status).toBe(200);
 
     const after = await browser("GET", `/v1/agents/${agent.id}`, ada);
-    expect(held<AgentBody>(after, "agent").retellModality).toBe("chat");
+    expect(held<AgentBody>(after, "agent").retellModality).toBeNull();
     expect(held<readonly ConnectionBody[]>(after, "connections")).toEqual([]);
 
     const listed = await browser("GET", "/v1/agents", ada);
     const [row] = held<
       readonly (AgentBody & { readonly connections: readonly ConnectionBody[] })[]
     >(listed, "agents");
-    expect(row?.retellModality).toBe("chat");
+    expect(row?.retellModality).toBeNull();
     expect(row?.connections).toEqual([]);
   });
 
@@ -542,11 +542,10 @@ describe("a connection's stored credential", () => {
 
     // The three credential rules the product's Restore is written against,
     // each named on the shape that has it.
-    // The chat-native door is dormant, so a form is never offered it; the
-    // text door is the Retell shape a person picks.
     expect(
       items.some((one) => one.connectionType === "retell_chat_api"),
     ).toBe(false);
+    // Text mode is the Retell chat shape a person picks.
     expect(
       items.find((one) => one.connectionType === "retell_text_mode")
         ?.credentialRule,
@@ -715,7 +714,7 @@ describe("restoring a connection", () => {
     expect(bare.status).toBe(422);
     expect(bare.body.error).toBe("credential_required");
     expect(bare.body.message).toBe(
-      `Connection ${wiring.id} uses retell_chat_api, which requires a new credential ` +
+      `Connection ${wiring.id} uses retell_text_mode, which requires a new credential ` +
         `after Archive. Enter a new credential and restore it again.`,
     );
 
@@ -1142,7 +1141,26 @@ describe("another organization's agent", () => {
 
 describe("archiving a connection that work is queued over", () => {
   it("cancels the queued simulation and the run, without erasing evidence", async () => {
-    api = await createApi("agents_browser_archive_cancels");
+    api = await createApi("agents_browser_archive_cancels", {
+      retellFetch: async (input) => {
+        const url = String(input);
+        if (url.includes("/get-agent/")) {
+          return new Response(JSON.stringify({
+            agent_id: "agent_in_retell_1",
+            version: 1,
+            is_published: true,
+            response_engine: { type: "conversation-flow", conversation_flow_id: "flow_1", version: 1 },
+          }), { status: 200 });
+        }
+        if (url.includes("/v2/list-phone-numbers")) {
+          return new Response(JSON.stringify({ items: [], has_more: false }), { status: 200 });
+        }
+        if (url.includes("/get-conversation-flow/")) {
+          return new Response(JSON.stringify({ conversation_flow_id: "flow_1", version: 1, nodes: [] }), { status: 200 });
+        }
+        throw new Error(`Unexpected Retell read: ${url}`);
+      },
+    });
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
     const { agentId, connectionId, connectionRevision, runId, simulationId } =

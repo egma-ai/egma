@@ -19,9 +19,10 @@ class AppointmentAgent(Agent):
         super().__init__(
             instructions=(
                 "You schedule dental appointments. Always call "
-                "check_availability before you say whether Tuesday is free. "
+                "check_availability exactly once, with day Tuesday, before you "
+                "say whether Tuesday is free. Never check a different day. "
                 "Then call record_request with day Tuesday and kind reschedule "
-                "before answering. "
+                "exactly once before answering. "
                 "Keep each reply short."
             )
         )

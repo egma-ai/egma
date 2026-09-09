@@ -14,13 +14,12 @@ import {
   createTest,
   createTestSuite,
   disconnectClickHouse,
-  finishGradingJob,
   getGradingJobForTrace,
+  pinnedSimulationGraders,
   readTraceGrading,
   reconcileGraderCatalog,
   recordSimulationTraces,
   regradeTrace,
-  releaseGradingJob,
   resolveRunStartReach,
   settleSimulationsPastTheAgentPovBound,
   startRun,
@@ -249,51 +248,101 @@ describe.each<Platform>(["livekit", "retell"])("%s final evidence", (platform) =
     expect((await getGradingJobForTrace(auth, conversation.traceId))?.id).toBe(job?.id);
   });
 
-  it("ends the wait at 245 seconds and allows regrading after late final evidence arrives", async () => {
+  it("files an evidence error at 245 seconds without model work and allows regrading after late final evidence arrives", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const conversation = await completedConversation(platform);
     const ref = { source: "simulation" as const, traceId: conversation.traceId, runId: conversation.claim.runId };
     afterCompletion(conversation, 245_000);
     const settled = await settleSimulationsPastTheAgentPovBound();
-    expect(settled).toContainEqual({ id: conversation.claim.id, runId: conversation.claim.runId, agentPovFiled: false });
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      const claimed = (await claimGradingJobs({ claimant: "final-evidence-grader", capacity: 50 }))
-        .find((one) => one.traceId === conversation.traceId);
-      if (claimed === undefined) throw new Error("the missing-evidence job was not claimed");
-      expect(claimed.attempts).toBe(attempt);
-      if (attempt < 3) {
-        await releaseGradingJob(claimed.auth, claimed.id, claimed.claimedBy, "The final transcript is not available yet.");
-        continue;
-      }
-      await appendGrades(claimed.auth, claimed.entries.map((entry) => ({
-        source: claimed.source,
-        traceId: claimed.traceId,
-        traceStartedAtMicroseconds: BigInt(claimed.traceStartedAt.getTime()) * 1_000n,
-        runId: claimed.runId ?? "",
-        projectGraderId: entry.projectGraderId,
-        graderDefinitionId: entry.graderDefinitionId,
-        graderDefinitionVersion: entry.graderDefinitionVersion,
-        parameterValues: entry.parameterValues,
-        graderPassThreshold: entry.graderPassThreshold,
-        gradingSequence: claimed.sequenceBase + claimed.attempts,
-        gradedAtMicroseconds: BigInt(Date.now()) * 1_000n,
-        score: null,
-        details: { error: "The final transcript is not available yet." },
-      })));
-      await finishGradingJob(claimed.auth, claimed.id, claimed.claimedBy);
-    }
-    await expect(readTraceGrading(auth, ref)).resolves.toMatchObject({ state: "error" });
+    expect(settled).toContainEqual({
+      id: conversation.claim.id,
+      runId: conversation.claim.runId,
+      agentPovFiled: false,
+      outcome: "evidence_error",
+    });
+    const terminal = await getGradingJobForTrace(auth, conversation.traceId);
+    expect(terminal).toMatchObject({
+      status: "abandoned",
+      attempts: 0,
+      lastError: "evidence_collection_error",
+    });
+    expect(
+      (await claimGradingJobs({
+        claimant: "final-evidence-grader",
+        capacity: 50,
+      })).map(({ traceId }) => traceId),
+    ).not.toContain(conversation.traceId);
+    await expect(readTraceGrading(auth, ref)).resolves.toMatchObject({
+      state: "error",
+      evidenceError: {
+        error: "evidence_collection_error",
+        message: expect.stringContaining("complete evidence"),
+      },
+      current: [],
+      history: [],
+    });
+    expect(await settleSimulationsPastTheAgentPovBound()).toEqual([]);
+    expect((await getGradingJobForTrace(auth, conversation.traceId))?.id)
+      .toBe(terminal?.id);
+    await expect(regradeTrace(auth, ref)).resolves.toEqual({
+      kind: "waiting",
+      for: "evidence",
+    });
+    expect(await getGradingJobForTrace(auth, conversation.traceId)).toMatchObject({
+      status: "abandoned",
+      attempts: 0,
+    });
 
     afterCompletion(conversation, 300_000);
     const final = finalEvidence(conversation);
     await appendSpans(auth, [final]);
     await recordSimulationTraces(auth, [final]);
     await expect(readiness(conversation)).resolves.toMatchObject({ ready: true, agentPovFiled: true });
-    expect(await getGradingJobForTrace(auth, conversation.traceId)).toBeUndefined();
+    expect(await getGradingJobForTrace(auth, conversation.traceId)).toMatchObject({
+      status: "abandoned",
+      attempts: 0,
+    });
     await expect(readTraceGrading(auth, ref)).resolves.toMatchObject({ state: "error" });
     await expect(regradeTrace(auth, ref)).resolves.toMatchObject({ kind: "queued", reopened: true, alreadyWaiting: false });
     expect(await getGradingJobForTrace(auth, conversation.traceId)).toMatchObject({ status: "pending", attempts: 0, lastError: null });
-    expect((await readTraceGrading(auth, ref))?.history[0]?.score).toBeNull();
+    expect((await readTraceGrading(auth, ref))?.history).toEqual([]);
+  });
+
+  it("never replaces a successful grade with an evidence error", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const conversation = await completedConversation(platform);
+    const [entry] = await pinnedSimulationGraders(auth, conversation.claim.id) ?? [];
+    if (entry === undefined) throw new Error("the simulation has no pinned grader");
+    await appendGrades(auth, [{
+      source: "simulation",
+      traceId: conversation.traceId,
+      traceStartedAtMicroseconds: conversation.span.startedAtMicroseconds,
+      runId: conversation.claim.runId,
+      projectGraderId: entry.projectGraderId,
+      graderDefinitionId: entry.definition.definitionId,
+      graderDefinitionVersion: entry.definition.definitionVersion,
+      parameterValues: entry.parameterValues,
+      graderPassThreshold: entry.passThreshold,
+      gradingSequence: 1,
+      gradedAtMicroseconds: BigInt(Date.now()) * 1_000n,
+      score: 1,
+      details: { rationale: "The expected behavior passed." },
+    }]);
+
+    afterCompletion(conversation, 245_000);
+    expect(await settleSimulationsPastTheAgentPovBound()).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: conversation.claim.id }),
+      ]),
+    );
+    await expect(readTraceGrading(auth, {
+      source: "simulation",
+      traceId: conversation.traceId,
+      runId: conversation.claim.runId,
+    })).resolves.toMatchObject({
+      state: "complete",
+      current: [{ score: 1 }],
+    });
   });
 
   it.each([-3_600_000, 3_600_000])("uses the full server wait when the reported end is offset by %i ms", async (offset) => {
@@ -313,6 +362,36 @@ describe.each<Platform>(["livekit", "retell"])("%s final evidence", (platform) =
       id: conversation.claim.id,
       runId: conversation.claim.runId,
       agentPovFiled: false,
+      outcome: "evidence_error",
     });
+  });
+});
+
+it("does not treat a Retell root or duplicate span IDs as a complete record", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const conversation = await completedConversation("retell");
+  const root = {
+    ...finalEvidence(conversation),
+    payload: JSON.stringify({
+      end_timestamp: conversation.completedAt.getTime(),
+      egma_normalised: { degraded: false, expected_span_count: 3 },
+    }),
+  };
+
+  await appendSpans(auth, [root, root]);
+  await expect(readiness(conversation)).resolves.toMatchObject({
+    ready: false,
+    agentPovFiled: false,
+  });
+  await recordSimulationTraces(auth, [root]);
+  expect(await getGradingJobForTrace(auth, conversation.traceId)).toBeUndefined();
+
+  await appendSpans(auth, [
+    { ...conversation.span, spanId: "3333333333333333", emitter: "agent" },
+    { ...conversation.span, spanId: "4444444444444444", emitter: "agent" },
+  ]);
+  await expect(readiness(conversation)).resolves.toMatchObject({
+    ready: true,
+    agentPovFiled: true,
   });
 });

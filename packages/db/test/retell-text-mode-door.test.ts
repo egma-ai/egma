@@ -41,7 +41,6 @@ describe("what a Retell text mode connection is made of", () => {
     // identity rather than between twins.
     expect(descriptorOf(KIND).reuse?.family).toBe("retellAgentId");
     expect(descriptorOf("retell_web_call").reuse?.family).toBe("retellAgentId");
-    expect(descriptorOf("retell_chat_api").reuse?.family).toBe("retellAgentId");
   });
 
   it("is in the schema's two lists, so a row can carry it at all", () => {
@@ -106,7 +105,7 @@ describe("text mode door's refusals", () => {
     // writer cannot read at a host the writer chose — a read of a write-only
     // secret by another name, and a DNS-rebinding surface with it. A test that
     // needs to converse with a Retell-shaped server on loopback uses the
-    // plug's own seam, exactly as `retell_chat_api` does, and nothing persists
+    // plug's own seam, exactly as `retell_text_mode` does, and nothing persists
     // it.
     expect(() =>
       validConfig(KIND, VARIANT, {
@@ -201,7 +200,7 @@ describe("what the shipped simulator can conduct over text mode", () => {
     // A shipped adapter is not a licence to conduct anything wearing the name.
     expect(connectionIsConductable(KIND, VARIANT, "voice")).toBe(false);
     expect(
-      connectionIsConductable(KIND, "retell_chat_api.api_key", "chat"),
+      connectionIsConductable(KIND, "retell_text_mode.api_key", "chat"),
     ).toBe(false);
   });
 });

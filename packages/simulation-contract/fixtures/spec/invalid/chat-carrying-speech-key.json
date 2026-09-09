@@ -4,8 +4,8 @@
   "modality": "chat",
   "connection": {
     "agent_platform": "retell",
-    "connection_type": "retell_chat_api",
-    "access_variant": "retell_chat_api.api_key",
+    "connection_type": "retell_text_mode",
+    "access_variant": "retell_text_mode.api_key",
     "config": { "retellAgentId": "agent_fixture" },
     "credentials": null
   },

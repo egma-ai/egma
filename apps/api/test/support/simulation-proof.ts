@@ -1,16 +1,81 @@
 import { loadIngestionSettings } from "@egma/ingestion";
 import { spawn, type ChildProcess } from "node:child_process";
+import { isDeepStrictEqual } from "node:util";
 import type { Page } from "playwright-core";
 import { expect } from "vitest";
 
 import { makeLog } from "../../../grader/src/log.ts";
 import { startService } from "../../../grader/src/service.ts";
 
+export function quickTunnelUrl(output: string): string | undefined {
+  if (!output.includes("Your quick Tunnel has been created!")) return undefined;
+  return [...output.matchAll(/https:\/\/([a-z0-9-]+)\.trycloudflare\.com/gu)]
+    .find((match) => match[1] !== "api")?.[0];
+}
+
+export async function startPublicTunnel(localUrl: string): Promise<{
+  process: ChildProcess;
+  url: string;
+  output: () => string;
+}> {
+  const child = spawn(
+    process.env["SIMULATION_E2E_CLOUDFLARED"] ?? "cloudflared",
+    ["tunnel", "--no-autoupdate", "--url", localUrl],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let said = "";
+  child.stdout?.on("data", (piece: Buffer) => { said += piece.toString("utf8"); });
+  child.stderr?.on("data", (piece: Buffer) => { said += piece.toString("utf8"); });
+  const deadline = Date.now() + 60_000;
+  for (;;) {
+    const found = quickTunnelUrl(said);
+    if (found !== undefined) return { process: child, url: found, output: () => said };
+    if (child.exitCode !== null) {
+      throw new Error(`cloudflared exited with ${String(child.exitCode)}:\n${said}`);
+    }
+    if (Date.now() > deadline) {
+      child.kill("SIGTERM");
+      throw new Error(`cloudflared did not publish a URL within 60s:\n${said}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
+
 export async function stopChild(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
   child.kill("SIGTERM");
   await exited;
+}
+
+/** Wait for a fixture's own cleanup and fail on timeout or an unsuccessful exit. */
+export async function waitForChild(
+  child: ChildProcess,
+  timeoutMilliseconds: number,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    if (child.exitCode === null && child.signalCode === null) {
+      await Promise.race([
+        new Promise<void>((resolve) => child.once("exit", () => resolve())),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => {
+            child.kill("SIGTERM");
+            reject(new Error(`fixture did not exit within ${timeoutMilliseconds}ms`));
+          }, timeoutMilliseconds);
+        }),
+      ]);
+    }
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+  if (child.exitCode !== 0) {
+    throw new Error(
+      child.signalCode === null
+        ? `fixture exited with ${String(child.exitCode)}`
+        : `fixture exited after ${child.signalCode}`,
+    );
+  }
 }
 
 export function startFullPathWorkers(options: {
@@ -147,7 +212,10 @@ export function assertPublicEvidence(
     ...turns.flatMap((turn) => turn.spans ?? []),
   ]).filter((span) => span.kind === "tool" && span.pov === expected.pov);
   for (const wanted of expected.tools) {
-    const calls = tools.filter((span) => span.toolName === wanted.name);
+    const calls = tools.filter((span) =>
+      span.toolName === wanted.name &&
+      isDeepStrictEqual(decode(span.toolArguments), wanted.arguments)
+    );
     expect(calls.length).toBeGreaterThanOrEqual(1);
     for (const call of calls) {
       expect(decode(call.toolArguments)).toEqual(wanted.arguments);
@@ -164,6 +232,7 @@ export async function assertEvidencePage(
     readonly humanIncludes: string;
     readonly agentIncludes: string;
     readonly recording: boolean;
+    readonly sourceLabel: string;
   },
 ): Promise<void> {
   const results = page.getByRole("tab", { name: "Results summary", exact: true });
@@ -182,6 +251,7 @@ export async function assertEvidencePage(
   const shown = await transcriptPanel.innerText();
   expect(shown).toContain("User");
   expect(shown).toContain("Agent");
+  expect(shown).toContain(expected.sourceLabel);
   expect(shown.toLowerCase()).toContain(expected.humanIncludes);
   expect(shown.toLowerCase()).toContain(expected.agentIncludes);
   expect(shown).not.toContain("LiveKit transcript unavailable");
@@ -189,5 +259,24 @@ export async function assertEvidencePage(
     const player = transcriptPanel.getByLabel("Simulation recording");
     await player.waitFor({ state: "attached" });
     expect(await player.getAttribute("src")).toContain("X-Amz-Signature=");
+    await player.evaluate((element) => {
+      (element as unknown as { load(): void }).load();
+    });
+    await expect.poll(async () => player.evaluate((element) => {
+      const media = element as unknown as {
+        readyState: number;
+        duration: number;
+        error: unknown;
+      };
+      return {
+        ready: media.readyState >= 1,
+        finiteDuration: Number.isFinite(media.duration) && media.duration > 0,
+        noError: media.error === null,
+      };
+    }), { timeout: 15_000 }).toEqual({
+      ready: true,
+      finiteDuration: true,
+      noError: true,
+    });
   }
 }

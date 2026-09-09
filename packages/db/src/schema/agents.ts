@@ -37,7 +37,6 @@ export type AgentPlatform = (typeof AGENT_PLATFORMS)[number];
 
 /** The direct paths Egma's simulator can select to reach an agent. */
 export const CONNECTION_TYPES = [
-  "retell_chat_api",
   "retell_text_mode",
   "retell_web_call",
   "phone_number",
@@ -45,9 +44,15 @@ export const CONNECTION_TYPES = [
 ] as const;
 export type ConnectionType = (typeof CONNECTION_TYPES)[number];
 
+/** Stored history includes connection types that the product no longer creates. */
+const PERSISTED_CONNECTION_TYPES = [
+  ...CONNECTION_TYPES,
+  "retell_chat_api",
+] as const;
+
 /**
  * Connection types that can supply an agent POV (ADR-0024 §2): LiveKit SDK push
- * and Retell web-call record pull. Phone, text mode, and chat API connections
+ * and Retell web-call record pull. Phone and text-mode connections
  * have no supported second-POV path. Grading also requires this simulation's
  * provider reference before waiting; capability alone is not enough.
  */
@@ -65,7 +70,6 @@ export function laneProducesAnAgentPov(connectionType: string): boolean {
 
 /** The authority and configuration used inside one connection type. */
 export const ACCESS_VARIANTS = [
-  "retell_chat_api.api_key",
   "retell_text_mode.api_key",
   "retell_web_call.api_key",
   "phone_number.public_e164",
@@ -73,6 +77,12 @@ export const ACCESS_VARIANTS = [
   "livekit_room.customer_token_endpoint",
 ] as const;
 export type AccessVariant = (typeof ACCESS_VARIANTS)[number];
+
+/** Stored history includes credentials shapes that the product no longer creates. */
+const PERSISTED_ACCESS_VARIANTS = [
+  ...ACCESS_VARIANTS,
+  "retell_chat_api.api_key",
+] as const;
 
 /**
  * Which layer is under test: chat exercises the harness (prompt, reasoning,
@@ -242,10 +252,10 @@ export const connection = pgTable(
   (table) => [
     prefixCheck("connection_id_prefix", table.id, "con"),
     oneOf("connection_type_allowed", table.connectionType, [
-      ...CONNECTION_TYPES,
+      ...PERSISTED_CONNECTION_TYPES,
     ]),
     oneOf("connection_access_variant_allowed", table.accessVariant, [
-      ...ACCESS_VARIANTS,
+      ...PERSISTED_ACCESS_VARIANTS,
     ]),
     oneOf("connection_modality_allowed", table.modality, [...MODALITIES]),
     oneOf("connection_topology_allowed", table.topology, [...TOPOLOGIES]),

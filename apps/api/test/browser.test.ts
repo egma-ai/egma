@@ -1,8 +1,15 @@
 import {
   appendGrades,
+  claimSimulations,
   claimGradingJobs,
+  completeSimulation,
+  createAgent,
   finishGradingJob,
   getGradingJobForTrace,
+  listSimulations,
+  settleSimulationsPastTheAgentPovBound,
+  startRun,
+  startSimulation,
 } from "@egma/db";
 import { newId } from "@egma/ids";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
@@ -3550,6 +3557,7 @@ describe("the complete product, walked in order in a second project", () => {
         .poll(() => evidence.innerText(), { timeout: 30_000 })
         .toContain("I need to move my cleaning to next week.");
       const shown = await evidence.innerText();
+      expect(shown).toContain("Conversation recorded by the persona");
       expect(shown).toContain("Of course — which afternoon suits you?");
       expect(shown).not.toContain("No conversation recorded");
 
@@ -3615,6 +3623,110 @@ describe("the complete product, walked in order in a second project", () => {
       await expect
         .poll(() => machineryOfTheRun(walk, runAddress), { timeout: 30_000 })
         .toBe("Completed");
+    },
+    SETTLE,
+  );
+
+  it(
+    "settles a completed LiveKit run when its agent evidence never arrives",
+    async () => {
+      const created = await createAgent(auth, {
+        agentPlatform: "livekit",
+        name: "LiveKit evidence failure",
+        connection: {
+          agentPlatform: "livekit",
+          connectionType: "livekit_room",
+          accessVariant: "livekit_room.project_credentials",
+          modality: "voice",
+          config: {
+            url: "wss://browser.livekit.example",
+            agentName: "browser-evidence-failure",
+          },
+          credentials: {
+            apiKey: "browser-livekit-key-A1B2C3D4",
+            apiSecret: "browser-livekit-secret-E5F6G7H8",
+          },
+        },
+      });
+      const started = await startRun(auth, {
+        suiteId: suiteIdOf(suiteAddress),
+        agentId: created.id,
+        connectionId: created.connection?.id ?? "",
+      });
+      const listed = await listSimulations(auth, started.id, { limit: 1 });
+      const simulation = listed?.items[0];
+      expect(simulation, "the evidence-failure run wrote one simulation").toBeDefined();
+      if (simulation === undefined) return;
+
+      const claimant = "browser-missing-agent-evidence";
+      const claimed = (await claimSimulations({ claimant, capacity: 1 }))[0];
+      expect(claimed?.id).toBe(simulation.id);
+      await startSimulation(auth, simulation.id, claimant);
+      await completeSimulation(auth, simulation.id, claimant, {
+        endingReason: "agent_ended",
+        turnCount: 2,
+        providerReference: "egma-sim-browser-evidence-failure",
+      });
+      expect(
+        await settleSimulationsPastTheAgentPovBound({ boundSeconds: 0 }),
+      ).toContainEqual({
+        id: simulation.id,
+        runId: started.id,
+        agentPovFiled: false,
+        outcome: "evidence_error",
+      });
+
+      const failureRunAddress = at("runs", started.id);
+      await walk.goto(at("runs"));
+      const failureRow = runRowOn(walk, failureRunAddress);
+      await failureRow.waitFor();
+      expect(await machineryOfTheRun(walk, failureRunAddress)).toBe(
+        "Grading failed",
+      );
+
+      await walk.goto(failureRunAddress);
+      await walk
+        .getByRole("button", { name: /Reschedules a booked appointment/u })
+        .first()
+        .click();
+      const results = walk.getByRole("tabpanel", { name: "Results summary" });
+      await expect
+        .poll(() => results.innerText(), { timeout: 30_000 })
+        .toContain("Evidence collection did not finish");
+      const shown = await results.innerText();
+      expect(shown).toContain(
+        "Egma could not collect the agent's complete evidence before the recovery window ended.",
+      );
+      expect(shown).not.toContain("Collecting agent transcript");
+      expect(shown).not.toContain("Result · Passed");
+      expect(shown).not.toContain("Result · Failed");
+      expect(shown).not.toContain("Result · Error");
+
+      await walk.getByRole("tab", { name: "Transcript & audio" }).click();
+      const transcript = walk.getByRole("tabpanel", {
+        name: "Transcript & audio",
+      });
+      expect(await transcript.innerText()).toContain(
+        "LiveKit transcript unavailable",
+      );
+      expect(await transcript.innerText()).not.toContain(
+        "Waiting for LiveKit transcript",
+      );
+
+      const cookies = (await walk.context().cookies(origin))
+        .map((cookie) => `${cookie.name}=${cookie.value}`)
+        .join("; ");
+      const publicRead = await instance.api.inject({
+        method: "GET",
+        url: `/v1/simulations/${simulation.id}?projectId=${second}`,
+        headers: { cookie: cookies },
+      });
+      expect(publicRead.statusCode, publicRead.body).toBe(200);
+      expect(publicRead.json()).toMatchObject({
+        gradingState: "error",
+        grades: [],
+        gradeHistory: [],
+      });
     },
     SETTLE,
   );

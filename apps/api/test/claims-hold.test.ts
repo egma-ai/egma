@@ -134,12 +134,15 @@ beforeAll(async () => {
       agentPlatform: "retell",
       name: "Front desk",
       connection: {
-        agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        agentPlatform: "livekit",
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
         modality: "chat",
-        config: { retellAgentId: "agent_in_retell_1" },
-        credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+        config: { url: "wss://acme.livekit.cloud", agentName: "front-desk" },
+        credentials: {
+          apiKey: "livekit-key-A1B2C3D4WXYZ",
+          apiSecret: "livekit-secret-E5F6G7H8QRST",
+        },
       },
     },
   );

@@ -29,14 +29,6 @@ export type RetellConnectionCandidate =
     }
   | {
       readonly agentPlatform: "retell";
-      readonly connectionType: "retell_chat_api";
-      readonly accessVariant: "retell_chat_api.api_key";
-      readonly modality: "chat";
-      readonly productLabel: string;
-      readonly config: { readonly retellAgentId: string };
-    }
-  | {
-      readonly agentPlatform: "retell";
       readonly connectionType: "retell_web_call";
       readonly accessVariant: "retell_web_call.api_key";
       readonly modality: "voice";
@@ -80,10 +72,6 @@ type RetellCandidateToConfirm =
       readonly config: { readonly retellAgentId: string };
     }
   | {
-      readonly connectionType: "retell_chat_api";
-      readonly config: { readonly retellAgentId: string };
-    }
-  | {
       readonly connectionType: "retell_web_call";
       readonly config: { readonly retellAgentId: string };
     }
@@ -91,11 +79,6 @@ type RetellCandidateToConfirm =
       readonly connectionType: "phone_number";
       readonly config: { readonly phoneNumber: string };
     };
-
-export type RetellDirectTargetCheck =
-  | { readonly kind: "ready" }
-  | { readonly kind: "blocked"; readonly message: string }
-  | { readonly kind: "retryable"; readonly message: string };
 
 function credential(value: string): RetellCredential {
   return { reveal: () => value };
@@ -110,22 +93,6 @@ function discoveryFailure(
         kind: "unavailable",
         message: "Retell could not read this account. Check its network and try again.",
       };
-}
-
-function chatCandidate(platformAgentId: string): RetellConnectionCandidate {
-  return {
-    agentPlatform: "retell",
-    connectionType: "retell_chat_api",
-    accessVariant: "retell_chat_api.api_key",
-    modality: "chat",
-    productLabel: productLabelOf(
-      "retell",
-      "retell_chat_api",
-      "retell_chat_api.api_key",
-      "chat",
-    ),
-    config: { retellAgentId: platformAgentId },
-  };
 }
 
 /**
@@ -284,8 +251,8 @@ export async function confirmRetellCandidate(
         kind: "rejected",
         message:
           "The Retell text mode tests a Retell **voice** agent in text. That " +
-          "agent is not one; a Retell chat agent is reached through the Chat " +
-          "API instead.",
+          "agent is not one. Egma does not run simulations against Retell " +
+          "chat agents.",
       };
     }
 
@@ -308,20 +275,6 @@ export async function confirmRetellCandidate(
       return { kind: "unavailable", message: world.message };
     }
     return { kind: "ready", candidate: textModeCandidate(platformAgentId) };
-  }
-
-  if (candidate.connectionType === "retell_chat_api") {
-    if (
-      candidate.config.retellAgentId !== platformAgentId ||
-      agent.modality !== "chat"
-    ) {
-      return {
-        kind: "rejected",
-        message:
-          "That Retell agent is no longer available through the Chat API. Load the account again and choose an available connection.",
-      };
-    }
-    return { kind: "ready", candidate: chatCandidate(platformAgentId) };
   }
 
   if (agent.modality !== "voice") {
@@ -368,65 +321,4 @@ export async function confirmRetellCandidate(
     };
   }
   return { kind: "ready", candidate: phoneCandidate(number.number.number) };
-}
-
-/**
- * Prove that a Retell chat connection still points at a chat agent before its
- * credential is handed to the simulator.
- *
- * The connection contract fixes `retell_chat_api` to chat modality. Retell can
- * later reconfigure the platform agent as voice, so the provider listing is
- * the source of truth for the agent's current modality.
- */
-export async function verifyRetellChatAgent(
-  apiKey: string,
-  agentId: string,
-  fetchImpl: ProviderFetch = fetch,
-  timeoutMilliseconds = 15_000,
-): Promise<RetellDirectTargetCheck> {
-  const wanted = agentId.trim();
-  if (wanted === "") {
-    return {
-      kind: "blocked",
-      message: "This Retell connection has no agent id and cannot be dispatched.",
-    };
-  }
-
-  const listed = await listAgents(credential(apiKey), {
-    fetchImpl,
-    signal: AbortSignal.timeout(
-      Math.max(1, Math.min(15_000, timeoutMilliseconds)),
-    ),
-  });
-  if (listed.kind === "invalid-key") {
-    return {
-      kind: "blocked",
-      message:
-        "Retell rejected this connection's stored API key. Update the connection through the API or CLI before starting another run.",
-    };
-  }
-  if (listed.kind !== "agents") {
-    return {
-      kind: "retryable",
-      message:
-        "Retell did not answer while Egma checked this connection. Egma will try this simulation again on the next claim.",
-    };
-  }
-
-  const target = listed.agents.find((agent) => agent.id === wanted);
-  if (target === undefined) {
-    return {
-      kind: "blocked",
-      message: `Retell no longer lists agent ${wanted}. Choose another agent before starting another run.`,
-    };
-  }
-  if (target.modality === "voice") {
-    return {
-      kind: "blocked",
-      message:
-        `Retell agent ${wanted} is a voice agent, but this connection reaches Retell's Chat API and has chat modality. ` +
-        "Add one of the agent's routed phone numbers as a Retell phone connection before starting another run.",
-    };
-  }
-  return { kind: "ready" };
 }

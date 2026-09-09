@@ -1,4 +1,7 @@
-import { AGENT_EVIDENCE_COMPLETE_SQL, AGENT_EVIDENCE_INCOMPLETE_SQL } from "./agent-evidence.ts";
+import {
+  AGENT_EVIDENCE_GROUP_COMPLETE_SQL,
+  AGENT_EVIDENCE_INCOMPLETE_SQL,
+} from "./agent-evidence.ts";
 import { traceStore } from "../clickhouse/client.ts";
 import {
   aggregateOf,
@@ -968,12 +971,11 @@ export async function readTrace(
   // Read capped tree rows, full-window aggregates, and the parentless payload
   // projection in parallel with the same scope and time bounds. Order tree rows
   // by start time and span ID; ingestion handles evidence conflicts before storage.
-  const [summaries, rows, roots] = await Promise.all([
-    rowsOf<SummaryRow & { agent_evidence_complete: number; agent_evidence_incomplete: number }>(
+  const [summaries, rows, roots, completeAgentRecords] = await Promise.all([
+    rowsOf<SummaryRow & { agent_evidence_incomplete: number }>(
       `select
        trace_id,
        ${TRACE_FACTS},
-       countIf(${AGENT_EVIDENCE_COMPLETE_SQL}) > 0 as agent_evidence_complete,
        countIf(${AGENT_EVIDENCE_INCOMPLETE_SQL}) > 0 as agent_evidence_incomplete
      from ${SPANS_TABLE} final
      where ${where}
@@ -1046,6 +1048,15 @@ export async function readTrace(
      limit 1`,
       parameters,
     ),
+    rowsOf<{ readonly complete: number }>(
+      `select 1 as complete
+       from ${SPANS_TABLE} final
+       where ${where}
+       group by trace_id, run_id, provider_call_id
+       having ${AGENT_EVIDENCE_GROUP_COMPLETE_SQL}
+       limit 1`,
+      parameters,
+    ),
   ]);
 
   const facts = summaries[0];
@@ -1062,7 +1073,7 @@ export async function readTrace(
     ...transcriptOf(kept),
     truncated,
     reported: reportedOn(roots[0]),
-    agentEvidenceComplete: facts.agent_evidence_complete === 1 && facts.agent_evidence_incomplete === 0,
+    agentEvidenceComplete: completeAgentRecords.length > 0 && facts.agent_evidence_incomplete === 0,
     ...(facts.agent_evidence_incomplete === 1
       ? { agentEvidenceIncomplete: true }
       : {}),

@@ -1,4 +1,8 @@
-import { resolveRetellSimulationPull, type AuthContext } from "@egma/db";
+import {
+  AGENT_POV_BOUND_SECONDS,
+  resolveRetellSimulationPull,
+  type AuthContext,
+} from "@egma/db";
 import type { FastifyBaseLogger } from "fastify";
 
 import { IngestionUnavailableError } from "@egma/ingestion";
@@ -30,7 +34,32 @@ export type RetellSimulationPullOptions = Omit<
   "completionReceivedAtMilliseconds"
 > & {
   readonly now?: number | undefined;
+  readonly fileEvidence?: typeof fileSimulationEvidence | undefined;
 };
+
+type CollectorState = {
+  readonly collecting: Set<string>;
+  readonly active: Set<Promise<void>>;
+  readonly accepted: Set<string>;
+  closing: boolean;
+};
+
+function collectorState(): CollectorState {
+  return { collecting: new Set(), active: new Set(), accepted: new Set(), closing: false };
+}
+
+/** One default collector for direct callers; servers create a lifecycle-owned one. */
+const defaultCollector = collectorState();
+/** Records this process already made durable but the trace-store drain may not
+ * expose yet. Keep them only through the original evidence deadline. */
+function rememberAccepted(state: CollectorState, simulationId: string, until: number): void {
+  state.accepted.add(simulationId);
+  const timer = setTimeout(
+    () => state.accepted.delete(simulationId),
+    Math.max(0, until - Date.now()),
+  );
+  timer.unref();
+}
 
 function providerText(value: unknown): string {
   return typeof value === "string" || typeof value === "number"
@@ -71,13 +100,45 @@ export async function pullRetellSimulationRecord(
   log: FastifyBaseLogger,
   options: RetellSimulationPullOptions = {},
 ): Promise<void> {
+  return trackedPull(defaultCollector, auth, simulationId, reach, log, options);
+}
+
+function trackedPull(
+  state: CollectorState,
+  auth: AuthContext,
+  simulationId: string,
+  reach: RetellSimulationPullReach,
+  log: FastifyBaseLogger,
+  options: RetellSimulationPullOptions = {},
+): Promise<void> {
+  if (state.closing) return Promise.resolve();
+  const work = pullWith(state, auth, simulationId, reach, log, options);
+  state.active.add(work);
+  void work.finally(() => state.active.delete(work));
+  return work;
+}
+
+async function pullWith(
+  state: CollectorState,
+  auth: AuthContext,
+  simulationId: string,
+  reach: RetellSimulationPullReach,
+  log: FastifyBaseLogger,
+  options: RetellSimulationPullOptions = {},
+): Promise<void> {
+  if (state.collecting.has(simulationId) || state.accepted.has(simulationId)) return;
+  state.collecting.add(simulationId);
   let pull;
   try {
     pull = await resolveRetellSimulationPull(auth, simulationId);
   } catch (cause) {
+    state.collecting.delete(simulationId);
     return said(log, simulationId, "the simulation could not be read", cause);
   }
-  if (pull === undefined) return;
+  if (pull === undefined) {
+    state.collecting.delete(simulationId);
+    return;
+  }
 
   const calls = pollRetellSimulationCall(
     pull.apiKey,
@@ -112,9 +173,27 @@ export async function pullRetellSimulationRecord(
       },
       options.now ?? Date.now(),
     );
-    await fileSimulationEvidence([
-      { standing: pull.standing, emitter: "agent", spans: normalised.spans },
+    const fileEvidence = options.fileEvidence ?? fileSimulationEvidence;
+    const roots = normalised.spans.filter(
+      (span) => span.kind === "conversation" && span.parentSpanId === "",
+    );
+    const children = normalised.spans.filter((span) => !roots.includes(span));
+    const acceptedChildren = await fileEvidence([
+      { standing: pull.standing, emitter: "agent", spans: children },
     ]);
+    if (
+      acceptedChildren.accepted !== children.length ||
+      acceptedChildren.refused.length > 0
+    ) {
+      throw new Error("the complete Retell record was refused by evidence ingestion");
+    }
+    const acceptedRoots = await fileEvidence([
+      { standing: pull.standing, emitter: "agent", spans: roots },
+    ]);
+    if (
+      acceptedRoots.accepted !== roots.length ||
+      acceptedRoots.refused.length > 0
+    ) throw new Error("the Retell completion record was refused by evidence ingestion");
   };
 
   const accept = async (answer: RetrievedCall): Promise<boolean> => {
@@ -123,7 +202,13 @@ export async function pullRetellSimulationRecord(
         await file(answer.call);
       } catch (cause) {
         said(log, simulationId, "the record could not be filed", cause);
+        return false;
       }
+      rememberAccepted(
+        state,
+        simulationId,
+        pull.completionReceivedAt.getTime() + AGENT_POV_BOUND_SECONDS * 1_000,
+      );
       return true;
     }
     if (answer.kind !== "call") {
@@ -142,13 +227,15 @@ export async function pullRetellSimulationRecord(
     const first = await calls.next();
     if (!first.done && await accept(first.value)) {
       await calls.return();
+      state.collecting.delete(simulationId);
       return;
     }
   } catch (cause) {
+    state.collecting.delete(simulationId);
     return said(log, simulationId, "the first attempt failed", cause);
   }
 
-  void (async () => {
+  const retrying = (async () => {
     try {
       for await (const answer of calls) {
         if (await accept(answer)) return;
@@ -162,8 +249,34 @@ export async function pullRetellSimulationRecord(
       );
     } catch (cause) {
       said(log, simulationId, "a retry failed", cause);
+    } finally {
+      state.collecting.delete(simulationId);
     }
   })();
+  state.active.add(retrying);
+  void retrying.finally(() => state.active.delete(retrying));
+}
+
+export type RetellSimulationCollector = {
+  readonly pull: typeof pullRetellSimulationRecord;
+  settle(): Promise<void>;
+};
+
+/** One collector shared by a server's report route and recovery sweep. */
+export function createRetellSimulationCollector(): RetellSimulationCollector {
+  const state = collectorState();
+  return {
+    pull: (auth, id, reach, log, options) =>
+      trackedPull(state, auth, id, reach, log, options),
+    settle: async () => {
+      state.closing = true;
+      while (state.active.size > 0) {
+        await Promise.allSettled([...state.active]);
+      }
+      state.collecting.clear();
+      state.accepted.clear();
+    },
+  };
 }
 
 /**

@@ -67,8 +67,8 @@ function aVoiceAgent(worker: number) {
 /** The same shape, over chat, for the refusal that a chat has no audio. */
 const A_CHAT_AGENT = {
   agentPlatform: "retell",
-  connectionType: "retell_chat_api",
-  accessVariant: "retell_chat_api.api_key",
+  connectionType: "retell_text_mode",
+  accessVariant: "retell_text_mode.api_key",
   modality: "chat",
   config: { retellAgentId: "agent_in_retell_2" },
   credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },

@@ -30,6 +30,8 @@ import { openBrowser } from "./support/browser.ts";
 import {
   assertEvidencePage,
   assertPublicEvidence,
+  quickTunnelUrl,
+  startPublicTunnel,
   startFullPathWorkers,
   stopChild,
 } from "./support/simulation-proof.ts";
@@ -60,31 +62,23 @@ const LIVE_MODALITY = process.env["SIMULATION_E2E_MODALITY"] ?? "chat";
 const LIVE_MOCKS = process.env["SIMULATION_E2E_MOCKS"] !== "off";
 const LIVE_ACCESS = process.env["SIMULATION_E2E_ACCESS"] ?? "project_credentials";
 
-async function startPublicTunnel(localUrl: string): Promise<{
-  process: ChildProcess;
-  url: string;
-  output: () => string;
-}> {
-  const child = spawn(
-    process.env["SIMULATION_E2E_CLOUDFLARED"] ?? "cloudflared",
-    ["tunnel", "--no-autoupdate", "--url", localUrl],
-    { stdio: ["ignore", "pipe", "pipe"] },
-  );
-  let said = "";
-  child.stdout?.on("data", (piece: Buffer) => { said += piece.toString("utf8"); });
-  child.stderr?.on("data", (piece: Buffer) => { said += piece.toString("utf8"); });
-  const deadline = Date.now() + 60_000;
-  for (;;) {
-    const found = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/u.exec(said)?.[0];
-    if (found !== undefined) return { process: child, url: found, output: () => said };
-    if (child.exitCode !== null) throw new Error(`cloudflared exited with ${String(child.exitCode)}`);
-    if (Date.now() > deadline) throw new Error("cloudflared did not publish a URL within 60s");
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-}
+describe("quick tunnel output", () => {
+  it("does not mistake the Cloudflare API error address for a public tunnel", () => {
+    expect(quickTunnelUrl("request to https://api.trycloudflare.com failed")).toBeUndefined();
+    expect(quickTunnelUrl(
+      "Your quick Tunnel has been created! Visit it at:\n" +
+        "https://fixture-name.trycloudflare.com",
+    )).toBe("https://fixture-name.trycloudflare.com");
+  });
+});
 
-async function waitForTokenEndpoint(endpoint: string, auth: string): Promise<void> {
+async function waitForTokenEndpoint(
+  endpoint: string,
+  auth: string,
+  tunnelOutput: () => string,
+): Promise<void> {
   const deadline = Date.now() + 60_000;
+  let lastAnswer = "no response";
   for (;;) {
     try {
       const answer = await fetch(endpoint, {
@@ -102,11 +96,15 @@ async function waitForTokenEndpoint(endpoint: string, auth: string): Promise<voi
         }),
       });
       if (answer.ok) return;
-    } catch {
-      // Quick-tunnel DNS and edge routing can lag behind URL publication.
+      lastAnswer = `${String(answer.status)} ${await answer.text()}`;
+    } catch (fault) {
+      lastAnswer = fault instanceof Error ? fault.message : String(fault);
     }
     if (Date.now() > deadline) {
-      throw new Error("the public token endpoint did not become reachable within 60s");
+      throw new Error(
+        "the public token endpoint did not become reachable within 60s; " +
+          `last answer: ${lastAnswer}; cloudflared said:\n${tunnelOutput()}`,
+      );
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
@@ -1212,6 +1210,11 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       const expectedAvailability = LIVE_MOCKS
         ? "Tuesday is completely full. The next opening is Thursday morning."
         : "The real calendar has a Tuesday appointment at 9:40.";
+      const expectedAvailabilityResult = LIVE_MOCKS
+        ? LIVE_LANGUAGE === "python"
+          ? `{'answer': '${expectedAvailability}'}`
+          : { answer: expectedAvailability }
+        : expectedAvailability;
       const expectedBehavior = LIVE_MOCKS
         ? "reports that Tuesday is full and Thursday morning is the next opening after checking availability"
         : "reports that Tuesday has an appointment at 9:40 after checking availability";
@@ -1253,7 +1256,10 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         providerSaid += piece.toString("utf8");
       });
       let fullPathWorkers: ReturnType<typeof startFullPathWorkers> | undefined;
-      const tunnels: ChildProcess[] = [];
+      const tunnels: Array<{
+        process: ChildProcess;
+        output: () => string;
+      }> = [];
       let artifact: { file: string; sha256: string; version: string } | undefined;
       let runtime: { name: string; version: string } | undefined;
       let diagnosticEvidence: Record<string, unknown> | undefined;
@@ -1292,7 +1298,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           const livekitTunnel = await startPublicTunnel(
             ready.localLivekitUrl.replace("ws://", "http://"),
           );
-          tunnels.push(livekitTunnel.process);
+          tunnels.push(livekitTunnel);
           await writeFile(
             publicLivekitPath,
             livekitTunnel.url.replace("https://", "wss://"),
@@ -1300,9 +1306,9 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           );
           const localTokenEndpoint = new URL(ready.localTokenEndpoint);
           const tokenTunnel = await startPublicTunnel(localTokenEndpoint.origin);
-          tunnels.push(tokenTunnel.process);
+          tunnels.push(tokenTunnel);
           tokenEndpoint = `${tokenTunnel.url}${localTokenEndpoint.pathname}`;
-          await waitForTokenEndpoint(tokenEndpoint, tokenAuth);
+          await waitForTokenEndpoint(tokenEndpoint, tokenAuth, tokenTunnel.output);
         }
 
         const registered = await call("POST", "/v1/agents", {
@@ -1429,7 +1435,10 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           const recordingUrl = String(recording.body.url);
           const audio = await fetch(recordingUrl);
           expect(audio.status).toBe(200);
-          expect((await audio.arrayBuffer()).byteLength).toBeGreaterThan(0);
+          expect(audio.headers.get("content-type")).toContain("audio/wav");
+          const recordingBytes = new Uint8Array(await audio.arrayBuffer());
+          expect(recordingBytes.byteLength).toBeGreaterThan(44);
+          expect(new TextDecoder().decode(recordingBytes.slice(0, 4))).toBe("RIFF");
         }
         assertPublicEvidence(detail.body, {
           pov: "agent",
@@ -1440,7 +1449,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             {
               name: "check_availability",
               arguments: { day: "Tuesday" },
-              result: expectedAvailability,
+              result: expectedAvailabilityResult,
               ...(LIVE_MOCKS ? { provenance: "mocked" as const } : {}),
             },
             {
@@ -1472,6 +1481,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             humanIncludes: "tuesday",
             agentIncludes: LIVE_MOCKS ? "thursday" : "9:40",
             recording: LIVE_MODALITY === "voice",
+            sourceLabel: "Conversation recorded by the customer agent",
           });
         } finally {
           await browser.close();
@@ -1491,7 +1501,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
               agentPovComplete: true,
               recording: LIVE_MODALITY === "voice",
               grade: "passed",
-              browser: { human: true, agent: true, grade: true },
+              browser: { human: true, agent: true, source: true, grade: true },
             },
           }, null, 2) + "\n",
           { encoding: "utf8", mode: 0o600 },
@@ -1511,6 +1521,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         const safeProviderLog = [
           providerSaid,
           fullPathWorkers?.output() ?? "",
+          ...tunnels.map((tunnel) => tunnel.output()),
           ...workerLogs,
         ]
           .join("\n")
@@ -1546,7 +1557,10 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         throw failure;
       } finally {
         await fullPathWorkers?.stop();
-        await Promise.all([provider, ...tunnels].map(stopChild));
+        await Promise.all([
+          stopChild(provider),
+          ...tunnels.map((tunnel) => stopChild(tunnel.process)),
+        ]);
       }
     },
   );

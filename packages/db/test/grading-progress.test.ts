@@ -82,11 +82,11 @@ function simulationSpan(
     toolArguments: "",
     toolResult: "",
     providerCallId: "",
-    agentPlatform: "retell",
+    agentPlatform: "livekit",
     platformAgentId: "",
     platformAgentName: "",
     platformAgentVersion: "",
-    connectionType: "retell_chat_api",
+    connectionType: "livekit_room",
     runId: claim.runId,
     agentId: claim.agentId,
     agentVersionId: "",
@@ -183,15 +183,15 @@ afterAll(async () => {
 describe("run grading progress", () => {
   it("counts gradable completed traces and only terminal grading states", async () => {
     const created = await createAgent(auth, {
-      agentPlatform: "retell",
+      agentPlatform: "livekit",
       name: "Front desk",
       connection: {
-        agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        agentPlatform: "livekit",
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
         modality: "chat",
-        config: { retellAgentId: "agent_in_retell_progress" },
-        credentials: { apiKey: "retell-progress-secret-A1B2C3D4" },
+        config: { url: "wss://test.livekit.cloud", agentName: "agent_in_retell_progress" },
+        credentials: { apiKey: "retell-progress-secret-A1B2C3D4", apiSecret: "livekit-secret-A1B2C3D4WXYZ" },
       },
     });
     const firstPersona = await createPersona(auth, {
@@ -308,15 +308,15 @@ describe("run grading progress", () => {
 
   it("counts each current grade of a simulation against its frozen plan", async () => {
     const created = await createAgent(auth, {
-      agentPlatform: "retell",
+      agentPlatform: "livekit",
       name: "Tally desk",
       connection: {
-        agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        agentPlatform: "livekit",
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
         modality: "chat",
-        config: { retellAgentId: "agent_in_retell_tally" },
-        credentials: { apiKey: "retell-tally-secret-A1B2C3D4" },
+        config: { url: "wss://test.livekit.cloud", agentName: "agent_in_retell_tally" },
+        credentials: { apiKey: "retell-tally-secret-A1B2C3D4", apiSecret: "livekit-secret-A1B2C3D4WXYZ" },
       },
     });
     const callers = await Promise.all(
@@ -428,15 +428,15 @@ describe("run grading progress", () => {
     );
     try {
       const created = await createAgent(auth, {
-        agentPlatform: "retell",
+        agentPlatform: "livekit",
         name: "Ungraded desk",
         connection: {
-          agentPlatform: "retell",
-          connectionType: "retell_chat_api",
-          accessVariant: "retell_chat_api.api_key",
+          agentPlatform: "livekit",
+          connectionType: "livekit_room",
+          accessVariant: "livekit_room.project_credentials",
           modality: "chat",
-          config: { retellAgentId: "agent_in_retell_ungraded" },
-          credentials: { apiKey: "retell-ungraded-secret-A1B2C3D4" },
+          config: { url: "wss://test.livekit.cloud", agentName: "agent_in_retell_ungraded" },
+          credentials: { apiKey: "retell-ungraded-secret-A1B2C3D4", apiSecret: "livekit-secret-A1B2C3D4WXYZ" },
         },
       });
       const caller = await createPersona(auth, {
@@ -495,15 +495,15 @@ describe("run grading progress", () => {
 
   it("freezes the provider span time when it precedes the simulation clock", async () => {
     const created = await createAgent(auth, {
-      agentPlatform: "retell",
+      agentPlatform: "livekit",
       name: "Skewed provider clock",
       connection: {
-        agentPlatform: "retell",
-        connectionType: "retell_chat_api",
-        accessVariant: "retell_chat_api.api_key",
+        agentPlatform: "livekit",
+        connectionType: "livekit_room",
+        accessVariant: "livekit_room.project_credentials",
         modality: "chat",
-        config: { retellAgentId: "agent_in_retell_skewed_clock" },
-        credentials: { apiKey: "retell-skewed-clock-secret-A1B2C3D4" },
+        config: { url: "wss://test.livekit.cloud", agentName: "agent_in_retell_skewed_clock" },
+        credentials: { apiKey: "retell-skewed-clock-secret-A1B2C3D4", apiSecret: "livekit-secret-A1B2C3D4WXYZ" },
       },
     });
     const persona = await createPersona(auth, {

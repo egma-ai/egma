@@ -1,6 +1,6 @@
 {
   "contract_version": 5,
-  "simulation_id": "sim_01K5T38H2WD4E5RYP7VM3QKB6N",
+  "simulation_id": "sim_01K5T31D6PJ2A0YWQ8VE4NRK7M",
   "modality": "chat",
   "connection": {
     "agent_platform": "retell",
@@ -13,14 +13,18 @@
       "apiKey": "fixture-not-a-real-secret-0000000000000000"
     }
   },
-  "agent_version": "   ",
+  "agent_version": "latest",
+  "dynamic_variables": {
+    "account_id": "sim_01K5T31D6PJ2A0YWQ8VE4NRK7M",
+    "caller_name": ""
+  },
   "persona": {
     "name": "Margaret",
-    "personality": "Margaret, 68, retired schoolteacher. Polite but easily flustered.",
+    "personality": "Margaret, 68, retired schoolteacher. Polite but easily flustered; asks for things to be repeated and apologises for it.",
     "language": "en-US"
   },
   "scenario": {
-    "instructions": "Move next Tuesday's cleaning to Thursday the same week."
+    "instructions": "You booked a dental cleaning for next Tuesday and need to move it to Thursday the same week. You do not remember the exact time of the original appointment. Conclude once the new time has been read back to you."
   },
   "limits": {
     "max_duration_seconds": 600,

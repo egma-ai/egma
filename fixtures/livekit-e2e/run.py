@@ -62,6 +62,31 @@ def request_json(url: str, *, body: dict | None = None) -> tuple[int, dict]:
         raise RuntimeError(f"{url} answered {error.code}: {message[:500]}") from error
 
 
+def validate_fixture_spec(spec: dict) -> None:
+    """Refuse an invalid fixture before it can spend provider credit."""
+    checked = subprocess.run(
+        [
+            str(SIMULATOR_PYTHON),
+            "-c",
+            (
+                "import json,sys; "
+                "from egma_simulator.contract import validate_spec; "
+                "validate_spec(json.load(sys.stdin))"
+            ),
+        ],
+        cwd=ROOT / "apps/simulator",
+        input=json.dumps(spec),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if checked.returncode != 0:
+        raise RuntimeError(
+            "fixture simulation spec violates the contract:\n"
+            + redacted(checked.stderr[-4000:])
+        )
+
+
 def wait_http(url: str, process: ManagedProcess | None = None) -> None:
     deadline = time.monotonic() + START_SECONDS
     while time.monotonic() < deadline:
@@ -476,10 +501,12 @@ def simulation_spec(
         "mock_tools": [
             {
                 "tool_name": "check_availability",
-                "answer": (
-                    "Tuesday is completely full. The next opening is "
-                    "Thursday morning."
-                ),
+                "answer": {
+                    "answer": (
+                        "Tuesday is completely full. The next opening is "
+                        "Thursday morning."
+                    )
+                },
             }
         ],
         "job_dispatch_metadata": {"egma_e2e": f"{language}-{modality}-delayed"},
@@ -760,19 +787,16 @@ def run_workbench_case(
         agent_name = f"egma-{language}-{modality}-e2e"
         simulation_id = f"sim-livekit-{language}-{modality}-delayed"
         spec_path = directory / f"{language}-{modality}-spec.json"
-        spec_path.write_text(
-            json.dumps(
-                simulation_spec(
-                    simulation_id=simulation_id,
-                    agent_name=agent_name,
-                    livekit_url=livekit.url,
-                    openai_key=openai_key,
-                    modality=modality,
-                    language=language,
-                )
-            ),
-            encoding="utf-8",
+        spec = simulation_spec(
+            simulation_id=simulation_id,
+            agent_name=agent_name,
+            livekit_url=livekit.url,
+            openai_key=openai_key,
+            modality=modality,
+            language=language,
         )
+        validate_fixture_spec(spec)
+        spec_path.write_text(json.dumps(spec), encoding="utf-8")
         spec_path.chmod(0o600)
 
         workbench = start_process(
@@ -960,8 +984,13 @@ def run_workbench_case(
         tool_spans = [
             record for record in agent_spans if record["name"] == "function_tool"
         ]
-        expected_output = (
+        expected_answer = (
             "Tuesday is completely full. The next opening is Thursday morning."
+        )
+        expected_output = (
+            {"answer": expected_answer}
+            if language == "javascript"
+            else "{'answer': '" + expected_answer + "'}"
         )
         successful_mock_calls = [
             record

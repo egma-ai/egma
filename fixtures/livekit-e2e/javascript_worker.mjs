@@ -67,9 +67,10 @@ export default defineAgent({
 
     const agent = voice.Agent.create({
       instructions:
-        "You schedule dental appointments. Always call check_availability " +
-        "before you say whether Tuesday is free. Then call record_request " +
-        "with day Tuesday and kind reschedule before answering. Keep each reply short.",
+        "You schedule dental appointments. Call check_availability exactly once, " +
+        "with day Tuesday, before you say whether Tuesday is free. Never check a " +
+        "different day. Then call record_request with day Tuesday and kind " +
+        "reschedule exactly once before answering. Keep each reply short.",
       tools: [checkAvailability, recordRequest],
     });
     const session = new voice.AgentSession({

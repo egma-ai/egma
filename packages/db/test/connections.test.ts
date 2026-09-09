@@ -70,8 +70,8 @@ function retellConnection(overrides: Partial<NewConnection> = {}): NewConnection
   return {
     name: `retell-${newId("con").slice(-8)}`,
     agentPlatform: "retell",
-    connectionType: "retell_chat_api",
-    accessVariant: "retell_chat_api.api_key",
+    connectionType: "retell_text_mode",
+    accessVariant: "retell_text_mode.api_key",
     modality: "chat",
     config: { retellAgentId: "agent_in_retell_1" },
     credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
@@ -156,8 +156,8 @@ describe("adding a connection", () => {
     const added = await addConnection(actingAsAcme(), agentId, {
       name: "staging",
       agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
+      connectionType: "retell_text_mode",
+      accessVariant: "retell_text_mode.api_key",
       modality: "chat",
       environment: "staging",
       config: { retellAgentId: "agent_abc" },
@@ -172,9 +172,9 @@ describe("adding a connection", () => {
       agentId,
       name: "staging",
       agentPlatform: "retell",
-      connectionType: "retell_chat_api",
-      accessVariant: "retell_chat_api.api_key",
-      productLabel: "Retell chat",
+      connectionType: "retell_text_mode",
+      accessVariant: "retell_text_mode.api_key",
+      productLabel: "Retell text mode",
       modality: "chat",
       topology: "hosted-broker",
       environment: "staging",
@@ -213,8 +213,8 @@ describe("adding a connection", () => {
       retellConnection({ name: undefined }),
     );
 
-    expect(first?.name).toBe("retell_chat_api-1");
-    expect(second?.name).toBe("retell_chat_api-2");
+    expect(first?.name).toBe("retell_text_mode-1");
+    expect(second?.name).toBe("retell_text_mode-2");
   });
 
   it("is allowed to a member and refused to a viewer", async () => {
@@ -252,10 +252,10 @@ describe("which platform a connection belongs to", () => {
       retellConnection({ name: "chat" }),
     );
 
-    // The agent is unbound, and it does not matter: `retell_chat_api` reaches
+    // The agent is unbound, and it does not matter: `retell_text_mode` reaches
     // exactly one platform.
     expect(chat?.agentPlatform).toBe("retell");
-    expect(chat?.productLabel).toBe("Retell chat");
+    expect(chat?.productLabel).toBe("Retell text mode");
   });
 
   it("comes through the agent where the type spans platforms", async () => {
@@ -429,7 +429,7 @@ describe("which platform a connection belongs to", () => {
   it("lets a pinned type name its own platform whatever the agent is on", async () => {
     const agentId = await boundToRetell("Pinned wins");
 
-    // `retell_chat_api` reaches Retell by construction, so the agent is never
+    // `retell_text_mode` reaches Retell by construction, so the agent is never
     // consulted and there is nothing here to contradict.
     const chat = await addConnection(
       actingAsAcme(),
@@ -437,7 +437,7 @@ describe("which platform a connection belongs to", () => {
       retellConnection({ name: "chat" }),
     );
     expect(chat?.agentPlatform).toBe("retell");
-    expect(chat?.productLabel).toBe("Retell chat");
+    expect(chat?.productLabel).toBe("Retell text mode");
   });
 
   it("travels with the agent in the list read too", async () => {
@@ -465,14 +465,16 @@ describe("the agent's durable Retell modality", () => {
     const agentId = await agentNamed("Retell history");
     expect((await getAgent(actingAsAcme(), agentId))?.retellModality).toBeNull();
 
-    const chat = await addConnection(
-      actingAsAcme(),
-      agentId,
-      retellConnection({ name: "chat" }),
+    const chatId = newId("con");
+    await database.sql(
+      `insert into connection
+         (id, organization_id, project_id, agent_id, name, connection_type, access_variant, modality, topology, config)
+       values ($1, $2, $3, $4, 'retired chat', 'retell_chat_api', 'retell_chat_api.api_key', 'chat', 'hosted-broker', $5)`,
+      [chatId, acme.organization, acme.project, agentId, { retellAgentId: "agent_historical" }],
     );
     expect((await getAgent(actingAsAcme(), agentId))?.retellModality).toBe("chat");
 
-    await archiveConnection(actingAsAcme(), agentId, chat?.id ?? "");
+    await archiveConnection(actingAsAcme(), agentId, chatId);
     expect((await getAgent(actingAsAcme(), agentId))?.retellModality).toBe("chat");
 
     const voice = await addConnection(actingAsAcme(), agentId, {
@@ -1147,7 +1149,7 @@ describe("creating an agent with its first connection inline", () => {
       connection: retellConnection({ name: undefined }),
     });
 
-    expect(created.connection?.name).toBe("retell_chat_api-1");
+    expect(created.connection?.name).toBe("retell_text_mode-1");
   });
 
   it("leaves no agent behind when the connection payload is bad", async () => {

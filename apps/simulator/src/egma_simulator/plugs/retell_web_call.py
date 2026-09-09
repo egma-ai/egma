@@ -28,7 +28,7 @@ from ..media import MediaBackendError, VoiceMedia
 from ..media.livekit_room import URL_SCHEMES, LiveKitRoomBackend, RoomSettings
 from ..platform_logging import log_event
 from . import PlugError, named_version, quotable, rendered_variables
-from .retell import CREDENTIAL_KEYS, DEFAULT_BASE_URL
+from .retell_common import CREDENTIAL_KEYS, DEFAULT_BASE_URL
 
 logger = logging.getLogger(__name__)
 

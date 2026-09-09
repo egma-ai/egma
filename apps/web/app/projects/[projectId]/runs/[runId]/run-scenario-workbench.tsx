@@ -358,6 +358,26 @@ function ResultNotice({ evidence }: { readonly evidence: SimulationEvidence }) {
       </div>
     );
   }
+  if (evidence.evidenceError !== null && evidence.evidenceError !== undefined) {
+    return (
+      <div className="border border-s-4 border-border border-s-failure bg-surface-soft px-4 py-3 sm:px-5" role="alert">
+        <p className="m-0 text-sm font-medium text-foreground">Evidence collection did not finish</p>
+        <p className="m-0 mt-1 text-sm text-muted-foreground">
+          {evidence.evidenceError.message}
+        </p>
+      </div>
+    );
+  }
+  if (waitingForSimulationTranscript(evidence)) {
+    return (
+      <div className="border border-s-4 border-border border-s-brand bg-selected px-4 py-3 sm:px-5" role="status">
+        <p className="m-0 text-sm font-medium text-foreground">Collecting agent transcript</p>
+        <p className="m-0 mt-1 text-sm text-muted-foreground">
+          Waiting for the agent’s complete transcript before grading. If it cannot be collected, this simulation will show an evidence error.
+        </p>
+      </div>
+    );
+  }
   if (evidence.gradingState === "pending" || evidence.gradingState === "running") {
     return (
       <div className="border border-s-[3px] border-border border-s-brand bg-selected px-5 py-3 max-[40rem]:px-4" role="status">

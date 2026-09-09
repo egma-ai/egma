@@ -58,6 +58,8 @@ export type OrphanSweepOptions = {
   >;
   /** Reconcile hosted voice compute on the same cadence. */
   readonly wakeVoiceFleet?: (() => void) | undefined;
+  /** Resume Retell simulation collection from durable simulation rows. */
+  readonly recoverRetell?: (() => Promise<void>) | undefined;
 };
 
 export type OrphanSweep = {
@@ -109,19 +111,26 @@ export function startOrphanSweep(options: OrphanSweepOptions): OrphanSweep {
       );
     }
 
-    // **Its own attempt, because these are two duties.** They share a tick to
+    try {
+      await options.recoverRetell?.();
+    } catch (fault) {
+      options.log.error(
+        { err: fault },
+        "pending Retell simulation evidence could not be recovered; it stays pending until a later sweep",
+      );
+    }
+
+    // **Its own attempt, because these are separate duties.** They share a tick to
     // save a timer, not because either depends on the other — so one silence
     // failing to be read must never leave the other unread.
     try {
-      // A conversation graded without the agent's own account of it is news:
-      // the record says so, and an operator reading this line knows an
-      // exporter or a pull is not delivering. The rest of what a tick settles
-      // is a handoff the drain began and did not finish, which is worth the
-      // same line and a different number.
+      // Missing final agent evidence is news: the record now contains an
+      // evidence error instead of asking a model to grade an incomplete
+      // conversation. A healthy backstop handoff is counted separately.
       const bounded = await settleAgentPovBound();
       if (bounded.length > 0) {
-        const without = bounded.filter(
-          (simulation) => !simulation.agentPovFiled,
+        const evidenceErrors = bounded.filter(
+          (simulation) => simulation.outcome === "evidence_error",
         ).length;
         options.log.info(
           {
@@ -129,7 +138,7 @@ export function startOrphanSweep(options: OrphanSweepOptions): OrphanSweep {
             runIds: [...new Set(bounded.map((simulation) => simulation.runId))],
           },
           `settled the agent-POV wait for ${bounded.length} simulation(s), ` +
-            `${without} of them graded without one`,
+            `${evidenceErrors} of them filed an evidence collection error`,
         );
       }
     } catch (fault) {

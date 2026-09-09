@@ -1131,7 +1131,7 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
    * on an interval is the API's, and what is proved here is the seam's own
    * decision.
    */
-  it("stops waiting at the bound, grades anyway, and says the POV is incomplete", async () => {
+  it("stops waiting at the bound with an evidence error and no model work", async () => {
     const room = "egma-grading-bound-1";
     const landed = await aLandedSimulation(acme, "bound", room, {
       ...A_LIVEKIT_AGENT,
@@ -1142,24 +1142,106 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
 
     advancePastEvidenceWait();
     const settled = await settleSimulationsPastTheAgentPovBound();
-    expect(settled.map((one) => one.id)).toContain(landed.simulationId);
-    expect(
-      settled.find((one) => one.id === landed.simulationId)?.agentPovFiled,
-    ).toBe(false);
+    expect(settled).toContainEqual({
+      id: landed.simulationId,
+      runId: landed.runId,
+      agentPovFiled: false,
+      outcome: "evidence_error",
+    });
 
     const job = await getGradingJobForTrace(auth, landed.traceId);
-    expect(job?.traceId).toBe(landed.traceId);
-    // **And the read says so**, which is the half a reader needs: a view that
-    // shows the agent's POV would otherwise show whatever fragment arrived as
-    // if it were the whole conversation.
-    expect(await agentPovIncompleteOf(landed.simulationId)).toBe(true);
+    expect(job).toMatchObject({
+      traceId: landed.traceId,
+      status: "abandoned",
+      attempts: 0,
+      lastError: "evidence_collection_error",
+    });
+    const read = await api.app.inject({
+      method: "GET",
+      url: `/v1/simulations/${landed.simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` },
+    });
+    expect(read.statusCode, read.body).toBe(200);
+    expect(read.json()).toMatchObject({
+      gradingState: "error",
+      agentPovIncomplete: true,
+      evidenceError: {
+        error: "evidence_collection_error",
+        message: expect.stringContaining("complete evidence"),
+      },
+      grades: [],
+      gradeHistory: [],
+    });
 
-    // **And it settles nothing a second time.** The queue row is the record of
-    // grading having been asked for, so a later tick reads it and passes the
-    // row over — which is what keeps one conversation to one handoff however
-    // many replicas are reading the clock.
+    // The terminal Postgres row is the durable idempotency record, so another
+    // replica or a restarted sweep cannot create work or another error.
     const again = await settleSimulationsPastTheAgentPovBound();
     expect(again.map((one) => one.id)).not.toContain(landed.simulationId);
+    expect((await getGradingJobForTrace(auth, landed.traceId))?.id).toBe(job?.id);
+  }, 120_000);
+
+  it("ends the evidence wait at the bound when no graders were selected", async () => {
+    const room = "egma-no-graders-bound-1";
+    const landed = await aLandedSimulation(
+      acme,
+      "no-graders-bound",
+      room,
+      {
+        ...A_LIVEKIT_AGENT,
+        config: {
+          url: "wss://acme.livekit.cloud",
+          agentName: "front-desk-no-graders",
+        },
+      },
+      {
+        startedAt: CONVERSATION_STARTED_AT,
+        endedAt: CONVERSATION_ENDED_AT,
+      },
+      [],
+      false,
+    );
+    const auth = contextFor(acme, "member");
+    // Historical and explicitly ungraded runs can have no selected entries.
+    // Preserve the real frozen plan shape and empty only this test's selection.
+    await api.database.sql("alter table run disable trigger run_grading_plan_guard");
+    try {
+      await api.database.sql(
+        `update run
+         set grading_plan = jsonb_set(grading_plan, '{groups,0,items}', '[]'::jsonb)
+         where id = $1`,
+        [landed.runId],
+      );
+    } finally {
+      await api.database.sql("alter table run enable trigger run_grading_plan_guard");
+    }
+    await completeSimulation(auth, landed.simulationId, CONDUCTOR, {
+      endingReason: "agent_ended",
+      turnCount: 2,
+      providerReference: room,
+      startedAt: CONVERSATION_STARTED_AT,
+      endedAt: CONVERSATION_ENDED_AT,
+    });
+
+    advancePastEvidenceWait();
+    await settleSimulationsPastTheAgentPovBound();
+
+    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
+    const read = await api.app.inject({
+      method: "GET",
+      url: `/v1/simulations/${landed.simulationId}`,
+      headers: { authorization: `Bearer ${acmeKey}` },
+    });
+    expect(read.statusCode, read.body).toBe(200);
+    expect(read.json()).toMatchObject({
+      gradingState: "not_requested",
+      agentPovIncomplete: true,
+      evidenceError: {
+        error: "evidence_collection_error",
+        message: expect.stringContaining("complete evidence"),
+      },
+      grades: [],
+      gradeHistory: [],
+    });
   }, 120_000);
 
   /**
@@ -1867,8 +1949,8 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
       name: `Retell terminal ${label}`,
       connection: {
         agentPlatform: "retell",
-        connectionType: webCall ? "retell_web_call" : "retell_chat_api",
-        accessVariant: webCall ? "retell_web_call.api_key" : "retell_chat_api.api_key",
+        connectionType: webCall ? "retell_web_call" : "retell_text_mode",
+        accessVariant: webCall ? "retell_web_call.api_key" : "retell_text_mode.api_key",
         modality: webCall ? "voice" : "chat",
         config: { retellAgentId: "agent_front_desk" },
         credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
