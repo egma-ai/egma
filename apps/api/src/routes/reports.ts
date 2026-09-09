@@ -139,6 +139,9 @@ function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
   if (facts === undefined) return {};
   return {
     turnCount: facts.turn_count,
+    ...(facts.evidence_error === "evidence_collection_error"
+      ? { evidenceError: facts.evidence_error }
+      : {}),
     ...(facts.provider_reference === null
       ? {}
       : { providerReference: facts.provider_reference }),
@@ -595,9 +598,6 @@ async function applyLanding(
   if (event.status === "completed") {
     return completeSimulation(standing.auth, standing.id, conductor, {
       endingReason: ending as CompletedEndingReason,
-      ...(event.facts?.evidence_error === "evidence_collection_error"
-        ? { evidenceError: event.facts.evidence_error }
-        : {}),
       ...facts,
     });
   }

@@ -28,6 +28,7 @@ from egma_simulator.speech import SCRIPTED_PAIR
         ("chat", "cleanup_failed"),
         ("chat", "evidence_cleanup_failed"),
         ("voice", "completed"),
+        ("voice", "recording_failed"),
         ("voice", "failed"),
         ("voice", "canceled"),
         ("chat", "assembly_failed"),
@@ -71,6 +72,8 @@ async def test_execution_end_precedes_cleanup_and_evidence_delivery(
             nonlocal seconds
             seconds = 30
             await asyncio.sleep(0)
+            if outcome == "recording_failed":
+                raise RuntimeError("recording upload failed")
             return await super().write(key, data)
 
     class ControlPlane:
@@ -149,7 +152,13 @@ async def test_execution_end_precedes_cleanup_and_evidence_delivery(
         "failed"
         if outcome == "assembly_failed"
         else "completed"
-        if outcome in ("setup_delayed", "cleanup_failed", "evidence_cleanup_failed")
+        if outcome
+        in (
+            "setup_delayed",
+            "cleanup_failed",
+            "evidence_cleanup_failed",
+            "recording_failed",
+        )
         else outcome
     )
     if outcome == "assembly_failed":
@@ -165,7 +174,7 @@ async def test_execution_end_precedes_cleanup_and_evidence_delivery(
         assert terminal["facts"]["started_at"] == "2026-09-08T00:00:00.000000Z"
     assert terminal["facts"]["ended_at"] == "2026-09-08T00:00:10.000000Z"
     assert terminal["at"] == "2026-09-08T00:02:00.000000Z"
-    if outcome == "evidence_cleanup_failed":
+    if outcome in ("evidence_cleanup_failed", "recording_failed"):
         assert terminal["facts"]["evidence_error"] == "evidence_collection_error"
     if modality == "voice" and outcome == "completed":
         assert terminal["facts"]["audio"] is not None

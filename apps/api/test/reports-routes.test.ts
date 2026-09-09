@@ -646,7 +646,17 @@ describe("the lifecycle lands", () => {
           traceId,
           runId,
         }),
-      ).toEqual({ kind: "waiting", for: "evidence" });
+      ).toEqual({ kind: "evidence_error" });
+      const refusedRegrade = await ask(
+        api.app,
+        "POST",
+        `/v1/simulations/${simulationId}/regrade`,
+        key,
+      );
+      expect(refusedRegrade.statusCode).toBe(422);
+      expect(refusedRegrade.body.message).toContain(
+        "could not collect the complete evidence",
+      );
       expect(await gradingJobsFor(simulationId)).toBe(1);
     },
   );
@@ -844,7 +854,10 @@ describe("the lifecycle lands", () => {
     );
 
     const answered = await report(simulationId, [
-      terminalEvent("failed", "error", { turn_count: 3 }),
+      terminalEvent("failed", "error", {
+        turn_count: 3,
+        evidence_error: "evidence_collection_error",
+      }),
     ]);
     expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
 
@@ -854,8 +867,8 @@ describe("the lifecycle lands", () => {
     expect(row?.executionFailure).toBe("the platform refused the exchange");
     expect(row?.turnCount).toBe(3);
 
-    // No completed trace exists, so the execution failure creates no grade job.
-    expect(await gradingJobsFor(simulationId)).toBe(0);
+    // The terminal job records evidence failure; it is never executable grading work.
+    expect(await gradingJobsFor(simulationId)).toBe(1);
     const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
     expect(header.body.status).toBe("completed");
     expect(header.body.failedCount).toBe(1);
@@ -881,6 +894,11 @@ describe("the lifecycle lands", () => {
       key,
     );
     expect(detail.body.executionFailure).toBe("the platform refused the exchange");
+    expect(detail.body).toMatchObject({
+      status: "failed",
+      gradingState: "not_requested",
+      evidenceError: { error: "evidence_collection_error" },
+    });
     const events = await ask(
       api.app,
       "GET",
@@ -936,7 +954,10 @@ describe("the lifecycle lands", () => {
     expect(asked.statusCode, JSON.stringify(asked.body)).toBe(200);
 
     const answered = await report(simulationId, [
-      terminalEvent("canceled", "canceled", { turn_count: 6 }),
+      terminalEvent("canceled", "canceled", {
+        turn_count: 6,
+        evidence_error: "evidence_collection_error",
+      }),
     ]);
     expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
 
@@ -946,8 +967,19 @@ describe("the lifecycle lands", () => {
     expect(row?.endingReason).toBeNull();
     expect(row?.turnCount).toBe(6);
 
-    // A canceled conversation is not graded, so no grading work is created.
-    expect(await gradingJobsFor(simulationId)).toBe(0);
+    // This is a terminal evidence-error record, not executable grading work.
+    expect(await gradingJobsFor(simulationId)).toBe(1);
+    const detail = await ask(
+      api.app,
+      "GET",
+      `/v1/simulations/${simulationId}`,
+      key,
+    );
+    expect(detail.body).toMatchObject({
+      status: "canceled",
+      gradingState: "not_requested",
+      evidenceError: { error: "evidence_collection_error" },
+    });
     const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
     expect(header.body.status).toBe("canceled");
     expect(header.body.canceledCount).toBe(1);

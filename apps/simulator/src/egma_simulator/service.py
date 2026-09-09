@@ -346,6 +346,11 @@ class RunningSimulation:
                         and conducting.provider_reference is not None
                     ):
                         reporter.provider_reference = conducting.provider_reference
+                    if (
+                        assembled.conductor is not None
+                        and assembled.conductor.evidence_error is not None
+                    ):
+                        reporter.evidence_error = assembled.conductor.evidence_error
                     # Conducting closed the pipeline on its way out, whatever
                     # happened, so whatever was recorded is measured by now.
                     recording = assembled.recording

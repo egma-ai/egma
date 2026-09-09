@@ -169,12 +169,15 @@ async def observe(
     )
 
 
+@pytest.mark.parametrize("late_stop", ["request_cancel", "trip_duration_limit"])
 async def test_voice_cleanup_does_not_replace_a_normal_ending(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, late_stop: str
 ):
     original_close = VoiceConductor.close
+    controls = ConversationControls()
 
     async def close_then_fail(conductor: VoiceConductor) -> None:
+        getattr(controls, late_stop)()
         await original_close(conductor)
         raise RuntimeError("voice resource cleanup failed")
 
@@ -183,10 +186,38 @@ async def test_voice_cleanup_does_not_replace_a_normal_ending(
         tmp_path,
         scenario="Confirm the greeting, then finish.",
         replies=["Confirmed."],
+        controls=controls,
     )
 
     assert observed.conducted.status == "completed"
     assert observed.conducted.ending == "persona_concluded"
+
+
+async def test_voice_leg_cleanup_failure_does_not_skip_recording(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    spec = spec_for()
+    assembled = assemble(
+        spec,
+        blobs=FilesystemBlobStore(tmp_path),
+        speech=SCRIPTED_PAIR,
+    )
+    conductor = assembled.conductor
+    assert conductor is not None
+    recording_written = asyncio.Event()
+
+    async def legs_fail() -> None:
+        raise RuntimeError("speech legs failed to close")
+
+    async def write_recording() -> None:
+        recording_written.set()
+
+    monkeypatch.setattr(conductor._legs, "aclose", legs_fail)
+    monkeypatch.setattr(conductor, "_write_recording", write_recording)
+
+    with pytest.raises(RuntimeError, match="speech legs failed to close"):
+        await conductor.close()
+    assert recording_written.is_set()
 
 
 # -- The codec ---------------------------------------------------------------
@@ -913,6 +944,35 @@ class _NeverAnswers:
     async def close(self) -> None:
         self.closed = True
         self._transport.stop()
+
+
+async def test_startup_duration_failure_wins_over_cleanup_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    class StartupFailure(_NeverAnswers):
+        def startup_duration_failure(self, seconds: float) -> str:
+            return f"the agent did not join within {seconds}s"
+
+    spec = spec_for(max_duration_seconds=7)
+    controls = ConversationControls()
+    line = StartupFailure(controls.trip_duration_limit)
+    conductor = VoiceConductor(
+        connection=line,
+        voice=voice_from_models(spec.models),
+        blobs=FilesystemBlobStore(tmp_path),
+        recording_key=f"{spec.simulation_id}/dual-channel.wav",
+    )
+    original_close = conductor.close
+
+    async def close_then_fail() -> None:
+        await original_close()
+        raise RuntimeError("cleanup failed too")
+
+    monkeypatch.setattr(conductor, "close", close_then_fail)
+    with pytest.raises(PlugError, match="agent did not join within 7s"):
+        await observe(
+            conductor, Assembled(conductor=conductor), spec, controls=controls
+        )
 
 
 async def stopped_while_opening(

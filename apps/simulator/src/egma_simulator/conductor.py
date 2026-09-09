@@ -1122,6 +1122,7 @@ class VoiceConductor:
         self._closed = False
 
         self.audio: AudioFacts | None = None
+        self.evidence_error: str | None = None
 
     @property
     def provider_reference(self) -> str | None:
@@ -1178,15 +1179,16 @@ class VoiceConductor:
             name=f"{name}:watchdog",
         )
         startup_finished = False
-        execution_finished = False
+        conducted: Conducted | None = None
         execution_fault: BaseException | None = None
         try:
-            await self._open(name)
-            startup_finished = True
-            await self._run()
-            execution_finished = True
-        except _Stopped:
-            execution_finished = True
+            try:
+                await self._open(name)
+                startup_finished = True
+                await self._run()
+            except _Stopped:
+                pass
+            conducted = self._result(startup_finished, max_duration_seconds, max_turns)
         except BaseException as fault:
             execution_fault = fault
             raise
@@ -1212,9 +1214,16 @@ class VoiceConductor:
                     },
                     exc_info=True,
                 )
-                if not execution_finished and execution_fault is None:
+                if conducted is None and execution_fault is None:
                     raise
 
+        assert conducted is not None
+        return conducted
+
+    def _result(
+        self, startup_finished: bool, max_duration_seconds: float, max_turns: int
+    ) -> Conducted:
+        controls = self._controls
         if controls.cause == CANCEL_DIRECTIVE:
             return Conducted(
                 status="canceled",
@@ -1377,6 +1386,7 @@ class VoiceConductor:
         if self._closed:
             return
         self._closed = True
+        cleanup_fault: Exception | None = None
         try:
             await self._end_pipeline()
         finally:
@@ -1384,8 +1394,13 @@ class VoiceConductor:
                 await self._connection.close()
             except Exception:
                 logger.exception("closing the voice connection failed")
-            await self._legs.aclose()
-        await self._write_recording()
+            try:
+                await self._legs.aclose()
+            except Exception as fault:
+                cleanup_fault = fault
+            await self._write_recording()
+        if cleanup_fault is not None:
+            raise cleanup_fault
 
     async def _end_pipeline(self) -> None:
         if self._running is None or self._worker is None:
@@ -1416,6 +1431,7 @@ class VoiceConductor:
                 ),
             )
         except Exception as failure:
+            self.evidence_error = "evidence_collection_error"
             log_event(
                 logger,
                 logging.ERROR,

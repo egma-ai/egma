@@ -216,11 +216,11 @@ export type SimulationSummaryFacts = {
   readonly recordingReference?: string | undefined;
   readonly startedAt?: Date | undefined;
   readonly endedAt?: Date | undefined;
+  readonly evidenceError?: "evidence_collection_error" | undefined;
 };
 
 export type SimulationReport = SimulationSummaryFacts & {
   readonly endingReason: CompletedEndingReason;
-  readonly evidenceError?: "evidence_collection_error" | undefined;
 };
 
 export type SimulationFailure = SimulationSummaryFacts & {
@@ -2753,6 +2753,19 @@ async function landSimulation(
 
     if (row === undefined) return undefined;
 
+    if (landing.evidenceError === "evidence_collection_error") {
+      const traceId = traceIdOfSimulation(row.id);
+      if (traceId !== undefined && row.startedAt !== null) {
+        await recordSimulationEvidenceErrorIn(tx, auth, {
+          simulationId: row.id,
+          traceId,
+          traceStartedAt: row.startedAt,
+          runId: row.runId,
+          error: SIMULATOR_EVIDENCE_DELIVERY_ERROR,
+        });
+      }
+    }
+
     if (row.status === "completed") {
       const traceId = traceIdOfSimulation(row.id);
       if (traceId === undefined || row.startedAt === null) {
@@ -2767,15 +2780,7 @@ async function landSimulation(
         throw new Error(`completed simulation ${row.id} has no grading plan`);
       }
       if (hasPlannedGraders) {
-        if (landing.evidenceError === "evidence_collection_error") {
-          await recordSimulationEvidenceErrorIn(tx, auth, {
-            simulationId: row.id,
-            traceId,
-            traceStartedAt: row.startedAt,
-            runId: row.runId,
-            error: SIMULATOR_EVIDENCE_DELIVERY_ERROR,
-          });
-        } else {
+        if (landing.evidenceError !== "evidence_collection_error") {
           // Expect an agent POV only when the run's frozen connection type supports it
           // and the simulation reported a provider reference. Evidence need not have arrived
           // yet; the readiness check applies the wait bound (ADR-0024 §6).
@@ -2900,6 +2905,7 @@ export async function failSimulation(
       executionFailure: executionFailureWrite(failure.message),
       ...summaryFactsWrite(failure),
     },
+    evidenceError: failure.evidenceError,
   });
 }
 
@@ -3000,6 +3006,7 @@ export async function markSimulationCanceled(
   return landSimulation(auth, id, claimant, {
     from: ["claimed", "running"],
     write: { status: "canceled", ...summaryFactsWrite(facts) },
+    evidenceError: facts.evidenceError,
     onlyWhere: isNotNull(simulation.cancelRequestedAt),
   });
 }

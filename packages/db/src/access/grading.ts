@@ -101,6 +101,7 @@ export type GradingRequestResult =
 export type RegradeTraceResult =
   | { readonly kind: "not_requested" }
   | { readonly kind: "waiting"; readonly for: "evidence" }
+  | { readonly kind: "evidence_error" }
   | {
       readonly kind: "queued";
       readonly jobId: string;
@@ -1712,7 +1713,18 @@ export async function readTraceGrading(
   // A production trace can be visible before its explicit end/evidence-ready
   // handshake freezes selection. That is pending, not an empty decision.
   if (entries === undefined) {
-    if (ref.source === "simulation") return undefined;
+    if (ref.source === "simulation") {
+      return evidenceError === null
+        ? undefined
+        : {
+            workBlock,
+            evidenceError,
+            state: "not_requested",
+            history: [],
+            current: [],
+            combinedScore: null,
+          };
+    }
     return {
       workBlock,
       evidenceError,
@@ -2142,7 +2154,7 @@ export async function regradeTrace(
       };
     }
     if (existing?.lastError === SIMULATOR_EVIDENCE_DELIVERY_ERROR) {
-      return { kind: "waiting", for: "evidence" };
+      return { kind: "evidence_error" };
     }
     if (ref.source === "simulation") {
       const simulationId = simulationIdOfTrace(ref.traceId);
