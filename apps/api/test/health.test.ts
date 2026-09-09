@@ -197,38 +197,49 @@ describe("configuration", () => {
     })).toThrow(/EGMA_SPEECH_PROVIDER_CONCURRENCY_CAPS/);
   });
 
-  it("loads the AWS voice fleet only when complete hosted settings name it", () => {
+  it("loads Daytona only when complete hosted settings name it", () => {
     expect(loadConfig(enough).voiceFleet).toBeUndefined();
-    expect(loadConfig({
+    const environment = {
       ...enough,
-      EGMA_VOICE_FLEET_LAUNCHER: "aws-ecs",
-      EGMA_VOICE_FLEET_CLUSTER: "egma-production",
-      EGMA_VOICE_FLEET_TASK_DEFINITION: "egma-voice",
-      EGMA_VOICE_FLEET_SUBNETS: '["subnet-a","subnet-b"]',
-      EGMA_VOICE_FLEET_SECURITY_GROUPS: '["sg-egma"]',
-    }).voiceFleet).toEqual({
-      kind: "aws-ecs",
-      cluster: "egma-production",
-      taskDefinition: "egma-voice",
-      containerName: "simulator",
-      subnets: ["subnet-a", "subnet-b"],
-      securityGroups: ["sg-egma"],
+      EGMA_BASE_URL: "https://egma.example",
+      EGMA_RELEASE_SHA: "a".repeat(40),
+      EGMA_VOICE_FLEET_LAUNCHER: "daytona",
+      DAYTONA_API_KEY: "daytona-key",
+      DAYTONA_SNAPSHOT_ID: "snapshot-id",
+      DAYTONA_SERVICE_TOKEN_SECRET: "service-token-secret",
+      DAYTONA_SANDBOX_SECRETS: '{"EGMA_OPENAI_API_KEY":"openai-secret","EGMA_DEEPGRAM_API_KEY":"deepgram-secret","EGMA_CARTESIA_API_KEY":"cartesia-secret"}',
+      EGMA_SIMULATOR_LIVEKIT_URL: "wss://livekit.example",
+      EGMA_SIMULATOR_LIVEKIT_API_KEY: "livekit-key",
+      EGMA_SIMULATOR_LIVEKIT_API_SECRET: "livekit-secret",
+      EGMA_SIMULATOR_S3_ENDPOINT: "https://s3.example",
+      EGMA_SIMULATOR_S3_BUCKET: "recordings",
+      EGMA_SIMULATOR_S3_REGION: "us-east-1",
+      EGMA_DAYTONA_RECORDING_ROLE_ARN: "arn:aws:iam::123:role/recording",
+      EGMA_DAYTONA_RECORDING_BUCKET_ARN: "arn:aws:s3:::recordings",
+    };
+    expect(loadConfig(environment).voiceFleet).toMatchObject({
+      kind: "daytona",
+      snapshot: "snapshot-id",
+      releaseSha: "a".repeat(40),
+      ttlMinutes: 30,
+      providerSecrets: {
+        EGMA_OPENAI_API_KEY: "openai-secret",
+        EGMA_DEEPGRAM_API_KEY: "deepgram-secret",
+        EGMA_CARTESIA_API_KEY: "cartesia-secret",
+      },
     });
   });
 
-  it("rejects incomplete or malformed AWS voice fleet settings", () => {
+  it("rejects incomplete or malformed Daytona settings", () => {
     expect(() => loadConfig({
       ...enough,
-      EGMA_VOICE_FLEET_LAUNCHER: "aws-ecs",
-    })).toThrow("EGMA_VOICE_FLEET_CLUSTER");
+      EGMA_VOICE_FLEET_LAUNCHER: "daytona",
+    })).toThrow("EGMA_RELEASE_SHA");
     expect(() => loadConfig({
       ...enough,
-      EGMA_VOICE_FLEET_LAUNCHER: "aws-ecs",
-      EGMA_VOICE_FLEET_CLUSTER: "egma-production",
-      EGMA_VOICE_FLEET_TASK_DEFINITION: "egma-voice",
-      EGMA_VOICE_FLEET_SUBNETS: "subnet-a,subnet-b",
-      EGMA_VOICE_FLEET_SECURITY_GROUPS: '["sg-egma"]',
-    })).toThrow("EGMA_VOICE_FLEET_SUBNETS must be a JSON array");
+      EGMA_RELEASE_SHA: "a".repeat(40),
+      EGMA_VOICE_FLEET_LAUNCHER: "other",
+    })).toThrow("does not support other");
   });
 
   it("accepts only an immutable commit as the release identity", () => {

@@ -26,7 +26,7 @@ bare simulator and a container use the same limit unless an operator supplies
 ``EGMA_SIMULATOR_CAPACITY`` explicitly.
 """
 
-SIMULATOR_MODES = ("persistent", "one-shot", "standby")
+SIMULATOR_MODES = ("persistent", "one-shot")
 SIMULATION_MODALITIES = ("voice", "chat")
 
 STT_PROVIDERS = ("scripted", "deepgram", "openai_realtime", "cartesia_manual")
@@ -185,6 +185,9 @@ class MediaSettings:
     livekit_url: str | None = None
     livekit_api_key: str | None = None
     livekit_api_secret: str | None = field(default=None, repr=False)
+    livekit_room_token: str | None = field(default=None, repr=False)
+    livekit_api_token: str | None = field(default=None, repr=False)
+    livekit_room_name: str | None = None
 
     trunk_address: str | None = None
     trunk_number: str | None = None
@@ -197,7 +200,12 @@ class MediaSettings:
         ask, so a third one arriving cannot fall out of the scrubbing."""
         return tuple(
             secret
-            for secret in (self.livekit_api_secret, self.trunk_password)
+            for secret in (
+                self.livekit_api_secret,
+                self.livekit_room_token,
+                self.livekit_api_token,
+                self.trunk_password,
+            )
             if secret is not None
         )
 
@@ -228,13 +236,36 @@ class MediaSettings:
         if named != "livekit":
             return cls(backend=named)
 
+        room_token = _text("EGMA_SIMULATOR_LIVEKIT_ROOM_TOKEN")
+        api_token = _text("EGMA_SIMULATOR_LIVEKIT_API_TOKEN")
+        room_name = _text("EGMA_SIMULATOR_LIVEKIT_ROOM_NAME")
+        using_tokens = any(
+            value is not None for value in (room_token, api_token, room_name)
+        )
         return cls(
             backend=named,
             livekit_url=_needed("EGMA_SIMULATOR_LIVEKIT_URL", because=because),
-            livekit_api_key=_needed("EGMA_SIMULATOR_LIVEKIT_API_KEY", because=because),
-            livekit_api_secret=_needed(
-                "EGMA_SIMULATOR_LIVEKIT_API_SECRET", because=because
-            ),
+            livekit_api_key=None
+            if using_tokens
+            else _needed("EGMA_SIMULATOR_LIVEKIT_API_KEY", because=because),
+            livekit_api_secret=None
+            if using_tokens
+            else _needed("EGMA_SIMULATOR_LIVEKIT_API_SECRET", because=because),
+            livekit_room_token=_needed(
+                "EGMA_SIMULATOR_LIVEKIT_ROOM_TOKEN", because=because
+            )
+            if using_tokens
+            else None,
+            livekit_api_token=_needed(
+                "EGMA_SIMULATOR_LIVEKIT_API_TOKEN", because=because
+            )
+            if using_tokens
+            else None,
+            livekit_room_name=_needed(
+                "EGMA_SIMULATOR_LIVEKIT_ROOM_NAME", because=because
+            )
+            if using_tokens
+            else None,
         )
 
     @classmethod
@@ -258,6 +289,9 @@ class MediaSettings:
             livekit_url=bridge.livekit_url,
             livekit_api_key=bridge.livekit_api_key,
             livekit_api_secret=bridge.livekit_api_secret,
+            livekit_room_token=bridge.livekit_room_token,
+            livekit_api_token=bridge.livekit_api_token,
+            livekit_room_name=bridge.livekit_room_name,
             trunk_address=carrier.trunk_address,
             trunk_number=carrier.trunk_number,
             trunk_username=carrier.trunk_username,
@@ -280,15 +314,25 @@ class MediaSettings:
             )
         if self.backend != "livekit":
             return self
-        absent = [
-            variable
-            for variable, value in (
-                ("EGMA_SIMULATOR_LIVEKIT_URL", self.livekit_url),
-                ("EGMA_SIMULATOR_LIVEKIT_API_KEY", self.livekit_api_key),
-                ("EGMA_SIMULATOR_LIVEKIT_API_SECRET", self.livekit_api_secret),
+        token_auth = all(
+            value is not None
+            for value in (
+                self.livekit_room_token,
+                self.livekit_api_token,
+                self.livekit_room_name,
             )
-            if value is None
-        ]
+        )
+        key_auth = (
+            self.livekit_api_key is not None and self.livekit_api_secret is not None
+        )
+        absent = (
+            []
+            if self.livekit_url is not None and (token_auth or key_auth)
+            else [
+                "EGMA_SIMULATOR_LIVEKIT_URL and either its key pair or all "
+                "three scoped token settings"
+            ]
+        )
         if absent:
             # Named as variables rather than as settings, because that is
             # what they are: the media server is a container of its own that
@@ -349,6 +393,7 @@ class ObjectStoreSettings:
 
     access_key_id: str = field(repr=False)
     secret_access_key: str = field(repr=False)
+    session_token: str | None = field(default=None, repr=False)
     """The simulator's write credential, both halves kept out of the
     dataclass repr, and neither of them optional: a store cannot be
     reached without both, so settings that exist at all hold both. The key
@@ -362,7 +407,15 @@ class ObjectStoreSettings:
         """Every secret these settings hold, for redaction. One place to
         ask, so a read credential arriving beside the write one cannot
         fall out of the scrubbing."""
-        return (self.access_key_id, self.secret_access_key)
+        return tuple(
+            value
+            for value in (
+                self.access_key_id,
+                self.secret_access_key,
+                self.session_token,
+            )
+            if value is not None
+        )
 
     @classmethod
     def from_env(cls) -> ObjectStoreSettings | None:
@@ -397,6 +450,7 @@ class ObjectStoreSettings:
             secret_access_key=_needed(
                 "EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY", because=NAMED_A_STORE
             ),
+            session_token=_text("EGMA_SIMULATOR_S3_SESSION_TOKEN"),
         )
 
 
@@ -433,16 +487,16 @@ class SimulatorConfig:
     log_level: str
 
     mode: str = "persistent"
-    """Process lifetime: standing loop, one claim, or bounded standby."""
+    """Process lifetime: standing loop or one claim."""
 
     modalities: tuple[str, ...] | None = None
     """Claim filter. None preserves the mixed self-hosted queue."""
 
     execution_deadline_seconds: float = 900.0
-    """Whole claim-to-report allowance for one-shot and standby modes."""
+    """Whole claim-to-report allowance for one-shot mode."""
 
-    standby_seconds: float = 1800.0
-    """How long a standby waits without a claim before it exits."""
+    runtime: str | None = None
+    """Hosted runtime marker sent on claims; absent for self-hosting."""
 
     thread_pool_workers: int | None = None
     """Optional size for the process default executor."""
@@ -491,7 +545,7 @@ class SimulatorConfig:
             or any(item not in SIMULATION_MODALITIES for item in self.modalities)
         ):
             raise ValueError("EGMA_SIMULATOR_MODALITIES must name voice, chat, or both")
-        if self.mode in ("one-shot", "standby"):
+        if self.mode == "one-shot":
             if self.capacity != 1:
                 raise ValueError(
                     f"EGMA_SIMULATOR_CAPACITY must be 1 in {self.mode} mode"
@@ -534,7 +588,7 @@ class SimulatorConfig:
         mode = _one_of("EGMA_SIMULATOR_MODE", SIMULATOR_MODES, "persistent")
         capacity = _whole(
             "EGMA_SIMULATOR_CAPACITY",
-            1 if mode in ("one-shot", "standby") else DEFAULT_CAPACITY,
+            1 if mode == "one-shot" else DEFAULT_CAPACITY,
         )
         if capacity < 1:
             raise ValueError(
@@ -545,7 +599,7 @@ class SimulatorConfig:
         offered_modalities = _text("EGMA_SIMULATOR_MODALITIES")
         modalities = (
             ("voice",)
-            if offered_modalities is None and mode in ("one-shot", "standby")
+            if offered_modalities is None and mode == "one-shot"
             else (
                 None
                 if offered_modalities is None
@@ -603,7 +657,9 @@ class SimulatorConfig:
             execution_deadline_seconds=_seconds(
                 "EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS", 900.0
             ),
-            standby_seconds=_seconds("EGMA_SIMULATOR_STANDBY_SECONDS", 1800.0),
+            runtime=_one_of("EGMA_SIMULATOR_RUNTIME", ("daytona",), "daytona")
+            if _text("EGMA_SIMULATOR_RUNTIME") is not None
+            else None,
             thread_pool_workers=thread_pool_workers,
             service_token=_text("EGMA_SIMULATOR_SERVICE_TOKEN"),
             vad_provider=vad_provider,

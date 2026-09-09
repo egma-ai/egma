@@ -1239,8 +1239,9 @@ def room_token(api_key: str, api_secret: str, room_name: str) -> str:
 async def delete_room(
     *,
     url: str,
-    api_key: str,
-    api_secret: str,
+    api_key: str | None,
+    api_secret: str | None,
+    token: str | None = None,
     room_name: str,
     quotable: Callable[[str], str] = lambda told: told,
 ) -> None:
@@ -1249,7 +1250,11 @@ async def delete_room(
 
     lkapi = None
     try:
-        lkapi = api.LiveKitAPI(url, api_key, api_secret)
+        lkapi = (
+            api.LiveKitAPI(url, token=token)
+            if token is not None
+            else api.LiveKitAPI(url, api_key, api_secret)
+        )
         await lkapi.room.delete_room(api.DeleteRoomRequest(room=room_name))
     except Exception as unfinished:
         logger.info(

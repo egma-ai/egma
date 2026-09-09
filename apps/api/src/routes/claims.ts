@@ -1,4 +1,3 @@
-import type { VoiceFleetReadiness } from "../voice-fleet-readiness.ts";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import {
@@ -48,6 +47,7 @@ import type { CarrierRoute } from "../config.ts";
 import { invalid, notTheService } from "../http/refusals.ts";
 import { mockToolBase } from "./mock-endpoint.ts";
 import { platformEvent, safeExceptionType } from "../platform-log.ts";
+import { DaytonaAssignmentUncertainError } from "../voice-fleet-daytona.ts";
 
 /**
  * Internal simulation claims require the deployment service token and bypass
@@ -61,8 +61,13 @@ import { platformEvent, safeExceptionType } from "../platform-log.ts";
  */
 
 export type ClaimRoutesOptions = {
-  readonly voiceFleetReadiness?: VoiceFleetReadiness | undefined;
   readonly wakeVoiceFleet?: (() => void) | undefined;
+  readonly daytonaProviderSecretEnvironment?: Readonly<Record<string, string>>;
+  readonly daytonaClaimRuntime?: (
+    claimant: string,
+    simulationId: string,
+    signal: AbortSignal,
+  ) => Promise<Record<string, unknown>>;
   /** The deployment's service token, from configuration. */
   readonly serviceToken: string;
   /**
@@ -102,8 +107,29 @@ const DEFAULT_HOLD_SECONDS = 15;
 /** How often a held claim re-asks the queue. The "about a second" promise. */
 const RECHECK_MILLISECONDS = 1_000;
 
-/** Hard wall for queue wait, provider checks, assembly, and the response. */
+/** Deadline for cancellable claim preparation before assignment commit. */
 const CLAIM_RESPONSE_MILLISECONDS = 28_000;
+
+/**
+ * Expire cancellable preparation at the response deadline. The operation owns
+ * any non-cancelable assignment commit it has already started and must settle
+ * that commit before this claim can be released or returned.
+ */
+async function beforeResponseDeadline<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  deadline: number,
+): Promise<T> {
+  const ownership = new AbortController();
+  const timeout = globalThis.setTimeout(() => {
+    ownership.abort(new Error("claim response deadline expired"));
+  }, Math.max(1, deadline - Date.now()));
+  if (typeof timeout === "object") timeout.unref();
+  try {
+    return await operation(ownership.signal);
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
+}
 
 /**
  * The most simulations one claim may take, mirrored from the module's own
@@ -159,6 +185,7 @@ async function modelsBlock(
   models: PersonaModels,
   source: ProviderCredentialSource,
   claim: SimulationClaim,
+  deploymentSecretEnvironment?: Readonly<Record<string, string>>,
 ): Promise<Record<string, unknown>> {
   const entryFor = <Job extends "llm" | "stt" | "tts">(
     job: Job,
@@ -209,8 +236,13 @@ async function modelsBlock(
           }),
         };
   };
-  const keyFor = (provider: PersonaModels["llm"]["provider"]): string =>
+  const keyFor = (provider: PersonaModels["llm"]["provider"]): string => {
+    const direct = customer[provider];
+    if (direct !== undefined) return direct.key;
     credentialFor(credentials, provider);
+    const variable = deploymentSecretEnvironment?.[provider];
+    return variable === undefined ? credentialFor(credentials, provider) : `env:${variable}`;
+  };
   const speechKey = (
     provider: PersonaModels["llm"]["provider"],
   ): Record<string, string> =>
@@ -343,6 +375,7 @@ type ClaimAsk = {
   /** Seconds this request may be held; already bounded by the cap. */
   readonly holdSeconds: number;
   readonly modalities?: readonly ("voice" | "chat")[] | undefined;
+  readonly runtime?: "daytona" | undefined;
 };
 
 /**
@@ -431,6 +464,19 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
     modalities = [...new Set(offeredModalities)];
   }
 
+  const runtime = body.runtime;
+  if (runtime !== undefined && runtime !== "daytona") {
+    return { refusal: "runtime must be daytona when it is present" };
+  }
+  if (
+    runtime === "daytona" &&
+    (capacity !== 1 || modalities?.length !== 1 || modalities[0] !== "voice")
+  ) {
+    return {
+      refusal: "a Daytona claim must request capacity 1 and only the voice modality",
+    };
+  }
+
   return {
     claimant: claimant.trim(),
     capacity: Math.min(capacity, LARGEST_CLAIM_CAPACITY),
@@ -439,6 +485,7 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
       LONGEST_HOLD_SECONDS,
     ),
     ...(modalities === undefined ? {} : { modalities }),
+    ...(runtime === undefined ? {} : { runtime }),
   };
 }
 
@@ -465,10 +512,12 @@ async function assembledSpec(
   carrierRoute: CarrierRoute | undefined,
   /** Where the mock endpoint answers, for the routing variables below. */
   baseUrl: string,
+  responseDeadline = Date.now() + CLAIM_RESPONSE_MILLISECONDS,
+  deploymentSecretEnvironment?: Readonly<Record<string, string>>,
 ): Promise<
   | Record<string, unknown>
   | { readonly unbuildable: string; readonly providerKeyUnavailable?: boolean }
-  | { readonly retryable: string }
+  | { readonly retryable: string; readonly deferredBy?: "provider" | "runtime" }
 > {
   if (personaVersion === undefined) {
     return { unbuildable: "its pinned persona version could not be read" };
@@ -532,6 +581,7 @@ async function assembledSpec(
       personaModelsOfParameters(validatePersonaParameterValues(personaVersion.parameterContract, claim.personaParameterValues)),
       providerCredentials,
       claim,
+      deploymentSecretEnvironment,
     );
   } catch (fault) {
     if (fault instanceof ProviderKeyUnavailableError)
@@ -653,15 +703,6 @@ export async function claimRoutes(
   app.post(CLAIMS_PATH, async (request, reply) => {
     const ask = claimAsk((request.body ?? {}) as Body);
     if ("refusal" in ask) return invalid(reply, ask.refusal);
-    const fleet = options.voiceFleetReadiness;
-    const identity = fleet?.identity(((request.body ?? {}) as Body).fleet);
-    if (identity !== undefined) {
-      fleet?.waiting(identity);
-      options.wakeVoiceFleet?.();
-      if (fleet?.shouldRetire(identity)) {
-        return reply.send({ specs: [], retire: true });
-      }
-    }
 
     // A client that hangs up mid-hold should stop being worked for: rows
     // claimed for nobody would sit claimed until the sweep called them
@@ -680,6 +721,7 @@ export async function claimRoutes(
     socket.once("close", clientLeft);
 
     try {
+      const responseDeadline = Date.now() + CLAIM_RESPONSE_MILLISECONDS;
       const holdDeadline = Date.now() + ask.holdSeconds * 1_000;
       let claims = await claimSimulations({
         claimant: ask.claimant,
@@ -692,9 +734,6 @@ export async function claimRoutes(
           Math.min(RECHECK_MILLISECONDS, holdDeadline - Date.now()),
         );
         if (gone) break;
-        if (identity !== undefined && fleet?.shouldRetire(identity)) {
-          return reply.send({ specs: [], retire: true });
-        }
         claims = await claimSimulations({
           claimant: ask.claimant,
           capacity: ask.capacity,
@@ -779,19 +818,23 @@ export async function claimRoutes(
       // Every spec starts together. A batch of fifty must not serialize its
       // database reads and break the route's sub-30-second response promise.
       const assembled = await Promise.all(
-        claims.map((claim) =>
+        claims.map(async (claim) =>
           // A withheld conversation is never assembled: it is going back on
           // the queue, and building a work order for it would read a
           // customer's credentials to make a document nobody will receive.
           withheld.has(claim.id)
-            ? Promise.resolve({ withheld: true } as const)
-            : assembledSpec(
+            ? ({ withheld: true } as const)
+            : await assembledSpec(
                 claim,
                 pinned.get(claim.id),
                 runs,
                 options.providerCredentials,
                 options.carrierRoute,
                 options.baseUrl,
+                responseDeadline,
+                ask.runtime === "daytona"
+                  ? options.daytonaProviderSecretEnvironment
+                  : undefined,
               ).catch(
                 (_fault: unknown): { readonly unbuildable: string } => ({
                   // This broad catch can hold dependency or credential errors.
@@ -800,7 +843,51 @@ export async function claimRoutes(
                   unbuildable:
                     "an internal error prevented Egma from building its simulation spec",
                 }),
-              ),
+              ).then(async (spec) => {
+                if (
+                  ask.runtime !== "daytona" ||
+                  "unbuildable" in spec ||
+                  "retryable" in spec
+                ) {
+                  return spec;
+                }
+                const daytonaClaimRuntime = options.daytonaClaimRuntime;
+                if (daytonaClaimRuntime === undefined) {
+                  return {
+                    retryable: "the Daytona claim runtime is not configured",
+                    deferredBy: "runtime" as const,
+                  };
+                }
+                try {
+                  const completed = {
+                    ...spec,
+                    runtime: await beforeResponseDeadline(
+                      (signal) => daytonaClaimRuntime(
+                        ask.claimant,
+                        claim.id,
+                        signal,
+                      ),
+                      responseDeadline,
+                    ),
+                  };
+                  return specComplaints(completed).length === 0
+                    ? completed
+                    : {
+                        retryable:
+                          "the Daytona sandbox received invalid simulation authority",
+                        deferredBy: "runtime" as const,
+                      };
+                } catch (fault) {
+                  if (fault instanceof DaytonaAssignmentUncertainError) {
+                    return { runtimeAssignmentUncertain: true } as const;
+                  }
+                  return {
+                    retryable:
+                      "the Daytona sandbox could not receive simulation authority",
+                    deferredBy: "runtime" as const,
+                  };
+                }
+              }),
         ),
       );
       for (const [index, claim] of claims.entries()) {
@@ -864,6 +951,20 @@ export async function claimRoutes(
           }
           continue;
         }
+        if ("runtimeAssignmentUncertain" in spec) {
+          request.log.error(
+            platformEvent(
+              "egma.simulation.dispatch.assignment_uncertain",
+              "Daytona sandbox assignment could not be confirmed",
+              {
+                "egma.simulation_id": claim.id,
+                "egma.run_id": claim.runId,
+                "error.type": "daytona_assignment_uncertain",
+              },
+            ),
+          );
+          continue;
+        }
         if ("retryable" in spec) {
           // A provider outage says nothing about the customer or their agent.
           // Give this lease back instead of minting a terminal error; a later
@@ -871,11 +972,15 @@ export async function claimRoutes(
           request.log.warn(
             platformEvent(
               "egma.simulation.dispatch.deferred",
-              "simulation dispatch was deferred after provider preflight",
+              spec.deferredBy === "runtime"
+                ? "simulation dispatch was deferred while preparing its Daytona sandbox"
+                : "simulation dispatch was deferred after provider preflight",
               {
                 "egma.simulation_id": claim.id,
                 "egma.run_id": claim.runId,
-                "error.type": "provider_preflight_failed",
+                "error.type": spec.deferredBy === "runtime"
+                  ? "daytona_claim_runtime_failed"
+                  : "provider_preflight_failed",
               },
             ),
           );
@@ -975,14 +1080,7 @@ export async function claimRoutes(
         );
       }
 
-      if (identity !== undefined) {
-        if (dispatchedVoice) {
-          fleet?.busy(identity);
-          options.wakeVoiceFleet?.();
-        } else {
-          fleet?.unclaimed(identity);
-        }
-      }
+      if (dispatchedVoice) options.wakeVoiceFleet?.();
       return await reply.send({ specs, claimed_at: claimedAt });
     } finally {
       // Taken back off rather than left behind: a keep-alive socket outlives

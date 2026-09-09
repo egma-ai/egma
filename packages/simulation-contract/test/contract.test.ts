@@ -268,6 +268,42 @@ describe("the two schemas, as one contract", () => {
     expect(reportSchema.$id).toBe("urn:egma:simulation-contract:report:v1");
   });
 
+  it("carries per-claim Daytona authority only on a voice work order", async () => {
+    const base = await readJson(
+      "fixtures",
+      "spec",
+      "valid",
+      "voice-loopback.json",
+    );
+    const runtime = {
+      kind: "daytona_voice",
+      media: {
+        backend: "livekit",
+        livekit_url: "wss://livekit.example",
+        livekit_room_name: "egma-sim-sim_123",
+        livekit_room_token: "room-token",
+        livekit_api_token: "api-token",
+      },
+      storage: {
+        backend: "s3",
+        endpoint: "https://s3.example",
+        bucket: "recordings",
+        region: "us-east-1",
+        access_key_id: "temporary-access",
+        secret_access_key: "temporary-secret",
+        session_token: "temporary-session",
+      },
+    };
+    expect(validators.spec({ ...base, runtime })).toBe(true);
+    expect(validators.spec({ ...base, modality: "chat", runtime })).toBe(false);
+    expect(
+      validators.spec({
+        ...base,
+        runtime: { ...runtime, storage: { ...runtime.storage, session_token: "" } },
+      }),
+    ).toBe(false);
+  });
+
   it("accepts only the shared speaking-speed range", async () => {
     const base = await readJson(
       "fixtures",

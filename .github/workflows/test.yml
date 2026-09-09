@@ -575,6 +575,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "platform=true" >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            echo "Every green main commit publishes and deploys its exact release."
+            exit 0
+          fi
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "platform=true" >> "$GITHUB_OUTPUT"
             if [ "$REPLACE_PRODUCTION" = "true" ]; then
@@ -614,7 +620,7 @@ jobs:
               apps/api/*|apps/grader/*|apps/simulator/*|packages/*|ee/*) platform=true ;;
               docker-compose.yml|docker-compose.managed.yml|.env.example) platform=true ;;
               pnpm-lock.yaml|pnpm-workspace.yaml|package.json|tsconfig.base.json) platform=true ;;
-              certificates/*|.github/ecr-image-exists.sh|.github/verify-platform-images.py|.github/workflows/test.yml|.github/workflows/build-platform-images.yml) platform=true ;;
+              certificates/*|.github/ecr-image-exists.sh|.github/workflows/test.yml|.github/workflows/build-platform-images.yml) platform=true ;;
               apps/web/*|tools/*|.github/deploy_vercel.py) web=true ;;
             esac
           done <<< "$changed"
@@ -680,6 +686,7 @@ jobs:
           done
 
       - name: Publish the immutable native images
+        id: publish
         if: steps.decide.outputs.platform == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -700,11 +707,17 @@ jobs:
           done
           [ -n "$run_id" ] || { echo "The image publication run did not appear." >&2; exit 1; }
           gh run watch "$run_id" --exit-status
+          directory="$(mktemp -d)"
+          gh run download "$run_id" --name "daytona-snapshot-$GITHUB_SHA" --dir "$directory"
+          snapshot_id="$(tr -d '\r\n' < "$directory/daytona-snapshot-id.txt")"
+          [ -n "$snapshot_id" ] || { echo "The publication produced no Daytona snapshot identity." >&2; exit 1; }
+          echo "daytona_snapshot_id=$snapshot_id" >> "$GITHUB_OUTPUT"
 
       - name: Ask the cloud repository to deploy this release
         if: steps.decide.outputs.platform == 'true' && env.REPLACE_PRODUCTION == 'true'
         env:
           CLOUD_RELEASE_TOKEN: ${{ steps.cloud-token.outputs.token }}
+          DAYTONA_SNAPSHOT_ID: ${{ steps.publish.outputs.daytona_snapshot_id }}
         run: |
           set -euo pipefail
           started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -713,7 +726,8 @@ jobs:
             --arg sha "$GITHUB_SHA" \
             --arg repository "$GITHUB_REPOSITORY" \
             --arg run_id "$GITHUB_RUN_ID" \
-            '{event_type:"public-release",client_payload:{sha:$sha,source_repository:$repository,source_run_id:$run_id}}')
+            --arg daytona_snapshot_id "$DAYTONA_SNAPSHOT_ID" \
+            '{event_type:"public-release",client_payload:{sha:$sha,daytona_snapshot_id:$daytona_snapshot_id,source_repository:$repository,source_run_id:$run_id}}')
           curl -fsS -X POST \
             -H "Authorization: Bearer $CLOUD_RELEASE_TOKEN" \
             -H "Accept: application/vnd.github+json" \
@@ -782,7 +796,7 @@ jobs:
               apps/api/*|apps/grader/*|apps/simulator/*|packages/*|ee/*) deployable=true ;;
               docker-compose.yml|docker-compose.managed.yml|.env.example) deployable=true ;;
               pnpm-lock.yaml|pnpm-workspace.yaml|package.json|tsconfig.base.json) deployable=true ;;
-              certificates/*|.github/ecr-image-exists.sh|.github/verify-platform-images.py|.github/workflows/test.yml|.github/workflows/build-platform-images.yml) deployable=true ;;
+              certificates/*|.github/ecr-image-exists.sh|.github/workflows/test.yml|.github/workflows/build-platform-images.yml) deployable=true ;;
               apps/web/*|tools/*|.github/deploy_vercel.py) deployable=true ;;
             esac
           done <<< "$(git diff --name-only "${{ github.sha }}" "$head")"

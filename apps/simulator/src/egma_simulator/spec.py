@@ -4,6 +4,7 @@ Readers can use nested fields without repeating schema checks.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -155,7 +156,7 @@ class SelectedModels:
                 provider=tts["provider"],
                 model=tts["model"],
                 adapter=tts["adapter"],
-                key=tts.get("key"),
+                key=_provider_key(tts),
                 funding_receipt=tts.get("funding_receipt"),
                 voice_id=tts["voice_id"],
                 speed=float(tts["speed"]),
@@ -169,9 +170,34 @@ def _selection(written: Any) -> ModelSelection:
         model=written["model"],
         adapter=written["adapter"],
         reasoning_effort=written.get("reasoning_effort"),
-        key=written.get("key"),
+        key=_provider_key(written),
         funding_receipt=written.get("funding_receipt"),
     )
+
+
+_PROVIDER_SECRET_ENVIRONMENT = {
+    "openai": "EGMA_OPENAI_API_KEY",
+    "deepgram": "EGMA_DEEPGRAM_API_KEY",
+    "cartesia": "EGMA_CARTESIA_API_KEY",
+}
+
+
+def _provider_key(written: Any) -> str | None:
+    """Resolve only the deployment provider references the API may issue."""
+    key = written.get("key")
+    if not isinstance(key, str) or not key.startswith("env:"):
+        return key
+    variable = _PROVIDER_SECRET_ENVIRONMENT.get(written.get("provider"))
+    if variable is None or key != f"env:{variable}":
+        raise ValueError(
+            "the work order names an unsupported provider secret reference"
+        )
+    value = os.environ.get(variable, "").strip()
+    if not value:
+        raise ValueError(
+            f"the work order needs {variable}, but the sandbox has no value"
+        )
+    return value
 
 
 @dataclass(frozen=True)
@@ -184,6 +210,75 @@ class Limits:
 
     max_duration_seconds: int
     max_turns: int
+
+
+@dataclass(frozen=True)
+class RuntimeMedia:
+    """Temporary LiveKit authority issued for this claimed simulation."""
+
+    livekit_url: str
+    livekit_room_name: str
+    livekit_room_token: str = field(repr=False)
+    livekit_api_token: str = field(repr=False)
+
+    @property
+    def secrets(self) -> tuple[str, ...]:
+        return (self.livekit_room_token, self.livekit_api_token)
+
+
+@dataclass(frozen=True)
+class RuntimeStorage:
+    """Temporary S3 write authority issued for this claimed simulation."""
+
+    endpoint: str
+    bucket: str
+    region: str
+    access_key_id: str = field(repr=False)
+    secret_access_key: str = field(repr=False)
+    session_token: str = field(repr=False)
+
+    @property
+    def secrets(self) -> tuple[str, ...]:
+        return (
+            self.access_key_id,
+            self.secret_access_key,
+            self.session_token,
+        )
+
+
+@dataclass(frozen=True)
+class ClaimRuntime:
+    """Per-claim hosted runtime settings, absent for ordinary workers."""
+
+    media: RuntimeMedia
+    storage: RuntimeStorage
+
+    @property
+    def secrets(self) -> tuple[str, ...]:
+        return self.media.secrets + self.storage.secrets
+
+    @classmethod
+    def from_document(cls, written: Any) -> ClaimRuntime | None:
+        if written is None:
+            return None
+        media = written["media"]
+        storage = written["storage"]
+        return cls(
+            media=RuntimeMedia(
+                livekit_url=media["livekit_url"],
+                livekit_room_name=media["livekit_room_name"],
+                livekit_room_token=media["livekit_room_token"],
+                livekit_api_token=media["livekit_api_token"],
+            ),
+            storage=RuntimeStorage(
+                endpoint=storage["endpoint"],
+                bucket=storage["bucket"],
+                region=storage["region"],
+                access_key_id=storage["access_key_id"],
+                secret_access_key=storage["secret_access_key"],
+                session_token=storage["session_token"],
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -260,6 +355,20 @@ class SimulationSpec:
     platform: WorkOrderPlatform = field(default_factory=WorkOrderPlatform)
     """The optional SIP carrier block. It owns no model or voice choice."""
 
+    runtime: ClaimRuntime | None = None
+    """Temporary hosted authority for this claim, absent elsewhere."""
+
+    @property
+    def secrets(self) -> tuple[Any, ...]:
+        """Every secret carried by this work order, in one redaction list."""
+        runtime = () if self.runtime is None else self.runtime.secrets
+        return (
+            *((self.credentials,) if self.credentials is not None else ()),
+            *self.platform.secrets,
+            *self.models.secrets,
+            *runtime,
+        )
+
     @classmethod
     def from_document(cls, document: Any) -> SimulationSpec:
         """Hold a claimed document to the contract, then read it.
@@ -277,6 +386,7 @@ class SimulationSpec:
             job_dispatch_metadata=document.get("job_dispatch_metadata"),
             mock_tools=_mock_tools(document.get("mock_tools") or []),
             platform=WorkOrderPlatform.from_document(document.get("platform")),
+            runtime=ClaimRuntime.from_document(document.get("runtime")),
             models=SelectedModels.from_document(document["models"]),
             simulation_id=document["simulation_id"],
             modality=document["modality"],

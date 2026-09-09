@@ -7,17 +7,16 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
-from conftest import scripted_spec
+from conftest import loopback_spec, scripted_spec
 
 from egma_simulator import service as service_module
 from egma_simulator.client import ClaimedSpec, ClaimFailure
 from egma_simulator.config import SimulatorConfig
 from egma_simulator.redaction import SecretRegistry
-from egma_simulator.service import SimulatorService
+from egma_simulator.service import SimulatorService, resources_for_claim
 from egma_simulator.spec import AuthoredPersona, SimulationSpec
 
 
@@ -173,43 +172,6 @@ class RefusingClient:
         raise ClaimFailure("claim answered 404: Route POST:/v1/claims not found")
 
 
-class RetiringClient:
-    retire_requested = False
-
-    def __init__(self) -> None:
-        self.attempts = 0
-
-    async def claim(
-        self,
-        claimant: str,
-        capacity: int,
-        modalities: tuple[str, ...] | None = None,
-    ) -> list[ClaimedSpec]:
-        del claimant, capacity, modalities
-        self.attempts += 1
-        self.retire_requested = True
-        return []
-
-
-@pytest.mark.parametrize("mode", ["one-shot", "standby"])
-async def test_a_hosted_retirement_answer_exits_without_claiming(
-    tmp_path, mode, caplog
-):
-    caplog.set_level(logging.INFO, logger="egma_simulator.service")
-    service = a_service(tmp_path)
-    service._config = replace(
-        service._config, mode=mode, capacity=1, modalities=("voice",)
-    )
-    client = RetiringClient()
-    executor = RecordingExecutor(capacity=1)
-
-    await service._claim_for_mode(client, executor)
-
-    assert client.attempts == 1
-    assert executor.accepted == []
-    assert "retired before claiming work" in caplog.text
-
-
 async def test_a_claim_failure_that_never_changes_is_said_once_not_forever(
     tmp_path, caplog, monkeypatch
 ):
@@ -296,3 +258,68 @@ def test_the_typed_spec_refuses_a_document_that_breaks_the_contract():
     broken["modality"] = "telepathy"
     with pytest.raises(ContractViolation):
         SimulationSpec.from_document(broken)
+
+
+def test_a_daytona_claim_replaces_only_media_and_recording_resources(
+    tmp_path, monkeypatch
+):
+    config = SimulatorConfig(
+        control_plane_url="http://127.0.0.1:1",
+        claimant="egma-voice-runtime",
+        capacity=1,
+        heartbeat_seconds=5.0,
+        claim_wait_seconds=1.0,
+        report_deadline_seconds=1.0,
+        wal_dir=tmp_path,
+        blob_dir=tmp_path / "blobs",
+        log_level="INFO",
+        mode="one-shot",
+        modalities=("voice",),
+        runtime="daytona",
+    )
+    document = loopback_spec("sim_123")
+    document["runtime"] = {
+        "kind": "daytona_voice",
+        "media": {
+            "backend": "livekit",
+            "livekit_url": "wss://livekit.example",
+            "livekit_room_name": "egma-sim-sim_123",
+            "livekit_room_token": "room-token",
+            "livekit_api_token": "api-token",
+        },
+        "storage": {
+            "backend": "s3",
+            "endpoint": "https://s3.example",
+            "bucket": "recordings",
+            "region": "us-east-1",
+            "access_key_id": "temporary-access",
+            "secret_access_key": "temporary-secret",
+            "session_token": "temporary-session",
+        },
+    }
+    spec = SimulationSpec.from_document(document)
+    standing_blobs = object()
+    built: dict = {}
+
+    def fake_s3(**settings):
+        built.update(settings)
+        return "claimed-store"
+
+    monkeypatch.setattr(service_module, "S3BlobStore", fake_s3)
+
+    claimed_config, claimed_blobs = resources_for_claim(
+        config, spec, standing_blobs
+    )
+
+    assert claimed_config.media is not None
+    assert claimed_config.media.livekit_room_name == "egma-sim-sim_123"
+    assert claimed_config.media.livekit_room_token == "room-token"
+    assert claimed_blobs == "claimed-store"
+    assert built == {
+        "endpoint": "https://s3.example",
+        "bucket": "recordings",
+        "region": "us-east-1",
+        "access_key_id": "temporary-access",
+        "secret_access_key": "temporary-secret",
+        "session_token": "temporary-session",
+    }

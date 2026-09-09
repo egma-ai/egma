@@ -1,4 +1,3 @@
-import { createVoiceFleetReadiness } from "./voice-fleet-readiness.ts";
 import {
   connect,
   connectClickHouse,
@@ -95,12 +94,31 @@ const running: Config = cloudBilling === undefined
 // the claim door and the write that stores a usage record — start reaching it.
 installBillingPlugIn(running.billing);
 
-const voiceFleetReadiness =
-  config.voiceFleet === undefined
-    ? undefined
-    : createVoiceFleetReadiness({
-        taskDefinition: config.voiceFleet.taskDefinition,
+const voiceFleetSettings = config.voiceFleet;
+const hostedVoice = voiceFleetSettings === undefined
+  ? undefined
+  : await (async () => {
+      // Daytona and AWS STS stay outside the self-hosted boot path. Only the
+      // explicit launcher setting loads either client.
+      const [{ Daytona }, adapter] = await Promise.all([
+        import("@daytona/sdk"),
+        import("./voice-fleet-daytona.ts"),
+      ]);
+      const client = new Daytona({
+        apiKey: voiceFleetSettings.apiKey,
+        ...(voiceFleetSettings.apiUrl === undefined
+          ? {}
+          : { apiUrl: voiceFleetSettings.apiUrl }),
+        ...(voiceFleetSettings.target === undefined
+          ? {}
+          : { target: voiceFleetSettings.target }),
       });
+      return {
+        client,
+        adapter,
+        claimRuntime: adapter.daytonaClaimRuntime(voiceFleetSettings, { client }),
+      };
+    })();
 
 let reconcileVoiceFleet:
   | (() => Promise<VoiceFleetReconcileResult>)
@@ -120,8 +138,10 @@ const wakeVoiceFleet = config.voiceFleet === undefined
 const { app } = buildApi({
   config: running,
   traceStoreReady: () => traceSchema.state === "ready",
-  ...(voiceFleetReadiness === undefined ? {} : { voiceFleetReadiness }),
   ...(wakeVoiceFleet === undefined ? {} : { wakeVoiceFleet }),
+  ...(hostedVoice === undefined
+    ? {}
+    : { daytonaClaimRuntime: hostedVoice.claimRuntime }),
   ...(cloudBilling === undefined ? {} : { billingRoutes: cloudBilling.routes }),
   ...(cloudBilling?.webhookRoutes === undefined
     ? {}
@@ -129,18 +149,14 @@ const { app } = buildApi({
 });
 
 if (config.voiceFleet !== undefined) {
-  // The AWS package is absent from the self-hosted boot path. Merely having
-  // ordinary AWS credentials in the environment cannot select this adapter.
-  const { awsVoiceFleet } = await import("./voice-fleet-aws.ts");
-  const fleet = awsVoiceFleet(config.voiceFleet);
+  if (hostedVoice === undefined) throw new Error("Daytona was not initialized");
+  const fleet = hostedVoice.adapter.daytonaVoiceFleet(config.voiceFleet, {
+    client: hostedVoice.client,
+    log: app.log,
+    onFreed: () => wakeVoiceFleet?.(),
+  });
   const reconciler = createVoiceFleetReconciler({
-    fleet: {
-      launchTasks: (request) => fleet.launchTasks(request),
-      listTasks: async () => {
-        const tasks = await fleet.listTasks();
-        return voiceFleetReadiness?.observeTasks(tasks) ?? tasks;
-      },
-    },
+    fleet,
     estimateDemand: () => estimateVoiceSimulationDemand({
       caps: config.simulationConcurrencyCaps,
     }),

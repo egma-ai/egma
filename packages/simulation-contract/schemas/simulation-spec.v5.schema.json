@@ -155,11 +155,49 @@
         "carrier": { "$ref": "#/$defs/platform_carrier" }
       }
     },
+    "runtime": {
+      "description": "Per-claim hosted runtime authority. It is absent for standing and self-hosted simulators and contains only the temporary media and recording access for this simulation.",
+      "$ref": "#/$defs/daytona_voice_runtime"
+    },
     "models": {
       "$ref": "#/$defs/models"
     }
   },
   "$defs": {
+    "daytona_voice_runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "media", "storage"],
+      "properties": {
+        "kind": { "const": "daytona_voice" },
+        "media": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["backend", "livekit_url", "livekit_room_name", "livekit_room_token", "livekit_api_token"],
+          "properties": {
+            "backend": { "const": "livekit" },
+            "livekit_url": { "type": "string", "pattern": "^wss?://", "minLength": 1 },
+            "livekit_room_name": { "type": "string", "minLength": 1 },
+            "livekit_room_token": { "type": "string", "minLength": 1 },
+            "livekit_api_token": { "type": "string", "minLength": 1 }
+          }
+        },
+        "storage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["backend", "endpoint", "bucket", "region", "access_key_id", "secret_access_key", "session_token"],
+          "properties": {
+            "backend": { "const": "s3" },
+            "endpoint": { "type": "string", "pattern": "^https?://", "minLength": 1 },
+            "bucket": { "type": "string", "minLength": 3 },
+            "region": { "type": "string", "minLength": 1 },
+            "access_key_id": { "type": "string", "minLength": 1 },
+            "secret_access_key": { "type": "string", "minLength": 1 },
+            "session_token": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
     "platform_carrier": {
       "description": "The complete credential-authenticated carrier route used for a phone simulation.",
       "type": "object",
@@ -284,6 +322,17 @@
     }
   },
   "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "properties": { "runtime": {} },
+        "required": ["runtime"]
+      },
+      "then": {
+        "type": "object",
+        "properties": { "modality": { "const": "voice" } }
+      }
+    },
     {
       "if": {
         "type": "object",

@@ -14,6 +14,7 @@ import logging
 import os
 import threading
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -22,7 +23,6 @@ from .client import ClaimedSpec, ClaimFailure, ControlPlaneClient, HeartbeatFail
 from .config import MediaSettings, SimulatorConfig
 from .contract import ContractViolation
 from .conversation import Conducted, ConversationControls, conduct
-from .fleet import FleetMetadataFailure, fleet_identity_for
 from .model import build_model_client
 from .persona import Persona
 from .pipeline import Assembled, assemble
@@ -63,8 +63,39 @@ def blob_store_for(config: SimulatorConfig) -> BlobStore:
         bucket=store.bucket,
         access_key_id=store.access_key_id,
         secret_access_key=store.secret_access_key,
+        session_token=store.session_token,
         region=store.region,
     )
+
+
+def resources_for_claim(
+    config: SimulatorConfig,
+    spec: SimulationSpec,
+    standing_blobs: BlobStore,
+) -> tuple[SimulatorConfig, BlobStore]:
+    """Use per-claim hosted authority when present; keep standing paths unchanged."""
+    runtime = spec.runtime
+    if runtime is None:
+        return config, standing_blobs
+    claimed_config = replace(
+        config,
+        media=MediaSettings(
+            backend="livekit",
+            livekit_url=runtime.media.livekit_url,
+            livekit_room_name=runtime.media.livekit_room_name,
+            livekit_room_token=runtime.media.livekit_room_token,
+            livekit_api_token=runtime.media.livekit_api_token,
+        ),
+    )
+    claimed_blobs = S3BlobStore(
+        endpoint=runtime.storage.endpoint,
+        bucket=runtime.storage.bucket,
+        region=runtime.storage.region,
+        access_key_id=runtime.storage.access_key_id,
+        secret_access_key=runtime.storage.secret_access_key,
+        session_token=runtime.storage.session_token,
+    )
+    return claimed_config, claimed_blobs
 
 
 class Executor(Protocol):
@@ -570,24 +601,11 @@ class SimulatorService:
         records what a disappearing simulator means.
         """
         config = self._config
-        metadata_uri = os.environ.get("ECS_CONTAINER_METADATA_URI_V4")
-        try:
-            identity = await fleet_identity_for(config.mode, metadata_uri)
-        except FleetMetadataFailure as error:
-            log_event(
-                logger,
-                logging.ERROR,
-                "egma.service.fleet_metadata_failed",
-                "hosted simulator could not read its ECS task identity",
-                attributes={"error.type": type(error).__name__},
-            )
-            raise
-        fleet = None if identity is None else identity.document()
         async with ControlPlaneClient(
             config.control_plane_url,
             claim_wait_seconds=config.claim_wait_seconds,
             service_token=config.service_token,
-            fleet=fleet,
+            runtime=config.runtime,
         ) as client:
             executor = AsyncioExecutor(
                 config.capacity,
@@ -688,36 +706,12 @@ class SimulatorService:
                     )
                 except ClaimFailure as failure:
                     self._note_claim_failure(str(failure))
-                    if self._config.mode == "one-shot":
-                        return
-                    await asyncio.sleep(CLAIM_RETRY_SECONDS)
-                    continue
+                    return
                 self._last_claim_failure = None
                 self._accept(specs, executor)
-                if client.retire_requested:
-                    log_event(
-                        logger,
-                        logging.INFO,
-                        "egma.service.retired",
-                        "hosted simulator retired before claiming work",
-                    )
-                    return
-                if specs or self._config.mode == "one-shot":
-                    return
+                return
 
-        if self._config.mode == "standby":
-            try:
-                async with asyncio.timeout(self._config.standby_seconds):
-                    await claim_until_work()
-            except TimeoutError:
-                log_event(
-                    logger,
-                    logging.INFO,
-                    "egma.service.standby_expired",
-                    "standby simulator idle limit expired",
-                )
-        else:
-            await claim_until_work()
+        await claim_until_work()
 
     def _note_claim_failure(self, failure: str) -> None:
         """Say a claim failure when it is new, and once a minute after that.
@@ -858,9 +852,7 @@ class SimulatorService:
                 continue
 
             # Register every work-order credential before conducting.
-            self._secrets.register(spec.credentials)
-            self._secrets.register(list(spec.platform.secrets))
-            self._secrets.register(list(spec.models.secrets))
+            self._secrets.register(list(spec.secrets))
             if self._config.mode != "persistent":
                 self._claimed_at[spec.simulation_id] = claimed_at
                 self._arm_hard_stop(claimed_at)
@@ -877,12 +869,13 @@ class SimulatorService:
         self, spec: SimulationSpec, client: ControlPlaneClient
     ) -> None:
         with simulation_log_context(spec.simulation_id):
+            config, blobs = resources_for_claim(self._config, spec, self._blobs)
             simulation = RunningSimulation(
                 spec,
                 client=client,
-                config=self._config,
+                config=config,
                 secrets=self._secrets,
-                blobs=self._blobs,
+                blobs=blobs,
             )
             if self._config.mode == "persistent":
                 await simulation.run()

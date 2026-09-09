@@ -37,6 +37,30 @@ def direct_key(provider: str) -> str:
     return f"{provider}-account-key"
 
 
+def test_daytona_provider_secret_reference_resolves_only_its_provider_env(monkeypatch):
+    monkeypatch.setenv("EGMA_OPENAI_API_KEY", "daytona-openai-placeholder")
+    models = SelectedModels.from_document(
+        {
+            "llm": {
+                "provider": "openai",
+                "model": "gpt",
+                "adapter": "openai_chat_completions",
+                "key": "env:EGMA_OPENAI_API_KEY",
+            },
+            "stt": {"provider": "scripted", "model": "scripted", "adapter": "scripted"},
+            "tts": {
+                "provider": "scripted",
+                "model": "scripted",
+                "adapter": "scripted",
+                "voice_id": "plain",
+                "speed": 1,
+            },
+        }
+    )
+
+    assert models.llm.key == "daytona-openai-placeholder"
+
+
 def selected(
     *,
     llm_provider: str = "openai",

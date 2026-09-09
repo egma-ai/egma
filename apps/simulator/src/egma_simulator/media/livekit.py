@@ -59,7 +59,7 @@ class LiveKitBackend:
         # second implementation of it.
         self._secrets = SecretRegistry()
         self._secrets.register(list(settings.secrets))
-        self._room_name = fresh_room_name()
+        self._room_name = settings.livekit_room_name or fresh_room_name()
         self._room: JoinedRoom | None = None
         self._dialling: asyncio.Task | None = None
 
@@ -72,7 +72,8 @@ class LiveKitBackend:
         """Build the room transport for the conductor's Pipecat pipeline."""
         self._room = JoinedRoom(
             url=self._settings.livekit_url,
-            token=room_token(
+            token=self._settings.livekit_room_token
+            or room_token(
                 self._settings.livekit_api_key,
                 self._settings.livekit_api_secret,
                 self._room_name,
@@ -136,6 +137,7 @@ class LiveKitBackend:
                     url=self._settings.livekit_url,
                     api_key=self._settings.livekit_api_key,
                     api_secret=self._settings.livekit_api_secret,
+                    token=self._settings.livekit_api_token,
                     room_name=self._room_name,
                     quotable=self._quotable,
                 )
@@ -171,10 +173,16 @@ class LiveKitBackend:
         if self._caller_id is not None:
             request.sip_number = self._caller_id
 
-        lkapi = api.LiveKitAPI(
-            self._settings.livekit_url,
-            self._settings.livekit_api_key,
-            self._settings.livekit_api_secret,
+        lkapi = (
+            api.LiveKitAPI(
+                self._settings.livekit_url, token=self._settings.livekit_api_token
+            )
+            if self._settings.livekit_api_token is not None
+            else api.LiveKitAPI(
+                self._settings.livekit_url,
+                self._settings.livekit_api_key,
+                self._settings.livekit_api_secret,
+            )
         )
         try:
             participant = await lkapi.sip.create_sip_participant(request)
