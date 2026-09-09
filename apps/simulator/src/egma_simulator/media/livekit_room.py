@@ -2054,6 +2054,11 @@ class LiveKitChatRoomBackend(RoomLifecycle):
 
     MODALITY = "chat"
 
+    @property
+    def has_ended(self) -> bool:
+        """Whether this room already observed its normal remote ending."""
+        return self._room is not None and self._room.ended.is_set()
+
     def _fresh_room_name(self) -> str:
         """The marked form: ``egma-sim-chat-`` says which kind of
         simulation this room conducts, to a worker deciding its room

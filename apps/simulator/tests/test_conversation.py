@@ -305,6 +305,10 @@ class TerminalPlug:
     async def wait_ended(self) -> None:
         await self.ended.wait()
 
+    @property
+    def has_ended(self) -> bool:
+        return self.ended.is_set()
+
     async def close(self) -> None:
         return None
 
@@ -440,6 +444,76 @@ async def test_customer_end_observed_first_beats_a_failure_ready_before_resume()
     conducted = await running
     assert conducted.ending == "agent_ended"
     assert turns == []
+
+
+@pytest.mark.parametrize("immediate", ["failure", "reply"])
+async def test_an_already_observed_customer_end_starts_no_persona_work(immediate):
+    class ImmediateModel:
+        model_name = "immediate"
+
+        def __init__(self) -> None:
+            self.called = False
+
+        async def reply(self, _context) -> PersonaReply:
+            self.called = True
+            if immediate == "failure":
+                raise ModelFailure("must not replace the customer ending")
+            return PersonaReply(text="too late", concluded=False)
+
+        async def close(self) -> None:
+            return None
+
+    model = ImmediateModel()
+    persona = Persona(
+        authored=AUTHORED, scenario_instructions="One point.", model=model
+    )
+    plug = TerminalPlug()
+    plug.ended.set()
+    turns, recorder = collect()
+
+    conducted = await conduct(
+        persona=persona,
+        plug=plug,
+        max_turns=10,
+        max_duration_seconds=30,
+        on_turn=recorder,
+        on_timing=None,
+        controls=ConversationControls(),
+        name="sim:already-ended",
+    )
+
+    assert conducted.ending == "agent_ended"
+    assert model.called is False
+    assert plug.sent == []
+    assert turns == []
+
+
+async def test_an_immediate_persona_failure_without_a_customer_end_still_fails():
+    class FailingModel:
+        model_name = "failing"
+
+        async def reply(self, _context) -> PersonaReply:
+            raise ModelFailure("actual persona failure")
+
+        async def close(self) -> None:
+            return None
+
+    persona = Persona(
+        authored=AUTHORED,
+        scenario_instructions="One point.",
+        model=FailingModel(),
+    )
+    with pytest.raises(ModelFailure, match="actual persona failure"):
+        await conduct(
+            persona=persona,
+            plug=TerminalPlug(),
+            max_turns=10,
+            max_duration_seconds=30,
+            on_turn=collect()[1],
+            on_timing=None,
+            controls=ConversationControls(),
+            name="sim:actual-failure",
+        )
 
 
 async def test_what_the_platform_said_rides_the_record_and_not_the_turn():

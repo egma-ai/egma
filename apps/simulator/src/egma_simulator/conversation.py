@@ -85,6 +85,7 @@ class ConversationControls:
         coroutine: Coroutine[Any, Any, Any],
         *,
         agent_ended: Coroutine[Any, Any, None] | None = None,
+        agent_already_ended: bool = False,
     ) -> Any:
         """Await one step of the conversation, unless a stop cause lands first.
 
@@ -93,11 +94,20 @@ class ConversationControls:
         the loop can name the cause. Cancellation of the loop itself — the
         service tearing down — passes straight through.
         """
-        step = asyncio.ensure_future(coroutine)
-        interrupter = asyncio.ensure_future(self._stopped.wait())
+        if agent_already_ended:
+            coroutine.close()
+            if agent_ended is not None:
+                agent_ended.close()
+            raise _AgentEnded()
+
+        # Start the normal-ending watcher before persona work. This preserves
+        # an ending that lands between the adapter's latch check above and task
+        # scheduling here.
         departure = (
             None if agent_ended is None else asyncio.ensure_future(agent_ended)
         )
+        step = asyncio.ensure_future(coroutine)
+        interrupter = asyncio.ensure_future(self._stopped.wait())
         first = asyncio.get_running_loop().create_future()
 
         def observed(cause: str) -> Callable[[asyncio.Future[Any]], None]:
@@ -252,6 +262,9 @@ async def conduct(
         wait_ended = getattr(plug, "wait_ended", None)
         return wait_ended() if callable(wait_ended) else None
 
+    def agent_has_ended() -> bool:
+        return bool(getattr(plug, "has_ended", False))
+
     watchdog = asyncio.create_task(
         _duration_watchdog(max_duration_seconds, controls),
         name=f"{name}:watchdog",
@@ -283,7 +296,9 @@ async def conduct(
             if budget_spent():
                 return limit_by_turns()
             reply = await controls.guard(
-                persona.next_turn(history), agent_ended=wait_for_agent_end()
+                persona.next_turn(history),
+                agent_ended=wait_for_agent_end(),
+                agent_already_ended=agent_has_ended(),
             )
             # The bill before the words, because the bill is a fact about the
             # request that just returned and the words are about to change the
@@ -293,7 +308,9 @@ async def conduct(
             if reply.concluded or reply.requests_end_call:
                 if reply.text:
                     final_answer = await controls.guard(
-                        plug.finish(reply.text), agent_ended=wait_for_agent_end()
+                        plug.finish(reply.text),
+                        agent_ended=wait_for_agent_end(),
+                        agent_already_ended=agent_has_ended(),
                     )
                     await record("human", reply.text)
                     if final_answer is not None:

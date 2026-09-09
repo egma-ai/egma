@@ -2227,11 +2227,17 @@ async def test_a_cancel_directive_mid_exchange_still_leaves_no_room_behind(
             super().__init__()
             self._steps = 0
 
-        async def guard(self, coroutine, *, agent_ended=None):
+        async def guard(
+            self, coroutine, *, agent_ended=None, agent_already_ended=False
+        ):
             self._steps += 1
             if self._steps > 1:
                 self.request_cancel()
-            return await super().guard(coroutine, agent_ended=agent_ended)
+            return await super().guard(
+                coroutine,
+                agent_ended=agent_ended,
+                agent_already_ended=agent_already_ended,
+            )
 
     stub = ChatStub(greeting="Front desk.", replies=["Noted."])
     conducted, _turns, _assembled = await chat_walk(

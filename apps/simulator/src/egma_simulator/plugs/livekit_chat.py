@@ -105,6 +105,11 @@ class LiveKitChat:
         """Expose the room driver for tests."""
         return self._backend
 
+    @property
+    def has_ended(self) -> bool:
+        """Whether the room has already observed a normal remote ending."""
+        return self._backend.has_ended
+
     async def open(self) -> str | None:
         """Open the room, require Egma hello, and collect an optional greeting.
         Return None when the agent waits for the persona to speak first.
