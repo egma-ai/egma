@@ -12,6 +12,7 @@ import UsageAndBillingPage from "../app/projects/[projectId]/settings/billing/pa
 import OrganizationSettingsPage from "../app/projects/[projectId]/settings/organization/page.tsx";
 import { HOBBY, PRO, USAGE, memberSession } from "./usage-billing-fixtures.ts";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
+import { renderSettingsPage } from "./render-settings-page.tsx";
 import type { BillingAccount } from "../lib/billing.ts";
 
 const routed = vi.hoisted(() => ({
@@ -82,7 +83,7 @@ function setup(account: BillingAccount | null = HOBBY, role = "admin") {
 }
 function open(account: BillingAccount | null = HOBBY, role = "admin") {
   setup(account, role);
-  render(<UsageAndBillingPage />);
+  renderSettingsPage(<UsageAndBillingPage />);
 }
 beforeEach(() => {
   requests.length = 0;
@@ -116,7 +117,7 @@ it("puts all billing facts on the named settings page and uses the activation bo
   const nav = screen.getByRole("navigation", { name: "Settings" });
   expect(
     within(nav)
-      .getByRole("link", { name: "Usage and billing" })
+      .getByRole("link", { name: "Usage and Billing" })
       .getAttribute("aria-current"),
   ).toBe("page");
 });
@@ -181,7 +182,7 @@ it("keeps loading and account failures distinct from zero or OSS", async () => {
     new Promise((resolve) => {
       settle = resolve;
     });
-  render(<UsageAndBillingPage />);
+  renderSettingsPage(<UsageAndBillingPage />);
   expect(await screen.findByText("Loading usage and billing…")).toBeTruthy();
   expect(screen.queryByText("$0.00")).toBeNull();
   settle({
@@ -210,7 +211,7 @@ it("keeps a known balance visible when provider usage cannot be read", async () 
       message: "Usage could not be read. Try again.",
     },
   };
-  render(<UsageAndBillingPage />);
+  renderSettingsPage(<UsageAndBillingPage />);
   expect(
     await screen.findByText("Usage could not be read. Try again."),
   ).toBeTruthy();
@@ -225,7 +226,7 @@ it("shows an empty provider period and an empty ledger explicitly", async () => 
       inference: { amountMicros: 0, requests: 0, byModel: [] },
     },
   };
-  render(<UsageAndBillingPage />);
+  renderSettingsPage(<UsageAndBillingPage />);
   expect(await screen.findByText("No model usage this period")).toBeTruthy();
   expect(screen.getByText("No billing activity yet")).toBeTruthy();
 });
@@ -267,7 +268,7 @@ it("loads another ledger page without losing history when a retry is needed", as
       ?.address.searchParams.get("cursor"),
   ).toBe("older/+page");
 });
-it("checks current history after a bought return without claiming a successful payment", async () => {
+it("keeps checkout-return facts visible and refreshes them from the billing controls", async () => {
   routed.search = "credit=bought";
   open();
   expect(
@@ -296,7 +297,7 @@ it("checks current history after a bought return without claiming a successful p
       },
     },
   };
-  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  fireEvent.click(screen.getByRole("button", { name: "Check again" }));
   expect(await screen.findByText("$29.25")).toBeTruthy();
   expect(screen.getByText("Credit purchase")).toBeTruthy();
 });
@@ -309,6 +310,7 @@ it("does not upgrade the displayed plan merely from a return parameter", async (
     ),
   ).toBeTruthy();
   expect(screen.getByText("Hobby")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
 });
 it("says checkout closed on cancellation while showing actual account facts", async () => {
   routed.search = "credit=cancelled";
@@ -366,7 +368,7 @@ it("validates a custom amount before opening checkout", async () => {
     "https://checkout.stripe.com/test",
   );
 });
-it("blocks duplicate upgrade actions and refresh while their result is pending", async () => {
+it("blocks duplicate upgrade actions while their result is pending", async () => {
   open();
   let resolve!: (fact: ResponseFact) => void;
   responses["/api/billing/upgrade"] = () =>
@@ -381,10 +383,6 @@ it("blocks duplicate upgrade actions and refresh while their result is pending",
   ).toBeTruthy();
   expect(
     (screen.getByRole("button", { name: "Buy credit" }) as HTMLButtonElement)
-      .disabled,
-  ).toBe(true);
-  expect(
-    (screen.getByRole("button", { name: "Refresh" }) as HTMLButtonElement)
       .disabled,
   ).toBe(true);
   resolve({
@@ -471,8 +469,8 @@ it("opens the existing payment portal action", async () => {
 it("keeps usage out of the organization name form", async () => {
   setup();
   routed.pathname = "/projects/prj_1/settings/organization";
-  render(<OrganizationSettingsPage />);
-  expect(await screen.findByLabelText("Name")).toBeTruthy();
+  renderSettingsPage(<OrganizationSettingsPage />);
+  expect(await screen.findByLabelText("Organization name*")).toBeTruthy();
   expect(
     requests.some((request) => request.path.startsWith("/api/organization/")),
   ).toBe(false);

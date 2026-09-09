@@ -243,15 +243,21 @@ function SheetBody({ className, ...props }: ComponentProps<"div">) {
 }
 
 /**
- * Keep submit and cancel together, with destructive actions separated at
- * the opposite edge. Destructive confirmation is handled by the caller.
+ * Keep secondary and destructive ways out at the left edge, and the form's
+ * main answer at the right. Destructive confirmation is handled by the caller.
  */
 function SheetFooter({
   className,
   children,
+  secondary,
   destructive,
   ...props
-}: ComponentProps<"div"> & { readonly destructive?: ReactNode }) {
+}: ComponentProps<"div"> & {
+  /** The normal way out, kept at the footer's left edge. */
+  readonly secondary?: ReactNode;
+  /** A destructive action stays apart from the main answer. */
+  readonly destructive?: ReactNode;
+}) {
   return (
     <div
       data-slot="sheet-footer"
@@ -261,10 +267,13 @@ function SheetFooter({
       )}
       {...props}
     >
-      <div className="flex flex-wrap items-center gap-3">{children}</div>
-      {destructive === undefined ? null : (
-        <div className="flex items-center">{destructive}</div>
+      {secondary === undefined && destructive === undefined ? null : (
+        <div className="flex flex-wrap items-center gap-3">
+          {secondary}
+          {destructive}
+        </div>
       )}
+      <div className="ml-auto flex flex-wrap items-center gap-3">{children}</div>
     </div>
   );
 }

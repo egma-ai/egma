@@ -74,6 +74,15 @@ describe("which project a tab is looking at", () => {
     expect(sectionIn("/projects/prj_1/runs/run_9")).toBe("runs");
   });
 
+  it("keeps a named settings page because the settings root does not exist", () => {
+    expect(inProject("/projects/prj_1/settings/project", "prj_2")).toBe(
+      "/projects/prj_2/settings/project",
+    );
+    expect(inProject("/projects/prj_1/settings", "prj_2")).toBe(
+      "/projects/prj_2/settings/organization",
+    );
+  });
+
   it("sends a page that never named a project to the new project's landing", () => {
     expect(inProject("/new-project", "prj_2")).toBe("/projects/prj_2/agents");
     expect(inProject("/", "prj_2")).toBe("/projects/prj_2/agents");

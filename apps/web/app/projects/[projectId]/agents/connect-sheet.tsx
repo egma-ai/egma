@@ -743,26 +743,6 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     return { agentId: watching.agentId, created: watching.created === true };
   }
 
-  async function resumeRetellMonitoring(): Promise<ConnectSheetResult | null> {
-    if (
-      agentId === undefined ||
-      agentId === NEW_AGENT ||
-      known?.platformAgentId === null ||
-      known?.platformAgentId === undefined
-    ) {
-      return null;
-    }
-
-    const watched = await startRetellMonitoringWatch({
-      agentId,
-      platformAgentId: known.platformAgentId,
-      name: known.name,
-    });
-    if (watched === null) return null;
-
-    return { agentId, connectionId: null, created: false };
-  }
-
   /**
    * The Monitoring goal's whole finish, from the agent choice itself.
    *
@@ -814,18 +794,6 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         body: connectionBody(option, candidate, pullsProduction),
         pullsProduction,
       });
-    }
-
-    const resumesStoredMonitoring =
-      goal !== "simulation" &&
-      storedRetellKey &&
-      agentId !== undefined &&
-      agentId !== NEW_AGENT &&
-      known?.platformAgentId === selectedRetellAgent.platformAgentId;
-    if (resumesStoredMonitoring) {
-      const resumed = await resumeRetellMonitoring();
-      if (resumed !== null) onConnected(resumed);
-      return;
     }
 
     const saved =
@@ -1582,10 +1550,11 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
             )}
             {body()}
           </SheetBody>
-          <SheetFooter className="border-t border-border pt-5 [&>div:first-child]:w-full [&>div:first-child]:justify-between">
-            {usable ? (
-              <>
-                {step === "livekit-testing" ? null : (
+          <SheetFooter
+            className="border-t border-border pt-5"
+            secondary={
+              usable ? (
+                step === "livekit-testing" ? undefined : (
                   <Button
                     type="button"
                     size="lg"
@@ -1603,7 +1572,15 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                         ? "Close"
                         : "Back"}
                   </Button>
-                )}
+                )
+              ) : (
+                <Button type="button" size="lg" variant="secondary" onClick={leave}>
+                  Close
+                </Button>
+              )
+            }
+          >
+            {usable ? (
                 <Button
                   type="submit"
                   size="lg"
@@ -1612,12 +1589,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                 >
                   {primaryLabel}
                 </Button>
-              </>
-            ) : (
-              <Button type="button" size="lg" variant="secondary" onClick={leave}>
-                Close
-              </Button>
-            )}
+            ) : null}
           </SheetFooter>
         </form>
       </SheetContent>

@@ -1988,8 +1988,8 @@ const DEFAULT_TRANSCRIPT_SPEAKERS: TranscriptSpeakerLabels = {
 };
 
 const DEFAULT_TRANSCRIPT_EMPTY_STATE: TranscriptEmptyState = {
-  title: "-",
-  description: "No conversation recorded",
+  title: "No conversation recorded",
+  description: "This simulation finished without a recorded conversation or tool calls.",
 };
 
 /** The same quiet absence whether no trace or an empty trace came back. */

@@ -1780,12 +1780,14 @@ describe("the role the shell shows", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: /^Account / })[0]!);
     const settings = screen.getByRole("menuitem", { name: "Settings" });
-    expect(settings.getAttribute("href")).toBe("/projects/prj_1/settings");
+    expect(settings.getAttribute("href")).toBe(
+      "/projects/prj_1/settings/organization",
+    );
     fireEvent.click(settings);
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("sends projectless Settings to People in the first available project", () => {
+  it("sends projectless Settings to Organization Settings in the first available project", () => {
     routed.pathname = "/new-project";
     routed.projectId = undefined;
     render(
@@ -1796,7 +1798,7 @@ describe("the role the shell shows", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: /^Account / })[0]!);
     expect(screen.getByRole("menuitem", { name: "Settings" }).getAttribute("href")).toBe(
-      "/projects/prj_1/settings/people",
+      "/projects/prj_1/settings/organization",
     );
   });
 

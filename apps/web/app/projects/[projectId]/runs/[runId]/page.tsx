@@ -623,18 +623,16 @@ function RunDetailView({
           { label: "Runs", href: projectPath(projectId, "runs") },
           { label: displayTitle },
         ]}
-        action={
+        topbarAction={
           !mayControl || !active ? undefined : (
-            <Actions>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={working}
-                onClick={() => setConfirmingCancel(true)}
-              >
-                Cancel run
-              </Button>
-            </Actions>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={working}
+              onClick={() => setConfirmingCancel(true)}
+            >
+              Cancel run
+            </Button>
           )
         }
       />

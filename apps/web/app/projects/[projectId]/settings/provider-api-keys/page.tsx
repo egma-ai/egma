@@ -38,25 +38,14 @@ import { useDraftNavigation } from "../../../../../ui/draft-navigation.tsx";
 import { Field, Help, Refused } from "../../../../../ui/form.tsx";
 import { Failure, Loading } from "../../../../../ui/page-state.tsx";
 import { ListInstant } from "../../../../../ui/relative-time.tsx";
-import { SettingsLayout } from "../../../../../ui/settings-nav.tsx";
 import {
   useOrganizationRead,
   useUnsavedChanges,
 } from "../../../../../ui/settings-read.ts";
-import {
-  AppShell,
-  PageBody,
-  PageHeader,
-  ProductPage,
-} from "../../../../../ui/shell.tsx";
 
 export default function ProviderApiKeysSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  return (
-    <AppShell>
-      <ProviderApiKeys projectId={projectId} />
-    </AppShell>
-  );
+  return <ProviderApiKeys projectId={projectId} />;
 }
 
 function ProviderApiKeys({ projectId }: { readonly projectId: string }) {
@@ -128,10 +117,7 @@ function ProviderApiKeys({ projectId }: { readonly projectId: string }) {
   ];
 
   return (
-    <ProductPage viewport>
-      <PageHeader title="Provider API Keys" />
-      <PageBody>
-        <SettingsLayout projectId={projectId} current="provider-api-keys">
+    <>
           {saved === null ? null : (
             <p className="m-0 text-sm" role="status">
               {saved}
@@ -164,8 +150,6 @@ function ProviderApiKeys({ projectId }: { readonly projectId: string }) {
               )}
             </>
           )}
-        </SettingsLayout>
-      </PageBody>
       {editing === null ? null : (
         <ProviderKeyEditor
           entry={editing}
@@ -178,7 +162,7 @@ function ProviderApiKeys({ projectId }: { readonly projectId: string }) {
           }}
         />
       )}
-    </ProductPage>
+    </>
   );
 }
 
@@ -338,6 +322,17 @@ function ProviderKeyEditor({
           </form>
         </SheetBody>
         <SheetFooter
+          secondary={
+            <Button
+              type="button"
+              size="lg"
+              variant="secondary"
+              disabled={busy}
+              onClick={close}
+            >
+              Cancel
+            </Button>
+          }
           destructive={
             entry.credential === null ? undefined : (
               <Button
@@ -364,15 +359,6 @@ function ProviderKeyEditor({
             disabled={key.trim().length < 8}
           >
             Save key
-          </Button>
-          <Button
-            type="button"
-            size="lg"
-            variant="secondary"
-            disabled={busy}
-            onClick={close}
-          >
-            Cancel
           </Button>
         </SheetFooter>
         <Dialog

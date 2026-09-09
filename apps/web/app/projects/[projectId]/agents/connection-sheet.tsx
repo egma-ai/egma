@@ -367,7 +367,13 @@ export function ConnectionSheet({
             </SheetHeader>
             <SheetBody>{body()}</SheetBody>
             {connection === null || role === null || editing === null ? null : (
-              <SheetFooter>
+              <SheetFooter
+                secondary={
+                  <Button onClick={() => setEditing(null)} size="lg" type="button" variant="secondary">
+                    Cancel
+                  </Button>
+                }
+              >
                 <Button
                   disabled={saving || !changed || !liveKitForm.ready}
                   size="lg"
@@ -376,14 +382,6 @@ export function ConnectionSheet({
                   aria-describedby={liveKitForm.ready ? undefined : whySaid}
                 >
                   {saving ? "Saving…" : "Save"}
-                </Button>
-                <Button
-                  onClick={() => setEditing(null)}
-                  size="lg"
-                  type="button"
-                  variant="secondary"
-                >
-                  Cancel
                 </Button>
               </SheetFooter>
             )}

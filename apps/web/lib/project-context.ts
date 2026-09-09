@@ -55,7 +55,14 @@ export function sectionIn(pathname: string): string | null {
  */
 export function inProject(pathname: string, projectId: string): string {
   const address = addressIn(pathname);
-  return address === null
-    ? projectLanding(projectId)
-    : projectPath(projectId, address.section);
+  if (address === null) return projectLanding(projectId);
+
+  // Settings pages are stable destinations, so keep their named page while
+  // switching projects. The settings root has no page of its own.
+  if (address.section === "settings") {
+    const settingsPage = pathname.split("/")[4] || "organization";
+    return projectPath(projectId, "settings", settingsPage);
+  }
+
+  return projectPath(projectId, address.section);
 }

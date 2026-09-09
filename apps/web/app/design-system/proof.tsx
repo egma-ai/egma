@@ -600,6 +600,13 @@ export function DesignSystemProof() {
                         </p>
                       </SheetBody>
                       <SheetFooter
+                        secondary={
+                          <SheetClose asChild>
+                            <BaseButton type="button" size="lg" variant="secondary">
+                              Cancel
+                            </BaseButton>
+                          </SheetClose>
+                        }
                         destructive={
                           <BaseButton type="button" variant="ghost" className="text-failure">
                             Delete
@@ -609,11 +616,6 @@ export function DesignSystemProof() {
                         <BaseButton type="button" size="lg">
                           Save connection
                         </BaseButton>
-                        <SheetClose asChild>
-                          <BaseButton type="button" size="lg" variant="secondary">
-                            Cancel
-                          </BaseButton>
-                        </SheetClose>
                       </SheetFooter>
                     </SheetContent>
                   </Sheet>

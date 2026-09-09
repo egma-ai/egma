@@ -14,6 +14,7 @@ import type { ProviderKeyEntry } from "@egma/platform-api/client";
 import { memberSession } from "./usage-billing-fixtures.ts";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 import { REPLAY_PRIVATE_ATTRIBUTE } from "../lib/replay-privacy.ts";
+import { renderSettingsPage } from "./render-settings-page.tsx";
 
 const routed = vi.hoisted(() => ({
   router: { push: vi.fn(), replace: vi.fn(), back: vi.fn() },
@@ -115,7 +116,7 @@ afterEach(() => {
 });
 
 it("adds an organization key through a private password field and clears its draft after saving", async () => {
-  render(<ProviderApiKeysPage />);
+  renderSettingsPage(<ProviderApiKeysPage />);
   fireEvent.click(
     await screen.findByRole("button", { name: "Add OpenAI key" }),
   );
@@ -137,7 +138,7 @@ it("adds an organization key through a private password field and clears its dra
 it("retains a replacement draft on a stale-write refusal and never overwrites a newer revision", async () => {
   rows[0] = { ...rows[0]!, credential: ORIGINAL_CREDENTIAL };
   failedWrite = true;
-  render(<ProviderApiKeysPage />);
+  renderSettingsPage(<ProviderApiKeysPage />);
   fireEvent.click(
     await screen.findByRole("button", { name: "Manage OpenAI key" }),
   );
@@ -185,7 +186,7 @@ it("retains a replacement draft on a stale-write refusal and never overwrites a 
 
 it("requires explicit removal confirmation and explains the return to inference credits", async () => {
   rows[0] = { ...rows[0]!, credential: ORIGINAL_CREDENTIAL };
-  render(<ProviderApiKeysPage />);
+  renderSettingsPage(<ProviderApiKeysPage />);
   fireEvent.click(
     await screen.findByRole("button", { name: "Manage OpenAI key" }),
   );
@@ -209,7 +210,7 @@ it("requires explicit removal confirmation and explains the return to inference 
 it("lets members see masked provider status without key management controls", async () => {
   mayManage = false;
   rows[0] = { ...rows[0]!, credential: ORIGINAL_CREDENTIAL };
-  render(<ProviderApiKeysPage />);
+  renderSettingsPage(<ProviderApiKeysPage />);
   expect(await screen.findByText("••••old1")).toBeTruthy();
   expect(screen.getByText(/Ask an organization admin/)).toBeTruthy();
   expect(
@@ -229,7 +230,7 @@ it("keeps a pending removal open on Escape and displays a failed delete", async 
     finish = resolve;
   });
   failedWrite = true;
-  render(<ProviderApiKeysPage />);
+  renderSettingsPage(<ProviderApiKeysPage />);
   fireEvent.click(
     await screen.findByRole("button", { name: "Manage OpenAI key" }),
   );

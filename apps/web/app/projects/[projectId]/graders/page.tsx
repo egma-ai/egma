@@ -1,9 +1,8 @@
 "use client";
 
-import { XIcon } from "lucide-react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   listGraderLibrary,
   listGraders,
@@ -48,6 +47,7 @@ import {
 } from "../../../../ui/page-state.tsx";
 import { useProjectRead } from "../../../../ui/resource.ts";
 import { DestructiveItem, RowMenu } from "../../../../ui/row-menu.tsx";
+import { Toast, type FeedbackInput } from "../../../../ui/feedback.tsx";
 import {
   AppShell,
   PageBody,
@@ -430,9 +430,19 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
   const [activeGrader, setActiveGrader] = useState<ProjectGrader | null>(null);
   const [activeOpen, setActiveOpen] = useState(false);
   const [removing, setRemoving] = useState<ProjectGrader | null>(null);
-  const [said, setSaid] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{
+    readonly input: FeedbackInput;
+    readonly message: string;
+    readonly open: boolean;
+  }>({ input: "keyboard", message: "", open: false });
   const openedLinkedGrader = useRef<string | null>(null);
   const openedLinkedDefinition = useRef<string | null>(null);
+  const showNotice = useCallback((message: string): void => {
+    setNotice({ input: "keyboard", message, open: true });
+  }, []);
+  const hideNotice = useCallback((input: FeedbackInput = "keyboard"): void => {
+    setNotice((current) => ({ ...current, input, open: false }));
+  }, []);
 
   useEffect(() => {
     if (
@@ -452,7 +462,7 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
     openedLinkedGrader.current = key;
     const grader = answer.value.graders.find((one) => one.id === linkedGraderId);
     if (grader === undefined) {
-      setSaid("This grader definition is no longer active in this project.");
+      showNotice("This grader definition is no longer active in this project.");
       return;
     }
     setTab("active");
@@ -464,6 +474,7 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
     linkedDefinitionVersion,
     linkedGraderId,
     projectId,
+    showNotice,
   ]);
 
   useEffect(() => {
@@ -477,7 +488,7 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
       (one) => one.id === linkedDefinitionId,
     );
     if (entry === undefined) {
-      setSaid("This grader definition is no longer available.");
+      showNotice("This grader definition is no longer available.");
       return;
     }
     setTab("library");
@@ -490,6 +501,7 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
     linkedDefinitionId,
     linkedDefinitionVersion,
     projectId,
+    showNotice,
   ]);
 
   const whyNot =
@@ -498,7 +510,7 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
       : `Your ${String(role)} role can view graders but cannot change them.`;
 
   function refreshAll(message: string): void {
-    setSaid(message);
+    showNotice(message);
     active.refresh();
     library.refresh();
   }
@@ -513,7 +525,7 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
   }
 
   function openGrader(grader: ProjectGrader): void {
-    setSaid(null);
+    hideNotice();
     setActiveGrader(grader);
     setActiveOpen(true);
   }
@@ -522,7 +534,7 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
     entry: GraderLibraryEntry,
     mode: "details" | "use",
   ): void {
-    setSaid(null);
+    hideNotice();
     setLibraryEntry(entry);
     setLibraryDefinitionVersion(undefined);
     setLibraryMode(mode);
@@ -543,7 +555,7 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
 
   /** The one destructive path, opened from a row menu in either list. */
   function askToRemove(grader: ProjectGrader): void {
-    setSaid(null);
+    hideNotice();
     setActiveOpen(false);
     setLibraryOpen(false);
     setRemoving(grader);
@@ -629,7 +641,7 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
       openGrader(grader);
       return;
     }
-    setSaid("This grader is active. Refresh Active graders to open its policy.");
+    showNotice("This grader is active. Refresh Active graders to open its policy.");
     setTab("active");
     active.reload();
   }
@@ -652,7 +664,7 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
                 disabled={!mayAuthor}
                 {...(whyNot === undefined ? {} : { why: whyNot })}
                 onClick={() => {
-                  setSaid(null);
+                  hideNotice();
                   setCreating(true);
                 }}
               >
@@ -662,36 +674,6 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
           }
         />
         <PageBody>
-          {said === null ? null : (
-            /*
-             * The notice stays until it is dismissed. No timer, on purpose: a
-             * line that removes itself is gone before a person who looked away
-             * could read it. The way out is the same dismiss control the
-             * product's feedback banner uses, and one control serves all four
-             * of this page's messages because refreshAll writes them all here.
-             */
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <p className="m-0 text-sm text-success" role="status">
-                {said}
-              </p>
-              <button
-                className={cn(
-                  "grid size-(--control-sm) shrink-0 cursor-pointer place-items-center p-0",
-                  "rounded-button border-0 bg-transparent text-muted-foreground",
-                  "transition-transform duration-(--duration-press) ease-out",
-                  "pointer-hover:bg-surface-soft pointer-hover:text-foreground",
-                  "[&:active:not(:focus-visible)]:scale-97",
-                  "motion-reduce:transition-none",
-                  "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
-                )}
-                type="button"
-                aria-label={`Dismiss ${said}`}
-                onClick={() => setSaid(null)}
-              >
-                <XIcon className="size-4" />
-              </button>
-            </div>
-          )}
           <TabsContent value="active">{activePanel()}</TabsContent>
           <TabsContent value="library">{libraryPanel()}</TabsContent>
         </PageBody>
@@ -750,6 +732,12 @@ function ProjectGraders({ projectId }: { readonly projectId: string }) {
           }}
         />
       )}
+      <Toast
+        input={notice.input}
+        open={notice.open}
+        title={notice.message}
+        onDismiss={hideNotice}
+      />
     </ProductPage>
   );
 }
