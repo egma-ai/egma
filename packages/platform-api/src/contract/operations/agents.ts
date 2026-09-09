@@ -72,6 +72,7 @@ const connection = {
     connectionType: {
       type: "string",
       enum: [
+        "retell_chat_api",
         "retell_text_mode",
         "retell_web_call",
         "phone_number",
@@ -81,6 +82,7 @@ const connection = {
     accessVariant: {
       type: "string",
       enum: [
+        "retell_chat_api.api_key",
         "retell_text_mode.api_key",
         "retell_web_call.api_key",
         "phone_number.public_e164",
@@ -167,7 +169,6 @@ const connectionInput = {
     connectionType: {
       type: "string",
       enum: [
-        "retell_chat_api",
         "retell_text_mode",
         "retell_web_call",
         "phone_number",
@@ -177,7 +178,6 @@ const connectionInput = {
     accessVariant: {
       type: "string",
       enum: [
-        "retell_chat_api.api_key",
         "retell_text_mode.api_key",
         "retell_web_call.api_key",
         "phone_number.public_e164",
