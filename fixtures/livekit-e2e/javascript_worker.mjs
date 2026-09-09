@@ -72,8 +72,9 @@ export default defineAgent({
         "check_availability with day Tuesday, then immediately call record_request " +
         "with day Tuesday and kind reschedule. Each call is required exactly once, " +
         "even when Tuesday is full. Do not ask for confirmation and never check " +
-        "another day. After both tools return, state the availability, confirm the " +
-        "request was recorded, and end the conversation. Keep the reply short.",
+        "another day. After both tools return, relay the complete availability " +
+        "result as provided, including any next opening, then confirm the request " +
+        "was recorded and end the conversation. Keep the reply short.",
       tools: [checkAvailability, recordRequest],
     });
     const session = new voice.AgentSession({

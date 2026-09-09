@@ -74,6 +74,12 @@ function decoded(value: unknown): unknown {
   return result;
 }
 
+function redact(text: string, secrets: readonly string[]): string {
+  return secrets
+    .filter((secret) => secret !== "")
+    .reduce((safe, secret) => safe.replaceAll(secret, "[REDACTED]"), text);
+}
+
 function publicTranscript(body: Record<string, unknown>): {
   turns: PublicSpan[];
   spans: PublicSpan[];
@@ -142,8 +148,21 @@ function expectWebEvidenceToMatchRetell(
       providerTools.push({ ...invocation, result: decoded(message.content) });
     }
   }
-  expect(pending.size, "Retell returned an invocation without its result").toBe(0);
-  expect(publicTools(transcript, "agent").map((tool) => ({
+  const terminalCalls = [...pending.entries()].filter(([, invocation]) =>
+    invocation.name === "end_call"
+  );
+  expect(terminalCalls, "Retell must finish with one native end_call invocation").toHaveLength(1);
+  const terminalArguments = terminalCalls[0]?.[1].arguments;
+  expect(terminalArguments).toMatchObject({ execution_message: expect.any(String) });
+  expect(String((terminalArguments as { execution_message?: unknown }).execution_message).trim())
+    .not.toBe("");
+  pending.delete(terminalCalls[0]![0]);
+  expect(pending.size, "Retell returned a custom-tool invocation without its result").toBe(0);
+  const publicEvidenceTools = publicTools(transcript, "agent");
+  const publicTerminalCalls = publicEvidenceTools.filter((tool) => tool.toolName === "end_call");
+  expect(publicTerminalCalls).toHaveLength(1);
+  expect(publicTerminalCalls[0]?.toolResult ?? "").toBe("");
+  expect(publicEvidenceTools.filter((tool) => tool.toolName !== "end_call").map((tool) => ({
     name: tool.toolName,
     arguments: decoded(tool.toolArguments),
     result: decoded(tool.toolResult),
@@ -167,13 +186,32 @@ function expectCompleteTextModeExchange(body: Record<string, unknown>): void {
 async function callbackServer(token: string): Promise<{
   origin: string;
   calls: ToolRequest[];
+  setMockOrigin(origin: string): void;
   close(): Promise<void>;
 }> {
   const calls: ToolRequest[] = [];
+  let mockOrigin: string | undefined;
   const server = http.createServer((request, response) => {
     let raw = "";
     request.on("data", (piece: Buffer) => { raw += piece.toString("utf8"); });
     request.on("end", () => {
+      const requestPath = request.url ?? "/";
+      if (requestPath.startsWith("/mock-tools/") && mockOrigin !== undefined) {
+        void fetch(`${mockOrigin}${requestPath}`, {
+          method: request.method ?? "GET",
+          headers: { "content-type": request.headers["content-type"] ?? "application/json" },
+          ...(raw === "" ? {} : { body: raw }),
+        }).then(async (answer) => {
+          response.writeHead(answer.status, {
+            "content-type": answer.headers.get("content-type") ?? "application/json",
+          });
+          response.end(await answer.text());
+        }).catch((error: unknown) => {
+          response.writeHead(502, { "content-type": "application/json" });
+          response.end(JSON.stringify({ error: error instanceof Error ? error.name : "proxy_failed" }));
+        });
+        return;
+      }
       if (request.headers.authorization !== `Bearer ${token}`) {
         response.writeHead(401).end();
         return;
@@ -182,7 +220,6 @@ async function callbackServer(token: string): Promise<{
       const args = typeof body.args === "object" && body.args !== null
         ? body.args as Record<string, unknown>
         : body;
-      const requestPath = request.url ?? "/";
       calls.push({ path: requestPath, body: args });
       const result = requestPath === "/check-availability"
         ? { available: true, day: "Tuesday", time: "9:40 AM" }
@@ -197,6 +234,7 @@ async function callbackServer(token: string): Promise<{
   return {
     origin: `http://127.0.0.1:${address.port}`,
     calls,
+    setMockOrigin(origin: string) { mockOrigin = origin; },
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }
@@ -271,6 +309,9 @@ it.skipIf(!ENABLED || storage?.available !== true)(
     } | undefined;
     let projectKey = "";
     let mainSucceeded = false;
+    let diagnosticDetail: Record<string, unknown> | undefined;
+    let diagnosticGrade: Record<string, unknown> | undefined;
+    let diagnosticProviderCall: Record<string, unknown> | undefined;
     try {
       provisioned = await waitForFile<{
         agentId: string;
@@ -278,12 +319,14 @@ it.skipIf(!ENABLED || storage?.available !== true)(
         providerMetadata: Record<string, unknown>;
       }>(readyPath, fixture, () => fixtureOutput);
       instance = await startInstance(`retell_live_${CONNECTION}_${MOCKS ? "mock" : "real"}`, {
+        baseUrl: tunnel.url,
         web: true,
         traces: true,
         providerKeys: { openai: MODEL_KEY },
         ingestStore: liveStorage().ingestStore,
         blob: liveStorage().store,
       });
+      callback.setMockOrigin(instance.origin);
       const signup = await request(instance, "POST", "/api/signup", { body: {
         email: "retell-e2e@acme.example",
         password: "a-password-long-enough-1",
@@ -356,7 +399,7 @@ it.skipIf(!ENABLED || storage?.available !== true)(
         claimant: `retell-${CONNECTION}-${MOCKS ? "mock" : "real"}`,
         simulatorDirectory: SIMULATOR,
         walDirectory: path.join(scratch, "wal"),
-        blobDirectory: path.join(scratch, "blobs"),
+        recordingStore: liveStorage().writeStore,
         modelKey: MODEL_KEY,
       });
       const run = await request(instance, "POST", "/v1/runs", { key: projectKey, body: {
@@ -372,6 +415,7 @@ it.skipIf(!ENABLED || storage?.available !== true)(
       await expect.poll(async () => {
         await instance!.drainEvidence();
         detail = await request(instance!, "GET", `/v1/simulations/${simulationId}`, { key: projectKey });
+        diagnosticDetail = detail.body;
         return { status: detail.body.status, gradingState: detail.body.gradingState };
       }, { timeout: 180_000, interval: 500 }).toEqual({ status: "completed", gradingState: "complete" });
       const storedGrades = await readTraceGrades(auth, {
@@ -380,6 +424,13 @@ it.skipIf(!ENABLED || storage?.available !== true)(
         runId,
       });
       expect(storedGrades.current).toHaveLength(1);
+      const currentGrade = storedGrades.current[0];
+      diagnosticGrade = currentGrade === undefined ? undefined : {
+        result: currentGrade.result,
+        score: currentGrade.score,
+        passThreshold: currentGrade.graderPassThreshold,
+        details: currentGrade.details,
+      };
       expect(storedGrades.current[0]?.result).toBe("passed");
       expect(storedGrades.current[0]?.score).toBe(1);
       const recorded = { recorded: true, day: "Tuesday", time: String(availability.time), reference: "retell-e2e-742" };
@@ -405,10 +456,8 @@ it.skipIf(!ENABLED || storage?.available !== true)(
         if (!providerAnswer.ok) {
           throw new Error(`Retell final record read failed with HTTP ${providerAnswer.status}`);
         }
-        expectWebEvidenceToMatchRetell(
-          detail!.body,
-          await providerAnswer.json() as Record<string, unknown>,
-        );
+        diagnosticProviderCall = await providerAnswer.json() as Record<string, unknown>;
+        expectWebEvidenceToMatchRetell(detail!.body, diagnosticProviderCall);
       } else {
         // Text mode creates no provider call. The stored persona POV is the
         // platform API exchange itself, so prove that complete bounded sequence.
@@ -453,23 +502,53 @@ it.skipIf(!ENABLED || storage?.available !== true)(
       }, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
       mainSucceeded = true;
     } catch (error) {
-      const safe = [fixtureOutput, workers?.output() ?? "", tunnel.output()]
-        .join("\n").replaceAll(RETELL_KEY, "[REDACTED]").replaceAll(MODEL_KEY, "[REDACTED]")
-        .replaceAll(projectKey, "[REDACTED]").replaceAll(callbackToken, "[REDACTED]");
+      if (CONNECTION === "web" && diagnosticProviderCall === undefined) {
+        const providerReference = diagnosticDetail?.providerReference;
+        if (typeof providerReference === "string" && providerReference !== "") {
+          try {
+            const providerAnswer = await fetch(
+              `https://api.retellai.com/v2/get-call/${encodeURIComponent(providerReference)}`,
+              { headers: { authorization: `Bearer ${RETELL_KEY}` } },
+            );
+            if (providerAnswer.ok) {
+              diagnosticProviderCall = await providerAnswer.json() as Record<string, unknown>;
+            }
+          } catch {
+            // The other retained diagnostics still explain an unreachable provider read.
+          }
+        }
+      }
+      const secrets = [RETELL_KEY, MODEL_KEY, projectKey, callbackToken];
+      const safe = redact(
+        [fixtureOutput, workers?.output() ?? "", tunnel.output()].join("\n"),
+        secrets,
+      );
       await mkdir(proofDirectory, { recursive: true });
       await writeFile(
         path.join(proofDirectory, `retell-${CONNECTION}-${MOCKS ? "mocked" : "unmocked"}.log`),
         safe,
         { encoding: "utf8", mode: 0o600 },
       );
-      await writeFile(
-        path.join(proofDirectory, `retell-${CONNECTION}-${MOCKS ? "mocked" : "unmocked"}.json`),
+      const diagnosticManifest = redact(
         JSON.stringify({
           commitSha: process.env["GITHUB_SHA"] ?? "local-working-tree",
           connection: CONNECTION,
           mocked: MOCKS,
-          outcomes: { simulation: "failed", failureType: error instanceof Error ? error.name : "unknown" },
-        }, null, 2) + "\n",
+          outcomes: {
+            simulation: "failed",
+            failureType: error instanceof Error ? error.name : "unknown",
+          },
+          ...(diagnosticDetail === undefined ? {} : { evidence: diagnosticDetail }),
+          ...(diagnosticGrade === undefined ? {} : { grade: diagnosticGrade }),
+          ...(diagnosticProviderCall === undefined ? {} : {
+            providerCall: diagnosticProviderCall,
+          }),
+        }, null, 2),
+        secrets,
+      ) + "\n";
+      await writeFile(
+        path.join(proofDirectory, `retell-${CONNECTION}-${MOCKS ? "mocked" : "unmocked"}.json`),
+        diagnosticManifest,
         { encoding: "utf8", mode: 0o600 },
       );
       throw error;

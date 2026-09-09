@@ -1318,6 +1318,12 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       let artifact: { file: string; sha256: string; version: string } | undefined;
       let runtime: { name: string; version: string } | undefined;
       let diagnosticEvidence: Record<string, unknown> | undefined;
+      let diagnosticGrade: {
+        result: CurrentGrade["result"];
+        score: number | null;
+        passThreshold: number;
+        details: CurrentGrade["details"];
+      } | undefined;
       try {
         const readyBy = Date.now() + 180_000;
         let ready: {
@@ -1445,7 +1451,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           claimant: caseId,
           simulatorDirectory: SIMULATOR_DIRECTORY,
           walDirectory: path.join(scratch, `${caseId}-wal`),
-          blobDirectory: path.join(scratch, `${caseId}-blobs`),
+          recordingStore: (storage as Extract<ObjectStorage, { available: true }>).writeStore,
           modelKey: LIVE_MODEL_KEY,
         });
 
@@ -1473,10 +1479,16 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         }
         await instance.drainEvidence();
         const grade = await gradesOn(auth, simulationId, runId, 1, 60_000);
-        expect(grade[0]?.result).toBe("passed");
-        expect(grade[0]?.score).toBe(1);
+        diagnosticGrade = grade[0] === undefined ? undefined : {
+          result: grade[0].result,
+          score: grade[0].score,
+          passThreshold: grade[0].graderPassThreshold,
+          details: grade[0].details,
+        };
         const detail = await call("GET", `/v1/simulations/${simulationId}`, { key });
         diagnosticEvidence = detail.body;
+        expect(grade[0]?.result).toBe("passed");
+        expect(grade[0]?.score).toBe(1);
         expect(detail.status, JSON.stringify(detail.body)).toBe(200);
         expect(detail.body).toMatchObject({
           status: "completed",
@@ -1644,6 +1656,10 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         );
       } catch (failure) {
         await mkdir(proofDirectory, { recursive: true });
+        const diagnosticNativeHistory = await readFile(
+          path.join(providerDirectory, "native-history.json"),
+          "utf8",
+        ).catch(() => "");
         const workerLogs = await Promise.all(
           [
             `${LIVE_LANGUAGE}-worker.log`,
@@ -1659,6 +1675,8 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           fullPathWorkers?.output() ?? "",
           ...tunnels.map((tunnel) => tunnel.output()),
           ...workerLogs,
+          diagnosticNativeHistory === "" ? "" :
+            `native session history:\n${diagnosticNativeHistory}`,
         ]
           .join("\n")
           .replaceAll(LIVE_MODEL_KEY, "[REDACTED]")
@@ -1668,9 +1686,8 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           safeProviderLog,
           { encoding: "utf8", mode: 0o600 },
         );
-        await writeFile(
-          path.join(proofDirectory, `${caseId}.json`),
-          JSON.stringify({
+        const diagnosticManifest = JSON.stringify(
+          {
             caseId,
             commitSha: process.env["GITHUB_SHA"] ?? "local-working-tree",
             ...(artifact === undefined ? {} : { artifact }),
@@ -1687,7 +1704,16 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
                 transcript: diagnosticEvidence.transcript,
               },
             }),
-          }, null, 2) + "\n",
+            ...(diagnosticGrade === undefined ? {} : { grade: diagnosticGrade }),
+          },
+          null,
+          2,
+        )
+          .replaceAll(LIVE_MODEL_KEY, "[REDACTED]")
+          .replaceAll(key, "[REDACTED]") + "\n";
+        await writeFile(
+          path.join(proofDirectory, `${caseId}.json`),
+          diagnosticManifest,
           { encoding: "utf8", mode: 0o600 },
         );
         throw failure;

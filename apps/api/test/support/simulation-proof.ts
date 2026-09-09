@@ -6,6 +6,7 @@ import { expect } from "vitest";
 
 import { makeLog } from "../../../grader/src/log.ts";
 import { startService } from "../../../grader/src/service.ts";
+import type { BlobStore } from "../../src/recordings/signed-link.ts";
 
 export function quickTunnelUrl(output: string): string | undefined {
   if (!output.includes("Your quick Tunnel has been created!")) return undefined;
@@ -84,7 +85,7 @@ export function startFullPathWorkers(options: {
   readonly claimant: string;
   readonly simulatorDirectory: string;
   readonly walDirectory: string;
-  readonly blobDirectory: string;
+  readonly recordingStore: BlobStore;
   readonly modelKey: string;
 }): {
   readonly simulator: ChildProcess;
@@ -102,7 +103,11 @@ export function startFullPathWorkers(options: {
       EGMA_SIMULATOR_CLAIM_WAIT_SECONDS: "2",
       EGMA_SIMULATOR_HEARTBEAT_SECONDS: "1",
       EGMA_SIMULATOR_WAL_DIR: options.walDirectory,
-      EGMA_SIMULATOR_BLOB_DIR: options.blobDirectory,
+      EGMA_SIMULATOR_S3_ENDPOINT: options.recordingStore.publicUrl,
+      EGMA_SIMULATOR_S3_BUCKET: options.recordingStore.bucket,
+      EGMA_SIMULATOR_S3_REGION: options.recordingStore.region,
+      EGMA_SIMULATOR_S3_ACCESS_KEY_ID: options.recordingStore.accessKeyId,
+      EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY: options.recordingStore.secretAccessKey,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

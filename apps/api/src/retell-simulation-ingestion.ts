@@ -162,9 +162,7 @@ async function pullWith(
   );
 
   const file = async (call: RetellCall): Promise<void> => {
-    if (reach.signal?.aborted === true) {
-      throw new Error("the Retell simulation collection lease is no longer held");
-    }
+    reach.signal?.throwIfAborted();
     const projectId = pull.standing.auth.projectId;
     if (projectId === undefined) {
       // A conducting context is built from the row's own organization and
@@ -189,9 +187,7 @@ async function pullWith(
       (span) => span.kind === "conversation" && span.parentSpanId === "",
     );
     const children = normalised.spans.filter((span) => !roots.includes(span));
-    if (reach.signal?.aborted === true) {
-      throw new Error("the Retell simulation collection lease is no longer held");
-    }
+    reach.signal?.throwIfAborted();
     const acceptedChildren = await fileEvidence([
       { standing: pull.standing, emitter: "agent", spans: children },
     ]);
@@ -201,9 +197,7 @@ async function pullWith(
     ) {
       throw new Error("the complete Retell record was refused by evidence ingestion");
     }
-    if (reach.signal?.aborted === true) {
-      throw new Error("the Retell simulation collection lease is no longer held");
-    }
+    reach.signal?.throwIfAborted();
     const acceptedRoots = await fileEvidence([
       { standing: pull.standing, emitter: "agent", spans: roots },
     ]);

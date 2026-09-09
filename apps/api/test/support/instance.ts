@@ -65,6 +65,8 @@ export type Instance = {
 };
 
 export type InstanceOptions = {
+  /** Public deployment origin used in callback URLs while tests reach the local listener. */
+  readonly baseUrl?: string;
   /**
    * Whether the trace store gets its schema. Off by default: creating and
    * migrating one costs a second, and a flow that reads no telemetry only needs
@@ -213,7 +215,7 @@ export async function startInstance(
       EGMA_AUTH_SECRET: "a-secret-only-this-test-uses",
       EGMA_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
       EGMA_SIMULATOR_SERVICE_TOKEN: "egma_st_held-by-this-test-suite-alone",
-      EGMA_BASE_URL: origin,
+      EGMA_BASE_URL: options.baseUrl ?? origin,
       EGMA_SINGLE_ORGANIZATION: "false",
       // A self-host test deployment with one explicit key per provider
       // account. They are nonsense and never reach a provider. Claim tests
