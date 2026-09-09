@@ -14,10 +14,13 @@ import logging
 import math
 import struct
 import sys
+import urllib.parse
 from array import array
 from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from functools import cache
+from typing import Any
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
@@ -367,6 +370,9 @@ class SpeechProviders:
     stt_customer_funded: bool = False
     tts_customer_funded: bool = False
 
+    use_environment_proxy: bool = False
+    """Whether provider sockets must honor the runtime's proxy settings."""
+
     stt_provider: str | None = None
     tts_provider: str | None = None
     """Who bills for each leg.
@@ -563,6 +569,15 @@ def _ears(
     if not providers.stt_model:
         raise SpeechFault("the deepgram listening leg was chosen without a model")
 
+    if providers.use_environment_proxy:
+        # Deepgram's pinned async client still uses the legacy websockets
+        # connector, which ignores Daytona's HTTPS_PROXY. A Daytona sandbox
+        # runs one claim, so selecting the current connector here is scoped to
+        # that dedicated runtime process.
+        from deepgram.listen.v1 import client as deepgram_listen_client
+
+        deepgram_listen_client.websockets_client_connect = _daytona_deepgram_connect
+
     leg = DeepgramSTTService(
         api_key=providers.stt_key,
         settings=DeepgramSTTService.Settings(model=providers.stt_model),
@@ -585,6 +600,31 @@ def _ears(
         await connection_ready.wait()
 
     return leg, connected
+
+
+@asynccontextmanager
+async def _daytona_deepgram_connect(
+    url: str, extra_headers: dict[str, str] | None = None
+) -> AsyncGenerator[Any, None]:
+    """Open Deepgram through Daytona's proxy with credentials in headers."""
+    from deepgram.core.api_error import ApiError
+    from websockets.asyncio.client import connect
+    from websockets.exceptions import InvalidStatus
+
+    try:
+        async with connect(
+            url,
+            additional_headers=extra_headers,
+            proxy=True,
+        ) as protocol:
+            yield protocol
+    except InvalidStatus as fault:
+        if fault.response.status_code not in {401, 403}:
+            raise
+        raise ApiError(
+            status_code=fault.response.status_code,
+            body="Websocket initialized with invalid credentials.",
+        ) from fault
 
 
 def _connection_opened_by(leg: FrameProcessor) -> asyncio.Event:
@@ -642,8 +682,30 @@ def _cartesia_mouth(
     The voice and speed are the pinned TTS selection's own. This adapter
     neither substitutes nor clamps them.
     """
-    from pipecat.services.cartesia.tts import CartesiaTTSService, GenerationConfig
+    from pipecat.services.cartesia.tts import (
+        CartesiaTTSService as StockCartesiaTTSService,
+    )
+    from pipecat.services.cartesia.tts import GenerationConfig
     from pipecat.services.tts_service import TextAggregationMode
+
+    class CartesiaTTSService(StockCartesiaTTSService):
+        async def _websocket_connect(self, uri: str, **kwargs: Any):
+            parsed = urllib.parse.urlsplit(uri)
+            query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+            safe_uri = urllib.parse.urlunsplit(
+                parsed._replace(
+                    query=urllib.parse.urlencode(
+                        [(name, value) for name, value in query if name != "api_key"]
+                    )
+                )
+            )
+            headers = dict(kwargs.pop("additional_headers", {}) or {})
+            headers["X-API-Key"] = self._api_key
+            return await super()._websocket_connect(
+                safe_uri,
+                additional_headers=headers,
+                **kwargs,
+            )
 
     if not providers.tts_key:
         raise SpeechFault("the cartesia speaking leg was chosen without a key")

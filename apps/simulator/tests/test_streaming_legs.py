@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -13,6 +14,7 @@ from egma_simulator.speech import (
     PersonaVoice,
     SpeechFault,
     SpeechProviders,
+    _daytona_deepgram_connect,
     _ears,
     _mouth,
 )
@@ -80,6 +82,38 @@ def test_cartesia_receives_the_pinned_model_voice_and_speed(
     assert closers == ()
 
 
+async def test_cartesia_tts_sends_its_key_in_a_websocket_header(monkeypatch):
+    from pipecat.services.websocket_service import WebsocketService
+
+    connected: list[tuple[str, dict[str, str]]] = []
+
+    async def connect(_service: object, uri: str, **kwargs: Any) -> object:
+        connected.append((uri, kwargs["additional_headers"]))
+        return object()
+
+    monkeypatch.setattr(WebsocketService, "_websocket_connect", connect)
+    placeholder = "dtn_secret_cartesia_under_test"
+    leg, _, _ = _mouth(
+        SpeechProviders(
+            tts="cartesia",
+            tts_key=placeholder,
+            tts_model="sonic-3.5",
+        ),
+        cartesia_voice(),
+    )
+
+    await leg._websocket_connect(
+        f"wss://api.cartesia.ai/tts/websocket?api_key={placeholder}"
+        "&cartesia_version=2026-03-01"
+    )
+
+    uri, headers = connected[0]
+    assert placeholder not in uri
+    assert "api_key" not in uri
+    assert "cartesia_version=2026-03-01" in uri
+    assert headers == {"X-API-Key": placeholder}
+
+
 @pytest.mark.parametrize(
     ("providers", "reason"),
     [
@@ -122,6 +156,118 @@ def test_cartesia_stt_receives_the_pinned_model(
 
     assert calls[0]["settings"].model == "ink-2"
     assert connected is not None
+
+
+async def test_daytona_deepgram_sends_its_key_through_the_environment_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from deepgram.listen.v1 import client as deepgram_listen_client
+    from websockets.asyncio import client as websocket_client
+
+    original_connector = deepgram_listen_client.websockets_client_connect
+    monkeypatch.setattr(
+        deepgram_listen_client,
+        "websockets_client_connect",
+        original_connector,
+    )
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    protocol = object()
+
+    class Connected:
+        async def __aenter__(self) -> object:
+            return protocol
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    def connect(url: str, **kwargs: Any) -> Connected:
+        calls.append((url, kwargs))
+        return Connected()
+
+    monkeypatch.setattr(websocket_client, "connect", connect)
+    _ears(
+        SpeechProviders(
+            stt="deepgram",
+            stt_key="dtn_secret_deepgram_under_test",
+            stt_model="nova-3",
+            use_environment_proxy=True,
+        )
+    )
+
+    assert deepgram_listen_client.websockets_client_connect is (
+        _daytona_deepgram_connect
+    )
+    connector = deepgram_listen_client.websockets_client_connect
+    async with connector(
+        "wss://api.deepgram.com/v1/listen",
+        extra_headers={"Authorization": "Token dtn_secret_deepgram_under_test"},
+    ) as connected:
+        assert connected is protocol
+    assert calls == [
+        (
+            "wss://api.deepgram.com/v1/listen",
+            {
+                "additional_headers": {
+                    "Authorization": "Token dtn_secret_deepgram_under_test",
+                },
+                "proxy": True,
+            },
+        )
+    ]
+
+
+async def test_daytona_deepgram_redacts_modern_auth_failure(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from deepgram.core.api_error import ApiError
+    from websockets.asyncio import client as websocket_client
+    from websockets.exceptions import InvalidStatus
+
+    class Rejected:
+        async def __aenter__(self) -> object:
+            raise InvalidStatus(SimpleNamespace(status_code=401))
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr(
+        websocket_client, "connect", lambda *_args, **_kwargs: Rejected()
+    )
+    placeholder = "dtn_secret_deepgram_under_test"
+
+    with pytest.raises(ApiError) as caught:
+        async with _daytona_deepgram_connect(
+            "wss://api.deepgram.com/v1/listen",
+            extra_headers={"Authorization": f"Token {placeholder}"},
+        ):
+            pass
+
+    assert caught.value.status_code == 401
+    assert caught.value.headers is None
+    assert placeholder not in str(caught.value)
+
+
+def test_non_daytona_deepgram_keeps_the_sdk_connector(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from deepgram.listen.v1 import client as deepgram_listen_client
+
+    original_connector = deepgram_listen_client.websockets_client_connect
+    monkeypatch.setattr(
+        deepgram_listen_client,
+        "websockets_client_connect",
+        original_connector,
+    )
+    _ears(
+        SpeechProviders(
+            stt="deepgram",
+            stt_key=A_KEY,
+            stt_model="nova-3",
+        )
+    )
+
+    assert deepgram_listen_client.websockets_client_connect is original_connector
 
 
 @pytest.mark.parametrize(

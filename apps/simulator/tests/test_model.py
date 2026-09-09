@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
 from aiohttp import web
@@ -170,6 +171,56 @@ async def test_the_openai_client_sends_the_messages_and_returns_the_reply(
     ]
     assert sent["tool_choice"] == "auto"
     assert model_stub.headers[0]["Authorization"] == "Bearer key-under-test"
+
+
+async def test_the_daytona_model_uses_the_environment_proxy(monkeypatch):
+    requests: list[tuple[str, str | None]] = []
+
+    async def proxy(request: web.Request) -> web.Response:
+        requests.append((request.raw_path, request.headers.get("Authorization")))
+        return web.json_response(
+            {"choices": [{"message": {"role": "assistant", "content": "Hello."}}]}
+        )
+
+    app = web.Application()
+    app.router.add_route("*", "/{tail:.*}", proxy)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    proxy_url = f"http://127.0.0.1:{runner.addresses[0][1]}"
+    monkeypatch.setenv("HTTP_PROXY", proxy_url)
+    monkeypatch.setenv("http_proxy", proxy_url)
+    monkeypatch.setenv("NO_PROXY", "")
+    monkeypatch.setenv("no_proxy", "")
+
+    client = build_model_client(
+        SimpleNamespace(
+            runtime=object(),
+            models=SimpleNamespace(
+                llm=SimpleNamespace(
+                    adapter="openai_chat_completions",
+                    key="dtn_secret_openai_under_test",
+                    model="model-under-test",
+                    reasoning_effort=None,
+                    funding_receipt=None,
+                )
+            ),
+        ),
+        _base_url="http://model.invalid/v1",
+    )
+    try:
+        await client.reply(system_and_history())
+    finally:
+        await client.close()
+        await runner.cleanup()
+
+    assert requests == [
+        (
+            "http://model.invalid/v1/chat/completions",
+            "Bearer dtn_secret_openai_under_test",
+        )
+    ]
 
 
 async def test_the_structured_end_call_is_returned_for_pipecat_to_execute(model_stub):
