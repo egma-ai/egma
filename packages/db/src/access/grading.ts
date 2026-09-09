@@ -737,6 +737,12 @@ export async function recordSimulationEvidenceErrorIn(
       `completed simulation ${input.simulationId} has no grading plan`,
     );
   }
+  if (
+    resolved.length === 0 &&
+    input.error !== SIMULATOR_EVIDENCE_DELIVERY_ERROR
+  ) {
+    return false;
+  }
 
   const grades = await readTraceGrades(auth, {
     source: "simulation",

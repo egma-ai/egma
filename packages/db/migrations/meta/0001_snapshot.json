@@ -5017,7 +5017,7 @@
         },
         "grading_job_entries_are_a_nonempty_list": {
           "name": "grading_job_entries_are_a_nonempty_list",
-          "value": "jsonb_typeof(\"grading_job\".\"entries\") = 'array'\n        and (jsonb_array_length(\"grading_job\".\"entries\") > 0\n          or (\"grading_job\".\"status\" = 'abandoned' and \"grading_job\".\"attempts\" = 0\n            and \"grading_job\".\"last_error\" = 'simulator_evidence_delivery_error'))"
+          "value": "jsonb_typeof(\"grading_job\".\"entries\") = 'array'\n        and (jsonb_array_length(\"grading_job\".\"entries\") > 0\n          or (\"grading_job\".\"status\" = 'abandoned' and \"grading_job\".\"attempts\" = 0\n            and \"grading_job\".\"last_error\" is not null\n            and \"grading_job\".\"last_error\" = 'simulator_evidence_delivery_error'))"
         },
         "grading_job_claim_columns_agree": {
           "name": "grading_job_claim_columns_agree",

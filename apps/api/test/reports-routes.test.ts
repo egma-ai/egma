@@ -326,6 +326,15 @@ async function gradingJobsFor(simulationId: string): Promise<number> {
   return Number(rows[0]?.count);
 }
 
+async function excludeAllSimulationGraders(customer: Customer): Promise<void> {
+  await api.database.sql(
+    `update project_grader
+     set scope = '{"simulations":[],"production":null}'::jsonb
+     where project_id = $1`,
+    [customer.projectId],
+  );
+}
+
 describe("the token gate", () => {
   it("refuses a missing, wrong, or customer token with one actionable sentence", async () => {
     const { key, connectionId, versionId } = await aCustomerReadyToRun(
@@ -663,7 +672,7 @@ describe("the lifecycle lands", () => {
   );
 
   it("retains a simulator evidence failure when no graders were selected", async () => {
-    const { key, connectionId, versionId } = await aCustomerReadyToRun(
+    const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
       "reports_evidence_rejected_without_graders",
       {
         carrierRoute: PHONE_IS_SET_UP,
@@ -671,22 +680,12 @@ describe("the lifecycle lands", () => {
       },
       RETELL_PHONE,
     );
-    const { runId, simulationId } = await aRunningSimulation(
+    await excludeAllSimulationGraders(ada);
+    const { simulationId } = await aRunningSimulation(
       key,
       connectionId,
       versionId,
     );
-    await api.database.sql("alter table run disable trigger run_grading_plan_guard");
-    try {
-      await api.database.sql(
-        `update run
-         set grading_plan = jsonb_set(grading_plan, '{groups,0,items}', '[]'::jsonb)
-         where id = $1`,
-        [runId],
-      );
-    } finally {
-      await api.database.sql("alter table run enable trigger run_grading_plan_guard");
-    }
     const answered = await report(simulationId, [
       terminalEvent("completed", "persona_concluded", {
         evidence_error: "evidence_collection_error",

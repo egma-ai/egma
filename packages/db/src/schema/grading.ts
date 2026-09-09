@@ -105,6 +105,7 @@ export const gradingJob = pgTable(
       sql`jsonb_typeof(${table.entries}) = 'array'
         and (jsonb_array_length(${table.entries}) > 0
           or (${table.status} = 'abandoned' and ${table.attempts} = 0
+            and ${table.lastError} is not null
             and ${table.lastError} = 'simulator_evidence_delivery_error'))`,
     ),
     check(

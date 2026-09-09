@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -251,5 +252,42 @@ describe("the fresh Postgres baseline", () => {
         "test_suite_membership_immutable",
       ]),
     );
+  });
+
+  it("allows empty entries only for a permanent simulator evidence error", async () => {
+    await runMigrations(database.url);
+    await store.sql("set session_replication_role = replica");
+    try {
+      const insertEmpty = (
+        status: "abandoned" | "pending",
+        lastError: string | null,
+      ) => store.sql(
+        `insert into grading_job
+          (id, organization_id, project_id, source, trace_id,
+           trace_started_at, entries, status, sequence_base, attempts,
+           last_error, finished_at)
+         values ($1, $2, $3, 'production', $4, now(), '[]'::jsonb,
+           $5, 0, 0, $6, case when $5 = 'abandoned' then now() end)`,
+        [
+          newId("gjb"),
+          newId("org"),
+          newId("prj"),
+          `trace-${randomUUID()}`,
+          status,
+          lastError,
+        ],
+      );
+      await expect(insertEmpty("abandoned", null)).rejects.toThrow(
+        /grading_job_entries_are_a_nonempty_list/,
+      );
+      await expect(
+        insertEmpty("pending", "simulator_evidence_delivery_error"),
+      ).rejects.toThrow(/grading_job_entries_are_a_nonempty_list/);
+      await expect(
+        insertEmpty("abandoned", "simulator_evidence_delivery_error"),
+      ).resolves.toBeDefined();
+    } finally {
+      await store.sql("set session_replication_role = origin");
+    }
   });
 });
