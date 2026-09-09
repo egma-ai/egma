@@ -2228,7 +2228,12 @@ async def test_a_cancel_directive_mid_exchange_still_leaves_no_room_behind(
             self._steps = 0
 
         async def guard(
-            self, coroutine, *, agent_ended=None, agent_already_ended=False
+            self,
+            coroutine,
+            *,
+            agent_ended=None,
+            agent_failed=None,
+            agent_already_ended=False,
         ):
             self._steps += 1
             if self._steps > 1:
@@ -2236,6 +2241,7 @@ async def test_a_cancel_directive_mid_exchange_still_leaves_no_room_behind(
             return await super().guard(
                 coroutine,
                 agent_ended=agent_ended,
+                agent_failed=agent_failed,
                 agent_already_ended=agent_already_ended,
             )
 

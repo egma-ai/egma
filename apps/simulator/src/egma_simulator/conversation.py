@@ -85,6 +85,7 @@ class ConversationControls:
         coroutine: Coroutine[Any, Any, Any],
         *,
         agent_ended: Coroutine[Any, Any, None] | None = None,
+        agent_failed: Coroutine[Any, Any, None] | None = None,
         agent_already_ended: bool = False,
     ) -> Any:
         """Await one step of the conversation, unless a stop cause lands first.
@@ -98,6 +99,8 @@ class ConversationControls:
             coroutine.close()
             if agent_ended is not None:
                 agent_ended.close()
+            if agent_failed is not None:
+                agent_failed.close()
             raise _AgentEnded()
 
         # Start the normal-ending watcher before persona work. This preserves
@@ -105,6 +108,9 @@ class ConversationControls:
         # scheduling here.
         departure = (
             None if agent_ended is None else asyncio.ensure_future(agent_ended)
+        )
+        transport_failure = (
+            None if agent_failed is None else asyncio.ensure_future(agent_failed)
         )
         step = asyncio.ensure_future(coroutine)
         interrupter = asyncio.ensure_future(self._stopped.wait())
@@ -121,6 +127,8 @@ class ConversationControls:
         interrupter.add_done_callback(observed("control"))
         if departure is not None:
             departure.add_done_callback(observed("agent"))
+        if transport_failure is not None:
+            transport_failure.add_done_callback(observed("failure"))
         winner: str | None = None
         try:
             winner = await first
@@ -136,6 +144,10 @@ class ConversationControls:
                 departure.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await departure
+            if transport_failure is not None and winner != "failure":
+                transport_failure.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await transport_failure
 
         if winner == "step":
             return step.result()
@@ -146,6 +158,8 @@ class ConversationControls:
         if departure is not None and winner == "agent":
             departure.result()
             raise _AgentEnded()
+        if transport_failure is not None and winner == "failure":
+            transport_failure.result()
         raise _ConversationStopped()
 
 
@@ -262,6 +276,15 @@ async def conduct(
         wait_ended = getattr(plug, "wait_ended", None)
         return wait_ended() if callable(wait_ended) else None
 
+    def wait_for_agent_failure() -> Coroutine[Any, Any, None] | None:
+        wait_failed = getattr(plug, "wait_failed", None)
+        return wait_failed() if callable(wait_failed) else None
+
+    def raise_if_agent_failed() -> None:
+        check = getattr(plug, "raise_if_failed", None)
+        if callable(check):
+            check()
+
     def agent_has_ended() -> bool:
         return bool(getattr(plug, "has_ended", False))
 
@@ -295,9 +318,11 @@ async def conduct(
             # The persona's move — unless the budget is already spent.
             if budget_spent():
                 return limit_by_turns()
+            raise_if_agent_failed()
             reply = await controls.guard(
                 persona.next_turn(history),
                 agent_ended=wait_for_agent_end(),
+                agent_failed=wait_for_agent_failure(),
                 agent_already_ended=agent_has_ended(),
             )
             # The bill before the words, because the bill is a fact about the
@@ -307,9 +332,11 @@ async def conduct(
                 await on_provider_usage(reply.usage)
             if reply.concluded or reply.requests_end_call:
                 if reply.text:
+                    raise_if_agent_failed()
                     final_answer = await controls.guard(
                         plug.finish(reply.text),
                         agent_ended=wait_for_agent_end(),
+                        agent_failed=wait_for_agent_failure(),
                         agent_already_ended=agent_has_ended(),
                     )
                     await record("human", reply.text)

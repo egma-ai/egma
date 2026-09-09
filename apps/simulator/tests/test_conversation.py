@@ -17,7 +17,7 @@ import pytest
 from egma_simulator.conversation import Conducted, ConversationControls, conduct
 from egma_simulator.model import GOODBYE, ModelFailure, PersonaReply, ScriptedModel
 from egma_simulator.persona import Persona
-from egma_simulator.plugs import AgentReply
+from egma_simulator.plugs import AgentReply, PlugError
 from egma_simulator.plugs.scripted import ScriptedCounterpart
 from egma_simulator.spec import AuthoredPersona
 
@@ -288,6 +288,7 @@ class TerminalPlug:
 
     def __init__(self, final_answer: AgentReply | None = None) -> None:
         self.ended = asyncio.Event()
+        self.failed = asyncio.Event()
         self.final_answer = final_answer
         self.sent: list[str] = []
 
@@ -305,9 +306,17 @@ class TerminalPlug:
     async def wait_ended(self) -> None:
         await self.ended.wait()
 
+    async def wait_failed(self) -> None:
+        await self.failed.wait()
+        self.raise_if_failed()
+
+    def raise_if_failed(self) -> None:
+        if self.failed.is_set():
+            raise PlugError("the chat transport failed")
+
     @property
     def has_ended(self) -> bool:
-        return self.ended.is_set()
+        return self.ended.is_set() and not self.failed.is_set()
 
     async def close(self) -> None:
         return None
@@ -514,6 +523,78 @@ async def test_an_immediate_persona_failure_without_a_customer_end_still_fails()
             controls=ConversationControls(),
             name="sim:actual-failure",
         )
+
+
+async def test_an_already_failed_transport_starts_no_persona_work():
+    model = FixedModel(PersonaReply(text="too late", concluded=False))
+    persona = Persona(
+        authored=AUTHORED, scenario_instructions="One point.", model=model
+    )
+    plug = TerminalPlug()
+    plug.failed.set()
+    turns, recorder = collect()
+
+    with pytest.raises(PlugError, match="transport failed"):
+        await conduct(
+            persona=persona,
+            plug=plug,
+            max_turns=10,
+            max_duration_seconds=30,
+            on_turn=recorder,
+            on_timing=None,
+            controls=ConversationControls(),
+            name="sim:already-failed",
+        )
+    assert plug.sent == []
+    assert turns == []
+
+
+async def test_transport_failure_then_departure_cancels_pending_persona_work():
+    class PendingModel:
+        model_name = "pending"
+
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.canceled = asyncio.Event()
+
+        async def reply(self, _context) -> PersonaReply:
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.canceled.set()
+                raise
+
+        async def close(self) -> None:
+            return None
+
+    model = PendingModel()
+    persona = Persona(
+        authored=AUTHORED, scenario_instructions="One point.", model=model
+    )
+    plug = TerminalPlug()
+    turns, recorder = collect()
+    running = asyncio.create_task(
+        conduct(
+            persona=persona,
+            plug=plug,
+            max_turns=10,
+            max_duration_seconds=30,
+            on_turn=recorder,
+            on_timing=None,
+            controls=ConversationControls(),
+            name="sim:failed-then-left",
+        )
+    )
+    await model.started.wait()
+    plug.failed.set()
+    plug.ended.set()
+
+    with pytest.raises(PlugError, match="transport failed"):
+        await running
+    assert model.canceled.is_set()
+    assert plug.sent == []
+    assert turns == []
 
 
 async def test_what_the_platform_said_rides_the_record_and_not_the_turn():
