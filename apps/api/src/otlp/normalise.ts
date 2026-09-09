@@ -778,10 +778,12 @@ export function normaliseOtlpExport(
           scope?.name === LIVEKIT_SCOPE && span.name === "agent_turn"
             ? firstAttribute([attributes], LIVEKIT_CALLER_INPUT)
             : "";
+        // Retain blank native turn records and their children as raw evidence,
+        // outside the spoken transcript.
         const native =
           scope?.name === LIVEKIT_SCOPE &&
-          span.name === "agent_turn" &&
-          normalised.text === ""
+          (span.name === "agent_turn" || span.name === "user_turn") &&
+          normalised.text.trim() === ""
             ? { ...normalised, kind: "other" }
             : normalised;
         if (callerInput !== "" && attribution.modality === "chat") {

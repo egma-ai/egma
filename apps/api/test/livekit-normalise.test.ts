@@ -216,6 +216,48 @@ describe("LiveKit Agents 1.7 trace attributes", () => {
     );
   });
 
+  it("retains an empty terminal user record outside the spoken conversation", () => {
+    const heard = span("0011223344556614", "user_turn", {
+      "lk.pii.user_transcript": "Is Tuesday available?",
+    });
+    const aborted = span("0011223344556615", "user_turn", {});
+
+    const result = normalise(
+      { "lk.pii.room_name": "egma-sim-sim_aborted_stt" },
+      [heard, aborted],
+      "1.7.1",
+      "voice",
+    );
+
+    expect(result.spans.filter(({ kind }) => kind.startsWith("turn:"))).toMatchObject([
+      { spanId: heard.spanId, kind: "turn:human", text: "Is Tuesday available?" },
+    ]);
+    expect(result.spans[1]).toMatchObject({
+      spanId: aborted.spanId,
+      name: "user_turn",
+      kind: "other",
+      text: "",
+    });
+    expect(result.spans[1]?.payload).toContain('"name":"user_turn"');
+  });
+
+  it.each([
+    { name: "user_turn", key: "lk.pii.user_transcript", text: "" },
+    { name: "user_turn", key: "lk.pii.user_transcript", text: " \t" },
+    { name: "agent_turn", key: "lk.pii.response.text", text: "" },
+    { name: "agent_turn", key: "lk.pii.response.text", text: " \t" },
+  ])("keeps blank $name text as raw evidence for %#", ({ name, key, text }) => {
+    const result = normalise(
+      { "lk.pii.room_name": "egma-sim-sim_blank_native_turn" },
+      [span("0011223344556616", name, { [key]: text })],
+      "1.7.1",
+      "voice",
+    );
+
+    expect(result.spans).toHaveLength(1);
+    expect(result.spans[0]).toMatchObject({ name, kind: "other", text });
+  });
+
   it("does not reinterpret production agent input as a simulation caller turn", () => {
     const result = normalise(
       { "lk.pii.room_name": "customer-production-chat" },

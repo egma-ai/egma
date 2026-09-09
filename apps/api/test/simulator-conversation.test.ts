@@ -1501,8 +1501,15 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         }).turns ?? []).find((turn) =>
           turn.pov === "agent" && turn.kind === "turn:agent" && turn.text?.trim() !== ""
         )?.text;
+        const persistedHumanText = ((detail.body.transcript as {
+          turns?: Array<{ kind?: string; pov?: string; text?: string }>;
+        }).turns ?? []).find((turn) =>
+          turn.pov === "agent" && turn.kind === "turn:human" && turn.text?.trim() !== ""
+        )?.text;
         expect(persistedAgentText).toBeDefined();
+        expect(persistedHumanText).toBeDefined();
         const agentNeedle = compactText(persistedAgentText ?? "").slice(0, 60).toLowerCase();
+        const humanNeedle = compactText(persistedHumanText ?? "").slice(0, 60).toLowerCase();
         if (LIVE_MODALITY === "voice") {
           const recording = await call(
             "GET",
@@ -1520,7 +1527,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         }
         assertPublicEvidence(detail.body, {
           pov: "agent",
-          humanIncludes: "tuesday",
+          humanIncludes: humanNeedle,
           agentIncludes: agentNeedle,
           recording: LIVE_MODALITY === "voice",
           tools: [
@@ -1577,6 +1584,8 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             text: compactText(text),
           }];
         });
+        expect(nativeTurns.some((turn) => turn.kind === "turn:human")).toBe(true);
+        expect(nativeTurns.some((turn) => turn.kind === "turn:agent")).toBe(true);
         expect(publicCustomerTurns.map((turn) => ({
           kind: turn.kind,
           text: compactText(turn.text ?? ""),
@@ -1631,7 +1640,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             `${instance.origin}/projects/${projectId}/runs/${runId}`,
           );
           await assertEvidencePage(page, {
-            humanIncludes: "tuesday",
+            humanIncludes: humanNeedle,
             agentIncludes: agentNeedle,
             recording: LIVE_MODALITY === "voice",
             sourceLabel: "Conversation recorded by the customer agent",
