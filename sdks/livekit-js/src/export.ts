@@ -14,6 +14,7 @@ import {
 import {
   BatchSpanProcessor,
   NodeTracerProvider,
+  type ReadableSpan,
   type SpanExporter,
   type SpanProcessor,
 } from "@opentelemetry/sdk-trace-node";
@@ -97,6 +98,92 @@ export type ExportState = {
 let state: ExportState | undefined;
 let contextsWithFlush = new WeakSet<object>();
 let pendingFlushes = new WeakMap<BatchSpanProcessor, Promise<void>>();
+
+type SpanExportResult = Parameters<Parameters<SpanExporter["export"]>[1]>[0];
+
+/**
+ * Keep a simulation's completion root behind every evidence batch that came
+ * before it. The OTLP exporter owns bounded transport retries; this gate only
+ * remembers their final result and never files a root after one failed.
+ */
+class SimulationEvidenceExporter implements SpanExporter {
+  private queued: Promise<void> = Promise.resolve();
+  private failure: Error | undefined;
+  private readonly delegate: SpanExporter;
+
+  constructor(delegate: SpanExporter) {
+    this.delegate = delegate;
+  }
+
+  export(
+    spans: ReadableSpan[],
+    resultCallback: (result: SpanExportResult) => void,
+  ): void {
+    const exporting = this.queued.then(() => this.exportInOrder(spans));
+    this.queued = exporting.then(
+      () => undefined,
+      () => undefined,
+    );
+    void exporting
+      .then(resultCallback, (cause: unknown) => {
+        resultCallback(this.failed(cause));
+      })
+      .catch(() => undefined);
+  }
+
+  async forceFlush(): Promise<void> {
+    for (;;) {
+      const held = this.queued;
+      await held;
+      if (held === this.queued) break;
+    }
+    await this.delegate.forceFlush?.();
+  }
+
+  async shutdown(): Promise<void> {
+    await this.forceFlush();
+    await this.delegate.shutdown();
+  }
+
+  private async exportInOrder(spans: ReadableSpan[]): Promise<SpanExportResult> {
+    const children = spans.filter((span) => span.name !== "agent_session");
+    const roots = spans.filter((span) => span.name === "agent_session");
+    if (children.length > 0) {
+      const result = await this.send(children);
+      if (result.code !== 0) return this.remember(result);
+    }
+    if (roots.length > 0) {
+      if (this.failure !== undefined) return this.failed(this.failure);
+      const result = await this.send(roots);
+      if (result.code !== 0) return this.remember(result);
+    }
+    return { code: 0 };
+  }
+
+  private send(spans: ReadableSpan[]): Promise<SpanExportResult> {
+    return new Promise((resolve) => {
+      try {
+        this.delegate.export(spans, resolve);
+      } catch (cause) {
+        resolve(this.failed(cause));
+      }
+    });
+  }
+
+  private remember(result: SpanExportResult): SpanExportResult {
+    this.failure = result.error ?? new Error(
+      "Egma did not accept all simulation evidence before its completion record.",
+    );
+    return { code: 1, error: this.failure };
+  }
+
+  private failed(cause: unknown): SpanExportResult {
+    const error = cause instanceof Error
+      ? cause
+      : new Error("Egma could not export this simulation's evidence.");
+    return { code: 1, error };
+  }
+}
 
 /**
  * The mutable seam for a tracer provider that another integration already
@@ -327,10 +414,13 @@ function configureExport(
 
   let processor: BatchSpanProcessor | undefined;
   try {
-    const exporter = new OTLPTraceExporter({
+    const transport = new OTLPTraceExporter({
       url: endpoint,
       headers: { Authorization: `Bearer ${apiKey}` },
     });
+    const exporter = providerReference === ""
+      ? transport
+      : new SimulationEvidenceExporter(transport);
     processor =
       providerReference === ""
         ? new BatchSpanProcessor(exporter)
