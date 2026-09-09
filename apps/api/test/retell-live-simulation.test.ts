@@ -368,46 +368,30 @@ async function proveAuthenticatedBrowser(
 }
 
 it.runIf(PROXY_PROBE)(
-  "serves an authenticated page with the production secure-cookie policy",
+  "serves an authenticated page through the public fixture tunnel",
   { timeout: 120_000 },
   async () => {
     const callback = await callbackServer("proxy-probe-token");
+    const tunnel = await startPublicTunnel(callback.origin);
     let instance: Instance | undefined;
     try {
+      await waitForPublicTunnel(tunnel, "/_egma-fixture/health");
       instance = await startInstance("retell_public_proxy_probe", {
-        baseUrl: "https://fixture.example",
+        baseUrl: tunnel.url,
         web: true,
       });
       callback.setMockOrigin(instance.origin);
-      const signup = await request(instance, "POST", "/api/signup", { body: {
+      const signup = await request(tunnel.url, "POST", "/api/signup", { body: {
         email: "retell-proxy-probe@acme.example",
         password: "a-password-long-enough-1",
         organizationName: "Retell Proxy Probe",
       } });
       expect(signup.status, JSON.stringify(signup.body)).toBe(201);
       const identity = signup.body as unknown as { project: { id: string } };
-      const browser = await openBrowser();
-      try {
-        const context = await browser.newContext();
-        await context.addCookies([browserCookie(signup.cookie, "https://fixture.example")]);
-        await context.route("https://fixture.example/**", async (route) => {
-          const requested = new URL(route.request().url());
-          const response = await route.fetch({
-            url: `${callback.origin}${requested.pathname}${requested.search}`,
-          });
-          await route.fulfill({ response });
-        });
-        const page = await context.newPage();
-        await page.goto(
-          `https://fixture.example/projects/${identity.project.id}/agents`,
-        );
-        await page.getByRole("heading", { name: "Agents", exact: true }).waitFor();
-        expect(page.url()).toContain(`/projects/${identity.project.id}/agents`);
-      } finally {
-        await browser.close();
-      }
+      await proveAuthenticatedBrowser(tunnel.url, signup.cookie, identity.project.id);
     } finally {
       await instance?.close();
+      await stopChild(tunnel.process);
       await callback.close();
     }
   },

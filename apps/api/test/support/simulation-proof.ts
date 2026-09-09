@@ -1,5 +1,6 @@
 import { loadIngestionSettings } from "@egma/ingestion";
 import { spawn, type ChildProcess } from "node:child_process";
+import { Resolver } from "node:dns/promises";
 import { isDeepStrictEqual } from "node:util";
 import type { Page } from "playwright-core";
 import { expect } from "vitest";
@@ -51,6 +52,39 @@ export async function waitForPublicTunnel(
 ): Promise<void> {
   const deadline = Date.now() + PUBLIC_TUNNEL_READY_MILLISECONDS;
   let lastFailure: unknown;
+
+  const hostname = new URL(tunnel.url).hostname;
+  if (!hostname.endsWith(".trycloudflare.com")) {
+    throw new Error("the quick tunnel URL is outside trycloudflare.com");
+  }
+  const discovery = new Resolver({ timeout: 2_000, tries: 1 });
+  const names = await discovery.resolveNs("trycloudflare.com");
+  const addresses = (await Promise.all(names.map(async (name) =>
+    await discovery.resolve4(name)
+  ))).flat();
+  if (addresses.length === 0) {
+    throw new Error("trycloudflare.com has no reachable authoritative nameserver");
+  }
+  const authoritative = new Resolver({ timeout: 2_000, tries: 1 });
+  authoritative.setServers(addresses);
+  for (;;) {
+    if (tunnel.process.exitCode !== null) {
+      throw new Error(`cloudflared exited before publishing DNS:\n${tunnel.output()}`);
+    }
+    try {
+      if ((await authoritative.resolve4(hostname)).length > 0) break;
+    } catch (cause) {
+      lastFailure = cause;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        "the public tunnel was not published by its authoritative DNS within 60s",
+        { cause: lastFailure },
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
   for (;;) {
     if (tunnel.process.exitCode !== null) {
       throw new Error(`cloudflared exited before its public URL was reachable:\n${tunnel.output()}`);
