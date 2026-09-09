@@ -51,6 +51,7 @@ jobs:
     needs: prepare
     if: needs.prepare.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     env:
       RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
     environment:
@@ -76,6 +77,21 @@ jobs:
           # Match the package's declared uv-build minor. A release must not
           # silently change build backends because the CLI moved forward.
           version: "0.11.33"
+
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Make the native build toolchain available
+        run: ./.github/native-toolchain.sh
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the web API client
+        run: pnpm --filter @egma/platform-api build
 
       - name: Check the release matches both package versions
         working-directory: sdks/python
@@ -112,28 +128,75 @@ jobs:
           test -n "$wheel"
           python3 .github/livekit_compatibility.py python "$wheel"
 
-      - name: Prove the exact wheel through LiveKit and the simulator
+      - name: Start the full-path evidence stores
+        run: pnpm db:up
+
+      - name: Sync the shipped simulator
+        working-directory: apps/simulator
+        run: uv sync --frozen
+
+      - name: Install the voice sentence tokenizer
+        working-directory: apps/simulator
+        run: uv run python -m nltk.downloader punkt_tab
+
+      - name: Report the browser
+        run: google-chrome --version
+
+      - name: Warm the object-store image
+        run: docker pull "$(awk '/^  minio:/{found=1} found && /image:/{print $2; exit}' docker-compose.yml)"
+
+      - name: Prove the exact wheel through storage and browser-visible grades
         env:
           LIVEKIT_E2E_OPENAI_API_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
         run: |
+          set -e
           if [ -z "$LIVEKIT_E2E_OPENAI_API_KEY" ]; then
             echo "LIVEKIT_E2E_OPENAI_API_KEY is required before this wheel can publish." >&2
             exit 1
           fi
-          uv sync --frozen --project apps/simulator
-          wheel="$(find sdks/python/dist -maxdepth 1 -name '*.whl' -print -quit)"
-          LIVEKIT_E2E_PYTHON_WHEEL="$wheel" \
-            python3 fixtures/livekit-e2e/run.py --case python-all
+          wheel="$(realpath "$(find sdks/python/dist -maxdepth 1 -name '*.whl' -print -quit)")"
 
-      - name: Upload redacted LiveKit proof records
+          run_case() {
+            version="$1"
+            modality="$2"
+            rm -rf .proofs/simulation-e2e
+            set +e
+            EGMA_REQUIRE_OBJECT_STORAGE=1 \
+              SIMULATION_E2E_LIVE=1 \
+              SIMULATION_E2E_LANGUAGE=python \
+              SIMULATION_E2E_MODALITY="$modality" \
+              SIMULATION_E2E_ACCESS=project_credentials \
+              SIMULATION_E2E_MOCKS=on \
+              LIVEKIT_E2E_PYTHON_WHEEL="$wheel" \
+              LIVEKIT_E2E_PYTHON_AGENTS_VERSION="$version" \
+              pnpm exec vitest run --project fast \
+                apps/api/test/simulator-conversation.test.ts \
+                --testNamePattern "runs a packaged LiveKit worker"
+            status="$?"
+            set -e
+            destination=".proofs/python-sdk-release/$version-$modality"
+            mkdir -p "$(dirname "$destination")"
+            if [ -d .proofs/simulation-e2e ]; then
+              mv .proofs/simulation-e2e "$destination"
+            fi
+            return "$status"
+          }
+
+          for version in 1.6.6 1.7.1; do
+            for modality in chat voice; do
+              run_case "$version" "$modality"
+            done
+          done
+
+      - name: Upload redacted full-path proof manifests
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: python-sdk-release-livekit-e2e-${{ github.sha }}
-          path: .proofs/livekit-e2e/**/upload/**
+          name: python-sdk-release-full-path-${{ github.sha }}
+          path: .proofs/python-sdk-release/**/*.json
           include-hidden-files: true
-          if-no-files-found: warn
-          retention-days: 7
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Prove the built wheel in a clean environment
         working-directory: sdks/python

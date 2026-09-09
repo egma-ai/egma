@@ -987,11 +987,7 @@ def run_workbench_case(
         expected_answer = (
             "Tuesday is completely full. The next opening is Thursday morning."
         )
-        expected_output = (
-            {"answer": expected_answer}
-            if language == "javascript"
-            else "{'answer': '" + expected_answer + "'}"
-        )
+        expected_output = expected_answer
         successful_mock_calls = [
             record
             for record in tool_spans

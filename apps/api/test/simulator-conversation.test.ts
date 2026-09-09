@@ -1,5 +1,6 @@
 import { loadIngestionSettings } from "@egma/ingestion";
 import { spawn, type ChildProcess } from "node:child_process";
+import { lookup } from "node:dns/promises";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
@@ -98,12 +99,21 @@ async function waitForTokenEndpoint(
       if (answer.ok) return;
       lastAnswer = `${String(answer.status)} ${await answer.text()}`;
     } catch (fault) {
-      lastAnswer = fault instanceof Error ? fault.message : String(fault);
+      const causes: string[] = [];
+      let current: unknown = fault;
+      for (let depth = 0; current instanceof Error && depth < 4; depth++) {
+        causes.push(`${current.name}: ${current.message}`);
+        current = current.cause;
+      }
+      lastAnswer = causes.length > 0 ? causes.join("; caused by ") : String(fault);
     }
     if (Date.now() > deadline) {
+      const addresses = await lookup(new URL(endpoint).hostname, { all: true })
+        .then((resolved) => JSON.stringify(resolved))
+        .catch((fault: unknown) => fault instanceof Error ? fault.message : String(fault));
       throw new Error(
         "the public token endpoint did not become reachable within 60s; " +
-          `last answer: ${lastAnswer}; cloudflared said:\n${tunnelOutput()}`,
+          `last answer: ${lastAnswer}; DNS: ${addresses}; cloudflared said:\n${tunnelOutput()}`,
       );
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
@@ -650,6 +660,52 @@ async function settledRun(
   }
 }
 
+async function nativeHistory(file: string): Promise<Record<string, unknown>[]> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    try {
+      const body = JSON.parse(await readFile(file, "utf8")) as { items?: Record<string, unknown>[] };
+      return body.items ?? [];
+    } catch {
+      if (Date.now() > deadline) throw new Error("the customer fixture did not save its native session history");
+      await new Promise((resume) => setTimeout(resume, 50));
+    }
+  }
+}
+
+function historyText(content: unknown): string {
+  return Array.isArray(content)
+    ? content.filter((part): part is string => typeof part === "string").join("\n").trim()
+    : "";
+}
+
+function compactText(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function decodedHistory(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try { return JSON.parse(value) as unknown; } catch { return value; }
+}
+
+type PublicTool = {
+  spanId?: string;
+  startedAt?: string;
+  kind?: string;
+  toolName?: string;
+  toolArguments?: string;
+  toolResult?: string;
+  pov?: string;
+  spans?: PublicTool[];
+};
+
+function publicTools(spans: readonly PublicTool[]): PublicTool[] {
+  return spans.flatMap((span) => [
+    ...(span.kind === "tool" && span.pov === "agent" ? [span] : []),
+    ...publicTools(span.spans ?? []),
+  ]);
+}
+
 beforeAll(async () => {
   scratch = await mkdtemp(path.join(os.tmpdir(), "egma-simulator-pass-"));
   counterpart = new RetellCounterpart();
@@ -664,6 +720,7 @@ beforeAll(async () => {
       : {}),
     retellFetch: RETELL_TEXT_MODE_PREFLIGHT,
     ...(storage.available ? { ingestStore: storage.ingestStore } : {}),
+    ...(storage.available ? { blob: storage.store } : {}),
     beforeApiListen(api) {
       api.addHook("preHandler", async (request) => {
         if (
@@ -1210,11 +1267,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       const expectedAvailability = LIVE_MOCKS
         ? "Tuesday is completely full. The next opening is Thursday morning."
         : "The real calendar has a Tuesday appointment at 9:40.";
-      const expectedAvailabilityResult = LIVE_MOCKS
-        ? LIVE_LANGUAGE === "python"
-          ? `{'answer': '${expectedAvailability}'}`
-          : { answer: expectedAvailability }
-        : expectedAvailability;
+      const expectedAvailabilityResult = expectedAvailability;
       const expectedBehavior = LIVE_MOCKS
         ? "reports that Tuesday is full and Thursday morning is the next opening after checking availability"
         : "reports that Tuesday has an appointment at 9:40 after checking availability";
@@ -1464,6 +1517,81 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             },
           ],
         });
+        const storedCustomerTurns = (await storedSpans(traceIdOf(simulationId)))
+          .filter((span) =>
+            span.emitter === "agent" &&
+            (span.kind === "turn:human" || span.kind === "turn:agent") &&
+            span.text.trim() !== ""
+          )
+          .map((span) => ({
+            spanId: span.span_id,
+            kind: span.kind,
+            text: span.text,
+          }));
+        const publicCustomerTurns = ((detail.body.transcript as {
+          turns?: Array<{
+            spanId?: string;
+            kind?: string;
+            text?: string;
+            pov?: string;
+          }>;
+        }).turns ?? [])
+          .filter((turn) => turn.pov === "agent")
+          .map((turn) => ({
+            spanId: turn.spanId,
+            kind: turn.kind,
+            text: turn.text,
+          }));
+        expect(publicCustomerTurns).toEqual(storedCustomerTurns);
+        const history = await nativeHistory(path.join(providerDirectory, "native-history.json"));
+        const nativeTurns = history.flatMap((item) => {
+          if (item.type !== "message" || (item.role !== "user" && item.role !== "assistant")) return [];
+          const text = historyText(item.content);
+          return text === "" ? [] : [{
+            kind: item.role === "user" ? "turn:human" : "turn:agent",
+            text: compactText(text),
+          }];
+        });
+        expect(publicCustomerTurns.map((turn) => ({
+          kind: turn.kind,
+          text: compactText(turn.text ?? ""),
+        }))).toEqual(nativeTurns);
+        const nativeCalls = history.filter((item) => item.type === "function_call");
+        const nativeOutputs = history.filter((item) => item.type === "function_call_output");
+        const outputsByCall = new Map(nativeOutputs.map((item) => [
+          String(item.call_id ?? item.callId),
+          item,
+        ]));
+        expect(nativeOutputs.length).toBe(nativeCalls.length);
+        const nativeToolSequence = nativeCalls.map((item) => {
+          const callId = String(item.call_id ?? item.callId);
+          const output = outputsByCall.get(callId);
+          expect(output, `native tool call ${callId} has no output`).toBeDefined();
+          return {
+            name: item.name,
+            arguments: decodedHistory(item.arguments ?? item.args),
+            result: decodedHistory(output?.output),
+          };
+        });
+        expect(outputsByCall.size).toBe(nativeCalls.length);
+        const transcript = detail.body.transcript as {
+          spans?: PublicTool[];
+          turns?: PublicTool[];
+        };
+        const publicToolSequence = publicTools([
+          ...(transcript.spans ?? []),
+          ...(transcript.turns ?? []),
+        ])
+          .sort((left, right) =>
+            String(left.startedAt).localeCompare(String(right.startedAt)) ||
+            String(left.spanId).localeCompare(String(right.spanId))
+          )
+          .map((tool) => ({
+            name: tool.toolName,
+            arguments: decodedHistory(tool.toolArguments),
+            result: decodedHistory(tool.toolResult),
+          }));
+        expect(publicToolSequence).toEqual(nativeToolSequence);
 
         const browser = await openBrowser();
         try {
@@ -1498,6 +1626,8 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             outcomes: {
               simulation: "completed",
               publicRead: true,
+              storedToPublicProjection: true,
+              nativeHistoryToStorage: true,
               agentPovComplete: true,
               recording: LIVE_MODALITY === "voice",
               grade: "passed",

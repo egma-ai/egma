@@ -82,6 +82,15 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             tts=openai.TTS(model="gpt-4o-mini-tts", voice="ash"),
         )
     )
+    history_path = os.environ.get("EGMA_E2E_NATIVE_HISTORY", "")
+    if history_path:
+        def capture_history(_event: object) -> None:
+            Path(history_path).write_text(
+                json.dumps(session.history.to_dict()), encoding="utf-8"
+            )
+            Path(history_path).chmod(0o600)
+
+        session.on("close", capture_history)
     await simulation(agent, ctx, session)
 
     production_marker = os.environ.get("EGMA_E2E_PRODUCTION_INERT_MARKER", "")

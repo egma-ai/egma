@@ -395,7 +395,7 @@ jobs:
           retention-days: 7
 
   simulation-e2e-livekit:
-    name: Simulation to grade (${{ matrix.language }}, ${{ matrix.modality }}, ${{ matrix.access }}, mocks ${{ matrix.mocks }})
+    name: Simulation to grade (${{ matrix.language }}, LiveKit ${{ matrix.runtime }}, ${{ matrix.modality }}, ${{ matrix.access }}, mocks ${{ matrix.mocks }})
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'workflow_dispatch' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
@@ -405,7 +405,15 @@ jobs:
         language: [python, javascript]
         modality: [chat, voice]
         access: [project_credentials, customer_token_endpoint]
-        mocks: [on, off]
+        mocks: [on]
+        runtime: [1.7.1]
+        include:
+          - { language: python, runtime: 1.6.6, modality: chat, access: project_credentials, mocks: on }
+          - { language: python, runtime: 1.6.6, modality: voice, access: project_credentials, mocks: on }
+          - { language: javascript, runtime: 1.5.5, modality: chat, access: project_credentials, mocks: on }
+          - { language: javascript, runtime: 1.5.5, modality: voice, access: project_credentials, mocks: on }
+          - { language: javascript, runtime: 1.6.4, modality: chat, access: project_credentials, mocks: on }
+          - { language: javascript, runtime: 1.6.4, modality: voice, access: project_credentials, mocks: on }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -465,6 +473,10 @@ jobs:
           sudo dpkg --install /tmp/cloudflared.deb
           cloudflared --version
 
+      - name: Resolve newly created public tunnel names through public DNS
+        if: ${{ matrix.access == 'customer_token_endpoint' }}
+        run: printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | sudo tee /etc/resolv.conf > /dev/null
+
       - name: Warm the object-store image
         run: docker pull "$(awk '/^  minio:/{found=1} found && /image:/{print $2; exit}' docker-compose.yml)"
 
@@ -477,6 +489,8 @@ jobs:
           SIMULATION_E2E_MODALITY: ${{ matrix.modality }}
           SIMULATION_E2E_ACCESS: ${{ matrix.access }}
           SIMULATION_E2E_MOCKS: ${{ matrix.mocks }}
+          LIVEKIT_E2E_PYTHON_AGENTS_VERSION: ${{ matrix.runtime }}
+          LIVEKIT_E2E_JAVASCRIPT_AGENTS_VERSION: ${{ matrix.runtime }}
         run: >-
           pnpm exec vitest run --project fast
           apps/api/test/simulator-conversation.test.ts
@@ -486,7 +500,83 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: simulation-e2e-${{ matrix.language }}-${{ matrix.modality }}-${{ matrix.access }}-${{ matrix.mocks }}-${{ github.sha }}
+          name: simulation-e2e-${{ matrix.language }}-livekit-${{ matrix.runtime }}-${{ matrix.modality }}-${{ matrix.access }}-${{ matrix.mocks }}-${{ github.sha }}
+          path: .proofs/simulation-e2e/*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
+  simulation-e2e-retell:
+    name: Simulation to grade (Retell ${{ matrix.connection }}, mocks ${{ matrix.mocks }})
+    if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'workflow_dispatch' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        connection: [text, web]
+        mocks: [on]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+        with:
+          version: "0.11.33"
+      - name: Make the native build toolchain available
+        run: ./.github/native-toolchain.sh
+      - run: pnpm install --frozen-lockfile
+      - name: Build the web API client
+        run: pnpm --filter @egma/platform-api build
+      - name: Start PostgreSQL and ClickHouse
+        run: pnpm db:up
+      - name: Sync the shipped simulator
+        working-directory: apps/simulator
+        run: uv sync --frozen
+      - name: Install the voice sentence tokenizer
+        if: ${{ matrix.connection == 'web' }}
+        working-directory: apps/simulator
+        run: uv run python -m nltk.downloader punkt_tab
+      - name: Require provider credentials
+        env:
+          RETELL_KEY: ${{ secrets.SIMULATION_E2E_RETELL_API_KEY }}
+          MODEL_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
+        run: |
+          test -n "$RETELL_KEY" || { echo "SIMULATION_E2E_RETELL_API_KEY is required." >&2; exit 1; }
+          test -n "$MODEL_KEY" || { echo "LIVEKIT_E2E_OPENAI_API_KEY is required." >&2; exit 1; }
+      - name: Install the public tunnel client
+        run: |
+          curl --fail --silent --show-error --location \
+            --output /tmp/cloudflared.deb \
+            https://github.com/cloudflare/cloudflared/releases/download/2025.7.0/cloudflared-linux-amd64.deb
+          sudo dpkg --install /tmp/cloudflared.deb
+      - name: Resolve newly created public tunnel names through public DNS
+        run: printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' | sudo tee /etc/resolv.conf > /dev/null
+      - name: Warm the object-store image
+        run: docker pull "$(awk '/^  minio:/{found=1} found && /image:/{print $2; exit}' docker-compose.yml)"
+      - name: Run Retell through storage and browser-visible grade
+        env:
+          EGMA_REQUIRE_OBJECT_STORAGE: "1"
+          SIMULATION_E2E_RETELL: "1"
+          SIMULATION_E2E_RETELL_CONNECTION: ${{ matrix.connection }}
+          SIMULATION_E2E_MOCKS: ${{ matrix.mocks }}
+          SIMULATION_E2E_RETELL_API_KEY: ${{ secrets.SIMULATION_E2E_RETELL_API_KEY }}
+          SIMULATION_E2E_MODEL_API_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
+        run: >-
+          pnpm exec vitest run --project fast
+          apps/api/test/retell-live-simulation.test.ts
+          --maxWorkers=1
+      - name: Upload redacted proof manifest
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: simulation-e2e-retell-${{ matrix.connection }}-${{ matrix.mocks }}-${{ github.sha }}
           path: .proofs/simulation-e2e/*
           include-hidden-files: true
           if-no-files-found: error
@@ -494,7 +584,7 @@ jobs:
 
   deploy:
     name: Deploy
-    needs: [checks, fast, browser, simulator, livekit-python-compatibility, livekit-js-compatibility, fixture, livekit-e2e]
+    needs: [checks, fast, browser, simulator, livekit-python-compatibility, livekit-js-compatibility, fixture, livekit-e2e, simulation-e2e-livekit, simulation-e2e-retell]
     if: >-
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')

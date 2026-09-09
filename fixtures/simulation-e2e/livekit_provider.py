@@ -173,6 +173,7 @@ def main() -> int:
                 "EGMA_URL": required("SIMULATION_E2E_API_ORIGIN"),
                 "EGMA_API_KEY": required("SIMULATION_E2E_PROJECT_KEY"),
                 "EGMA_E2E_AGENT_NAME": agent_name,
+                "EGMA_E2E_NATIVE_HISTORY": str(proof / "native-history.json"),
                 "EGMA_E2E_SILENT_START": "1",
                 "EGMA_E2E_LONG_LIVED_ENTRY": (
                     "1" if language == "javascript" else "0"

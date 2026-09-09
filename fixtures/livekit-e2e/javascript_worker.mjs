@@ -1,6 +1,7 @@
 /** Packaged JavaScript SDK worker used by the LiveKit end-to-end lane. */
 
 import { writeFile } from "node:fs/promises";
+import { chmodSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { simulation } from "@egma/livekit";
@@ -79,6 +80,13 @@ export default defineAgent({
       stt: new openai.STT({ model: "whisper-1", useRealtime: false }),
       tts: new openai.TTS({ model: "tts-1", voice: "alloy" }),
     });
+    const historyPath = process.env.EGMA_E2E_NATIVE_HISTORY;
+    if (historyPath) {
+      session.on(AgentSessionEventTypes.Close, () => {
+        writeFileSync(historyPath, JSON.stringify(session.history.toJSON()), "utf8");
+        chmodSync(historyPath, 0o600);
+      });
+    }
 
     await simulation(agent, ctx, session);
     await delayFrom("EGMA_E2E_SESSION_DELAY_MS");
