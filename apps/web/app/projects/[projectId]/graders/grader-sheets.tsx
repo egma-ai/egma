@@ -322,7 +322,7 @@ function SettingsFields({
           <NumberField
             key={definition.key}
             id={`grader-setting-${definition.key}`}
-            label={settingLabel(definition)}
+            label={`${settingLabel(definition)}*`}
             value={value}
             onChange={(next) => onChange({ ...draft, [definition.key]: next })}
             unit={milliseconds ? "seconds" : (definition.unit ?? undefined)}
@@ -392,9 +392,6 @@ function PassThresholdField({
     parsed <= 1;
   return (
     <div className="flex flex-col gap-2" data-slot="pass-threshold-field">
-      <label className="sr-only" htmlFor="grader-pass-threshold">
-        {COPY.passThreshold}
-      </label>
       <Input
         className={cn(
           "tabular-nums",
@@ -425,7 +422,7 @@ function PassThresholdSection({ children }: { readonly children: ReactNode }) {
     <Section
       title={
         <span className="flex items-center gap-2">
-          Pass threshold
+          <label htmlFor="grader-pass-threshold">{COPY.passThreshold}</label>
           <Tooltip label={COPY.passThresholdHint}>
             <button
               className="grid size-4 cursor-pointer place-items-center border-0 bg-transparent p-0 text-muted-foreground pointer-hover:text-foreground pointer-coarse:size-(--tap-target)"

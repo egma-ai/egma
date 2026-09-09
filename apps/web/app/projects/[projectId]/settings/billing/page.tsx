@@ -14,17 +14,14 @@ import {
   UsageAllowances,
 } from "@/ui/usage-and-billing";
 import { Failure, Loading } from "@/ui/page-state";
-import { SettingsPageShell, useSettingsRouteShell } from "../route-shell.tsx";
 
 export default function UsageAndBillingPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const sharedShell = useSettingsRouteShell();
-  const body = (
+  return (
     <Suspense fallback={<Loading what="usage and billing" />}>
       <UsageAndBillingBody projectId={projectId} />
     </Suspense>
   );
-  return sharedShell ? body : <SettingsPageShell section="billing">{body}</SettingsPageShell>;
 }
 
 function UsageAndBillingBody({ projectId }: { readonly projectId: string }) {

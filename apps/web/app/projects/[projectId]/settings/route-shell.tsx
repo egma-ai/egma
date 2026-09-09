@@ -1,13 +1,11 @@
 "use client";
 
-import { createContext, useContext, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { useParams, usePathname } from "next/navigation";
 
 import type { SettingsSection } from "../../../../ui/settings-nav.tsx";
 import { SettingsLayout } from "../../../../ui/settings-nav.tsx";
-import { AppShell, PageBody, PageHeader, ProductPage } from "../../../../ui/shell.tsx";
-
-const settingsRouteShell = createContext(false);
+import { PageBody, PageHeader, ProductPage } from "../../../../ui/shell.tsx";
 
 const SETTINGS_PAGE: Record<SettingsSection, { readonly title: string }> = {
   organization: { title: "Organization" },
@@ -19,6 +17,7 @@ const SETTINGS_PAGE: Record<SettingsSection, { readonly title: string }> = {
 };
 
 function sectionAt(pathname: string): SettingsSection {
+  if (pathname.endsWith("/settings")) return "project";
   if (pathname.endsWith("/billing")) return "billing";
   if (pathname.endsWith("/provider-api-keys")) return "provider-api-keys";
   if (pathname.endsWith("/people")) return "people";
@@ -53,34 +52,8 @@ export function SettingsRouteShell({ children }: { readonly children: ReactNode 
   const { projectId } = useParams<{ projectId: string }>();
   const section = sectionAt(usePathname() ?? "");
   return (
-    <settingsRouteShell.Provider value>
-      <SettingsChrome projectId={projectId} section={section}>
-        {children}
-      </SettingsChrome>
-    </settingsRouteShell.Provider>
+    <SettingsChrome projectId={projectId} section={section}>
+      {children}
+    </SettingsChrome>
   );
-}
-
-/** Preserve direct page-component test renders outside the route layout. */
-export function SettingsPageShell({
-  children,
-  section,
-}: {
-  readonly children: ReactNode;
-  readonly section: SettingsSection;
-}) {
-  const { projectId } = useParams<{ projectId: string }>();
-  return (
-    <AppShell>
-      <settingsRouteShell.Provider value>
-        <SettingsChrome projectId={projectId} section={section}>
-          {children}
-        </SettingsChrome>
-      </settingsRouteShell.Provider>
-    </AppShell>
-  );
-}
-
-export function useSettingsRouteShell(): boolean {
-  return useContext(settingsRouteShell);
 }

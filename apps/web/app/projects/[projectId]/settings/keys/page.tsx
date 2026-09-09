@@ -44,7 +44,6 @@ import {
   useUnsavedChanges,
 } from "../../../../../ui/settings-read.ts";
 import { useShellSession } from "../../../../../ui/shell.tsx";
-import { SettingsPageShell, useSettingsRouteShell } from "../route-shell.tsx";
 
 /**
  * Display a newly minted API secret once; later reads expose only its hint
@@ -54,9 +53,7 @@ import { SettingsPageShell, useSettingsRouteShell } from "../route-shell.tsx";
  */
 export default function ApiKeysSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const sharedShell = useSettingsRouteShell();
-  const body = <ApiKeys projectId={projectId} />;
-  return sharedShell ? body : <SettingsPageShell section="keys">{body}</SettingsPageShell>;
+  return <ApiKeys projectId={projectId} />;
 }
 
 const WHOLE_ORGANIZATION = "";

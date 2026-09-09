@@ -53,7 +53,6 @@ import {
   useUnsavedChanges,
 } from "../../../../../ui/settings-read.ts";
 import { useShellSession } from "../../../../../ui/shell.tsx";
-import { SettingsPageShell, useSettingsRouteShell } from "../route-shell.tsx";
 
 /**
  * Membership and invitations apply to the organization. Without email
@@ -82,9 +81,7 @@ const ROW_ACTION =
 
 export default function PeopleSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const sharedShell = useSettingsRouteShell();
-  const body = <PeopleSettings projectId={projectId} />;
-  return sharedShell ? body : <SettingsPageShell section="people">{body}</SettingsPageShell>;
+  return <PeopleSettings projectId={projectId} />;
 }
 
 function PeopleSettings({ projectId }: { readonly projectId: string }) {

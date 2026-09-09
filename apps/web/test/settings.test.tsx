@@ -20,6 +20,7 @@ import ProjectSettingsPage from "../app/projects/[projectId]/settings/project/pa
 import type { Me } from "../lib/me.ts";
 import { REPLAY_PRIVATE_ATTRIBUTE } from "../lib/replay-privacy.ts";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
+import { renderSettingsPage } from "./render-settings-page.tsx";
 
 /**
  * Drive settings pages with stubbed API responses. Check project revision
@@ -61,6 +62,26 @@ vi.mock("next/link", () => ({
 vi.mock("next/image", () => ({
   default: ({ alt }: { alt: string }) => <img alt={alt} />,
 }));
+
+function renderProjectSettings() {
+  routed.pathname = "/projects/prj_1/settings/project";
+  return renderSettingsPage(<ProjectSettingsPage />);
+}
+
+function renderOrganizationSettings() {
+  routed.pathname = "/projects/prj_1/settings/organization";
+  return renderSettingsPage(<OrganizationSettingsPage />);
+}
+
+function renderPeopleSettings() {
+  routed.pathname = "/projects/prj_1/settings/people";
+  return renderSettingsPage(<PeoplePage />);
+}
+
+function renderApiKeysSettings() {
+  routed.pathname = "/projects/prj_1/settings/keys";
+  return renderSettingsPage(<ApiKeysPage />);
+}
 
 const PROJECTS = [
   { id: "prj_1", name: "Default", slug: "default" },
@@ -205,7 +226,7 @@ const ORGANIZATION_WIDE: readonly {
       "/v1/organization": { status: 200, body: ORGANIZATION },
       "/api/organization/usage": { status: 200, body: PERIOD_USAGE },
     },
-    open: () => render(<OrganizationSettingsPage />),
+    open: () => renderOrganizationSettings(),
     removed: /Everything on this page belongs to the whole organization/,
   },
   {
@@ -217,13 +238,13 @@ const ORGANIZATION_WIDE: readonly {
       },
       "/v1/invitations": { status: 200, body: { invitations: [] } },
     },
-    open: () => render(<PeoplePage />),
+    open: () => renderPeopleSettings(),
     removed: /Membership belongs to the whole organization/,
   },
   {
     page: "API keys",
     answers: { "/v1/keys": { status: 200, body: { keys: [] } } },
-    open: () => render(<ApiKeysPage />),
+    open: () => renderApiKeysSettings(),
     removed: /Keys belong to the organization/,
   },
 ];
@@ -255,7 +276,7 @@ describe("the Settings navigation", () => {
       "/api/me": { status: 200, body: meWith("admin") },
       "/v1/projects/prj_1": { status: 200, body: PROJECT },
     });
-    render(<ProjectSettingsPage />);
+    renderProjectSettings();
 
     const nav = await screen.findByRole("navigation", { name: "Settings" });
     expect(within(nav).getAllByRole("group")).toEqual([
@@ -328,7 +349,7 @@ describe("project settings", () => {
       "/api/me": { status: 200, body: meWith(role) },
       "/v1/projects/prj_1": { status: 200, body: project },
     });
-    render(<ProjectSettingsPage />);
+    renderProjectSettings();
   }
 
   it("shows what is stored, and saves against the revision it was opened at", async () => {
@@ -339,7 +360,7 @@ describe("project settings", () => {
         { status: 200, body: { ...PROJECT, name: "Renamed", revision: "rev_2" } },
       ],
     });
-    render(<ProjectSettingsPage />);
+    renderProjectSettings();
 
     const name = (await screen.findByLabelText("Name")) as HTMLInputElement;
     // Waited for rather than read once: the field exists on the first ready
@@ -378,7 +399,7 @@ describe("project settings", () => {
         },
       ],
     });
-    render(<ProjectSettingsPage />);
+    renderProjectSettings();
 
     const name = (await screen.findByDisplayValue("Default")) as HTMLInputElement;
     const save = screen.getByRole("button", { name: "Save project" });
@@ -433,7 +454,7 @@ describe("project settings", () => {
         retryAnswer,
       ],
     });
-    render(<ProjectSettingsPage />);
+    renderProjectSettings();
 
     const name = (await screen.findByDisplayValue("Default")) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "Renamed" } });
@@ -533,7 +554,7 @@ describe("project settings", () => {
     });
     const confirm = vi.fn(() => false);
     vi.stubGlobal("confirm", confirm);
-    render(<ProjectSettingsPage />);
+    renderProjectSettings();
 
     fireEvent.change(await screen.findByDisplayValue("Default"), {
       target: { value: "A draft name" },
@@ -598,7 +619,7 @@ describe("project settings", () => {
         { status: 200, body: { ...PROJECT, revision: "rev_2" } },
       ],
     });
-    render(<ProjectSettingsPage />);
+    renderProjectSettings();
 
     const name = (await screen.findByLabelText("Name")) as HTMLInputElement;
     // The stored name arrives a render after the field exists, so the draft is
@@ -702,7 +723,7 @@ describe("project settings", () => {
         body: { error: "unavailable", message: "Egma could not answer that." },
       },
     });
-    render(<ProjectSettingsPage />);
+    renderProjectSettings();
 
     expect(await screen.findByText("Egma could not answer that.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
@@ -716,7 +737,7 @@ describe("project settings", () => {
         body: { error: "not_signed_in", message: "no" },
       },
     });
-    render(<ProjectSettingsPage />);
+    renderProjectSettings();
 
     await waitFor(() => {
       expect(wentTo).toContain("/sign-in");
@@ -919,7 +940,7 @@ describe("organization settings", () => {
       "/v1/organization": { status: 200, body: organization },
       "/api/organization/usage": { status: 200, body: PERIOD_USAGE },
     });
-    render(<OrganizationSettingsPage />);
+    renderOrganizationSettings();
   }
 
   it("renames the organization and leaves its short name alone", async () => {
@@ -932,7 +953,7 @@ describe("organization settings", () => {
       ],
       "/api/organization/usage": { status: 200, body: PERIOD_USAGE },
     });
-    render(<OrganizationSettingsPage />);
+    renderOrganizationSettings();
 
     // Waited for the stored name, not just the field. The field exists on the
     // first ready render and what was read lands on the next, so typing on
@@ -941,7 +962,7 @@ describe("organization settings", () => {
     await screen.findByDisplayValue(ORGANIZATION.name);
     const save = screen.getByRole("button", { name: "Save organization" });
     expect(save.hasAttribute("disabled")).toBe(true);
-    fireEvent.change(screen.getByLabelText("Organization name"), {
+    fireEvent.change(screen.getByLabelText("Organization name*"), {
       target: { value: "Acme Voice" },
     });
     expect(save.hasAttribute("disabled")).toBe(false);
@@ -962,7 +983,7 @@ describe("organization settings", () => {
       name: "Save organization",
     });
     expect(savedButton.hasAttribute("disabled")).toBe(true);
-    fireEvent.change(screen.getByLabelText("Organization name"), {
+    fireEvent.change(screen.getByLabelText("Organization name*"), {
       target: { value: "Acme Voice Labs" },
     });
     expect(screen.queryByText("Saved.")).toBeNull();
@@ -996,7 +1017,7 @@ describe("organization settings", () => {
       ],
       "/api/organization/usage": { status: 200, body: PERIOD_USAGE },
     });
-    render(<OrganizationSettingsPage />);
+    renderOrganizationSettings();
 
     const name = (await screen.findByDisplayValue("Acme")) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "Acme Voice" } });
@@ -1066,7 +1087,7 @@ describe("organization settings", () => {
     await act(async () => {
       finishRetry({ status: 200, body: renamed });
     });
-    expect((screen.getByLabelText("Organization name") as HTMLInputElement).value).toBe(
+    expect((screen.getByLabelText("Organization name*") as HTMLInputElement).value).toBe(
       "Acme Voice Labs",
     );
     expect(
@@ -1082,7 +1103,7 @@ describe("organization settings", () => {
     async (role) => {
       open(role, { ...ORGANIZATION, mayManageOrganization: false });
 
-      const name = (await screen.findByLabelText("Organization name")) as HTMLInputElement;
+      const name = (await screen.findByLabelText("Organization name*")) as HTMLInputElement;
       await waitFor(() => {
         expect(name.value).toBe("Acme");
       });
@@ -1103,7 +1124,7 @@ describe("organization settings", () => {
   it("labels the field without the removed storage hint", async () => {
     open("admin", ORGANIZATION);
 
-    expect(await screen.findByLabelText("Organization name")).toBeTruthy();
+    expect(await screen.findByLabelText("Organization name*")).toBeTruthy();
     expect(screen.queryByText(/What Egma calls your organization/)).toBeNull();
   });
 });
@@ -1174,7 +1195,7 @@ describe("people and invitations", () => {
         body: { userId: "usr_2", keys_revoked: 1 },
       },
     });
-    render(<PeoplePage />);
+    renderPeopleSettings();
   }
 
   it("lists everybody, with a role control an admin can change", async () => {
@@ -1303,7 +1324,7 @@ describe("people and invitations", () => {
         { status: 200, body: { invitations: [] } },
       ],
     });
-    render(<PeoplePage />);
+    renderPeopleSettings();
 
     fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
 
@@ -1352,7 +1373,7 @@ describe("people and invitations", () => {
         { status: 200, body: { invitations: [] } },
       ],
     });
-    render(<PeoplePage />);
+    renderPeopleSettings();
 
     fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
     fireEvent.change(await screen.findByLabelText("Email"), {
@@ -1437,7 +1458,7 @@ describe("people and invitations", () => {
         },
       ],
     });
-    render(<PeoplePage />);
+    renderPeopleSettings();
 
     fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
     expect(await screen.findByText("Invitations are offline.")).toBeTruthy();
@@ -1453,7 +1474,7 @@ describe("people and invitations", () => {
       },
       "/v1/invitations": "never",
     });
-    render(<PeoplePage />);
+    renderPeopleSettings();
 
     fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
     expect(await screen.findByText("Loading outstanding invitations…")).toBeTruthy();
@@ -1525,7 +1546,7 @@ describe("people and invitations", () => {
         { status: 200, body: { invitations: [DEAD_INVITATION] } },
       ],
     });
-    render(<PeoplePage />);
+    renderPeopleSettings();
 
     fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
 
@@ -1560,7 +1581,7 @@ describe("people and invitations", () => {
         },
       },
     });
-    render(<PeoplePage />);
+    renderPeopleSettings();
 
     fireEvent.change(
       (await screen.findAllByLabelText("ada@acme.example role"))[0]!,
@@ -1605,7 +1626,7 @@ describe("API keys", () => {
       "/api/me": { status: 200, body: meWith(role) },
       "/v1/keys": { status: 200, body: { keys } },
     });
-    render(<ApiKeysPage />);
+    renderApiKeysSettings();
   }
 
   /**
@@ -1635,7 +1656,7 @@ describe("API keys", () => {
         { status: 200, body: { keys: [MY_KEY] } },
       ],
     });
-    render(<ApiKeysPage />);
+    renderApiKeysSettings();
 
     fireEvent.change(await screen.findByLabelText("Name"), {
       target: { value: "My laptop" },
@@ -1682,7 +1703,7 @@ describe("API keys", () => {
         },
       ],
     });
-    render(<ApiKeysPage />);
+    renderApiKeysSettings();
 
     fireEvent.click(await screen.findByRole("button", { name: "Create key" }));
 
@@ -1708,7 +1729,7 @@ describe("API keys", () => {
     });
     const confirm = vi.fn(() => false);
     vi.stubGlobal("confirm", confirm);
-    render(<ApiKeysPage />);
+    renderApiKeysSettings();
 
     fireEvent.click(await screen.findByRole("button", { name: "Create key" }));
     expect(await screen.findByRole("button", { name: "Creating…" })).toBeTruthy();
@@ -1736,7 +1757,7 @@ describe("API keys", () => {
         { status: 200, body: { keys: [] } },
       ],
     });
-    render(<ApiKeysPage />);
+    renderApiKeysSettings();
 
     expect((await screen.findByLabelText("Scope") as HTMLSelectElement).value).toBe(
       "prj_1",
@@ -1757,7 +1778,7 @@ describe("API keys", () => {
       "/v1/keys": { status: 200, body: { keys: [MY_KEY] } },
       "/v1/keys/key_1/revoke": { status: 200, body: MY_KEY },
     });
-    render(<ApiKeysPage />);
+    renderApiKeysSettings();
 
     const table = await screen.findByRole("table", { name: "Your API keys" });
     fireEvent.click(within(table).getByRole("button", { name: "Revoke" }));
@@ -1787,7 +1808,7 @@ describe("API keys", () => {
         { status: 200, body: { keys: [MY_KEY] } },
       ],
     });
-    render(<ApiKeysPage />);
+    renderApiKeysSettings();
 
     fireEvent.change(await screen.findByLabelText("Scope"), {
       target: { value: "prj_2" },

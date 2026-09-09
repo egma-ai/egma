@@ -25,14 +25,11 @@ import {
   useUnsavedChanges,
 } from "../../../../../ui/settings-read.ts";
 import { useShellSession } from "../../../../../ui/shell.tsx";
-import { SettingsPageShell, useSettingsRouteShell } from "../route-shell.tsx";
 
 /** Organization-wide details. Model choices and credentials do not live here. */
 export default function OrganizationSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const sharedShell = useSettingsRouteShell();
-  const body = <OrganizationSettingsBody projectId={projectId} />;
-  return sharedShell ? body : <SettingsPageShell section="organization">{body}</SettingsPageShell>;
+  return <OrganizationSettingsBody projectId={projectId} />;
 }
 
 function OrganizationSettingsBody({ projectId }: { readonly projectId: string }) {
@@ -132,7 +129,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
 
             <Form onSubmit={() => void save()}>
               <Field
-                label="Organization name"
+                label="Organization name*"
                 htmlFor="organization-name"
               >
                 <Input
@@ -141,6 +138,7 @@ function OrganizationSettingsBody({ projectId }: { readonly projectId: string })
                   autoComplete="off"
                   spellCheck={false}
                   disabled={!mayAdminister}
+                  aria-required="true"
                   aria-invalid={named ? undefined : true}
                   onChange={(event) => {
                     editVersion.current += 1;

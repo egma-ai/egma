@@ -26,7 +26,6 @@ import {
   useUnsavedChanges,
 } from "../../../../ui/settings-read.ts";
 import { useShellSession } from "../../../../ui/shell.tsx";
-import { SettingsPageShell, useSettingsRouteShell } from "./route-shell.tsx";
 
 /**
  * Edit project metadata with expectedRevision so concurrent saves cannot
@@ -35,9 +34,7 @@ import { SettingsPageShell, useSettingsRouteShell } from "./route-shell.tsx";
  */
 export default function ProjectSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const sharedShell = useSettingsRouteShell();
-  const body = <ProjectSettingsBody projectId={projectId} />;
-  return sharedShell ? body : <SettingsPageShell section="project">{body}</SettingsPageShell>;
+  return <ProjectSettingsBody projectId={projectId} />;
 }
 
 function ProjectSettingsBody({ projectId }: { readonly projectId: string }) {

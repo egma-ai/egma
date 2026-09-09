@@ -778,7 +778,8 @@ describe("the project Graders surface", () => {
     expect(within(details).queryByLabelText("Maximum acceptable response latency")).toBeNull();
     fireEvent.click(within(details).getByRole("button", { name: "Use in project" }));
 
-    const maximum = within(details).getByLabelText("Maximum acceptable response latency");
+    const maximum = within(details).getByLabelText("Maximum acceptable response latency*");
+    expect(maximum.getAttribute("aria-required")).toBe("true");
     expect((maximum as HTMLInputElement).value).toBe("3");
     fireEvent.change(maximum, { target: { value: "2.5" } });
     fireEvent.click(within(details).getByRole("button", { name: "Use in project" }));
@@ -1516,7 +1517,7 @@ describe("the project Graders surface", () => {
       within(sheet).getByText("Choose how this project will use the grader."),
     ).toBeTruthy();
     expect(
-      within(sheet).getByLabelText("Maximum acceptable response latency"),
+      within(sheet).getByLabelText("Maximum acceptable response latency*"),
     ).toBeTruthy();
   });
 });

@@ -42,13 +42,10 @@ import {
   useOrganizationRead,
   useUnsavedChanges,
 } from "../../../../../ui/settings-read.ts";
-import { SettingsPageShell, useSettingsRouteShell } from "../route-shell.tsx";
 
 export default function ProviderApiKeysSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
-  const sharedShell = useSettingsRouteShell();
-  const body = <ProviderApiKeys projectId={projectId} />;
-  return sharedShell ? body : <SettingsPageShell section="provider-api-keys">{body}</SettingsPageShell>;
+  return <ProviderApiKeys projectId={projectId} />;
 }
 
 function ProviderApiKeys({ projectId }: { readonly projectId: string }) {
