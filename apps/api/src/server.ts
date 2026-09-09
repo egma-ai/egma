@@ -2,6 +2,7 @@ import type { VoiceFleetReadiness } from "./voice-fleet-readiness.ts";
 import {
   openDrainOwnership,
   sweepPendingRetellSimulationCollections,
+  takeRetellSimulationCollectionLease,
   ping,
   pingClickHouse,
   type DrainOwnership,
@@ -182,6 +183,31 @@ export function buildApi(options: ServerOptions): Api {
     role !== "ingest" && options.drainsPendingEvidence !== false;
   const simulationPullAbort = new AbortController();
   const simulationCollector = createRetellSimulationCollector();
+  const pullSimulationRecord: typeof simulationCollector.pull = async (
+    auth,
+    simulationId,
+    reach,
+    log,
+    pullOptions,
+  ) => {
+    const lease = await takeRetellSimulationCollectionLease(auth, simulationId);
+    if (lease === undefined) return;
+    try {
+      const leasedReach = {
+        ...reach,
+        signal: reach.signal === undefined
+          ? lease.signal
+          : AbortSignal.any([reach.signal, lease.signal]),
+      };
+      await simulationCollector.pull(auth, simulationId, leasedReach, log, {
+        ...pullOptions,
+        onCollectionFinished: () => lease.release(),
+      });
+    } catch (cause) {
+      await lease.release();
+      throw cause;
+    }
+  };
   const simulationPullReach = {
     ...(options.retellReach ?? {}),
     signal: options.retellReach?.signal === undefined
@@ -553,7 +579,7 @@ export function buildApi(options: ServerOptions): Api {
     // platform that exports nothing of its own. It asks where every other
     // Retell read in this deployment asks.
     simulationPullReach,
-    pullSimulationRecord: simulationCollector.pull,
+    pullSimulationRecord,
     ...(options.simulationPullOptions === undefined
       ? {}
       : { simulationPullOptions: options.simulationPullOptions }),
@@ -644,7 +670,7 @@ export function buildApi(options: ServerOptions): Api {
       ...(acceptsEvidence ? { recoverRetell: async () => {
         const pending = await sweepPendingRetellSimulationCollections();
         await Promise.all(pending.map(async ({ id, auth }) => {
-          await simulationCollector.pull(
+          await pullSimulationRecord(
             auth,
             id,
             simulationPullReach,

@@ -22,7 +22,7 @@ import { FundingRefusedError } from "./errors.ts";
 import { billing } from "../billing/ports.ts";
 import { traceStore } from "../clickhouse/client.ts";
 import { graderModelOfParameters } from "../grader-library/parameters.ts";
-import { db, listen, type Listening, type Queryable } from "../client.ts";
+import { db, dedicatedConnection, listen, type Listening, type Queryable } from "../client.ts";
 import { combinedGradeScore } from "../grading/results.ts";
 import type { PlanGroup } from "../grading/plan.ts";
 import { graderDefinition, projectGrader } from "../schema/graders.ts";
@@ -912,6 +912,50 @@ export type PendingRetellSimulationCollection = {
   readonly id: string;
   readonly auth: AuthContext;
 };
+
+export type RetellSimulationCollectionLease = {
+  readonly signal: AbortSignal;
+  release(): Promise<void>;
+};
+
+/**
+ * Try to own one simulation's provider pull across API replicas. The lock lives
+ * on its own Postgres session and is released when that session closes, including
+ * when a process or connection disappears during background polling.
+ */
+export async function takeRetellSimulationCollectionLease(
+  auth: AuthContext,
+  simulationId: string,
+): Promise<RetellSimulationCollectionLease | undefined> {
+  const connection = dedicatedConnection();
+  const lost = new AbortController();
+  connection.on("error", (cause) => lost.abort(cause));
+  connection.on("end", () => lost.abort(new Error("the Retell collection lease connection ended")));
+  try {
+    await connection.connect();
+    const answer = await connection.query<{ taken: boolean }>(
+      "select pg_try_advisory_lock(hashtextextended($1::text, 0)) as taken",
+      [`egma:retell-simulation-collection:${auth.organizationId}:${auth.projectId ?? ""}:${simulationId}`],
+    );
+    if (answer.rows[0]?.taken !== true) {
+      await connection.end().catch(() => undefined);
+      return undefined;
+    }
+  } catch (cause) {
+    await connection.end().catch(() => undefined);
+    throw cause;
+  }
+  let released = false;
+  return {
+    signal: lost.signal,
+    async release() {
+      if (released) return;
+      released = true;
+      lost.abort(new Error("the Retell collection lease was released"));
+      await connection.end().catch(() => undefined);
+    },
+  };
+}
 
 let retellCollectionCursor: string | undefined;
 

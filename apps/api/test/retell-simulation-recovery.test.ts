@@ -151,3 +151,28 @@ it("does not refetch while an accepted segment is waiting for the trace-store dr
   expect(fileEvidence).toHaveBeenCalledTimes(2);
   await collector.settle();
 });
+
+it("does not file after its cross-replica ownership signal is lost", async () => {
+  const collector = createRetellSimulationCollector();
+  const ownership = new AbortController();
+  const fetchImpl = vi.fn(async () => {
+    ownership.abort(new Error("lease connection lost"));
+    return new Response(JSON.stringify(call), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+  const fileEvidence = vi.fn();
+
+  await collector.pull(
+    standing.auth,
+    simulationId,
+    { fetchImpl, signal: ownership.signal },
+    { warn: vi.fn() } as never,
+    { retryWaitsMilliseconds: [], fileEvidence },
+  );
+  await collector.settle();
+
+  expect(fetchImpl).toHaveBeenCalledOnce();
+  expect(fileEvidence).not.toHaveBeenCalled();
+});

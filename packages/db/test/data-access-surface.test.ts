@@ -99,6 +99,7 @@ const WORK_DISPATCHING = [
   "owedMockCleanups",
   "sweepOrphanedSimulations",
   "sweepPendingRetellSimulationCollections",
+  "takeRetellSimulationCollectionLease",
   // The agent-POV bound, read on the same clock and on the same terms: a POV
   // that never arrives sends nothing, so its absence is noticed by nobody in
   // particular. It moves rows egma's own claim machinery stamped and answers

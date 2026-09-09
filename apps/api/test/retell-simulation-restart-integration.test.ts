@@ -9,6 +9,7 @@ import {
   resolveRunStartReach,
   startRun,
   startSimulation,
+  takeRetellSimulationCollectionLease,
 } from "@egma/db";
 import { buildApi } from "../src/server.ts";
 import { createApi, type TestApi } from "./support/api.ts";
@@ -38,7 +39,7 @@ it.runIf(storage.available)("a fresh API sweep recovers and stores a completed R
       traceStore: true,
       ingestStore: runningStorage().ingestStore,
       orphanSweepIntervalMilliseconds: 60 * 60_000,
-      simulationPullOptions: { retryWaitsMilliseconds: [] },
+      simulationPullOptions: { retryWaitsMilliseconds: [60_000] },
       retellReach: {
         fetchImpl: async () => {
           firstPulls += 1;
@@ -120,6 +121,10 @@ it.runIf(storage.available)("a fresh API sweep recovers and stores a completed R
     expect(landed.statusCode, landed.body).toBe(200);
     expect(firstPulls).toBe(1);
 
+    // The report route holds the database lease while its incomplete record
+    // waits in the background. Another replica sees no ownership to take.
+    expect(await takeRetellSimulationCollectionLease(auth, claim.id)).toBeUndefined();
+
     await api.app.close();
     let drainRolePulls = 0;
     drainOnly = buildApi({
@@ -167,7 +172,7 @@ it.runIf(storage.available)("a fresh API sweep recovers and stores a completed R
     await expect.poll(
       async () => (await pendingSegments(runningStorage().ingestStore)).length,
       { timeout: 5_000 },
-    ).toBeGreaterThan(0);
+    ).toBeGreaterThanOrEqual(2);
     await drainPendingEvidence(runningStorage().ingestStore);
     const store = api.traceStore;
     if (store === undefined) throw new Error("trace store was not started");
