@@ -375,10 +375,10 @@ configuration error.
 | `EGMA_SIMULATOR_LOG_LEVEL` | Simulator log level; default `INFO` |
 | `EGMA_SIMULATOR_LIVEKIT_URL` | Override for an external LiveKit server |
 | `EGMA_SIMULATOR_LIVEKIT_API_KEY` | External LiveKit API key override |
-| `EGMA_SIMULATOR_LIVEKIT_ROOM_NAME` | Hosted one-shot room name paired with scoped tokens |
-| `EGMA_SIMULATOR_LIVEKIT_ROOM_TOKEN` | Short-lived participant token scoped to that room |
-| `EGMA_SIMULATOR_LIVEKIT_API_TOKEN` | Short-lived room-admin and SIP token scoped to that room |
-| `EGMA_SIMULATOR_S3_SESSION_TOKEN` | Session token paired with short-lived hosted recording credentials |
+| `EGMA_SIMULATOR_LIVEKIT_ROOM_NAME` | Optional deployment-scoped room name paired with scoped tokens |
+| `EGMA_SIMULATOR_LIVEKIT_ROOM_TOKEN` | Optional deployment-scoped participant token |
+| `EGMA_SIMULATOR_LIVEKIT_API_TOKEN` | Optional deployment-scoped room-admin and SIP token |
+| `EGMA_SIMULATOR_S3_SESSION_TOKEN` | Optional session token paired with S3 credentials |
 | `EGMA_SIMULATOR_RUNTIME` | Hosted claimant marker; `daytona` when present |
 | `EGMA_SIMULATOR_LIVEKIT_API_SECRET` | External LiveKit API secret override |
 | `EGMA_SIMULATOR_S3_ENDPOINT` | External recording-store endpoint override |
@@ -388,6 +388,8 @@ configuration error.
 | `EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY` | External recording-store secret override |
 
 The five `EGMA_SIMULATOR_S3_*` values are an advanced external-S3 interface.
+Daytona workers receive their room and recording authority in the claimed work
+order, so the launcher does not set these credential variables on the sandbox.
 The bundled stack uses MinIO and does not need them in `.env`.
 
 ### Bundled LiveKit and SIP gateway
@@ -502,7 +504,8 @@ Without `EGMA_VOICE_FLEET_LAUNCHER`, the API does not load Daytona or STS code.
 | `DAYTONA_SANDBOX_TTL_MINUTES` | Abandoned-sandbox cleanup limit; default 30 |
 | `DAYTONA_SERVICE_TOKEN_SECRET` | Daytona organization secret mounted as `EGMA_SIMULATOR_SERVICE_TOKEN` |
 | `DAYTONA_SANDBOX_SECRETS` | JSON map from supported provider environment names to Daytona organization secret names |
-| `EGMA_DAYTONA_RECORDING_ROLE_ARN` | Recording-only AWS role assumed once per sandbox |
+| `EGMA_DAYTONA_RECORDING_ROLE_ARN` | Recording-only AWS role assumed after a sandbox claims one simulation |
+| `EGMA_DAYTONA_RECORDING_BUCKET_ARN` | Recording bucket ARN used to restrict that role session to the claimed simulation's recording |
 | `EGMA_RELEASE_SHA` | Lowercase 40-character public commit SHA exposed by `/health` after deployment |
 
 The release workflow checks `releaseSha` before it ships the web app.

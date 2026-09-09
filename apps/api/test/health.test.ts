@@ -215,6 +215,7 @@ describe("configuration", () => {
       EGMA_SIMULATOR_S3_BUCKET: "recordings",
       EGMA_SIMULATOR_S3_REGION: "us-east-1",
       EGMA_DAYTONA_RECORDING_ROLE_ARN: "arn:aws:iam::123:role/recording",
+      EGMA_DAYTONA_RECORDING_BUCKET_ARN: "arn:aws:s3:::recordings",
     };
     expect(loadConfig(environment).voiceFleet).toMatchObject({
       kind: "daytona",

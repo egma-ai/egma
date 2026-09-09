@@ -94,6 +94,32 @@ const running: Config = cloudBilling === undefined
 // the claim door and the write that stores a usage record — start reaching it.
 installBillingPlugIn(running.billing);
 
+const voiceFleetSettings = config.voiceFleet;
+const hostedVoice = voiceFleetSettings === undefined
+  ? undefined
+  : await (async () => {
+      // Daytona and AWS STS stay outside the self-hosted boot path. Only the
+      // explicit launcher setting loads either client.
+      const [{ Daytona }, adapter] = await Promise.all([
+        import("@daytona/sdk"),
+        import("./voice-fleet-daytona.ts"),
+      ]);
+      const client = new Daytona({
+        apiKey: voiceFleetSettings.apiKey,
+        ...(voiceFleetSettings.apiUrl === undefined
+          ? {}
+          : { apiUrl: voiceFleetSettings.apiUrl }),
+        ...(voiceFleetSettings.target === undefined
+          ? {}
+          : { target: voiceFleetSettings.target }),
+      });
+      return {
+        client,
+        adapter,
+        claimRuntime: adapter.daytonaClaimRuntime(voiceFleetSettings, { client }),
+      };
+    })();
+
 let reconcileVoiceFleet:
   | (() => Promise<VoiceFleetReconcileResult>)
   | undefined;
@@ -113,6 +139,9 @@ const { app } = buildApi({
   config: running,
   traceStoreReady: () => traceSchema.state === "ready",
   ...(wakeVoiceFleet === undefined ? {} : { wakeVoiceFleet }),
+  ...(hostedVoice === undefined
+    ? {}
+    : { daytonaClaimRuntime: hostedVoice.claimRuntime }),
   ...(cloudBilling === undefined ? {} : { billingRoutes: cloudBilling.routes }),
   ...(cloudBilling?.webhookRoutes === undefined
     ? {}
@@ -120,22 +149,9 @@ const { app } = buildApi({
 });
 
 if (config.voiceFleet !== undefined) {
-  // Daytona and AWS STS stay outside the self-hosted boot path. Only the
-  // explicit launcher setting loads either client.
-  const [{ Daytona }, { daytonaVoiceFleet }] = await Promise.all([
-    import("@daytona/sdk"),
-    import("./voice-fleet-daytona.ts"),
-  ]);
-  const fleet = daytonaVoiceFleet(config.voiceFleet, {
-    client: new Daytona({
-      apiKey: config.voiceFleet.apiKey,
-      ...(config.voiceFleet.apiUrl === undefined
-        ? {}
-        : { apiUrl: config.voiceFleet.apiUrl }),
-      ...(config.voiceFleet.target === undefined
-        ? {}
-        : { target: config.voiceFleet.target }),
-    }),
+  if (hostedVoice === undefined) throw new Error("Daytona was not initialized");
+  const fleet = hostedVoice.adapter.daytonaVoiceFleet(config.voiceFleet, {
+    client: hostedVoice.client,
     log: app.log,
     onFreed: () => wakeVoiceFleet?.(),
   });

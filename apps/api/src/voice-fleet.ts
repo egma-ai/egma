@@ -16,6 +16,7 @@ export type DaytonaVoiceFleetSettings = {
   readonly s3Bucket: string;
   readonly s3Region: string;
   readonly recordingRoleArn: string;
+  readonly recordingBucketArn: string;
 };
 
 export type VoiceFleetSettings = DaytonaVoiceFleetSettings;

@@ -383,6 +383,7 @@ function voiceFleetSettings(
     s3Bucket: required("EGMA_SIMULATOR_S3_BUCKET"),
     s3Region: required("EGMA_SIMULATOR_S3_REGION"),
     recordingRoleArn: required("EGMA_DAYTONA_RECORDING_ROLE_ARN"),
+    recordingBucketArn: required("EGMA_DAYTONA_RECORDING_BUCKET_ARN"),
   };
 }
 

@@ -3,7 +3,7 @@ import { AccessToken } from "livekit-server-sdk";
 
 export const VOICE_CREDENTIAL_TTL_SECONDS = 20 * 60;
 
-export type VoiceSandboxCredentials = {
+export type VoiceClaimCredentials = {
   readonly roomName: string;
   readonly roomToken: string;
   readonly apiToken: string;
@@ -12,16 +12,42 @@ export type VoiceSandboxCredentials = {
   readonly s3SessionToken: string;
 };
 
+export type DaytonaVoiceRuntime = {
+  readonly kind: "daytona_voice";
+  readonly media: {
+    readonly backend: "livekit";
+    readonly livekit_url: string;
+    readonly livekit_room_name: string;
+    readonly livekit_room_token: string;
+    readonly livekit_api_token: string;
+  };
+  readonly storage: {
+    readonly backend: "s3";
+    readonly endpoint: string;
+    readonly bucket: string;
+    readonly region: string;
+    readonly access_key_id: string;
+    readonly secret_access_key: string;
+    readonly session_token: string;
+  };
+};
+
 export type VoiceCredentialSettings = {
+  readonly livekitUrl: string;
   readonly livekitApiKey: string;
   readonly livekitApiSecret: string;
   readonly recordingRoleArn: string;
+  readonly recordingBucketArn: string;
+  readonly s3Endpoint: string;
+  readonly s3Bucket: string;
+  readonly s3Region: string;
 };
 
 export type AssumeRecordingRole = (options: {
   readonly roleArn: string;
   readonly sessionName: string;
   readonly durationSeconds: number;
+  readonly policy: string;
 }) => Promise<{
   readonly accessKeyId: string;
   readonly secretAccessKey: string;
@@ -29,11 +55,12 @@ export type AssumeRecordingRole = (options: {
 }>;
 
 export function awsRecordingRole(client = new STSClient({})): AssumeRecordingRole {
-  return async ({ roleArn, sessionName, durationSeconds }) => {
+  return async ({ roleArn, sessionName, durationSeconds, policy }) => {
     const response = await client.send(new AssumeRoleCommand({
       RoleArn: roleArn,
       RoleSessionName: sessionName,
       DurationSeconds: durationSeconds,
+      Policy: policy,
     }));
     const credentials = response.Credentials;
     if (!credentials?.AccessKeyId || !credentials.SecretAccessKey || !credentials.SessionToken) {
@@ -47,13 +74,13 @@ export function awsRecordingRole(client = new STSClient({})): AssumeRecordingRol
   };
 }
 
-export async function issueVoiceSandboxCredentials(options: {
+export async function issueVoiceClaimCredentials(options: {
   readonly settings: VoiceCredentialSettings;
-  readonly runtimeId: string;
+  readonly simulationId: string;
   readonly roomName: string;
   readonly assumeRole: AssumeRecordingRole;
-}): Promise<VoiceSandboxCredentials> {
-  const { settings, runtimeId, roomName } = options;
+}): Promise<VoiceClaimCredentials> {
+  const { settings, simulationId, roomName } = options;
   const participant = new AccessToken(settings.livekitApiKey, settings.livekitApiSecret, {
     identity: "egma-persona",
     ttl: VOICE_CREDENTIAL_TTL_SECONDS,
@@ -77,8 +104,16 @@ export async function issueVoiceSandboxCredentials(options: {
     control.toJwt(),
     options.assumeRole({
       roleArn: settings.recordingRoleArn,
-      sessionName: `egma-daytona-${runtimeId}`.slice(0, 64),
+      sessionName: `egma-daytona-${simulationId}`.slice(0, 64),
       durationSeconds: VOICE_CREDENTIAL_TTL_SECONDS,
+      policy: JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [{
+          Effect: "Allow",
+          Action: "s3:PutObject",
+          Resource: `${settings.recordingBucketArn}/${simulationId}/dual-channel.wav`,
+        }],
+      }),
     }),
   ]);
   return {
@@ -88,5 +123,36 @@ export async function issueVoiceSandboxCredentials(options: {
     s3AccessKeyId: storage.accessKeyId,
     s3SecretAccessKey: storage.secretAccessKey,
     s3SessionToken: storage.sessionToken,
+  };
+}
+
+export async function issueDaytonaVoiceRuntime(options: {
+  readonly settings: VoiceCredentialSettings;
+  readonly simulationId: string;
+  readonly assumeRole: AssumeRecordingRole;
+}): Promise<DaytonaVoiceRuntime> {
+  const roomName = `egma-sim-${options.simulationId}`;
+  const credentials = await issueVoiceClaimCredentials({
+    ...options,
+    roomName,
+  });
+  return {
+    kind: "daytona_voice",
+    media: {
+      backend: "livekit",
+      livekit_url: options.settings.livekitUrl,
+      livekit_room_name: credentials.roomName,
+      livekit_room_token: credentials.roomToken,
+      livekit_api_token: credentials.apiToken,
+    },
+    storage: {
+      backend: "s3",
+      endpoint: options.settings.s3Endpoint,
+      bucket: options.settings.s3Bucket,
+      region: options.settings.s3Region,
+      access_key_id: credentials.s3AccessKeyId,
+      secret_access_key: credentials.s3SecretAccessKey,
+      session_token: credentials.s3SessionToken,
+    },
   };
 }

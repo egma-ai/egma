@@ -1,10 +1,14 @@
 import { TokenVerifier } from "livekit-server-sdk";
 import { describe, expect, it, vi } from "vitest";
 
-import { daytonaVoiceFleet, type DaytonaClient } from "../src/voice-fleet-daytona.ts";
+import {
+  daytonaClaimRuntime,
+  daytonaVoiceFleet,
+  type DaytonaClient,
+} from "../src/voice-fleet-daytona.ts";
 import {
   awsRecordingRole,
-  issueVoiceSandboxCredentials,
+  issueVoiceClaimCredentials,
   VOICE_CREDENTIAL_TTL_SECONDS,
 } from "../src/voice-fleet-credentials.ts";
 import type { DaytonaVoiceFleetSettings } from "../src/voice-fleet.ts";
@@ -25,6 +29,7 @@ const settings: DaytonaVoiceFleetSettings = {
   s3Bucket: "recordings",
   s3Region: "us-east-1",
   recordingRoleArn: "arn:aws:iam::123:role/recording",
+  recordingBucketArn: "arn:aws:s3:::recordings",
 };
 
 const temporaryStorage = vi.fn(async () => ({
@@ -48,6 +53,7 @@ describe("Daytona voice credentials", () => {
       roleArn: settings.recordingRoleArn,
       sessionName: "egma-daytona-runtime",
       durationSeconds: 1_200,
+      policy: "scoped-policy",
     })).toEqual({
       accessKeyId: "temporary-access",
       secretAccessKey: "temporary-secret",
@@ -57,13 +63,14 @@ describe("Daytona voice credentials", () => {
       RoleArn: settings.recordingRoleArn,
       RoleSessionName: "egma-daytona-runtime",
       DurationSeconds: 1_200,
+      Policy: "scoped-policy",
     });
   });
 
   it("scopes both LiveKit tokens to one room and the 20 minute execution window", async () => {
-    const credentials = await issueVoiceSandboxCredentials({
+    const credentials = await issueVoiceClaimCredentials({
       settings,
-      runtimeId: "runtime-1",
+      simulationId: "sim_123",
       roomName: "egma-sim-runtime-1",
       assumeRole: temporaryStorage,
     });
@@ -84,9 +91,63 @@ describe("Daytona voice credentials", () => {
     expect(payload.exp - payload.nbf).toBe(VOICE_CREDENTIAL_TTL_SECONDS);
     expect(temporaryStorage).toHaveBeenCalledWith({
       roleArn: settings.recordingRoleArn,
-      sessionName: "egma-daytona-runtime-1",
+      sessionName: "egma-daytona-sim_123",
       durationSeconds: VOICE_CREDENTIAL_TTL_SECONDS,
+      policy: JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [{
+          Effect: "Allow",
+          Action: "s3:PutObject",
+          Resource: "arn:aws:s3:::recordings/sim_123/dual-channel.wav",
+        }],
+      }),
     });
+  });
+
+  it("labels the claimed sandbox before returning per-simulation authority", async () => {
+    const sandbox = {
+      id: "sandbox-1",
+      labels: {
+        "egma.runtime": "voice-simulator",
+        "egma.release_sha": "a".repeat(40),
+      },
+      process: { getEntrypointSession: vi.fn(async () => ({ commands: [] })) },
+      setLabels: vi.fn(async (labels: Record<string, string>) => labels),
+    };
+    const client = {
+      get: vi.fn(async () => sandbox),
+    } as unknown as DaytonaClient;
+    const assign = daytonaClaimRuntime(settings, {
+      client,
+      assumeRole: temporaryStorage,
+    });
+
+    const runtime = await assign("egma-voice-runtime-1", "sim_123");
+
+    expect(client.get).toHaveBeenCalledWith("egma-voice-runtime-1");
+    expect(sandbox.setLabels).toHaveBeenCalledWith({
+      "egma.runtime": "voice-simulator",
+      "egma.release_sha": "a".repeat(40),
+      "egma.simulation_id": "sim_123",
+    });
+    expect(runtime).toMatchObject({
+      kind: "daytona_voice",
+      media: {
+        backend: "livekit",
+        livekit_url: "wss://livekit.example",
+        livekit_room_name: "egma-sim-sim_123",
+      },
+      storage: {
+        backend: "s3",
+        endpoint: "https://s3.example",
+        bucket: "recordings",
+        region: "us-east-1",
+        session_token: "temporary-session",
+      },
+    });
+    expect(temporaryStorage).toHaveBeenLastCalledWith(expect.objectContaining({
+      policy: expect.stringContaining("arn:aws:s3:::recordings/sim_123/dual-channel.wav"),
+    }));
   });
 });
 
@@ -98,6 +159,7 @@ describe("Daytona voice fleet", () => {
       process: {
         getEntrypointSession: vi.fn(async () => { throw new Error("stale sandbox object used"); }),
       },
+      setLabels: vi.fn(async (labels: Record<string, string>) => labels),
     };
     const refreshed = {
       id: "sandbox-1",
@@ -105,6 +167,7 @@ describe("Daytona voice fleet", () => {
       process: {
         getEntrypointSession: vi.fn(async () => ({ commands: [{ exitCode: 0 }] })),
       },
+      setLabels: vi.fn(async (labels: Record<string, string>) => labels),
     };
     const create = vi.fn(async () => created);
     const remove = vi.fn(async () => undefined);
@@ -117,7 +180,6 @@ describe("Daytona voice fleet", () => {
     const fleet = daytonaVoiceFleet(settings, {
       client,
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-      assumeRole: temporaryStorage,
       id: () => "runtime-1",
       pollMilliseconds: 0,
     });
@@ -148,8 +210,17 @@ describe("Daytona voice fleet", () => {
       EGMA_SIMULATOR_MODE: "one-shot",
       EGMA_SIMULATOR_MODALITIES: "voice",
       EGMA_SIMULATOR_VAD_PROVIDER: "silero",
-      EGMA_SIMULATOR_S3_SESSION_TOKEN: "temporary-session",
     });
+    expect(Object.keys(request?.envVars ?? {})).not.toEqual(
+      expect.arrayContaining([
+        "EGMA_SIMULATOR_LIVEKIT_ROOM_NAME",
+        "EGMA_SIMULATOR_LIVEKIT_ROOM_TOKEN",
+        "EGMA_SIMULATOR_LIVEKIT_API_TOKEN",
+        "EGMA_SIMULATOR_S3_ACCESS_KEY_ID",
+        "EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY",
+        "EGMA_SIMULATOR_S3_SESSION_TOKEN",
+      ]),
+    );
     const raw = JSON.stringify(request?.envVars);
     expect(raw).not.toContain(settings.livekitApiSecret);
     expect(raw).not.toContain(settings.apiKey);
@@ -165,6 +236,7 @@ describe("Daytona voice fleet", () => {
       process: {
         getEntrypointSession: vi.fn(async () => ({ commands: [{ exitCode: 0 }] })),
       },
+      setLabels: vi.fn(async (labels: Record<string, string>) => labels),
     };
     const client: DaytonaClient = {
       create: vi.fn(async () => { throw new Error("quota reached"); }),
@@ -178,7 +250,6 @@ describe("Daytona voice fleet", () => {
     const fleet = daytonaVoiceFleet(settings, {
       client,
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-      assumeRole: temporaryStorage,
       pollMilliseconds: 0,
     });
 

@@ -2,17 +2,20 @@ import { randomUUID } from "node:crypto";
 import type { DaytonaVoiceFleetSettings, VoiceFleet, VoiceFleetLog, VoiceFleetTask } from "./voice-fleet.ts";
 import {
   awsRecordingRole,
-  issueVoiceSandboxCredentials,
+  issueDaytonaVoiceRuntime,
   type AssumeRecordingRole,
+  type DaytonaVoiceRuntime,
 } from "./voice-fleet-credentials.ts";
 
 type DaytonaSandbox = {
   readonly id: string;
+  readonly labels?: Record<string, string>;
   readonly state?: string;
   readonly errorReason?: string;
   readonly process: {
     getEntrypointSession(): Promise<{ commands?: readonly { exitCode?: number }[] }>;
   };
+  setLabels(labels: Record<string, string>): Promise<Record<string, string>>;
 };
 
 export type DaytonaClient = {
@@ -31,6 +34,11 @@ export type DaytonaClient = {
   delete(sandbox: DaytonaSandbox, timeout?: number, wait?: boolean): Promise<void>;
 };
 
+export type DaytonaClaimRuntime = (
+  claimant: string,
+  simulationId: string,
+) => Promise<DaytonaVoiceRuntime>;
+
 const FLEET_LABELS = { "egma.runtime": "voice-simulator" };
 const TERMINAL_STATES = new Set([
   "stopped",
@@ -47,14 +55,12 @@ export function daytonaVoiceFleet(
   options: {
     readonly client: DaytonaClient;
     readonly log: VoiceFleetLog;
-    readonly assumeRole?: AssumeRecordingRole;
     readonly onFreed?: () => void;
     readonly id?: () => string;
     readonly pollMilliseconds?: number;
   },
 ): VoiceFleet {
   const watching = new Set<string>();
-  const assumeRole = options.assumeRole ?? awsRecordingRole();
   const id = options.id ?? randomUUID;
   const pollMilliseconds = options.pollMilliseconds ?? 1_000;
 
@@ -96,13 +102,6 @@ export function daytonaVoiceFleet(
   const launchOne = async (): Promise<VoiceFleetTask> => {
     const runtimeId = id();
     const name = `egma-voice-${runtimeId}`.slice(0, 63);
-    const roomName = `egma-sim-${runtimeId}`;
-    const credentials = await issueVoiceSandboxCredentials({
-      settings,
-      runtimeId,
-      roomName,
-      assumeRole,
-    });
     const sandbox = await options.client.create({
       name,
       snapshot: settings.snapshot,
@@ -123,18 +122,7 @@ export function daytonaVoiceFleet(
         EGMA_SIMULATOR_CAPACITY: "1",
         EGMA_SIMULATOR_CLAIMANT: name,
         EGMA_SIMULATOR_CONTROL_PLANE_URL: settings.controlPlaneUrl,
-        EGMA_SIMULATOR_MEDIA_BACKEND: "livekit",
         EGMA_SIMULATOR_VAD_PROVIDER: "silero",
-        EGMA_SIMULATOR_LIVEKIT_URL: settings.livekitUrl,
-        EGMA_SIMULATOR_LIVEKIT_ROOM_NAME: credentials.roomName,
-        EGMA_SIMULATOR_LIVEKIT_ROOM_TOKEN: credentials.roomToken,
-        EGMA_SIMULATOR_LIVEKIT_API_TOKEN: credentials.apiToken,
-        EGMA_SIMULATOR_S3_ENDPOINT: settings.s3Endpoint,
-        EGMA_SIMULATOR_S3_BUCKET: settings.s3Bucket,
-        EGMA_SIMULATOR_S3_REGION: settings.s3Region,
-        EGMA_SIMULATOR_S3_ACCESS_KEY_ID: credentials.s3AccessKeyId,
-        EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY: credentials.s3SecretAccessKey,
-        EGMA_SIMULATOR_S3_SESSION_TOKEN: credentials.s3SessionToken,
       },
       secrets: {
         EGMA_SIMULATOR_SERVICE_TOKEN: settings.serviceTokenSecret,
@@ -166,5 +154,26 @@ export function daytonaVoiceFleet(
           : []),
       };
     },
+  };
+}
+
+export function daytonaClaimRuntime(
+  settings: DaytonaVoiceFleetSettings,
+  options: {
+    readonly client: DaytonaClient;
+    readonly assumeRole?: AssumeRecordingRole;
+  },
+): DaytonaClaimRuntime {
+  const assumeRole = options.assumeRole ?? awsRecordingRole();
+  return async (claimant, simulationId) => {
+    const [sandbox, runtime] = await Promise.all([
+      options.client.get(claimant),
+      issueDaytonaVoiceRuntime({ settings, simulationId, assumeRole }),
+    ]);
+    await sandbox.setLabels({
+      ...(sandbox.labels ?? {}),
+      "egma.simulation_id": simulationId,
+    });
+    return runtime;
   };
 }

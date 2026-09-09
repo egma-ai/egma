@@ -849,6 +849,24 @@ describe("claiming work", () => {
     });
     expect(badWait.statusCode).toBe(400);
     expect(String(badWait.body.message)).toContain("wait_seconds");
+
+    for (const shape of [
+      { capacity: 2, modalities: ["voice"] },
+      { capacity: 1, modalities: ["chat"] },
+      { capacity: 1, modalities: ["voice", "chat"] },
+      { capacity: 1 },
+    ]) {
+      const badDaytona = await claim(token, {
+        claimant: "egma-voice-runtime",
+        wait_seconds: 0,
+        runtime: "daytona",
+        ...shape,
+      });
+      expect(badDaytona.statusCode).toBe(400);
+      expect(String(badDaytona.body.message)).toContain(
+        "capacity 1 and only the voice modality",
+      );
+    }
   });
 });
 
@@ -1522,10 +1540,30 @@ describe("one source of execution truth", () => {
       s3Bucket: "recordings",
       s3Region: "us-east-1",
       recordingRoleArn: "arn:aws:iam::123:role/recording",
+      recordingBucketArn: "arn:aws:s3:::recordings",
     };
+    const daytonaClaimRuntime = vi.fn(async (_claimant: string, simulationId: string) => ({
+      kind: "daytona_voice",
+      media: {
+        backend: "livekit",
+        livekit_url: "wss://livekit.example",
+        livekit_room_name: `egma-sim-${simulationId}`,
+        livekit_room_token: "room-token",
+        livekit_api_token: "api-token",
+      },
+      storage: {
+        backend: "s3",
+        endpoint: "https://s3.example",
+        bucket: "recordings",
+        region: "us-east-1",
+        access_key_id: "temporary-access",
+        secret_access_key: "temporary-secret",
+        session_token: "temporary-session",
+      },
+    }));
     const { key, connectionId, versionId } = await aRealtimeVoiceCustomerReadyToRun(
       "claims_daytona_provider_secrets",
-      { providerCredentials: { load }, voiceFleet },
+      { providerCredentials: { load }, voiceFleet, daytonaClaimRuntime },
     );
     await aQueuedRun(key, connectionId, versionId);
 
@@ -1545,6 +1583,89 @@ describe("one source of execution truth", () => {
     });
     expect(JSON.stringify(models)).not.toContain("platform-openai");
     expect(JSON.stringify(models)).not.toContain("platform-cartesia");
+    expect(daytonaClaimRuntime).toHaveBeenCalledWith(
+      "daytona-runtime",
+      expect.any(String),
+    );
+  });
+
+  it("releases Daytona work when claim-time authority or labels cannot be prepared", async () => {
+    const daytonaClaimRuntime = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Daytona is unavailable"))
+      .mockResolvedValueOnce({
+        kind: "daytona_voice",
+        media: {
+          backend: "livekit",
+          livekit_url: "wss://livekit.example",
+          livekit_room_name: "egma-sim-retry",
+          livekit_room_token: "room-token",
+          livekit_api_token: "api-token",
+        },
+        storage: {
+          backend: "s3",
+          endpoint: "https://s3.example",
+          bucket: "recordings",
+          region: "us-east-1",
+          access_key_id: "temporary-access",
+          secret_access_key: "temporary-secret",
+          session_token: "temporary-session",
+        },
+      });
+    const { ada, key, connectionId, versionId } =
+      await aRealtimeVoiceCustomerReadyToRun(
+        "claims_daytona_runtime_retry",
+        { daytonaClaimRuntime },
+      );
+    const { simulationId } = await aQueuedRun(key, connectionId, versionId);
+
+    const deferred = await claim(api.config.simulatorServiceToken, {
+      claimant: "egma-voice-runtime",
+      capacity: 1,
+      wait_seconds: 0,
+      modalities: ["voice"],
+      runtime: "daytona",
+    });
+    expect(deferred.body.specs).toEqual([]);
+    expect(
+      (await getSimulation(contextFor(ada, "member"), simulationId))?.status,
+    ).toBe("queued");
+
+    const retried = await claim(api.config.simulatorServiceToken, {
+      claimant: "egma-voice-runtime",
+      capacity: 1,
+      wait_seconds: 0,
+      modalities: ["voice"],
+      runtime: "daytona",
+    });
+    expect(retried.body.specs as unknown[]).toHaveLength(1);
+  });
+
+  it("releases Daytona work when claim-time authority violates the contract", async () => {
+    const daytonaClaimRuntime = vi.fn(async () => ({
+      kind: "daytona_voice",
+      media: {},
+      storage: {},
+    }));
+    const { ada, key, connectionId, versionId } =
+      await aRealtimeVoiceCustomerReadyToRun(
+        "claims_daytona_runtime_invalid",
+        { daytonaClaimRuntime },
+      );
+    const { simulationId } = await aQueuedRun(key, connectionId, versionId);
+
+    const deferred = await claim(api.config.simulatorServiceToken, {
+      claimant: "egma-voice-runtime",
+      capacity: 1,
+      wait_seconds: 0,
+      modalities: ["voice"],
+      runtime: "daytona",
+    });
+
+    expect(deferred.body.specs).toEqual([]);
+    expect(
+      (await getSimulation(contextFor(ada, "member"), simulationId))?.status,
+    ).toBe("queued");
   });
 
   it("releases work when the current AWS bundle cannot be read", async () => {

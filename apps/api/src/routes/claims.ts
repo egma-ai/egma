@@ -66,6 +66,10 @@ import {
 export type ClaimRoutesOptions = {
   readonly wakeVoiceFleet?: (() => void) | undefined;
   readonly daytonaProviderSecretEnvironment?: Readonly<Record<string, string>>;
+  readonly daytonaClaimRuntime?: (
+    claimant: string,
+    simulationId: string,
+  ) => Promise<Record<string, unknown>>;
   /** The deployment's service token, from configuration. */
   readonly serviceToken: string;
   /**
@@ -109,6 +113,20 @@ const RECHECK_MILLISECONDS = 1_000;
 
 /** Hard wall for queue wait, provider checks, assembly, and the response. */
 const CLAIM_RESPONSE_MILLISECONDS = 28_000;
+
+async function beforeResponseDeadline<T>(
+  operation: Promise<T>,
+  deadline: number,
+): Promise<T> {
+  return await Promise.race([
+    operation,
+    sleep(Math.max(1, deadline - Date.now()), undefined, { ref: false }).then(
+      () => {
+        throw new Error("claim response deadline expired");
+      },
+    ),
+  ]);
+}
 
 /**
  * The most simulations one claim may take, mirrored from the module's own
@@ -447,6 +465,14 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
   if (runtime !== undefined && runtime !== "daytona") {
     return { refusal: "runtime must be daytona when it is present" };
   }
+  if (
+    runtime === "daytona" &&
+    (capacity !== 1 || modalities?.length !== 1 || modalities[0] !== "voice")
+  ) {
+    return {
+      refusal: "a Daytona claim must request capacity 1 and only the voice modality",
+    };
+  }
 
   return {
     claimant: claimant.trim(),
@@ -490,7 +516,7 @@ async function assembledSpec(
 ): Promise<
   | Record<string, unknown>
   | { readonly unbuildable: string; readonly providerKeyUnavailable?: boolean }
-  | { readonly retryable: string }
+  | { readonly retryable: string; readonly deferredBy?: "provider" | "runtime" }
 > {
   if (personaVersion === undefined) {
     return { unbuildable: "its pinned persona version could not be read" };
@@ -818,13 +844,13 @@ export async function claimRoutes(
       // together. A batch of fifty must not spend one provider timeout fifty
       // times or break the route's sub-30-second response promise.
       const assembled = await Promise.all(
-        claims.map((claim) =>
+        claims.map(async (claim) =>
           // A withheld conversation is never assembled: it is going back on
           // the queue, and building a work order for it would read a
           // customer's credentials to make a document nobody will receive.
           withheld.has(claim.id)
-            ? Promise.resolve({ withheld: true } as const)
-            : assembledSpec(
+            ? ({ withheld: true } as const)
+            : await assembledSpec(
                 claim,
                 pinned.get(claim.id),
                 runs,
@@ -845,7 +871,43 @@ export async function claimRoutes(
                   unbuildable:
                     "an internal error prevented Egma from building its simulation spec",
                 }),
-              ),
+              ).then(async (spec) => {
+                if (
+                  ask.runtime !== "daytona" ||
+                  "unbuildable" in spec ||
+                  "retryable" in spec
+                ) {
+                  return spec;
+                }
+                if (options.daytonaClaimRuntime === undefined) {
+                  return {
+                    retryable: "the Daytona claim runtime is not configured",
+                    deferredBy: "runtime" as const,
+                  };
+                }
+                try {
+                  const completed = {
+                    ...spec,
+                    runtime: await beforeResponseDeadline(
+                      options.daytonaClaimRuntime(ask.claimant, claim.id),
+                      responseDeadline,
+                    ),
+                  };
+                  return specComplaints(completed).length === 0
+                    ? completed
+                    : {
+                        retryable:
+                          "the Daytona sandbox received invalid simulation authority",
+                        deferredBy: "runtime" as const,
+                      };
+                } catch {
+                  return {
+                    retryable:
+                      "the Daytona sandbox could not receive simulation authority",
+                    deferredBy: "runtime" as const,
+                  };
+                }
+              }),
         ),
       );
       for (const [index, claim] of claims.entries()) {
@@ -916,11 +978,15 @@ export async function claimRoutes(
           request.log.warn(
             platformEvent(
               "egma.simulation.dispatch.deferred",
-              "simulation dispatch was deferred after provider preflight",
+              spec.deferredBy === "runtime"
+                ? "simulation dispatch was deferred while preparing its Daytona sandbox"
+                : "simulation dispatch was deferred after provider preflight",
               {
                 "egma.simulation_id": claim.id,
                 "egma.run_id": claim.runId,
-                "error.type": "provider_preflight_failed",
+                "error.type": spec.deferredBy === "runtime"
+                  ? "daytona_claim_runtime_failed"
+                  : "provider_preflight_failed",
               },
             ),
           );

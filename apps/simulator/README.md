@@ -284,7 +284,8 @@ describe the connection's codec or acoustic quality.
 
 ## Configuration
 
-Everything arrives as environment variables.
+Deployment settings arrive as environment variables. A Daytona worker receives
+its temporary room and recording authority in the one simulation it claims.
 
 Model, speech, voice, and their direct keys are absent from this table because
 the work order is their only source. The environment contains deployment
@@ -308,9 +309,9 @@ transport and process settings only.
 | `EGMA_SIMULATOR_LIVEKIT_URL` | (required for `livekit`) | The LiveKit server — self-hosted or Cloud, only the URL differs. |
 | `EGMA_SIMULATOR_LIVEKIT_API_KEY` | (required for `livekit`) | The LiveKit API key. |
 | `EGMA_SIMULATOR_LIVEKIT_API_SECRET` | (required for `livekit`) | The LiveKit API secret. Never logged. |
-| `EGMA_SIMULATOR_LIVEKIT_ROOM_NAME` | hosted only | The room assigned to one Daytona voice simulation. |
-| `EGMA_SIMULATOR_LIVEKIT_ROOM_TOKEN` | hosted only | A short-lived participant token scoped to that room. |
-| `EGMA_SIMULATOR_LIVEKIT_API_TOKEN` | hosted only | A short-lived room-admin and SIP token scoped to that room. |
+| `EGMA_SIMULATOR_LIVEKIT_ROOM_NAME` | (none) | Optional deployment-scoped room name paired with scoped tokens. |
+| `EGMA_SIMULATOR_LIVEKIT_ROOM_TOKEN` | (none) | Optional deployment-scoped participant token. |
+| `EGMA_SIMULATOR_LIVEKIT_API_TOKEN` | (none) | Optional deployment-scoped room-admin and SIP token. |
 | `EGMA_SIMULATOR_RUNTIME` | (none) | The hosted claimant marker. Daytona sandboxes set it to `daytona`. |
 | `EGMA_SIMULATOR_WAL_DIR` | `.egma-simulator/wal` | Where report documents land before sending. |
 | `EGMA_SIMULATOR_S3_ENDPOINT` | (none) | Where the object store recordings go to answers, on the deployment's own network. Naming it is the whole of what selects object storage, and what makes the two credentials below required; naming none keeps the filesystem store, so a checkout needs no container. |
@@ -318,7 +319,7 @@ transport and process settings only.
 | `EGMA_SIMULATOR_S3_REGION` | `us-east-1` | What requests are signed for. MinIO ignores it; a bucket at a real provider does not. |
 | `EGMA_SIMULATOR_S3_ACCESS_KEY_ID` | (required with an endpoint) | The write credential's key id. Never logged. |
 | `EGMA_SIMULATOR_S3_SECRET_ACCESS_KEY` | (required with an endpoint) | The write credential's secret. Never logged. |
-| `EGMA_SIMULATOR_S3_SESSION_TOKEN` | hosted only | The session token paired with the short-lived recording credentials. |
+| `EGMA_SIMULATOR_S3_SESSION_TOKEN` | (none) | Optional session token paired with S3 credentials. |
 | `EGMA_SIMULATOR_BLOB_DIR` | `.egma-simulator/blobs` | Where recordings land when no endpoint above names an object store. Unread, and not even created, when one does. |
 | `EGMA_SIMULATOR_LOG_LEVEL` | `INFO` | The usual levels: `CRITICAL`, `ERROR`, `WARNING`, `INFO`, `DEBUG`. |
 | `EGMA_SIMULATION_CONTRACT_DIR` | auto-located | The contract package, when the repo layout isn't around it. |

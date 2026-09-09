@@ -55,6 +55,7 @@ import type { RetellReach } from "./retell/api.ts";
 import type { RetellSimulationPullOptions } from "./retell-simulation-ingestion.ts";
 import { startOrphanSweep, type OrphanSweep } from "./simulation-sweep.ts";
 import type { Config } from "./config.ts";
+import type { DaytonaClaimRuntime } from "./voice-fleet-daytona.ts";
 import {
   platformEvent,
   PRIVATE_LOG_SERIALIZERS,
@@ -125,6 +126,8 @@ export type ServerOptions = {
   readonly traceStoreReady?: (() => boolean) | undefined;
   /** Hosted-only wake-up shared by run creation and the standing sweep. */
   readonly wakeVoiceFleet?: (() => void) | undefined;
+  /** Hosted-only per-simulation authority and sandbox correlation. */
+  readonly daytonaClaimRuntime?: DaytonaClaimRuntime | undefined;
   /**
    * The Billing section's reads, on a deployment whose settings selected the
    * cloud adapter. Absent on every other deployment, and absent is the
@@ -510,6 +513,9 @@ export function buildApi(options: ServerOptions): Api {
             ]),
           ),
         }),
+    ...(options.daytonaClaimRuntime === undefined
+      ? {}
+      : { daytonaClaimRuntime: options.daytonaClaimRuntime }),
     serviceToken: config.simulatorServiceToken,
     providerCredentials: config.providerCredentials,
     carrierRoute: config.carrierRoute,
