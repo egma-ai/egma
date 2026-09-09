@@ -66,7 +66,8 @@ it("retries a final record after durable ingestion refused the first save", asyn
     .mockResolvedValueOnce({ accepted: 1, refused: [{ reason: "temporary refusal" }] })
     .mockResolvedValueOnce({ accepted: 2, refused: [] })
     .mockResolvedValueOnce({ accepted: 1, refused: [] });
-  const log = { warn: vi.fn() } as never;
+  const warned = vi.fn();
+  const log = { warn: warned } as never;
 
   await collector.pull(standing.auth, simulationId, { fetchImpl }, log, {
     retryWaitsMilliseconds: [],
@@ -91,6 +92,39 @@ it("retries a final record after durable ingestion refused the first save", asyn
   const finalFiling = fileEvidence.mock.calls[2]?.[0]?.[0];
   expect(finalFiling?.spans).toHaveLength(1);
   expect(finalFiling?.spans[0]?.parentSpanId).toBe("");
+});
+
+it("retries after durable ingestion throws before accepting any evidence", async () => {
+  const first = createRetellSimulationCollector();
+  const fetchImpl = vi.fn(async () =>
+    new Response(JSON.stringify(call), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })) as unknown as typeof fetch;
+  const fileEvidence = vi.fn()
+    .mockRejectedValueOnce(new Error("object store unavailable"))
+    .mockImplementation(async (filings: readonly { spans: readonly unknown[] }[]) => ({
+      accepted: filings[0]?.spans.length ?? 0,
+      refused: [],
+    }));
+  const warned = vi.fn();
+  const log = { warn: warned } as never;
+
+  await first.pull(standing.auth, simulationId, { fetchImpl }, log, {
+    retryWaitsMilliseconds: [], fileEvidence,
+  });
+  await first.settle();
+  expect(fileEvidence).toHaveBeenCalledOnce();
+
+  const restarted = createRetellSimulationCollector();
+  await restarted.pull(standing.auth, simulationId, { fetchImpl }, log, {
+    retryWaitsMilliseconds: [], fileEvidence,
+  });
+  await restarted.settle();
+
+  expect(fetchImpl).toHaveBeenCalledTimes(2);
+  expect(fileEvidence).toHaveBeenCalledTimes(3);
+  expect(warned).toHaveBeenCalled();
 });
 
 it("does not refetch while an accepted segment is waiting for the trace-store drain", async () => {

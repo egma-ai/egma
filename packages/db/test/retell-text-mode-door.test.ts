@@ -200,7 +200,7 @@ describe("what the shipped simulator can conduct over text mode", () => {
     // A shipped adapter is not a licence to conduct anything wearing the name.
     expect(connectionIsConductable(KIND, VARIANT, "voice")).toBe(false);
     expect(
-      connectionIsConductable(KIND, "retell_text_mode.api_key", "chat"),
+      connectionIsConductable(KIND, "retell_web_call.api_key", "chat"),
     ).toBe(false);
   });
 });

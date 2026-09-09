@@ -53,35 +53,44 @@ const RESCHEDULING = {
   expectedBehaviors: ["confirms the new time back before finishing"],
 } as const;
 
-const RETELL = {
-  agentPlatform: "retell",
-  connectionType: "retell_chat_api",
-  accessVariant: "retell_chat_api.api_key",
+const LIVEKIT_CHAT = {
+  agentPlatform: "livekit",
+  connectionType: "livekit_room",
+  accessVariant: "livekit_room.project_credentials",
   modality: "chat",
-  config: { retellAgentId: "agent_in_retell_1" },
-  credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+  config: { url: "wss://fixture.livekit.cloud", agentName: "agent_in_retell_1" },
+  credentials: { apiKey: "APIfixture12345678", apiSecret: "livekit-secret-fixture" },
 } as const;
 
-/** The Retell chat fixture in this file points at a chat agent. */
-const RETELL_CHAT_FETCH: typeof fetch = async (input) => {
-  const url = String(input);
-  if (!url.includes("/v2/list-agents")) {
-    throw new Error(`Unexpected Retell read: ${url}`);
-  }
-  return new Response(
-    JSON.stringify({
-      items: [
-        {
-          agent_id: "agent_in_retell_1",
-          agent_name: "Front desk",
-          channel: "chat",
-        },
-      ],
+const RETELL_PHONE = {
+  agentPlatform: "retell",
+  connectionType: "phone_number",
+  accessVariant: "phone_number.public_e164",
+  modality: "voice",
+  config: { phoneNumber: "+15551230000" },
+  agentPlatformSelection: {
+    platformAgentId: "agent_reports_completed",
+    credentials: { apiKey: "retell-secret-reports-WXYZ" },
+  },
+} as const;
+
+const RETELL_PHONE_FETCH: typeof fetch = async (input) => {
+  const pathname = new URL(String(input)).pathname;
+  if (pathname === "/v2/list-agents") {
+    return new Response(JSON.stringify({
+      items: [{ agent_id: "agent_reports_completed", agent_name: "Front desk", channel: "voice" }],
       has_more: false,
-    }),
-    { status: 200 },
-  );
+    }), { status: 200 });
+  }
+  if (pathname.startsWith("/get-phone-number/")) {
+    return new Response(JSON.stringify({
+      phone_number: "+15551230000",
+      inbound_agents: [{ agent_id: "agent_reports_completed" }],
+    }), { status: 200 });
+  }
+  throw new Error(`unexpected Retell request ${pathname}`);
 };
+
 
 /** The deployment credential required to conduct a phone simulation. */
 const PHONE_IS_SET_UP = {
@@ -174,6 +183,7 @@ function terminalEvent(
 async function aCustomerReadyToRun(
   label: string,
   options: TestApiOptions = {},
+  connection: typeof LIVEKIT_CHAT | typeof RETELL_PHONE = LIVEKIT_CHAT,
 ): Promise<{
   ada: Customer;
   key: string;
@@ -184,15 +194,15 @@ async function aCustomerReadyToRun(
   api = await createApi(label, {
     ...options,
     traceStore: options.traceStore ?? true,
-    retellFetch: options.retellFetch ?? RETELL_CHAT_FETCH,
+    ...(options.retellFetch === undefined ? {} : { retellFetch: options.retellFetch }),
   });
   const ada = await signUp(api.app, "ada@acme.example", "Acme");
   const key = await projectKeyFor(api.app, ada);
 
   const registered = await ask(api.app, "POST", "/v1/agents", key, {
-    agentPlatform: "retell",
+    agentPlatform: connection.agentPlatform,
     name: "Front desk",
-    connection: RETELL,
+    connection,
   });
   expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
   const agentId = (registered.body.agent as { id: string }).id;
@@ -448,7 +458,12 @@ describe("the lifecycle lands", () => {
     async () => {
       const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
         "reports_completed",
-        { ingestStore: runningStorage().ingestStore },
+        {
+          ingestStore: runningStorage().ingestStore,
+          carrierRoute: PHONE_IS_SET_UP,
+          retellFetch: RETELL_PHONE_FETCH,
+        },
+        RETELL_PHONE,
       );
       const { runId, simulationId } = await aRunningSimulation(
         key,
@@ -485,8 +500,8 @@ describe("the lifecycle lands", () => {
       expect(row?.endedAt?.toISOString()).toBe("2026-08-05T09:02:10.551Z");
 
       // The completed landing queued its frozen whole-trace grading plan and
-      // finalized the run header. A chat-API conversation has one account of
-      // itself — egma's — so nothing is waited for.
+      // finalized the run header. A phone conversation is read from the
+      // persona exchange, so no separate agent record is awaited.
       expect(await gradingJobsFor(simulationId)).toBe(1);
       const header = await ask(api.app, "GET", `/v1/runs/${runId}`, key);
       expect(header.body.status).toBe("completed");

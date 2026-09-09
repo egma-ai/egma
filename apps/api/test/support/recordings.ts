@@ -66,12 +66,18 @@ function aVoiceAgent(worker: number) {
 
 /** The same shape, over chat, for the refusal that a chat has no audio. */
 const A_CHAT_AGENT = {
-  agentPlatform: "retell",
-  connectionType: "retell_text_mode",
-  accessVariant: "retell_text_mode.api_key",
+  agentPlatform: "livekit",
+  connectionType: "livekit_room",
+  accessVariant: "livekit_room.project_credentials",
   modality: "chat",
-  config: { retellAgentId: "agent_in_retell_2" },
-  credentials: { apiKey: "retell-secret-A1B2C3D4WXYZ" },
+  config: {
+    url: "wss://acme.livekit.cloud",
+    agentName: "front-desk-chat",
+  },
+  credentials: {
+    apiKey: "livekit-key-A1B2C3D4WXYZ",
+    apiSecret: "livekit-secret-E5F6G7H8QRST",
+  },
 } as const;
 
 const A_TEST = {

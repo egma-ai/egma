@@ -200,18 +200,44 @@ def provision_retell_fixture(
             },
             _api=api,
         )
-    except Exception:
+    except Exception as provision_error:
+        cleanup_error: RuntimeError | None = None
         if agent_id is not None:
-            try:
-                api.request("DELETE", f"/delete-agent/{agent_id}")
-            except RuntimeError:
-                pass
+            for attempt in range(3):
+                try:
+                    api.request(
+                        "DELETE", f"/delete-agent/{agent_id}", missing_ok=True
+                    )
+                    break
+                except RuntimeError as error:
+                    cleanup_error = error
+                    if attempt < 2:
+                        time.sleep(1)
+            else:
+                assert cleanup_error is not None
+                raise ExceptionGroup(
+                    f"Retell fixture provisioning failed and agent {agent_id} cleanup failed",
+                    [provision_error, cleanup_error],
+                ) from None
         if llm_id is not None:
-            try:
-                api.request("DELETE", f"/delete-retell-llm/{llm_id}")
-            except RuntimeError:
-                pass
-        raise
+            cleanup_error = None
+            for attempt in range(3):
+                try:
+                    api.request(
+                        "DELETE", f"/delete-retell-llm/{llm_id}", missing_ok=True
+                    )
+                    break
+                except RuntimeError as error:
+                    cleanup_error = error
+                    if attempt < 2:
+                        time.sleep(1)
+            else:
+                assert cleanup_error is not None
+                raise ExceptionGroup(
+                    f"Retell fixture provisioning failed and LLM {llm_id} cleanup failed",
+                    [provision_error, cleanup_error],
+                ) from None
+        raise provision_error
 
 
 def _run_from_environment() -> None:

@@ -257,9 +257,15 @@ it.skipIf(!ENABLED || storage?.available !== true)(
     fixture.stderr?.on("data", (piece: Buffer) => { fixtureOutput += piece.toString("utf8"); });
     let instance: Instance | undefined;
     let workers: ReturnType<typeof startFullPathWorkers> | undefined;
+    let provisioned: {
+      agentId: string;
+      agentVersion: number;
+      providerMetadata: Record<string, unknown>;
+    } | undefined;
     let projectKey = "";
+    let mainSucceeded = false;
     try {
-      const provisioned = await waitForFile<{
+      provisioned = await waitForFile<{
         agentId: string;
         agentVersion: number;
         providerMetadata: Record<string, unknown>;
@@ -421,12 +427,14 @@ it.skipIf(!ENABLED || storage?.available !== true)(
       } finally {
         await browser.close();
       }
-      if (MOCKS) {
-        expect(callback.calls.some((call) => call.path === "/check-availability")).toBe(false);
-      } else {
-        expect(callback.calls.some((call) => call.path === "/check-availability")).toBe(true);
-      }
-      expect(callback.calls.some((call) => call.path === "/record-request")).toBe(true);
+      const availabilityCallbacks = callback.calls.filter((call) => call.path === "/check-availability");
+      const recordCallbacks = callback.calls.filter((call) => call.path === "/record-request");
+      if (MOCKS) expect(availabilityCallbacks).toEqual([]);
+      else expect(availabilityCallbacks.map((call) => call.body)).toContainEqual({ day: "Tuesday" });
+      expect(recordCallbacks.map((call) => call.body)).toContainEqual({
+        day: "Tuesday",
+        time: availability.time,
+      });
       await mkdir(proofDirectory, { recursive: true });
       await writeFile(path.join(proofDirectory, `retell-${CONNECTION}-${MOCKS ? "mocked" : "unmocked"}.json`), JSON.stringify({
         commitSha: process.env["GITHUB_SHA"] ?? "local-working-tree",
@@ -435,6 +443,7 @@ it.skipIf(!ENABLED || storage?.available !== true)(
         providerMetadata: provisioned.providerMetadata,
         outcomes: { simulation: "completed", grade: "passed", browser: true },
       }, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+      mainSucceeded = true;
     } catch (error) {
       const safe = [fixtureOutput, workers?.output() ?? "", tunnel.output()]
         .join("\n").replaceAll(RETELL_KEY, "[REDACTED]").replaceAll(MODEL_KEY, "[REDACTED]")
@@ -471,7 +480,42 @@ it.skipIf(!ENABLED || storage?.available !== true)(
       await clean(async () => callback.close());
       await clean(async () => rm(scratch, { recursive: true, force: true }));
       if (failures.length > 0) {
+        await mkdir(proofDirectory, { recursive: true });
+        await writeFile(
+          path.join(proofDirectory, `retell-${CONNECTION}-${MOCKS ? "mocked" : "unmocked"}.json`),
+          JSON.stringify({
+            commitSha: process.env["GITHUB_SHA"] ?? "local-working-tree",
+            connection: CONNECTION,
+            mocked: MOCKS,
+            ownedFixture: provisioned === undefined ? null : {
+              agentId: provisioned.agentId,
+              agentVersion: provisioned.agentVersion,
+              providerMetadata: provisioned.providerMetadata,
+            },
+            outcomes: {
+              simulation: "failed",
+              cleanup: "failed",
+              cleanupFailureCount: failures.length,
+            },
+          }, null, 2) + "\n",
+          { encoding: "utf8", mode: 0o600 },
+        );
         throw new AggregateError(failures, "Retell live fixture cleanup failed");
+      }
+      if (mainSucceeded) {
+        const manifestPath = path.join(
+          proofDirectory,
+          `retell-${CONNECTION}-${MOCKS ? "mocked" : "unmocked"}.json`,
+        );
+        const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+          outcomes: Record<string, unknown>;
+        };
+        manifest.outcomes.cleanup = "complete";
+        await writeFile(
+          manifestPath,
+          JSON.stringify(manifest, null, 2) + "\n",
+          { encoding: "utf8", mode: 0o600 },
+        );
       }
     }
   },
