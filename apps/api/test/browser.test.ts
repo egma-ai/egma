@@ -1111,11 +1111,10 @@ describe("what a project recorded in production", () => {
         }),
       ).toBe("nowrap");
       expect(shown).toContain("1m 13s");
-      // The p90 of the capture's three answered turns, which nearest-rank
-      // makes its slowest: 3454.607472 ms, measured from the caller's last
-      // audible sample (catalog version 8). `otlp-derived-measures.test.ts`
-      // works all three out by hand from this same capture.
-      expect(shown).toContain("3.45s");
+      // The p90 of the capture's three measured spoken replies, which
+      // nearest-rank makes its slowest: 3066.59356 ms. Unspoken native agent
+      // records keep their own timing outside the conversation-turn measure.
+      expect(shown).toContain("3.07s");
 
       /*
        * The table contains production traces only, so it needs no repeated source
@@ -1182,7 +1181,7 @@ describe("what a project recorded in production", () => {
         "Turns",
         "P90 turn latency",
       ]);
-      expect(await overview.innerText()).toContain("3.45s");
+      expect(await overview.innerText()).toContain("3.07s");
       expect(
         await sheet
           .getByRole("heading", { name: "Latency", exact: true })
@@ -1557,7 +1556,7 @@ describe("one exchange, read as a transcript", () => {
       await openIt();
       const shown = await page.innerText("main");
 
-      // Thirteen turns, alternating, labelled the way a transcript labels them.
+      // Spoken turns, alternating, labelled the way a transcript labels them.
       expect((shown.match(/^human:/gmu) ?? []).length).toBe(
         FIXTURE_TRACE.humanTurns,
       );
@@ -1584,42 +1583,10 @@ describe("one exchange, read as a transcript", () => {
         reached = at;
       }
 
-      // The four agent turns where nothing was said are turns, not gaps: two of
-      // them are where the agent only reached for the weather.
-      expect((shown.match(/\(no speech in this turn\)/gu) ?? []).length).toBe(4);
-    },
-    SETTLE,
-  );
-
-  it(
-    "opens a turn onto the timed steps inside it",
-    async () => {
-      await openIt();
-
-      // The fifth turn is the agent's answer to the Lisbon question: it says
-      // nothing out loud, because all it did was reach for the weather. Six
-      // timed things happened inside it — the tool, and a model request that
-      // nests four adapters deep — and the count says so before it is opened.
-      const turns = page.locator('[data-turn="true"]');
-      const weather = turns.nth(4);
-      expect(await weather.innerText()).toContain("6 steps");
-
-      await weather.locator("summary").first().click();
-      const steps = weather.locator(":scope > div > div > details");
-      expect(await steps.count()).toBe(2);
-      expect(await steps.nth(0).innerText()).toContain("Model");
-      expect(await steps.nth(1).innerText()).toContain("Tool");
-      expect(await weather.innerText()).toMatch(/\d+(\.\d+)? (ms|s)/u);
-
-      // And a step opens again onto exactly what was recorded — which is where
-      // the raw facts live, and deliberately not the default view.
-      const tool = steps.nth(1);
-      expect(await tool.innerText()).not.toContain("lookup_weather");
-      await tool.locator("summary").first().click();
-      const recorded = await tool.innerText();
-      expect(recorded).toContain("lookup_weather");
-      expect(recorded).toContain('{"location": "Lisbon"}');
-      expect(recorded).toContain("sunny with a temperature of 70 degrees.");
+      // Native records with no spoken response remain available in the raw
+      // trace, while the conversation rail contains no invented blank turns.
+      expect(shown).not.toContain("(no speech in this turn)");
+      expect(shown).toContain("Everything else recorded");
     },
     SETTLE,
   );
@@ -1645,6 +1612,22 @@ describe("one exchange, read as a transcript", () => {
       const reached = await around.innerText();
       expect(reached).toContain("Overview");
       expect(reached).toContain("agent_session");
+      // Tool-only native records moved out of the spoken-turn list, but their
+      // recorded call, arguments and result stay available down the hierarchy.
+      let disclosure = around;
+      for (;;) {
+        const children = disclosure === around
+          ? disclosure.locator(":scope > div > details")
+          : disclosure.locator(":scope > div > div > details");
+        const next = children.filter({ hasText: "lookup_weather" }).first();
+        if (await next.count() === 0) break;
+        await next.locator(":scope > summary").click();
+        disclosure = next;
+      }
+      const recorded = await disclosure.innerText();
+      expect(recorded).toContain("lookup_weather");
+      expect(recorded).toContain('{"location": "Lisbon"}');
+      expect(recorded).toContain("sunny with a temperature of 70 degrees.");
     },
     SETTLE,
   );
@@ -3560,6 +3543,10 @@ describe("the complete product, walked in order in a second project", () => {
       expect(shown).toContain("Conversation recorded by the persona");
       expect(shown).toContain("Of course — which afternoon suits you?");
       expect(shown).not.toContain("No conversation recorded");
+      await walk.screenshot({
+        path: "/tmp/egma-simulation-phone-source-desktop.png",
+        fullPage: true,
+      });
 
       // One trace, one current grade, seven nested assertions, and one mean.
       // With one selected grader the display-only mean is that grader's score.
@@ -3680,9 +3667,7 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.goto(at("runs"));
       const failureRow = runRowOn(walk, failureRunAddress);
       await failureRow.waitFor();
-      expect(await machineryOfTheRun(walk, failureRunAddress)).toBe(
-        "Grading failed",
-      );
+      expect(await machineryOfTheRun(walk, failureRunAddress)).toBe("Completed");
 
       await walk.goto(failureRunAddress);
       await walk
@@ -3701,6 +3686,23 @@ describe("the complete product, walked in order in a second project", () => {
       expect(shown).not.toContain("Result · Passed");
       expect(shown).not.toContain("Result · Failed");
       expect(shown).not.toContain("Result · Error");
+      await walk.screenshot({
+        path: "/tmp/egma-livekit-evidence-error-desktop.png",
+        fullPage: true,
+      });
+      await walk.setViewportSize({ width: 390, height: 844 });
+      await walk.evaluate('document.documentElement.dataset.theme = "dark"');
+      expect(
+        await walk.evaluate(
+          "document.documentElement.scrollWidth <= window.innerWidth",
+        ),
+      ).toBe(true);
+      await walk.screenshot({
+        path: "/tmp/egma-livekit-evidence-error-mobile-dark.png",
+        fullPage: true,
+      });
+      await walk.setViewportSize({ width: 1280, height: 900 });
+      await walk.evaluate('delete document.documentElement.dataset.theme');
 
       await walk.getByRole("tab", { name: "Transcript & audio" }).click();
       const transcript = walk.getByRole("tabpanel", {
