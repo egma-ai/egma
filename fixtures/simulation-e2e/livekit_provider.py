@@ -89,6 +89,7 @@ def main() -> int:
                 "EGMA_E2E_LONG_LIVED_ENTRY": (
                     "1" if language == "javascript" else "0"
                 ),
+                "LOG_LEVEL": "info",
             },
             cwd=LIVEKIT_FIXTURE,
         )

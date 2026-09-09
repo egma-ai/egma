@@ -471,7 +471,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: simulation-e2e-${{ matrix.language }}-${{ matrix.modality }}-${{ matrix.mocks }}-${{ github.sha }}
-          path: .proofs/simulation-e2e/*.json
+          path: .proofs/simulation-e2e/*
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

@@ -38,7 +38,7 @@ class AppointmentAgent(Agent):
         return "The real calendar has a Tuesday appointment at 9:40."
 
     @function_tool
-    async def record_request(self, day: str, kind: str) -> dict[str, object]:
+    async def record_request(self, day: str, kind: str) -> str:
         """Record an appointment request after availability was checked.
 
         Args:
@@ -52,12 +52,14 @@ class AppointmentAgent(Agent):
                 json.dumps({"day": day, "kind": kind}),
                 encoding="utf-8",
             )
-        return {
-            "recorded": True,
-            "reference": "fixture-request-1",
-            "day": day,
-            "kind": kind,
-        }
+        return json.dumps(
+            {
+                "recorded": True,
+                "reference": "fixture-request-1",
+                "day": day,
+                "kind": kind,
+            }
+        )
 
 
 async def entrypoint(ctx: agents.JobContext) -> None:

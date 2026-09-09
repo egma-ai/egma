@@ -11,6 +11,7 @@ import {
   disconnectClickHouse,
   reconcileGraderCatalog,
   seedPersonaLibrary,
+  upsertRateCard,
 } from "@egma/db";
 import type { FastifyInstance } from "fastify";
 
@@ -190,6 +191,7 @@ export async function startInstance(
   // before it serves a request.
   await seedPersonaLibrary();
   await reconcileGraderCatalog();
+  await upsertRateCard();
 
   const withPages = options.web ?? true;
   const apiPort = await freePort();

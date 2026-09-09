@@ -1155,6 +1155,10 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         ? "reports that Tuesday is full and Thursday morning is the next opening after checking availability"
         : "reports that Tuesday has an appointment at 9:40 after checking availability";
       const caseId = `livekit-${LIVE_LANGUAGE}-${LIVE_MODALITY}-project-credentials-${LIVE_MOCKS ? "mocked" : "unmocked"}`;
+      const proofDirectory = path.join(
+        import.meta.dirname,
+        "../../../.proofs/simulation-e2e",
+      );
       const providerDirectory = path.join(scratch, `${caseId}-provider`);
       const readyPath = path.join(providerDirectory, "ready.json");
       const provider = spawn(
@@ -1182,6 +1186,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       });
       let liveSimulator: ChildProcess | undefined;
       let liveGrader: Service | undefined;
+      let artifact: { file: string; sha256: string; version: string } | undefined;
       try {
         const readyBy = Date.now() + 180_000;
         let ready: {
@@ -1204,6 +1209,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         if (ready === undefined) {
           throw new Error(`LiveKit provider did not become ready:\n${providerSaid}`);
         }
+        artifact = ready.artifact;
 
         const registered = await call("POST", "/v1/agents", {
           key,
@@ -1263,7 +1269,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             personas: ["Impatient Rita"],
             ...(LIVE_MOCKS ? {
               mockTools: [{
-                toolName: "check_availability",
+                tool: "check_availability",
                 answer: { answer: expectedAvailability },
               }],
             } : {}),
@@ -1328,7 +1334,15 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         const simulation = (page.body.simulations as Array<{ id: string }>)[0];
         expect(simulation).toBeDefined();
         const simulationId = simulation!.id;
-        expect(await waitForTerminal(simulationId, 120_000)).toBe("completed");
+        const terminalStatus = await waitForTerminal(simulationId, 120_000);
+        if (terminalStatus !== "completed") {
+          const failed = await call("GET", `/v1/simulations/${simulationId}`, { key });
+          throw new Error(JSON.stringify({
+            status: failed.body.status,
+            reason: failed.body.reason,
+            executionFailure: failed.body.executionFailure,
+          }));
+        }
         await instance.drainEvidence();
         const grade = await gradesOn(auth, simulationId, runId, 1, 60_000);
         expect(grade[0]?.result).toBe("passed");
@@ -1342,26 +1356,67 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         });
         const transcript = detail.body.transcript as {
           turns?: Array<{ kind?: string; text?: string; pov?: string }>;
+          spans?: EvidenceSpan[];
+        };
+        type EvidenceSpan = {
+          kind?: string;
+          toolName?: string;
+          toolArguments?: string;
+          toolResult?: string;
+          toolProvenance?: string;
+          pov?: string;
+          spans?: EvidenceSpan[];
+        };
+        const flatten = (spans: EvidenceSpan[]): EvidenceSpan[] =>
+          spans.flatMap((span) => [span, ...flatten(span.spans ?? [])]);
+        const decode = (value: string | undefined): unknown => {
+          if (value === undefined) return undefined;
+          let decoded: unknown = value;
+          for (let depth = 0; depth < 2 && typeof decoded === "string"; depth += 1) {
+            try { decoded = JSON.parse(decoded) as unknown; } catch { break; }
+          }
+          return decoded;
         };
         const turns = transcript.turns ?? [];
-        expect(turns.length).toBeGreaterThanOrEqual(2);
-        expect(turns[0]).toMatchObject({ kind: "turn:human", pov: "agent" });
-        expect(turns.some((turn) =>
+        const customerTurns = turns.filter((turn) => turn.pov === "agent");
+        expect(customerTurns.length).toBeGreaterThanOrEqual(2);
+        expect(customerTurns[0]).toMatchObject({ kind: "turn:human", pov: "agent" });
+        expect(customerTurns.some((turn) =>
           turn.kind === "turn:human" && turn.text?.toLowerCase().includes("tuesday")
         )).toBe(true);
-        expect(turns.some((turn) =>
+        expect(customerTurns.some((turn) =>
           turn.kind === "turn:agent" && turn.text?.toLowerCase().includes(
             LIVE_MOCKS ? "thursday" : "9:40",
           )
         )).toBe(true);
-        expect(turns.every((turn, index) =>
-          index === 0 || turn.kind !== turns[index - 1]?.kind
-        )).toBe(true);
-        expect(JSON.stringify(detail.body).toLowerCase()).toContain(
-          expectedAvailability.toLowerCase(),
+        expect(customerTurns.every((turn) => (turn.text?.trim().length ?? 0) > 0)).toBe(true);
+        const tools = flatten(transcript.spans ?? []).filter(
+          (span) => span.kind === "tool" && span.pov === "agent",
         );
-        expect(JSON.stringify(detail.body)).toContain("fixture-request-1");
-        expect(JSON.stringify(detail.body)).toContain("reschedule");
+        const availabilityCalls = tools.filter(
+          (span) => span.toolName === "check_availability",
+        );
+        expect(availabilityCalls.length).toBeGreaterThanOrEqual(1);
+        for (const span of availabilityCalls) {
+          expect(decode(span.toolArguments)).toEqual({ day: "Tuesday" });
+          expect(decode(span.toolResult)).toBe(expectedAvailability);
+          expect(span.toolProvenance).toBe(LIVE_MOCKS ? "mocked" : undefined);
+        }
+        const recordCalls = tools.filter((span) => span.toolName === "record_request");
+        expect(recordCalls.length).toBeGreaterThanOrEqual(1);
+        for (const span of recordCalls) {
+          expect(decode(span.toolArguments)).toEqual({
+            day: "Tuesday",
+            kind: "reschedule",
+          });
+          expect(decode(span.toolResult)).toEqual({
+            recorded: true,
+            reference: "fixture-request-1",
+            day: "Tuesday",
+            kind: "reschedule",
+          });
+          expect(span.toolProvenance).toBeUndefined();
+        }
 
         const browser = await openBrowser();
         try {
@@ -1390,17 +1445,13 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           await browser.close();
         }
 
-        const proofDirectory = path.join(
-          import.meta.dirname,
-          "../../../.proofs/simulation-e2e",
-        );
         await mkdir(proofDirectory, { recursive: true });
         await writeFile(
           path.join(proofDirectory, `${caseId}.json`),
           JSON.stringify({
             caseId,
             commitSha: process.env["GITHUB_SHA"] ?? "local-working-tree",
-            artifact: ready.artifact,
+            artifact,
             outcomes: {
               simulation: "completed",
               publicRead: true,
@@ -1411,11 +1462,52 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           }, null, 2) + "\n",
           { encoding: "utf8", mode: 0o600 },
         );
+      } catch (failure) {
+        await mkdir(proofDirectory, { recursive: true });
+        const workerLogs = await Promise.all(
+          [
+            `${LIVE_LANGUAGE}-worker.log`,
+            "livekit.log",
+            "python-build.log",
+            "javascript-build.log",
+          ].map(async (name) =>
+            readFile(path.join(providerDirectory, name), "utf8").catch(() => "")
+          ),
+        );
+        const safeProviderLog = [providerSaid, simulatorSaid, ...workerLogs]
+          .join("\n")
+          .replaceAll(LIVE_MODEL_KEY, "[REDACTED]")
+          .replaceAll(key, "[REDACTED]");
+        await writeFile(
+          path.join(proofDirectory, `${caseId}.log`),
+          safeProviderLog,
+          { encoding: "utf8", mode: 0o600 },
+        );
+        await writeFile(
+          path.join(proofDirectory, `${caseId}.json`),
+          JSON.stringify({
+            caseId,
+            commitSha: process.env["GITHUB_SHA"] ?? "local-working-tree",
+            ...(artifact === undefined ? {} : { artifact }),
+            outcomes: {
+              simulation: "failed",
+              failureType: failure instanceof Error ? failure.name : "unknown",
+            },
+          }, null, 2) + "\n",
+          { encoding: "utf8", mode: 0o600 },
+        );
+        throw failure;
       } finally {
         liveSimulator?.kill("SIGTERM");
         liveGrader?.stop();
         await liveGrader?.finished;
         provider.kill("SIGTERM");
+        await Promise.all(
+          [liveSimulator, provider].map(async (child) => {
+            if (child === undefined || child.exitCode !== null) return;
+            await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+          }),
+        );
       }
     },
   );
