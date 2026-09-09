@@ -28,7 +28,7 @@ export const FIXTURE_TRACE = {
   started_at: "2026-08-02T18:04:40.281989Z",
   spans: 133,
   humanTurns: 5,
-  agentTurns: 8,
+  agentTurns: 4,
   toolSpans: 2,
   erroredSpans: 3,
 } as const;
