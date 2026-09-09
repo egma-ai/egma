@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { simulation } from "@egma/livekit";
 import {
+  AgentSessionEventTypes,
   WorkerOptions,
   cli,
   defineAgent,
@@ -78,6 +79,12 @@ export default defineAgent({
       session.generateReply({
         instructions: "Greet the caller and ask which appointment day they need.",
       });
+    }
+
+    if (process.env.EGMA_E2E_LONG_LIVED_ENTRY === "1") {
+      await new Promise((resolve) =>
+        session.once(AgentSessionEventTypes.Close, resolve),
+      );
     }
   },
 });

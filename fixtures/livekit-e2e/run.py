@@ -798,6 +798,9 @@ def run_workbench_case(
             "EGMA_E2E_SETUP_DELAY_MS": "50",
             "EGMA_E2E_SESSION_DELAY_MS": "10000",
             "EGMA_E2E_SILENT_START": "1",
+            # Match customer workers that keep their entry point alive until
+            # AgentSession closes. Completion must not depend on entry return.
+            "EGMA_E2E_LONG_LIVED_ENTRY": "1" if language == "javascript" else "0",
             "EGMA_E2E_REAL_TOOL_SENTINEL": str(sentinel),
         }
         worker = start_process(
@@ -893,12 +896,32 @@ def run_workbench_case(
             raise AssertionError("terminal turn count does not match the trace")
 
         provider_reference = terminal["facts"]["provider_reference"]
-        required_names = {"llm_request", "function_tool"}
-        if language == "python":
-            required_names.add("agent_session")
+        caller_span_name = "agent_turn" if modality == "chat" else "user_turn"
+        required_names = {
+            "agent_session",
+            "llm_request",
+            "function_tool",
+            caller_span_name,
+        }
         agent_spans = wait_for_agent_spans(
             otlp_records, provider_reference, required_names
         )
+        caller_inputs = [
+            record["attributes"].get(
+                "lk.pii.user_input"
+                if modality == "chat"
+                else "lk.pii.user_transcript"
+            )
+            for record in agent_spans
+            if record["name"] == caller_span_name
+        ]
+        if not any(
+            isinstance(text, str) and "tuesday" in text.lower()
+            for text in caller_inputs
+        ):
+            raise AssertionError(
+                f"agent evidence omitted the caller input: {caller_inputs}"
+            )
         tool_spans = [
             record for record in agent_spans if record["name"] == "function_tool"
         ]
