@@ -16,24 +16,31 @@ from egma_simulator.client import ControlPlaneClient
 
 
 @pytest.fixture
-async def listening_control_plane() -> AsyncIterator[tuple[str, list[str | None]]]:
-    """Answers everything agreeably and keeps every ``Authorization`` it saw."""
+async def listening_control_plane() -> AsyncIterator[
+    tuple[str, list[str | None], list[str | None]]
+]:
+    """Answers everything agreeably and keeps the client identity it saw."""
     offered: list[str | None] = []
+    user_agents: list[str | None] = []
+
+    def record(request: web.Request) -> None:
+        offered.append(request.headers.get("Authorization"))
+        user_agents.append(request.headers.get("User-Agent"))
 
     async def claim(request: web.Request) -> web.Response:
-        offered.append(request.headers.get("Authorization"))
+        record(request)
         return web.json_response({"specs": []})
 
     async def heartbeat(request: web.Request) -> web.Response:
-        offered.append(request.headers.get("Authorization"))
+        record(request)
         return web.json_response({"directive": None})
 
     async def report(request: web.Request) -> web.Response:
-        offered.append(request.headers.get("Authorization"))
+        record(request)
         return web.Response(status=204)
 
     async def traces(request: web.Request) -> web.Response:
-        offered.append(request.headers.get("Authorization"))
+        record(request)
         return web.json_response({})
 
     app = web.Application()
@@ -47,7 +54,7 @@ async def listening_control_plane() -> AsyncIterator[tuple[str, list[str | None]
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
     try:
-        yield f"http://127.0.0.1:{runner.addresses[0][1]}", offered
+        yield f"http://127.0.0.1:{runner.addresses[0][1]}", offered, user_agents
     finally:
         await runner.cleanup()
 
@@ -59,8 +66,8 @@ async def _make_every_call(client: ControlPlaneClient) -> None:
     await client.spans("sim-1", b'{"resourceSpans":[]}')
 
 
-async def test_a_service_token_rides_every_outbound_call(listening_control_plane):
-    base_url, offered = listening_control_plane
+async def test_client_identity_rides_every_outbound_call(listening_control_plane):
+    base_url, offered, user_agents = listening_control_plane
 
     async with ControlPlaneClient(
         base_url, claim_wait_seconds=1, service_token="egma_service_token_under_test"
@@ -68,16 +75,56 @@ async def test_a_service_token_rides_every_outbound_call(listening_control_plane
         await _make_every_call(client)
 
     assert offered == ["Bearer egma_service_token_under_test"] * 4
+    assert user_agents == ["egma-simulator/0.0.0"] * 4
 
 
 async def test_no_token_means_no_header(listening_control_plane):
     """The workbench asks for nothing, and gets nothing, rather than "Bearer "."""
-    base_url, offered = listening_control_plane
+    base_url, offered, _ = listening_control_plane
 
     async with ControlPlaneClient(base_url, claim_wait_seconds=1) as client:
         await _make_every_call(client)
 
     assert offered == [None] * 4
+
+
+async def test_control_plane_calls_use_the_environment_proxy(monkeypatch):
+    """Daytona's proxy can replace its mounted secret placeholder."""
+    requests: list[tuple[str, str | None]] = []
+
+    async def proxy(request: web.Request) -> web.Response:
+        requests.append((request.raw_path, request.headers.get("Authorization")))
+        return web.json_response({"specs": []})
+
+    app = web.Application()
+    app.router.add_route("*", "/{tail:.*}", proxy)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    proxy_url = f"http://127.0.0.1:{runner.addresses[0][1]}"
+    monkeypatch.setenv("HTTP_PROXY", proxy_url)
+    monkeypatch.setenv("http_proxy", proxy_url)
+    monkeypatch.setenv("NO_PROXY", "")
+    monkeypatch.setenv("no_proxy", "")
+
+    try:
+        async with ControlPlaneClient(
+            "http://control-plane.invalid",
+            claim_wait_seconds=1,
+            service_token="dtn_secret_under_test",
+            runtime="daytona",
+        ) as client:
+            await client.claim("sim-under-test", 1)
+    finally:
+        await runner.cleanup()
+
+    assert requests == [
+        (
+            "http://control-plane.invalid/v1/claims",
+            "Bearer dtn_secret_under_test",
+        )
+    ]
 
 
 # -- And nowhere else --------------------------------------------------------

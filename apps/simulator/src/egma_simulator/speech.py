@@ -14,10 +14,12 @@ import logging
 import math
 import struct
 import sys
+import urllib.parse
 from array import array
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field
 from functools import cache
+from typing import Any
 
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
@@ -642,8 +644,30 @@ def _cartesia_mouth(
     The voice and speed are the pinned TTS selection's own. This adapter
     neither substitutes nor clamps them.
     """
-    from pipecat.services.cartesia.tts import CartesiaTTSService, GenerationConfig
+    from pipecat.services.cartesia.tts import (
+        CartesiaTTSService as StockCartesiaTTSService,
+    )
+    from pipecat.services.cartesia.tts import GenerationConfig
     from pipecat.services.tts_service import TextAggregationMode
+
+    class CartesiaTTSService(StockCartesiaTTSService):
+        async def _websocket_connect(self, uri: str, **kwargs: Any):
+            parsed = urllib.parse.urlsplit(uri)
+            query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+            safe_uri = urllib.parse.urlunsplit(
+                parsed._replace(
+                    query=urllib.parse.urlencode(
+                        [(name, value) for name, value in query if name != "api_key"]
+                    )
+                )
+            )
+            headers = dict(kwargs.pop("additional_headers", {}) or {})
+            headers["X-API-Key"] = self._api_key
+            return await super()._websocket_connect(
+                safe_uri,
+                additional_headers=headers,
+                **kwargs,
+            )
 
     if not providers.tts_key:
         raise SpeechFault("the cartesia speaking leg was chosen without a key")

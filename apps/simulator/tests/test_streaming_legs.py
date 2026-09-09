@@ -80,6 +80,38 @@ def test_cartesia_receives_the_pinned_model_voice_and_speed(
     assert closers == ()
 
 
+async def test_cartesia_tts_sends_its_key_in_a_websocket_header(monkeypatch):
+    from pipecat.services.websocket_service import WebsocketService
+
+    connected: list[tuple[str, dict[str, str]]] = []
+
+    async def connect(_service: object, uri: str, **kwargs: Any) -> object:
+        connected.append((uri, kwargs["additional_headers"]))
+        return object()
+
+    monkeypatch.setattr(WebsocketService, "_websocket_connect", connect)
+    placeholder = "dtn_secret_cartesia_under_test"
+    leg, _, _ = _mouth(
+        SpeechProviders(
+            tts="cartesia",
+            tts_key=placeholder,
+            tts_model="sonic-3.5",
+        ),
+        cartesia_voice(),
+    )
+
+    await leg._websocket_connect(
+        f"wss://api.cartesia.ai/tts/websocket?api_key={placeholder}"
+        "&cartesia_version=2026-03-01"
+    )
+
+    uri, headers = connected[0]
+    assert placeholder not in uri
+    assert "api_key" not in uri
+    assert "cartesia_version=2026-03-01" in uri
+    assert headers == {"X-API-Key": placeholder}
+
+
 @pytest.mark.parametrize(
     ("providers", "reason"),
     [
