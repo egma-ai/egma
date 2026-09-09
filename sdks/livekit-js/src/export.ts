@@ -96,6 +96,7 @@ export type ExportState = {
 
 let state: ExportState | undefined;
 let contextsWithFlush = new WeakSet<object>();
+let pendingFlushes = new WeakMap<BatchSpanProcessor, Promise<void>>();
 
 /**
  * The mutable seam for a tracer provider that another integration already
@@ -188,12 +189,23 @@ export async function flushNow(
   processor: BatchSpanProcessor,
   why: string,
 ): Promise<void> {
+  const previous = pendingFlushes.get(processor) ?? Promise.resolve();
+  const current = previous.then(async () => {
+    try {
+      await processor.forceFlush();
+    } catch {
+      console.warn(
+        `Egma: could not flush every buffered span at ${why}.`,
+      );
+    }
+  });
+  pendingFlushes.set(processor, current);
   try {
-    await processor.forceFlush();
-  } catch {
-    console.warn(
-      `Egma: could not flush every buffered span at ${why}.`,
-    );
+    await current;
+  } finally {
+    if (pendingFlushes.get(processor) === current) {
+      pendingFlushes.delete(processor);
+    }
   }
 }
 
@@ -456,4 +468,5 @@ export function exportStateForTests(): ExportState | undefined {
 export function resetExportForTests(): void {
   state = undefined;
   contextsWithFlush = new WeakSet<object>();
+  pendingFlushes = new WeakMap<BatchSpanProcessor, Promise<void>>();
 }

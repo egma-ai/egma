@@ -854,7 +854,7 @@ describe("egma.simulation", () => {
     expect(delay).toBe(SIMULATION_BATCH_MILLIS);
   });
 
-  it("flushes when the session closes and again when the job stops", async () => {
+  it("finishes the session-close flush before the job shutdown flush returns", async () => {
     const agent = agentWithTool("check_calendar", async () => "real");
     const ctx = context("egma-sim-sim_143", {
       mockedTools: ["check_calendar"],
@@ -863,19 +863,36 @@ describe("egma.simulation", () => {
 
     await simulation(agent, asJobContext(ctx), oneSession);
     const processor = exportStateForTests()!.processor;
-    const flushed = vi.spyOn(processor, "forceFlush");
+    let finishCloseFlush: (() => void) | undefined;
+    const closeFlush = new Promise<void>((resolve) => {
+      finishCloseFlush = resolve;
+    });
+    const flushed = vi
+      .spyOn(processor, "forceFlush")
+      .mockImplementationOnce(() => closeFlush)
+      .mockResolvedValue(undefined);
 
     await oneSession.start({ agent });
     await oneSession.close();
-    await vi.waitFor(() => expect(flushed).toHaveBeenCalled(), {
+    await vi.waitFor(() => expect(flushed).toHaveBeenCalledTimes(1), {
       timeout: 5_000,
     });
 
     // The job's own flush is the backstop, and it is the first callback
-    // the export registered.
-    await ctx.shutdownCallbacks[0]!();
+    // the export registered. It must wait for the HTTP export started at
+    // session close instead of letting the worker exit underneath it.
+    let shutdownFinished = false;
+    const shutdown = ctx.shutdownCallbacks[0]!().then(() => {
+      shutdownFinished = true;
+    });
+    await Promise.resolve();
+    expect(shutdownFinished).toBe(false);
+    expect(flushed).toHaveBeenCalledTimes(1);
 
-    expect(flushed.mock.calls.length).toBeGreaterThanOrEqual(2);
+    finishCloseFlush?.();
+    await shutdown;
+
+    expect(flushed).toHaveBeenCalledTimes(2);
   });
 
   it.each(["EGMA_URL", "EGMA_API_KEY"])(
