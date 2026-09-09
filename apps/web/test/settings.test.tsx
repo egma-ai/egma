@@ -8,6 +8,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import RootPage from "../app/page.tsx";
@@ -40,7 +41,7 @@ const routed = vi.hoisted(() => {
      * the session into a loop that never settled.
      */
     router: { push, replace: vi.fn(), back: vi.fn() },
-    pathname: "/projects/prj_1/settings",
+    pathname: "/projects/prj_1/settings/organization",
     projectId: "prj_1",
   };
 });
@@ -63,24 +64,33 @@ vi.mock("next/image", () => ({
   default: ({ alt }: { alt: string }) => <img alt={alt} />,
 }));
 
+function renderAt(pathname: string, page: ReactElement) {
+  routed.pathname = pathname;
+  window.location.href = `http://egma.test${pathname}`;
+  window.location.pathname = pathname;
+  return renderSettingsPage(page);
+}
+
 function renderProjectSettings() {
-  routed.pathname = "/projects/prj_1/settings/project";
-  return renderSettingsPage(<ProjectSettingsPage />);
+  return renderAt(
+    "/projects/prj_1/settings/project",
+    <ProjectSettingsPage />,
+  );
 }
 
 function renderOrganizationSettings() {
-  routed.pathname = "/projects/prj_1/settings/organization";
-  return renderSettingsPage(<OrganizationSettingsPage />);
+  return renderAt(
+    "/projects/prj_1/settings/organization",
+    <OrganizationSettingsPage />,
+  );
 }
 
 function renderPeopleSettings() {
-  routed.pathname = "/projects/prj_1/settings/people";
-  return renderSettingsPage(<PeoplePage />);
+  return renderAt("/projects/prj_1/settings/people", <PeoplePage />);
 }
 
 function renderApiKeysSettings() {
-  routed.pathname = "/projects/prj_1/settings/keys";
-  return renderSettingsPage(<ApiKeysPage />);
+  return renderAt("/projects/prj_1/settings/keys", <ApiKeysPage />);
 }
 
 const PROJECTS = [
@@ -185,9 +195,9 @@ beforeEach(() => {
     configurable: true,
     value: {
       ...window.location,
-      href: "http://egma.test/projects/prj_1/settings",
+      href: "http://egma.test/projects/prj_1/settings/organization",
       search: "",
-      pathname: "/projects/prj_1/settings",
+      pathname: "/projects/prj_1/settings/organization",
       replace: (url: string) => wentTo.push(url),
       assign: (url: string) => wentTo.push(url),
     },
@@ -197,7 +207,7 @@ beforeEach(() => {
     value: { ...window.history, pushState: vi.fn() },
   });
   routed.push.mockReset();
-  routed.pathname = "/projects/prj_1/settings";
+  routed.pathname = "/projects/prj_1/settings/organization";
   routed.projectId = "prj_1";
   vi.stubGlobal("scrollTo", vi.fn());
 });
@@ -588,7 +598,7 @@ describe("project settings", () => {
     fireEvent.click(selectors[0]!);
     fireEvent.click(screen.getByRole("menuitem", { name: "Outbound" }));
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
-    expect(routed.push).toHaveBeenCalledWith("/projects/prj_2/settings");
+    expect(routed.push).toHaveBeenCalledWith("/projects/prj_2/settings/project");
     expect(confirm).not.toHaveBeenCalled();
   });
 
@@ -1041,7 +1051,7 @@ describe("organization settings", () => {
     });
     fireEvent(
       within(screen.getByRole("navigation", { name: "Settings" }))
-        .getByRole("link", { name: "Organization Settings" }),
+        .getByRole("link", { name: "Project Settings" }),
       clickWhileConfirming,
     );
     expect(clickWhileConfirming.defaultPrevented).toBe(true);
@@ -1070,7 +1080,7 @@ describe("organization settings", () => {
     });
     fireEvent(
       within(screen.getByRole("navigation", { name: "Settings" }))
-        .getByRole("link", { name: "Organization Settings" }),
+        .getByRole("link", { name: "Project Settings" }),
       clickAfterFailure,
     );
     expect(clickAfterFailure.defaultPrevented).toBe(true);
@@ -1420,7 +1430,7 @@ describe("people and invitations", () => {
     expect(window.history.pushState).toHaveBeenLastCalledWith(
       null,
       "",
-      "/projects/prj_1/settings?tab=invitations",
+      "/projects/prj_1/settings/people?tab=invitations",
     );
     fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
 
@@ -1435,8 +1445,8 @@ describe("people and invitations", () => {
       "draft@acme.example",
     );
 
-    window.location.href = "http://egma.test/projects/prj_1/settings";
-    window.location.pathname = "/projects/prj_1/settings";
+    window.location.href = "http://egma.test/projects/prj_1/settings/people";
+    window.location.pathname = "/projects/prj_1/settings/people";
 
     fireEvent.click(screen.getByRole("tab", { name: "People" }));
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));

@@ -3776,9 +3776,8 @@ describe("the complete product, walked in order in a second project", () => {
         selectedRadio: "Monitor production",
       },
       {
-        what: "Settings",
-        address: at("settings"),
-        lands: at("settings", "organization"),
+        what: "Organization Settings",
+        address: at("settings", "organization"),
         says: "Save organization",
       },
       {
@@ -5007,7 +5006,7 @@ describe("the complete product, walked in order in a second project", () => {
           `${origin}${conversation}`,
           runAddress,
           at("tests"),
-          at("settings"),
+          at("settings", "organization"),
         ]) {
           await walk.goto(address);
           // The settled page, for the reason the case above gives: nothing

@@ -40,16 +40,6 @@ const config: NextConfig = {
     })(),
   },
 
-  async redirects() {
-    return [
-      {
-        source: "/projects/:projectId/settings",
-        destination: "/projects/:projectId/settings/organization",
-        permanent: false,
-      },
-    ];
-  },
-
   async rewrites() {
     return {
       // Ahead of this app's own files, so the API owns these paths outright.
