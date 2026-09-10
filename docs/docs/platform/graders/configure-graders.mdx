@@ -1,9 +1,23 @@
 ---
-title: "Configure graders"
+title: "Update a grader"
 ---
 
-Open **Graders**, select **Active graders**, and open the grader's menu. Select
-**Edit** to change its project settings.
+Change a grader's project settings to control which conversations it checks and how its score is judged.
+
+<Tabs>
+  <Tab title="UI">
+    Open **Graders**, select **Active graders**, and select the grader to change its project settings, then save your changes.
+
+    <Frame caption="Response latency settings, including scope and maximum response time.">
+      <img src="/docs/assets/images/ui/update-grader.jpg" alt="Response latency settings, including scope and maximum response time." />
+    </Frame>
+  </Tab>
+  <Tab title="API">
+    Use [Update a grader](/api-reference/update-grader) for project settings or [Update a grader definition](/api-reference/update-grader-definition) for custom instructions.
+
+    The [custom grader guide](/docs/platform/graders/custom-graders#edit-or-clone-a-grader) explains the difference between settings and instructions.
+  </Tab>
+</Tabs>
 
 ## Choose the scope
 
@@ -31,7 +45,7 @@ at least that threshold. Keep the threshold at `1` for a binary rule when you
 want a failed check to fail the grader.
 
 Some graders have extra settings. For example, **Response latency** has a
-maximum response time in milliseconds. These settings control how it computes
+maximum response time in seconds in the UI. These settings control how it computes
 the score; the pass threshold controls how that score becomes an individual
 result.
 

@@ -1,5 +1,5 @@
 ---
-title: "Start and follow a run"
+title: "Start a run"
 ---
 
 Before starting, connect a [LiveKit](/docs/integrations/livekit) or
@@ -10,97 +10,45 @@ project persona settings, and grader selection, versions, settings, and
 thresholds. Queued simulations and retries use that saved selection. Changes
 to models, voices, or grading policy apply to future runs.
 
-## Start from your repository
 
-Run `egma pull` to refresh the agent and connection IDs in `egma/config.yaml`.
-Use the IDs for the agent and connection you want to test:
+## Start the run
 
-```bash
-egma run create appointment-booking \
-  --agent "$EGMA_AGENT_ID" \
-  --connection "$EGMA_CONNECTION_ID" \
-  --name "Appointment booking check"
-```
+<Tabs>
+  <Tab title="UI">
+    1. Open **Runs** and select **Create a run**.
+    2. Choose your test suite.
+    3. Choose the agent and one of its connections. Review the run settings.
+    4. Select **Start run**.
+    5. Open the run to follow its simulations. Starting successfully does not mean the tests passed.
 
-`appointment-booking` names a direct directory under `egma/tests/`.
-`EGMA_AGENT_ID` and `EGMA_CONNECTION_ID` are shell variables you set to the IDs
-from your configuration.
+    <Frame caption="Choose a test suite and agent to start a run.">
+      <img src="/docs/assets/images/ui/start-run.jpg" alt="Choose a test suite and agent to start a run." />
+    </Frame>
+  </Tab>
+  <Tab title="CLI">
+    Run `egma pull` to refresh the agent and connection IDs in `egma/config.yaml`.
+    Use the IDs for the agent and connection you want to test:
 
-The command pushes your local Egma project changes, starts the run, prints its
-ID and results URL, and returns. A zero exit code means the run started. It does not
-mean that simulation execution or grading passed.
+    ```bash
+    egma run create appointment-booking \
+      --agent "$EGMA_AGENT_ID" \
+      --connection "$EGMA_CONNECTION_ID" \
+      --name "Appointment booking check"
+    ```
 
-If the pre-run push is refused, no run starts. Resolve the reported test change
-or invalid content first.
+    `appointment-booking` names a direct directory under `egma/tests/`.
+    `EGMA_AGENT_ID` and `EGMA_CONNECTION_ID` are shell variables you set to the IDs
+    from your configuration.
 
-## Read the result
+    The command pushes your local Egma project changes, starts the run, prints its
+    ID and results URL, and returns. A zero exit code means the run started. It does not
+    mean that simulation execution or grading passed.
 
-Open the printed URL, or open **Runs** in your project and select the run.
+    If the pre-run push is refused, no run starts. Resolve the reported test change
+    or invalid content first.
+  </Tab>
+</Tabs>
 
-1. Check execution progress. Each test and persona combination is one
-   simulation. A simulation can complete, fail to execute, or be canceled.
-2. Select a simulation and open **Results**. Wait for its selected graders to
-   finish, then read each grader's score and individual result.
-3. For **Expected behaviors**, read the statement results. Follow the evidence
-   into **Transcript** to see what the caller, agent, and tools actually did.
-4. Use the transcript and recording, when available, to decide whether to
-   change the agent or the test. Save the change and start another run.
+## Next steps
 
-Execution and grading finish separately. A completed run can still have
-grading in progress, and completed execution can include simulations that
-failed to execute. Check individual simulation and grader results.
-
-### Check which evidence arrived
-
-A simulation can contain Egma's record of the caller and the agent's own
-record of the same conversation. Retell supplies its record through the
-platform; LiveKit sends it through the SDK's `simulation` helper.
-
-The transcript and graders prefer the agent's turns and tool calls when those
-are available. Otherwise, they use the available conversation evidence. The
-recording follows what Egma's caller heard, so its timing can differ from the
-agent's reported timing.
-
-For LiveKit and Retell simulations, grading waits up to 245 seconds after Egma receives the completion report for the final agent record. Grading starts as soon as that record is complete. If the wait ends first, grading can use the available evidence.
-
-[Get a simulation](/api-reference/get-simulation) returns `agentPovComplete` when the final agent record is present. `agentPovIncomplete` is true when the record is explicitly degraded, or still missing after the wait. Existing grades do not change when late evidence arrives; [regrade](/docs/platform/graders/configure-graders#regrade-a-simulation) to use it.
-
-Retell records are checked immediately, every five seconds through the first minute, then at 70, 90, 130, 190, and 240 seconds. Each request has a five-second timeout, with at most 18 requests. Polling stops when the final call record has a usable transcript. After those attempts, Egma does not fetch again automatically; regrading uses stored evidence. LiveKit sends its record through the SDK.
-
-The combined score is a comparison value. Egma does not assign an overall
-pass/fail result to a run. See [Scores and thresholds](/docs/platform/graders/scores-and-thresholds).
-
-### Read timing metrics
-
-Each API metric has a `pov` field that identifies who measured it: `agent` for
-the agent's own evidence or `persona` for Egma's simulated caller. When both
-measure the same event, the API returns the second series in `otherPov`. Egma
-keeps the two sets of samples separate.
-
-`turn_response_latency` measures the wait from the end of the caller's turn to
-the start of the agent's reply. For voice simulations, it starts at the end of
-the caller's played audio, including the voice's trailing padding, and ends
-when the agent's audio reaches the caller. `first_response_latency` measures
-the time from the start of the conversation to the agent's first reply. Both
-use milliseconds. Simulations prefer the caller's series when it is available;
-the agent's series is returned separately in `otherPov`. Production traces use
-the agent's evidence. The
-[Response latency grader](/docs/platform/graders/built-in-graders#response-latency) uses the
-same primary series shown in the metrics.
-
-## Cancel a run
-
-Use the run ID printed by the create command:
-
-```bash
-egma run cancel "$EGMA_RUN_ID"
-```
-
-Cancellation does not remove evidence already collected. Inspect the run to
-see which simulations finished and which were canceled.
-
-If the create command is interrupted before it receives an answer, check
-**Runs** before starting another run. The original request may have succeeded.
-
-For an automated wait and release decision, use the API recipe in
-[Automate tests in CI](/docs/platform/runs/automate-tests-in-ci).
+[Review a run](/docs/platform/runs/review-a-run) to inspect conversations and grades, or [cancel a run](/docs/platform/runs/cancel-a-run) to stop unfinished work.

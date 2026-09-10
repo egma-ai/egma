@@ -1,93 +1,21 @@
 ---
-title: "Personas"
+title: "What is a persona?"
 ---
 
 A persona defines the caller's identity, personality, language, and speech
 settings. The test describes the situation. Reuse a persona across tests when
 you want the same kind of caller in different situations.
 
-## Use an existing persona
 
-List the personas available to the repository's project:
+## Persona and scenario
 
-```bash
-egma persona list
-```
+The persona describes who the caller is. The scenario describes what they want in one conversation. For example, “Caller in a hurry” can ask to book, reschedule, or cancel an appointment in different tests.
 
-Egma includes **Everyday caller**, a patient, cooperative caller. Add the name
-to your test's front matter:
+## Personas in a run
 
-```yaml
-personas:
-  - name: Everyday caller
-```
+Each test selects one or more personas. A test with two personas creates two simulations per run. A run saves the selected behavior versions and project model settings, so later edits apply to future runs.
 
-Every test must name at least one persona. Adding a second persona creates a
-second simulation for that test in each run.
+## Add or update a persona
 
-On push, Egma resolves a name to its persona ID. Pulled files include that ID.
-Keep it when you edit the test. If two personas have the same name, use the ID
-from `egma persona list` to select the one you mean.
-
-Selecting a persona for the first time saves its default model and voice
-settings for your project. All tests in that project that select the persona
-share those settings. Test files keep the persona selection; `egma pull` and
-`egma push` do not copy model settings into the file.
-
-## Choose models and a voice
-
-Open the persona in **Personas**. Select **Use** to save its first settings,
-**Edit settings** for a provided persona, or **Edit** for a custom persona.
-
-Choose the language model, speech-to-text model, text-to-speech model, voice,
-and speech rate. The supported speech rate is `0.6` through `1.5`; `1` is the
-normal rate. You can enter a voice ID from the selected provider even if it is
-not in the recommended list.
-
-These choices belong to your project. Saving them does not change the
-persona's behavior version or another project's settings. Defaults are saved
-on first use and do not replace the choices you have already saved.
-
-## Create a persona
-
-Open **Personas** in your project and select **New persona**.
-
-1. Enter a **Name** that your team can recognize, such as `Caller in a hurry`.
-2. Set **Identity name** to the name the caller gives the agent, such as
-   `Morgan Chen`.
-3. Write a **Personality** that describes how the caller acts. For example:
-   `Answers briefly, asks for the earliest appointment, and asks the agent to
-   get to the point if it repeats a question. Remains polite.`
-4. Choose the **Language** and review the language, speech-to-text, and
-   text-to-speech models. Use the supplied choices, then set the voice and
-   speech rate if the test needs them.
-5. Select **Create persona**, run `egma persona list`, and add the persona to
-   your test.
-
-Keep the caller's goal in the scenario. Keep lasting traits in the persona.
-The library **Name** is for your team; **Identity name** is what the agent hears.
-
-To start from an existing persona, open its menu and select **Clone**. This
-copies the current behavior and your project's effective settings into an
-independent custom persona. Select the clone in your tests to use it. Custom
-personas are available only in the project that owns them.
-
-## Understand changes and versions
-
-Changing a custom persona's identity, personality, or language creates a new
-immutable behavior version. Its name, description, and project model settings
-can change without creating a behavior version. Version history is read-only.
-For API behavior edits, send the current `versionId` as `expectedVersionId`;
-read the persona again if another edit changed that version.
-
-Egma maintains the behavior of provided personas. Compatible updates apply to
-future runs while keeping your project's model settings and test selections.
-Clones do not receive updates from their source.
-
-A run saves each selected persona's current behavior version and complete
-project settings when it is created. Queued simulations and retries keep that
-selection. After changing behavior or settings, start a new run to use them.
-
-## Bring your own provider keys
-
-Add your keys in [Settings → Provider API Keys](/docs/platform/provider-api-keys). Provider keys and model choices are separate settings. Your keys also apply to predefined personas and model graders. Code graders do not make model calls.
+- [Add a persona](/docs/platform/personas/add-a-persona) to use an existing caller or create your own.
+- [Update a persona](/docs/platform/personas/update-a-persona) to change behavior, models, or voice settings.

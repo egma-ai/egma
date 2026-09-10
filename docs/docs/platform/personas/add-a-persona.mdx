@@ -1,0 +1,85 @@
+---
+title: "Add a persona"
+---
+
+Start with **Everyday caller**, or create a custom persona when you need different caller behavior.
+
+## Use an existing persona
+
+<Tabs>
+  <Tab title="UI">
+    Open **Tests**, select a suite, and edit a test's **Personas** cell. Choose the persona you want to use and select **Done**. For a new test, select **Save test** after completing its other fields.
+
+    <Frame caption="Select personas for a test.">
+      <img src="/docs/assets/images/ui/select-persona.jpg" alt="Select personas for a test." />
+    </Frame>
+  </Tab>
+  <Tab title="CLI">
+    List the personas available to the repository's project:
+
+    ```bash
+    egma persona list
+    ```
+
+    Egma includes **Everyday caller**, a patient, cooperative caller. Add the name
+    to your test's front matter:
+
+    ```yaml
+    personas:
+      - name: Everyday caller
+    ```
+
+    Every test must name at least one persona. Adding a second persona creates a
+    second simulation for that test in each run.
+
+    On push, Egma resolves a name to its persona ID. Pulled files include that ID.
+    Keep it when you edit the test. If two personas have the same name, use the ID
+    from `egma persona list` to select the one you mean.
+
+    Selecting a persona for the first time saves its default model and voice
+    settings for your project. All tests in that project that select the persona
+    share those settings. Test files keep the persona selection; `egma pull` and
+    `egma push` do not copy model settings into the file.
+  </Tab>
+</Tabs>
+
+## Create a custom persona
+
+<Tabs>
+  <Tab title="UI">
+    Open **Personas** in your project and select **New persona**.
+
+    1. Enter a **Name** that your team can recognize, such as `Caller in a hurry`.
+    2. Set **Identity name** to the name the caller gives the agent, such as
+       `Morgan Chen`.
+    3. Write a **Personality** that describes how the caller acts. For example:
+       `Answers briefly, asks for the earliest appointment, and asks the agent to
+       get to the point if it repeats a question. Remains polite.`
+    4. Choose the **Language** and review the language, speech-to-text, and
+       text-to-speech models. Use the supplied choices, then set the voice and
+       speech rate if the test needs them.
+    5. Select **Create persona**, run `egma persona list`, and add the persona to
+       your test.
+
+    Keep the caller's goal in the scenario. Keep lasting traits in the persona.
+    The library **Name** is for your team; **Identity name** is what the agent hears.
+
+    To start from an existing persona, open its menu and select **Clone**. This
+    copies the current behavior and your project's effective settings into an
+    independent custom persona. Select the clone in your tests to use it. Custom
+    personas are available only in the project that owns them.
+
+    <Frame caption="Create a custom persona and choose its behavior and voice settings.">
+      <img src="/docs/assets/images/ui/add-persona.jpg" alt="Create a custom persona and choose its behavior and voice settings." />
+    </Frame>
+  </Tab>
+  <Tab title="API">
+    Use [Create a persona](/api-reference/create-persona) to create a custom persona in your project. Read [Get persona form](/api-reference/get-persona-form) for the supported fields and choices. Use the returned persona ID in your tests.
+
+    Use [Fork a persona](/api-reference/fork-persona) when starting from an existing persona.
+  </Tab>
+</Tabs>
+
+## Next step
+
+[Update a persona](/docs/platform/personas/update-a-persona) to choose its models, voice, and speech rate.

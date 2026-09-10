@@ -1,0 +1,25 @@
+---
+title: "Cancel a run"
+---
+
+Cancel a run when you want to stop its unfinished simulations. Evidence already collected stays available.
+
+<Tabs>
+  <Tab title="UI">
+    Open **Runs**, select the run, and use **Cancel run**. Complete any confirmation shown, then inspect which simulations finished and which were canceled.
+  </Tab>
+  <Tab title="CLI">
+    Use the run ID printed by the create command:
+
+    ```bash
+    egma run cancel "$EGMA_RUN_ID"
+    ```
+
+    Cancellation does not remove evidence already collected. Inspect the run to
+    see which simulations finished and which were canceled.
+
+    If the create command is interrupted before it receives an answer, check
+    **Runs** before starting another run. The original request may have succeeded.
+
+  </Tab>
+</Tabs>

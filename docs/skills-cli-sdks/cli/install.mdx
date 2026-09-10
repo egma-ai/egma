@@ -201,7 +201,7 @@ egma run create appointment-booking \
 
 This command pushes the repository first, then starts one run of the complete suite against the selected connection. A failed push prevents the run from starting.
 
-Open the printed results URL. The command returns after the run starts; its success exit code does not mean the simulations have finished or passed. See [Start and follow a run](/docs/platform/runs/start-and-follow-a-run).
+Open the printed results URL. The command returns after the run starts; its success exit code does not mean the simulations have finished or passed. See [Start a run](/docs/platform/runs/start-and-follow-a-run).
 
 To cancel a run, set `EGMA_RUN_ID` to its ID and run:
 
@@ -235,7 +235,7 @@ egma project api-key create --name "CI"
 
 The key is shown once and is not saved by this command. Store it in your CI secret store as `EGMA_API_KEY`. Commit `egma/config.yaml`, suite files, and tests; keep credentials out of Git.
 
-The CLI uses `EGMA_API_KEY` when it is set, so CI does not need browser login. Use [Automate tests in CI](/docs/platform/runs/automate-tests-in-ci) to wait for completion and make a release decision with the API.
+The CLI uses `EGMA_API_KEY` when it is set, so CI does not need browser login.
 
 ## Command reference
 

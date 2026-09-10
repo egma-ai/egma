@@ -1,0 +1,49 @@
+---
+title: "Set up provider API keys"
+---
+
+Use your own OpenAI, Deepgram, or Cartesia key for model calls. You must be an organization admin to add, replace, or remove a key.
+
+## Add or replace a key
+
+<Tabs>
+  <Tab title="UI">
+    Open **Settings → Provider API Keys**.
+
+    1. Choose **Add key** beside the provider, or **Manage key** to replace one.
+    2. Paste the provider's API key and choose **Save key**.
+    3. Select your supported models in the persona or model grader's settings.
+
+    The key applies across projects in the organization. Model choices remain
+    specific to each project's persona or grader settings, including predefined
+    personas and graders. Adding a key does not add unsupported models to the
+    catalog.
+
+    New work uses the saved key for that provider. Calls already in progress keep
+    the key they started with. If the saved key fails, Egma reports the provider
+    failure and does not switch to a default key.
+
+    <Frame caption="Add an OpenAI provider key in organization settings.">
+      <img src="/docs/assets/images/ui/provider-key.jpg" alt="Add an OpenAI provider key in organization settings." />
+    </Frame>
+  </Tab>
+  <Tab title="API">
+    Authenticate with an organization API key. A project API key cannot manage provider keys.
+
+    1. [List provider keys](/api-reference/list-provider-keys) to see which providers have a saved key.
+    2. [Save a provider key](/api-reference/put-provider-key) to add or replace it.
+    3. Select supported models in your project's persona or grader settings.
+
+    The provider key is separate from the Egma API key used to authenticate these requests.
+  </Tab>
+</Tabs>
+
+## Remove a key
+
+In **Settings → Provider API Keys**, choose **Manage key → Remove key** and confirm. Through the API, use [Delete a provider key](/api-reference/delete-provider-key).
+
+New work returns to the default provider key. On Egma Cloud, those calls use inference credit again. Calls already in progress keep the key they started with.
+
+## Check the setup
+
+Check that the provider is shown as configured with the expected masked key ending. Start new work using that provider's model. If it fails, inspect the reported provider error; Egma does not silently fall back to a default key.

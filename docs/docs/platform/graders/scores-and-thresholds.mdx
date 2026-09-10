@@ -50,13 +50,8 @@ Grading state describes whether work has finished:
 `complete` does not guarantee that all agent evidence arrived. Grading can
 proceed with the available evidence when the wait for agent evidence ends.
 Check the simulation's `agentPovIncomplete` field and
-[review the evidence source](/docs/platform/runs/start-and-follow-a-run#check-which-evidence-arrived)
+[review the evidence source](/docs/platform/runs/review-a-run#check-which-evidence-arrived)
 when a result appears to omit something the agent did.
 
 A simulation that fails or is canceled before producing a completed trace has
 no grading work to wait for. Its API `gradingState` is `null`.
-
-For release automation, define your own policy. The
-[CI example](/docs/platform/runs/automate-tests-in-ci) requires every simulation to complete
-and every selected grader to pass. It also fails on flagged missing agent
-evidence, missing grades, grading errors, and timeouts.

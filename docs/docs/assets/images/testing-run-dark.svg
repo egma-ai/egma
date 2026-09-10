@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="850" viewBox="0 0 1040 850" role="img" aria-labelledby="title desc">
+<title id="title">From configuration to graded simulations</title>
+<desc id="desc">Test suite, containing tests and selected personas, and Agent plus Connection feed into a Run. The Run creates Simulations, one per test and persona pair. Graders assess each conversation's evidence.</desc>
+<rect width="1040" height="850" fill="#1f1f1f"/>
+<g font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+<g fill="#282828" stroke="#646464" stroke-width="1.5">
+<rect x="60" y="50" width="420" height="138"/>
+<rect x="560" y="50" width="420" height="138"/>
+<rect x="320" y="484" width="400" height="126"/>
+<rect x="320" y="698" width="400" height="110"/>
+</g>
+<rect x="320" y="280" width="400" height="118" fill="#34251f" stroke="#ff7554" stroke-width="1.5"/>
+<path d="M320 280 H720" stroke="#ff7554" stroke-width="4"/>
+<g fill="#f5f5f5" text-anchor="middle" font-size="29" font-weight="500">
+<text x="270" y="104">Test suite</text>
+<text x="770" y="104">Agent + Connection</text>
+<text x="520" y="327">Run</text>
+<text x="520" y="535">Simulations</text>
+<text x="520" y="744">Graders</text>
+</g>
+<g fill="#c0c0c0" text-anchor="middle" font-size="21">
+<text x="270" y="146">Tests + selected personas</text>
+<text x="770" y="146">Who to test and how to reach it</text>
+<text x="520" y="366">Execute the selected suite</text>
+<text x="520" y="574">One per test + persona pair</text>
+<text x="520" y="780">Assess each conversation</text>
+</g>
+<g fill="none" stroke="#ff7554" stroke-width="2.5" stroke-linejoin="round">
+<path d="M270 188 V230 H520 M770 188 V230 H520 V279"/>
+<path d="M513 268 L520 279 L527 268"/>
+<path d="M520 398 V483 M513 472 L520 483 L527 472"/>
+<path d="M520 610 V697 M513 686 L520 697 L527 686"/>
+</g>
+<rect x="380" y="428" width="280" height="26" fill="#1f1f1f"/>
+<text x="520" y="449" fill="#c0c0c0" font-size="18" text-anchor="middle">Creates conversations</text>
+<rect x="382" y="642" width="276" height="26" fill="#1f1f1f"/>
+<text x="520" y="663" fill="#c0c0c0" font-size="18" text-anchor="middle">Conversation evidence</text>
+</g>
+</svg>

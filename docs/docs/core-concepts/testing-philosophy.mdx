@@ -22,18 +22,24 @@ The [pytest guide to the anatomy of a test](https://docs.pytest.org/en/stable/ex
 
 In Egma, the scenario and persona shape the simulated caller. Together, “change an appointment” and “a frustrated caller who speaks Spanish” give the simulator a goal and a way to approach the conversation. It talks to your agent through the selected connection.
 
+Egma records evidence from the conversation, including the transcript and available tool calls and metrics. Graders use the evidence they receive to assess whether the agent met your criteria. For the appointment test, you might expect the agent to explain that the requested time is unavailable, offer an available alternative, and ask for confirmation before booking. Several different conversations could meet those expectations. You usually want to check the behavior without requiring the agent to repeat an exact sentence.
+
+## From a test to a run
+
+To start a run, choose a [test suite](/docs/platform/tests/test-suites), an [agent](/docs/platform/agents-and-connections/agent), and one of that agent's [connections](/docs/platform/agents-and-connections/connection). Each test in the suite already selects one or more personas. Egma runs each test once for every selected persona, producing a separate simulation for each pair.
+
+For example, a suite with three tests and two personas per test produces six simulations. They all use the same agent and connection. Graders assess the evidence from each simulation.
+
 <img
   className="block dark:hidden"
-  src="/docs/assets/images/testing-flow-light.jpg"
-  alt="Test and persona interact with your voice agent, the system under test. Both feed into a simulation, which is assessed by a grader."
+  src="/docs/assets/images/testing-run-light.svg"
+  alt="A test suite with selected personas and an agent with its connection feed into a run. The run creates one simulation per test and persona pair. Graders assess each conversation’s evidence."
 />
 <img
   className="hidden dark:block"
-  src="/docs/assets/images/testing-flow-dark.jpg"
-  alt="Test and persona interact with your voice agent, the system under test. Both feed into a simulation, which is assessed by a grader."
+  src="/docs/assets/images/testing-run-dark.svg"
+  alt="A test suite with selected personas and an agent with its connection feed into a run. The run creates one simulation per test and persona pair. Graders assess each conversation’s evidence."
 />
-
-Egma records evidence from the conversation, including the transcript and available tool calls and metrics. Graders use the evidence they receive to assess whether the agent met your criteria. For the appointment test, you might expect the agent to explain that the requested time is unavailable, offer an available alternative, and ask for confirmation before booking. Several different conversations could meet those expectations. You usually want to check the behavior without requiring the agent to repeat an exact sentence.
 
 ## Definitions
 

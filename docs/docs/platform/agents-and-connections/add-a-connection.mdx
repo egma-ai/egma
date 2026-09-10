@@ -1,0 +1,50 @@
+---
+title: "Add a connection"
+---
+
+For LiveKit, you need the agent's dispatch name and either project credentials or a token endpoint. Your agent also needs the Egma SDK configured for simulations.
+
+For Retell, you need access to the agent through a Retell API key. A phone connection also needs a phone number routed to that agent.
+
+<Tabs>
+  <Tab title="UI">
+    1. Open **Agents** and select the agent you want to connect to.
+    2. Under **Connections**, select **+ Add Connection**.
+    3. For this LiveKit example, choose **Voice**, then select **Continue**.
+    4. Select **Project credentials** as the connection type. Enter your worker's exact **LiveKit agent name**, your project's **WebSocket URL**, **API key**, and **API secret**.
+    5. Select **Continue to testing** and complete the SDK setup instructions. Return to the agent's **Connections** list to find the new connection.
+
+    This walkthrough shows the LiveKit voice connection form during initial setup. It stops before entering credentials or saving the connection.
+
+    <video controls autoPlay loop muted playsInline preload="metadata" aria-label="Set up a LiveKit voice connection" poster="/docs/assets/videos/add-livekit-connection-poster.jpg">
+      <source src="/docs/assets/videos/add-livekit-connection.mp4" type="video/mp4" />
+    </video>
+  </Tab>
+  <Tab title="CLI">
+    First, [install and set up the CLI](/skills-cli-sdks/cli/install#sign-in-and-initialize) and [register your agent](/docs/platform/agents-and-connections/register-an-agent).
+
+    For a LiveKit voice connection, set `EGMA_AGENT_ID` to your Egma agent ID. Set `LIVEKIT_URL` to your project's WebSocket URL and `LIVEKIT_AGENT_NAME` to your worker's exact dispatch name.
+
+    Load `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` from your secret store, then add the connection:
+
+    ```bash
+    export EGMA_LIVEKIT_API_KEY="$LIVEKIT_API_KEY"
+    export EGMA_LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET"
+
+    egma agent connection add \
+      --agent "$EGMA_AGENT_ID" \
+      --access livekit-project-credentials \
+      --modality voice \
+      --livekit-url "$LIVEKIT_URL" \
+      --livekit-agent-name "$LIVEKIT_AGENT_NAME" \
+      --name "Appointment assistant — voice"
+    ```
+
+    Keep the connection ID printed by the command. Use it when starting a run. Before running tests, add the required Egma simulation hook to your worker and keep the worker running. Follow the [LiveKit guide](/docs/integrations/livekit) for SDK setup, text connections, and token endpoints.
+  </Tab>
+</Tabs>
+
+Follow the setup guide for your platform:
+
+- [Connect a LiveKit agent](/docs/integrations/livekit)
+- [Connect a Retell agent](/docs/integrations/retell)

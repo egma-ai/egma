@@ -1,0 +1,33 @@
+---
+title: "Add a grader"
+---
+
+Add a grader to your project to check simulations, production conversations, or both. **Expected behaviors** already applies to all simulations and cannot be removed.
+
+## Use a grader from the library
+
+<Tabs>
+  <Tab title="UI">
+    1. Open **Graders** and select **Grader library**.
+    2. Open the menu for the grader you want and select **Use in project**.
+    3. Find it in **Active graders** and select **Edit** to review its model, scope, settings, and pass threshold.
+    4. Save the settings before starting new work.
+
+    See [Types of graders](/docs/platform/graders/types) and [Built-in graders](/docs/platform/graders/built-in-graders) to choose a suitable check.
+
+    <Frame caption="The grader library. These two graders are already active in this project.">
+      <img src="/docs/assets/images/ui/grader-library.jpg" alt="The grader library. These two graders are already active in this project." />
+    </Frame>
+  </Tab>
+  <Tab title="API">
+    [List the grader library](/api-reference/list-grader-library), then [use a grader in your project](/api-reference/use-grader-in-project). [Update the project grader](/api-reference/update-grader) to set its scope and settings.
+  </Tab>
+</Tabs>
+
+## Create your own grader
+
+Use [Create a custom grader](/docs/platform/graders/custom-graders) when you need instructions specific to your agent.
+
+## Check its results
+
+Start a new run or review an eligible production conversation. Read the grader's score, result, and evidence. See [Update a grader](/docs/platform/graders/configure-graders) to change its scope or settings.

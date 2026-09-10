@@ -1,5 +1,5 @@
 ---
-title: "Provider API keys"
+title: "What are provider API keys?"
 ---
 
 Open **Settings → Provider API Keys** to manage keys for your organization.
@@ -14,20 +14,10 @@ Manage these settings through a browser session or an organization API key.
 A project API key cannot read or change organization provider keys, even when
 its owner is an admin.
 
-## Add or replace a key
 
-1. Choose **Add key** beside the provider, or **Manage key** to replace one.
-2. Paste the provider's API key and choose **Save key**.
-3. Select your supported models in the persona or model grader's settings.
+## Set up your keys
 
-The key applies across projects in the organization. Model choices remain
-specific to each project's persona or grader settings, including predefined
-personas and graders. Adding a key does not add unsupported models to the
-catalog.
-
-New work uses the saved key for that provider. Calls already in progress keep
-the key they started with. If the saved key fails, Egma reports the provider
-failure and does not switch to a default key.
+Follow [Set up provider API keys](/docs/platform/provider-api-keys/set-up-provider-api-keys) to add, replace, or remove a key.
 
 ## Inference credit on Egma Cloud
 

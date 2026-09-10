@@ -1,5 +1,5 @@
 ---
-title: "Write a test"
+title: "Keep your tests in code"
 ---
 
 Keep your tests beside your agent code. Each Markdown file describes one
@@ -29,10 +29,10 @@ egma suite create appointment-booking --name "Appointment booking"
 
 Create `egma/tests/appointment-booking/book-consultation.md`.
 
-This example assumes a Retell agent with `check_availability` and
+This example assumes a LiveKit agent with `check_availability` and
 `book_appointment` tools. Match the tool names and answers to your agent before
 running it. Both tools are mocked, so these calls use the test's answers.
-Use a Retell text mode or web call connection for this example.
+Use a LiveKit voice connection with the [Egma simulation hook](/docs/integrations/livekit#1-prepare-the-worker) configured for this example.
 
 ````markdown
 ---
@@ -87,7 +87,7 @@ name when asked and confirm that you want the appointment.
 
 ```json
 {
-  "retell_dynamic_variables": {
+  "job_dispatch_metadata": {
     "clinic_name": "Harbor Clinic",
     "current_date": "2026-10-12"
   }
@@ -109,26 +109,13 @@ what the backend returned.
 `Env` supplies context before the conversation starts. It does not set shell
 environment variables or store provider credentials.
 
-For Retell, use `retell_dynamic_variables`. Every value must be a string, and
-variable names must match those used by your agent. Names starting with `egma_`
-are reserved.
+For LiveKit, the example's `job_dispatch_metadata` is available as
+`ctx.job.metadata`. Parse that value as JSON in your worker and use the same
+field names your worker expects.
 
-For LiveKit, replace the example's `Env` block with the metadata your worker
-reads from `ctx.job.metadata`. Parse that value as JSON in the worker:
-
-````markdown
-## Env
-
-```json
-{
-  "job_dispatch_metadata": {
-    "clinic_name": "Harbor Clinic",
-    "tenant_id": "demo-clinic",
-    "current_date": "2026-10-12"
-  }
-}
-```
-````
+For Retell, replace `job_dispatch_metadata` with `retell_dynamic_variables`.
+Every value must be a string, and variable names must match those used by your
+agent. Names starting with `egma_` are reserved.
 
 Use realistic test data and keep secrets out of the file. Include only the
 provider field your agent needs. Omit `## Env` when no startup context is needed.

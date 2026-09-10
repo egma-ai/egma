@@ -1,0 +1,52 @@
+---
+title: "Create a test"
+---
+
+Keep tests in a [test suite](/docs/platform/tests/test-suites). A suite belongs to your project and holds the tests you review and run together.
+
+<Tabs>
+  <Tab title="UI">
+    1. Open **Tests** and select a suite. If you need a new suite, select **Create suite**, enter its name, and save it.
+    2. In the suite, select **+ Write a test**.
+    3. Enter a **Name**, a **Scenario**, and at least one **Expected behavior**.
+    4. Select one or more **Personas**. Start with **Everyday caller** if it is available in your project.
+    5. Add **Mock tools** or **Env** if the situation needs them, then select **Save test**.
+
+    To edit a saved test, select its cells in the table. Text edits save when you leave the cell. Mock tools and Env open separate JSON editors with a **Save** button.
+
+    This walkthrough uses an unsaved draft and stops before saving.
+
+    <video controls autoPlay loop muted playsInline preload="metadata" aria-label="Create a test" poster="/docs/assets/videos/create-test-poster.jpg">
+      <source src="/docs/assets/videos/create-test.mp4" type="video/mp4" />
+    </video>
+  </Tab>
+  <Tab title="CLI">
+    First, [install the CLI and initialize your project](/skills-cli-sdks/cli/install#sign-in-and-initialize). Pull the current tests and list the available personas:
+
+    ```bash
+    egma pull
+    egma persona list
+    ```
+
+    Use an existing suite, or create one:
+
+    ```bash
+    egma suite create appointment-booking --name "Appointment booking"
+    ```
+
+    Create `egma/tests/appointment-booking/book-consultation.md` using the [Keep your tests in code](/docs/platform/tests/write-a-test). Use a persona name returned by `egma persona list`, then save your changes to Egma:
+
+    ```bash
+    egma push
+    ```
+
+    You can also [use your coding agent to write tests](/skills-cli-sdks/skills/write-tests) from your agent's prompt, tools, and code.
+  </Tab>
+</Tabs>
+
+## Run your tests
+
+A run executes the complete suite against one agent connection. Each test and selected persona combination produces a simulation. Two tests with two personas each produce four simulations.
+
+[Start a run](/docs/platform/runs/start-and-follow-a-run), then inspect each simulation's conversation and grading results. The same suite can run against different connections, so you can check a flow through both text and voice.
+

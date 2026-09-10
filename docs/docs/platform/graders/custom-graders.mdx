@@ -1,5 +1,5 @@
 ---
-title: "Custom graders"
+title: "Create a custom grader"
 ---
 
 A custom grader uses an LLM to check conversation evidence against your
@@ -10,7 +10,7 @@ The grader receives the transcript, ending outcome, tool names and arguments,
 observed metrics, and any expected behaviors from the test. Tool return
 payloads are not sent to the LLM. Use rules you can check with this evidence.
 The transcript and tool calls prefer the agent's evidence when available.
-See [Check which evidence arrived](/docs/platform/runs/start-and-follow-a-run#check-which-evidence-arrived).
+See [Check which evidence arrived](/docs/platform/runs/review-a-run#check-which-evidence-arrived).
 
 ## Create a grader
 
@@ -32,6 +32,11 @@ Choose **Language model** from the supported options. Under **Scope**, select
 choose the test suites and tests that book appointments. Select **Create grader**.
 Egma saves the instructions as the first definition version and adds the
 grader to this project's active graders with the chosen settings.
+
+
+<Frame caption="Create a custom grader with instructions, pass and fail criteria, and scope.">
+  <img src="/docs/assets/images/ui/custom-grader.jpg" alt="Create a custom grader with instructions, pass and fail criteria, and scope." />
+</Frame>
 
 ## Write a check the evidence can settle
 

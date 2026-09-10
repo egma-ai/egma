@@ -46,36 +46,47 @@
                 "group": "Agents & Connections",
                 "pages": [
                   "docs/platform/agents-and-connections/agent",
-                  "docs/platform/agents-and-connections/connection"
+                  "docs/platform/agents-and-connections/register-an-agent",
+                  "docs/platform/agents-and-connections/connection",
+                  "docs/platform/agents-and-connections/add-a-connection"
                 ]
               },
               {
                 "group": "Tests",
                 "pages": [
                   "docs/platform/tests/overview",
+                  "docs/platform/tests/create-a-test",
                   "docs/platform/tests/test-suites",
-                  "docs/platform/tests/features",
-                  "docs/platform/tests/write-a-test",
-                  "docs/platform/tests/mock-tool-responses"
+                  "docs/platform/tests/mock-tool-responses",
+                  "docs/platform/tests/write-a-test"
                 ]
               },
-              "docs/platform/personas",
+              {
+                "group": "Personas",
+                "pages": [
+                  "docs/platform/personas",
+                  "docs/platform/personas/add-a-persona",
+                  "docs/platform/personas/update-a-persona"
+                ]
+              },
               {
                 "group": "Runs",
                 "pages": [
                   "docs/platform/runs/overview",
                   "docs/platform/runs/start-and-follow-a-run",
-                  "docs/platform/runs/automate-tests-in-ci"
+                  "docs/platform/runs/review-a-run",
+                  "docs/platform/runs/cancel-a-run"
                 ]
               },
               {
                 "group": "Graders",
                 "pages": [
                   "docs/platform/graders/overview",
+                  "docs/platform/graders/add-a-grader",
+                  "docs/platform/graders/configure-graders",
                   "docs/platform/graders/types",
                   "docs/platform/graders/built-in-graders",
                   "docs/platform/graders/custom-graders",
-                  "docs/platform/graders/configure-graders",
                   "docs/platform/graders/scores-and-thresholds"
                 ]
               },
@@ -83,10 +94,17 @@
                 "group": "Monitoring",
                 "pages": [
                   "docs/platform/monitoring/overview",
-                  "docs/platform/monitoring/set-up-monitoring"
+                  "docs/platform/monitoring/set-up-monitoring",
+                  "docs/platform/monitoring/review-conversations"
                 ]
               },
-              "docs/platform/provider-api-keys"
+              {
+                "group": "Provider API keys",
+                "pages": [
+                  "docs/platform/provider-api-keys",
+                  "docs/platform/provider-api-keys/set-up-provider-api-keys"
+                ]
+              }
             ]
           },
           {
@@ -94,6 +112,12 @@
             "pages": [
               "docs/integrations/retell",
               "docs/integrations/livekit"
+            ]
+          },
+          {
+            "group": "Contact us",
+            "pages": [
+              "docs/contact-us"
             ]
           }
         ]
@@ -351,6 +375,14 @@
     {
       "source": "/get-started/introduction",
       "destination": "/docs/get-started/introduction"
+    },
+    {
+      "source": "/docs/platform/tests/features",
+      "destination": "/docs/platform/tests/overview#parts-of-a-test"
+    },
+    {
+      "source": "/docs/platform/runs/automate-tests-in-ci",
+      "destination": "/docs/platform/runs/start-and-follow-a-run"
     }
   ]
 }

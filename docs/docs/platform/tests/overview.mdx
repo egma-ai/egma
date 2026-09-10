@@ -1,33 +1,51 @@
 ---
-title: "Tests"
-sidebarTitle: "What is a test?"
+title: "What is a test?"
 ---
 
-A **test** describes one situation and the behaviors you expect from your
-agent. It selects one or more personas to act as the caller. You can also
-supply mock tool responses and startup context for the agent.
+A test describes one situation and the behaviors you expect from your agent. It selects one or more personas to act as the caller. You can also supply mock tool responses and startup context for the agent.
 
-For example, a booking test can ask the caller to request an afternoon
-appointment and require the agent to check availability before offering a
-time.
+For example, a booking test can ask the caller to request an afternoon appointment and require the agent to check availability before offering a time.
 
-## Keep tests in a suite
+## Parts of a test
 
-A [test suite](/docs/platform/tests/test-suites) belongs to a project and holds
-tests that you review and run together. In your agent repository, each suite
-has a directory under `egma/tests/`, and each test is a Markdown file.
+### Scenario
 
-A run executes the complete suite against one agent connection. Each test
-and selected persona combination produces a simulation.
+The scenario tells the caller what they want and how to act in this conversation. Describe one situation in plain language. Keep unrelated situations in separate tests.
 
-## Build a test
+### Expected behaviors
 
-- [Test features](/docs/platform/tests/features): scenario, expected behaviors,
-  personas, mock tools, and startup context.
-- [Write a test](/docs/platform/tests/write-a-test): a complete Markdown example
-  that you can adapt and push to Egma.
-- [Write tests with your coding agent](/skills-cli-sdks/skills/write-tests): use the agent's
-  code and tools to create suitable tests.
+Expected behaviors are observable requirements for your agent. Include at least one. The Expected behaviors grader checks these statements against the simulation's evidence.
 
-After you push your tests, [start a run](/docs/platform/runs/start-and-follow-a-run)
-and inspect each simulation's conversation and grading results.
+For example: “The agent asks the caller to confirm the appointment date and time before booking.” Use one clear claim per behavior.
+
+### Personas
+
+A [persona](/docs/platform/personas) defines the kind of caller. The scenario defines what that caller wants in this test. Select one or more personas. Each selected persona adds a simulation when you run the suite.
+
+### Mock tools
+
+Mock tools provide a fixed response or error for a named tool. For example, make an availability tool return no appointment slots. A tool without a mock runs its real implementation.
+
+See [Mock tool responses](/docs/platform/tests/mock-tool-responses) for examples and supported connections.
+
+### Startup context
+
+Startup context supplies data before the conversation starts. For LiveKit, `job_dispatch_metadata` supplies the JSON data your worker reads from `ctx.job.metadata`. For Retell, `retell_dynamic_variables` supplies string values.
+
+This is the **Env** field in the UI and the `## Env` section in a test file. It does not set shell environment variables or store credentials.
+
+## Create a test
+
+Follow [Create a test](/docs/platform/tests/create-a-test) for UI steps, a walkthrough, and CLI commands.
+
+## Run your tests
+
+A run executes the complete suite against one agent connection. Each test and selected persona combination produces a simulation. Two tests with two personas each produce four simulations.
+
+[Start a run](/docs/platform/runs/start-and-follow-a-run), then inspect each simulation's conversation and grading results. The same suite can run against different connections, so you can check a flow through both text and voice.
+
+## Keep your tests current
+
+Add tests as you add flows and capabilities to your agent. Keep tests for working behavior in a regression suite, and use a separate suite for behavior you are still improving.
+
+If you edit tests in both the UI and your repository, run `egma pull` before local edits and `egma push` when they are ready. See [Test suites](/docs/platform/tests/test-suites#keep-local-and-browser-changes-in-sync) for synchronization and conflict handling.

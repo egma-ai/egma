@@ -8,34 +8,52 @@ workflow, such as appointment booking or order cancellation.
 
 ## Create a suite
 
-In a repository connected to Egma, run:
+<Tabs>
+  <Tab title="UI">
+    1. Open **Tests** in your project.
+    2. Select **Create suite**.
+    3. Enter a **Suite name**, such as “Appointment booking,” and select **Create suite**.
+    4. Open the suite and select **+ Write a test** to add your first test.
 
-```bash
-egma pull
-egma suite create appointment-booking --name "Appointment booking"
-```
+    See [Create a test](/docs/platform/tests/create-a-test) for the required fields.
 
-Egma creates the suite and writes its identity to
-`egma/tests/appointment-booking/suite.yaml`. Add your Markdown tests beside that
-file:
+    This walkthrough uses an unsaved draft and stops before saving.
 
-```text
-egma/
-  config.yaml
-  tests/
-    appointment-booking/
-      suite.yaml
-      book-consultation.md
-      no-available-slots.md
-```
+    <video controls autoPlay loop muted playsInline preload="metadata" aria-label="Create a test suite" poster="/docs/assets/videos/create-test-suite-poster.jpg">
+      <source src="/docs/assets/videos/create-test-suite.mp4" type="video/mp4" />
+    </video>
+  </Tab>
+  <Tab title="CLI">
+    In a repository connected to Egma, run:
 
-The directory is the local name you pass to the CLI. The ID in `suite.yaml`
-identifies the suite on Egma. Keep the generated ID; do not copy it into another
-directory to create a second suite.
+    ```bash
+    egma pull
+    egma suite create appointment-booking --name "Appointment booking"
+    ```
 
-Write the files using [test format 5](/docs/platform/tests/write-a-test), then run
-`egma push`. You can change the suite's display name in `suite.yaml` and push
-the change.
+    Egma creates the suite and writes its identity to
+    `egma/tests/appointment-booking/suite.yaml`. Add your Markdown tests beside that
+    file:
+
+    ```text
+    egma/
+      config.yaml
+      tests/
+        appointment-booking/
+          suite.yaml
+          book-consultation.md
+          no-available-slots.md
+    ```
+
+    The directory is the local name you pass to the CLI. The ID in `suite.yaml`
+    identifies the suite on Egma. Keep the generated ID; do not copy it into another
+    directory to create a second suite.
+
+    Write the files using [test format 5](/docs/platform/tests/write-a-test), then run
+    `egma push`. You can change the suite's display name in `suite.yaml` and push
+    the change.
+  </Tab>
+</Tabs>
 
 ## Choose what runs together
 

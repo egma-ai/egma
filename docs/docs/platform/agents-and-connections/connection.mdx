@@ -1,10 +1,14 @@
 ---
-title: "Connection"
+title: "What is a connection?"
 ---
 
 A connection defines how Egma reaches your agent to run simulations. Each connection belongs to one [agent](/docs/platform/agents-and-connections/agent), and an agent can have multiple connections.
 
-For example, you can connect to a Retell agent through text mode, a web call, or its phone number. For a LiveKit agent, Egma joins a room where your agent handles the conversation.
+For example, you can connect to a LiveKit agent using project credentials. Egma creates a room and dispatches your worker to handle the conversation.
+
+<Note>
+  If a single voice agent serves multiple customers, register it as one agent in Egma. You can add multiple connections to the same agent and test different behaviors through each connection.
+</Note>
 
 ## Choose a connection
 
@@ -28,18 +32,7 @@ You can start with text while developing a flow, then run the same suite over vo
 
 ## Add a connection
 
-Select the agent you want to connect to, choose an available connection option, and provide its required details.
-
-For LiveKit, you need the agent's dispatch name and either project credentials or a token endpoint. Your agent also needs the Egma SDK configured for simulations.
-
-For Retell, you need access to the agent through a Retell API key. A phone connection also needs a phone number routed to that agent.
-
-Give the connection a name that makes it easy to identify when starting a run, such as “Appointment assistant — voice.”
-
-Follow the setup guide for your platform:
-
-- [Connect a LiveKit agent](/docs/integrations/livekit)
-- [Connect a Retell agent](/docs/integrations/retell)
+Follow [add a connection](/docs/platform/agents-and-connections/add-a-connection) for UI steps, a walkthrough, and CLI commands.
 
 ## Use a connection in a run
 
@@ -50,6 +43,16 @@ A run uses one connection for every simulation in the suite. To test the same su
 ## Connection capabilities
 
 The connection you choose affects which testing features are available.
+
+| Connection | Text | Voice | Mock tool responses | Startup context |
+| --- | --- | --- | --- | --- |
+| LiveKit project credentials | Yes | Yes | Yes, with the Egma SDK | `job_dispatch_metadata` |
+| LiveKit token endpoint | Yes | Yes | Yes, with the Egma SDK | `job_dispatch_metadata` |
+| Retell text mode | Yes | No | Yes | `retell_dynamic_variables` |
+| Retell web call | No | Yes | Yes | `retell_dynamic_variables` |
+| Retell phone | No | Yes | No | No test-supplied context |
+
+For LiveKit, the Egma simulation hook is required for every simulation. Text connections also need the worker's chat-mode setup. See the [LiveKit guide](/docs/integrations/livekit).
 
 Retell text mode supports Retell-managed LLM and conversation-flow agents. Use a voice connection for Retell custom-LLM agents.
 
