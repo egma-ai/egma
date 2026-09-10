@@ -1,0 +1,40 @@
+---
+title: "Monitoring philosophy"
+---
+
+Egma's monitoring system in inspired by the word "Sentry" - which means someone standing guard.
+
+A good monitoring system should be feel like a member of your team is literally reading production logs 24*7 to find issues, search for improvement opportunities and flag/escalate important things for you to take action on in a timely manner.
+
+Most monitoring tools allow you to run some graders on top of incoming production data at some sample rate. But by definition - a grader can only grade what you already knew to look out for. While helpful, this in itself doesn't give you the peace of mind that you'd otherwise had when a member of your team with full context of your business and goals was looking at each conversation.
+
+We call this finding the unknown unknowns: the silent issues that disappear into a sea of conversations because nobody thought to look for them.
+
+The difficulty is that you can’t write a check for a problem you haven’t discovered yet. You need a system that helps you discover what to check.
+
+The scientific method is a useful starting point. Notice something unusual. Form a hypothesis. Test it against the data. Use what you learn to ask a better question.
+
+There are two parts to making this work:
+
+1. Finding a problem worth investigating.
+2. Checking whether it holds up across millions of conversations, cheaply enough that you can keep doing it.
+
+One way to find problems is to group similar conversations and look for patterns. Perhaps users trying to reschedule appointments keep getting frustrated. Perhaps a tool fails repeatedly, but the agent carries on as though it worked. A single conversation might look unremarkable. A hundred conversations failing in the same way tell you something.
+
+Another approach is to give an LLM context about what the agent is supposed to accomplish and ask it to propose explanations for where things might be going wrong. Those hypotheses can then be tested against production data. The result should raise new questions, which lead to more tests.
+
+But discovering a promising question is only half the problem. You still need an affordable way to answer it across every conversation.
+
+Take a simple question: did the agent tell the user their appointment was booked even though the booking never happened?
+
+You could ask an LLM to examine every conversation and its tool results. But at an assumed `$0.05` per evaluation, checking 10,000 conversations would cost `$500`. A million would cost `$50,000`. And that is one question. A useful monitoring system might need to investigate dozens, then ask new ones tomorrow.
+
+This is where small, specialised classifiers come in. Once we know the question, we can train a model to answer that specific question and check how reliably it does so. It doesn’t need to understand everything about the conversation. It needs to recognise one particular failure well enough to find it at scale.
+
+These classifiers need to learn from audio too. A calm “no” and an angry “no” look identical in a transcript, but they can tell you very different things about how a conversation is going. If you only look at the words, you lose part of the evidence. For voice agents, how something was said is part of what happened.
+
+The two parts belong together. A system that only proposes hypotheses leaves you with suspicions. A system that only runs predefined checks leaves you blind to problems you haven’t anticipated. You need a way to discover a possible failure, gather evidence, and turn what you learn into something you can keep watching.
+
+That is what we want Egma to do. Notice something you missed. Investigate whether it matters. Show you the evidence. And keep watch as your agent changes.
+
+Whether your agent handles a few dozen conversations or millions, you should be able to find out what is going wrong without already knowing what to ask.

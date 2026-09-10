@@ -33,10 +33,10 @@
             ]
           },
           {
-            "group": "Core concepts",
+            "group": "Core Philosophies",
             "pages": [
-              "docs/core-concepts/testing-philosophy",
-              "docs/core-concepts/monitoring-philosophy"
+              "docs/core-philosophies/testing-philosophy",
+              "docs/core-philosophies/monitoring-philosophy"
             ]
           },
           {

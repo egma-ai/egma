@@ -6,7 +6,7 @@ This is the source for [docs.egma.ai](https://docs.egma.ai). Mintlify reads the
 ## Edit a guide
 
 - `docs/get-started/`: platform introduction and the five-minute quickstart.
-- `docs/core-concepts/`: testing and monitoring philosophy.
+- `docs/core-philosophies/`: testing and monitoring philosophy.
 - `docs/platform/`: agents and connections, tests, personas, runs, graders, monitoring,
   and provider API keys. Related guides stay under their platform topic.
 - `docs/integrations/`: Retell and LiveKit setup.
