@@ -121,6 +121,50 @@ async def test_chat_room_closure_preserves_an_established_ending(departed_first:
     assert room.ended.is_set()
 
 
+async def test_chat_participant_departure_cannot_replace_a_transport_failure():
+    class ChatWire(ScriptedRtcRoom):
+        def register_text_stream_handler(self, *_args: object) -> None:
+            pass
+
+    room = TextRoom(url="wss://livekit.test", token="test", room_name="room")
+    wire = ChatWire()
+    room._room = wire
+    room._watch(wire)
+    participant = type("Participant", (), {"identity": "agent"})()
+    wire.handlers["participant_connected"][0](participant)
+    wire.handlers["disconnected"][0](rtc.DisconnectReason.UNKNOWN_REASON)
+    wire.handlers["participant_disconnected"][0](participant)
+
+    assert room.failed.is_set()
+    assert not room.ended.is_set()
+
+
+async def test_chat_transport_failure_cannot_replace_a_normal_departure():
+    class ChatWire(ScriptedRtcRoom):
+        def register_text_stream_handler(self, *_args: object) -> None:
+            pass
+
+    room = TextRoom(url="wss://livekit.test", token="test", room_name="room")
+    wire = ChatWire()
+    room._room = wire
+    room._watch(wire)
+    participant = type("Participant", (), {"identity": "agent"})()
+    wire.handlers["participant_connected"][0](participant)
+    wire.handlers["participant_disconnected"][0](participant)
+    wire.handlers["disconnected"][0](rtc.DisconnectReason.UNKNOWN_REASON)
+
+    assert room.ended.is_set()
+    assert not room.failed.is_set()
+
+
+async def test_local_chat_cleanup_does_not_turn_a_failure_into_an_ending():
+    room = TextRoom(url="wss://livekit.test", token="test", room_name="room")
+    room.failed.set()
+    await room.leave()
+    assert room.failed.is_set()
+    assert not room.ended.is_set()
+
+
 @pytest.mark.parametrize("reason", ["agent_hangup", "inactivity", "user_hangup"])
 async def test_retell_final_ended_status_confirms_a_whole_room_close(reason: str):
     stub = FinalCallStub(api_key=SENTINEL_KEY, reason=reason)

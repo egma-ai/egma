@@ -198,6 +198,10 @@ class ConductorProbe:
             self.concluded.append(text)
             self.ended.set()
 
+    def persona_concluded_without_speech(self) -> None:
+        self.concluded.append("")
+        self.ended.set()
+
     def the_brain_failed(self, fault: BaseException) -> None:
         self.failures.append(fault)
         self.ended.set()
@@ -226,6 +230,58 @@ class OutputProbe(FrameProcessor):
             if self.response_count == 2:
                 self.final_responded.set()
         await self.push_frame(frame, direction)
+
+
+async def test_textless_end_call_concludes_without_text_or_tts_frames():
+    class TextlessEndModel:
+        model_name = "textless-end"
+
+        async def reply(self, _context: LLMContext) -> PersonaReply:
+            return PersonaReply(
+                text="",
+                concluded=False,
+                tool_calls=(
+                    PersonaToolCall(
+                        tool_call_id="call_end", name="end_call", arguments={}
+                    ),
+                ),
+            )
+
+        async def close(self) -> None:
+            return None
+
+    persona = Persona(
+        authored=AUTHORED,
+        scenario_instructions="Finish without words.",
+        model=TextlessEndModel(),
+    )
+    conductor = ConductorProbe()
+    service = _PersonaLLMService(persona=persona)
+    gate = _PersonaReplyGate(service=service, conductor=conductor)
+    brain = _PersonaBrain(persona=persona, conductor=conductor, replies=gate)
+    output = OutputProbe()
+    worker = PipelineWorker(
+        Pipeline([brain, service, gate, output]),
+        params=PipelineParams(),
+        idle_timeout_secs=None,
+        enable_tracing=False,
+        enable_turn_tracking=False,
+        enable_rtvi=False,
+    )
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker)
+    running = asyncio.create_task(runner.run())
+    try:
+        await asyncio.wait_for(output.started.wait(), timeout=2)
+        await worker.queue_frame(_AgentFinished(heard_a_turn=False))
+        await asyncio.wait_for(conductor.ended.wait(), timeout=2)
+    finally:
+        await worker.queue_frame(EndFrame())
+        await asyncio.wait_for(running, timeout=2)
+
+    assert conductor.concluded == [""]
+    assert conductor.spoken == []
+    assert not any(isinstance(frame, TextFrame) for frame in output.frames)
 
 
 class DeterministicTTSService(TTSService):

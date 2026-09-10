@@ -80,7 +80,10 @@ import {
 import type { AuthContext } from "./context.ts";
 import { RunWriteRefusedError } from "./errors.ts";
 import {
+  lockSimulationGradingTrace,
+  recordSimulationEvidenceErrorIn,
   requestGradingIn,
+  SIMULATOR_EVIDENCE_DELIVERY_ERROR,
   simulationEvidenceReadiness,
 } from "./grading.ts";
 import { pageOf, pageWindow, type PageRequest } from "./pages.ts";
@@ -213,6 +216,7 @@ export type SimulationSummaryFacts = {
   readonly recordingReference?: string | undefined;
   readonly startedAt?: Date | undefined;
   readonly endedAt?: Date | undefined;
+  readonly evidenceError?: "evidence_collection_error" | undefined;
 };
 
 export type SimulationReport = SimulationSummaryFacts & {
@@ -2704,6 +2708,7 @@ async function landSimulation(
      * stamp below is only the fallback for a report that brought none.
      */
     readonly write: Record<string, unknown>;
+    readonly evidenceError?: "evidence_collection_error" | undefined;
     /** Any further condition the landing requires of the row. */
     readonly onlyWhere?: SQL | undefined;
   },
@@ -2721,6 +2726,13 @@ async function landSimulation(
       then ${write.executionEndedAt}::timestamptz else null end`;
   }
   return db().transaction(async (tx) => {
+    const evidenceTraceId =
+      landing.evidenceError === "evidence_collection_error"
+        ? traceIdOfSimulation(id)
+        : undefined;
+    if (evidenceTraceId !== undefined) {
+      await lockSimulationGradingTrace(tx, auth, evidenceTraceId);
+    }
     const [row] = await tx
       .update(simulation)
       .set({ endedAt: now, ...write, heartbeatAt: now })
@@ -2741,6 +2753,19 @@ async function landSimulation(
 
     if (row === undefined) return undefined;
 
+    if (landing.evidenceError === "evidence_collection_error") {
+      const traceId = traceIdOfSimulation(row.id);
+      if (traceId !== undefined && row.startedAt !== null) {
+        await recordSimulationEvidenceErrorIn(tx, auth, {
+          simulationId: row.id,
+          traceId,
+          traceStartedAt: row.startedAt,
+          runId: row.runId,
+          error: SIMULATOR_EVIDENCE_DELIVERY_ERROR,
+        });
+      }
+    }
+
     if (row.status === "completed") {
       const traceId = traceIdOfSimulation(row.id);
       if (traceId === undefined || row.startedAt === null) {
@@ -2755,51 +2780,53 @@ async function landSimulation(
         throw new Error(`completed simulation ${row.id} has no grading plan`);
       }
       if (hasPlannedGraders) {
-        // Expect an agent POV only when the run's frozen connection type supports it
-        // and the simulation reported a provider reference. Evidence need not have arrived
-        // yet; the readiness check applies the wait bound (ADR-0024 §6).
-        const [executed] = await tx
-          .select({ connectionSnapshot: run.connectionSnapshot })
-          .from(run)
-          .where(eq(run.id, row.runId))
-          .limit(1);
-        const reference = row.providerReference;
-        const producesAnAgentPov =
-          laneProducesAnAgentPov(
-            (executed?.connectionSnapshot as { connectionType?: string })
-              ?.connectionType ?? "",
-          ) &&
-          reference !== null &&
-          reference !== "";
-        // Evidence may have drained before this lifecycle transition. Probe the
-        // bounded trace window, then request work inside this same Postgres
-        // transaction. A crash cannot commit "completed" without also
-        // committing the queue row when evidence was already visible.
-        const readiness = await simulationEvidenceReadiness(auth, {
-          traceId,
-          runId: row.runId,
-          window: {
-            // The simulation row and provider spans do not share one clock. A
-            // five-minute cushion keeps an earlier provider timestamp visible
-            // when evidence drains before this completion transaction.
-            from: BigInt(row.startedAt.getTime() - 5 * 60 * 1_000) * 1_000n,
-            // The store uses an exclusive upper bound. One second keeps a span
-            // stamped at the landing boundary inside this small probe.
-            to: BigInt(now.getTime() + 1_000) * 1_000n,
-          },
-          producesAnAgentPov,
-          completedAt: now,
-          now,
-        });
-        await requestGradingIn(tx, auth, {
-          source: "simulation",
-          traceId,
-          traceStartedAt: readiness.traceStartedAt ?? row.startedAt,
-          runId: row.runId,
-          endsTrace: true,
-          modality: row.modality as Modality,
-          evidenceReady: readiness.ready,
-        });
+        if (landing.evidenceError !== "evidence_collection_error") {
+          // Expect an agent POV only when the run's frozen connection type supports it
+          // and the simulation reported a provider reference. Evidence need not have arrived
+          // yet; the readiness check applies the wait bound (ADR-0024 §6).
+          const [executed] = await tx
+            .select({ connectionSnapshot: run.connectionSnapshot })
+            .from(run)
+            .where(eq(run.id, row.runId))
+            .limit(1);
+          const reference = row.providerReference;
+          const producesAnAgentPov =
+            laneProducesAnAgentPov(
+              (executed?.connectionSnapshot as { connectionType?: string })
+                ?.connectionType ?? "",
+            ) &&
+            reference !== null &&
+            reference !== "";
+          // Evidence may have drained before this lifecycle transition. Probe the
+          // bounded trace window, then request work inside this same Postgres
+          // transaction. A crash cannot commit "completed" without also
+          // committing the queue row when evidence was already visible.
+          const readiness = await simulationEvidenceReadiness(auth, {
+            traceId,
+            runId: row.runId,
+            window: {
+              // The simulation row and provider spans do not share one clock. A
+              // five-minute cushion keeps an earlier provider timestamp visible
+              // when evidence drains before this completion transaction.
+              from: BigInt(row.startedAt.getTime() - 5 * 60 * 1_000) * 1_000n,
+              // The store uses an exclusive upper bound. One second keeps a span
+              // stamped at the landing boundary inside this small probe.
+              to: BigInt(now.getTime() + 1_000) * 1_000n,
+            },
+            producesAnAgentPov,
+            completedAt: now,
+            now,
+          });
+          await requestGradingIn(tx, auth, {
+            source: "simulation",
+            traceId,
+            traceStartedAt: readiness.traceStartedAt ?? row.startedAt,
+            runId: row.runId,
+            endsTrace: true,
+            modality: row.modality as Modality,
+            evidenceReady: readiness.ready,
+          });
+        }
       }
     }
     const settled = await finalizeRunIfDone(tx, row.runId, now);
@@ -2845,6 +2872,7 @@ export async function completeSimulation(
       endingReason: report.endingReason,
       ...summaryFactsWrite(report),
     },
+    evidenceError: report.evidenceError,
   });
 }
 
@@ -2877,6 +2905,7 @@ export async function failSimulation(
       executionFailure: executionFailureWrite(failure.message),
       ...summaryFactsWrite(failure),
     },
+    evidenceError: failure.evidenceError,
   });
 }
 
@@ -2977,6 +3006,7 @@ export async function markSimulationCanceled(
   return landSimulation(auth, id, claimant, {
     from: ["claimed", "running"],
     write: { status: "canceled", ...summaryFactsWrite(facts) },
+    evidenceError: facts.evidenceError,
     onlyWhere: isNotNull(simulation.cancelRequestedAt),
   });
 }

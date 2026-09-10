@@ -765,7 +765,8 @@ class _PersonaLLMService(LLMService):
                     ]
                 )
             )
-        await self.push_frame(LLMTextFrame(reply.text))
+        if reply.text:
+            await self.push_frame(LLMTextFrame(reply.text))
         reply = await self._execute_tool_calls(reply, context)
         self._reply = reply
 
@@ -862,7 +863,9 @@ class _PersonaReplyGate(FrameProcessor):
                 raise RuntimeError(
                     "Pipecat's persona response did not match its model reply"
                 )
-            if not self._conductor.is_ending:
+            if reply.concluded and not reply.text:
+                self._conductor.persona_concluded_without_speech()
+            elif not self._conductor.is_ending:
                 await self._conductor.wait_until(due)
                 if not self._conductor.is_ending:
                     self._conductor.persona_will_speak(
@@ -1122,6 +1125,7 @@ class VoiceConductor:
         self._closed = False
 
         self.audio: AudioFacts | None = None
+        self.evidence_error: str | None = None
 
     @property
     def provider_reference(self) -> str | None:
@@ -1178,12 +1182,19 @@ class VoiceConductor:
             name=f"{name}:watchdog",
         )
         startup_finished = False
+        conducted: Conducted | None = None
+        execution_fault: BaseException | None = None
         try:
-            await self._open(name)
-            startup_finished = True
-            await self._run()
-        except _Stopped:
-            pass
+            try:
+                await self._open(name)
+                startup_finished = True
+                await self._run()
+            except _Stopped:
+                pass
+            conducted = self._result(startup_finished, max_duration_seconds, max_turns)
+        except BaseException as fault:
+            execution_fault = fault
+            raise
         finally:
             # The loop has finished the exchange, including queued speech.
             # Recording upload and connection teardown are not call duration.
@@ -1192,8 +1203,30 @@ class VoiceConductor:
             watchdog.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await watchdog
-            await self.close()
+            try:
+                await self.close()
+            except Exception as cleanup_fault:
+                log_event(
+                    logger,
+                    logging.ERROR,
+                    "egma.simulation.cleanup_failed",
+                    "voice resources cleanup failed",
+                    attributes={
+                        "egma.cleanup_operation": "voice_resources_close",
+                        "error.type": type(cleanup_fault).__name__,
+                    },
+                    exc_info=True,
+                )
+                if conducted is None and execution_fault is None:
+                    raise
 
+        assert conducted is not None
+        return conducted
+
+    def _result(
+        self, startup_finished: bool, max_duration_seconds: float, max_turns: int
+    ) -> Conducted:
+        controls = self._controls
         if controls.cause == CANCEL_DIRECTIVE:
             return Conducted(
                 status="canceled",
@@ -1301,6 +1334,8 @@ class VoiceConductor:
 
         @worker.event_handler("on_pipeline_error")
         async def _remember_fault(_worker: object, error: object) -> None:
+            if self._agent_departed:
+                return
             exception = getattr(error, "exception", None)
             processor = getattr(error, "processor", None)
             if isinstance(exception, ProviderKeyUnavailable):
@@ -1356,6 +1391,7 @@ class VoiceConductor:
         if self._closed:
             return
         self._closed = True
+        cleanup_fault: Exception | None = None
         try:
             await self._end_pipeline()
         finally:
@@ -1363,8 +1399,13 @@ class VoiceConductor:
                 await self._connection.close()
             except Exception:
                 logger.exception("closing the voice connection failed")
-            await self._legs.aclose()
-        await self._write_recording()
+            try:
+                await self._legs.aclose()
+            except Exception as fault:
+                cleanup_fault = fault
+            await self._write_recording()
+        if cleanup_fault is not None:
+            raise cleanup_fault
 
     async def _end_pipeline(self) -> None:
         if self._running is None or self._worker is None:
@@ -1395,6 +1436,7 @@ class VoiceConductor:
                 ),
             )
         except Exception as failure:
+            self.evidence_error = "evidence_collection_error"
             log_event(
                 logger,
                 logging.ERROR,
@@ -1636,6 +1678,13 @@ class VoiceConductor:
         self._owes_a_turn = False
         self.media_advanced()
 
+    def persona_concluded_without_speech(self) -> None:
+        """End on a valid end action that requested no speech."""
+        if not self.is_ending:
+            self._ending = PERSONA_CONCLUDED
+        self._owes_a_turn = False
+        self.media_advanced()
+
     def _talked_over(self, began: MediaPosition) -> bool:
         if began < self._record.quiet_since:
             return True
@@ -1713,6 +1762,8 @@ class VoiceConductor:
         await self._recorder.close_input_at(source_end)
 
     def the_brain_failed(self, fault: BaseException) -> None:
+        if self._agent_departed:
+            return
         if self._brain_fault is None:
             self._brain_fault = fault
         self._faulted.set()

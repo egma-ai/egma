@@ -90,6 +90,7 @@ type StatusEvent = {
       readonly recording: string;
     } | null;
     readonly provider_reference: string | null;
+    readonly evidence_error?: "evidence_collection_error" | null;
   };
 };
 
@@ -138,6 +139,9 @@ function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
   if (facts === undefined) return {};
   return {
     turnCount: facts.turn_count,
+    ...(facts.evidence_error === "evidence_collection_error"
+      ? { evidenceError: facts.evidence_error }
+      : {}),
     ...(facts.provider_reference === null
       ? {}
       : { providerReference: facts.provider_reference }),

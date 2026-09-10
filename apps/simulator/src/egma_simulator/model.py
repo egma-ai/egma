@@ -91,7 +91,13 @@ class PersonaReply:
 
 
 class ModelFailure(Exception):
-    """A model call did not produce words the persona can speak."""
+    """A model call did not produce a usable persona reply."""
+
+    def __init__(
+        self, message: str, *, diagnostic_attributes: dict[str, object] | None = None
+    ) -> None:
+        super().__init__(message)
+        self.diagnostic_attributes = diagnostic_attributes or {}
 
 
 class ModelClient(Protocol):
@@ -245,38 +251,48 @@ class OpenAICompatibleModel:
                 f"the model was unreachable: {self._provider_detail(error)}"
             ) from None
 
+        diagnostics = _completion_diagnostics(body)
         try:
             message = body["choices"][0]["message"]
         except (KeyError, IndexError, TypeError) as unexpected:
             raise ModelFailure(
-                "the model's answer had no assistant message: "
-                f"{self._provider_detail(body)}"
+                "the model's answer had no assistant message",
+                diagnostic_attributes=diagnostics,
             ) from unexpected
         if not isinstance(message, dict):
             raise ModelFailure(
-                "the model's assistant message was not an object: "
-                f"{self._provider_detail(message)}"
+                "the model's assistant message was not an object",
+                diagnostic_attributes=diagnostics,
             )
 
-        tool_calls = self._tool_calls_from(message.get("tool_calls"))
+        try:
+            tool_calls = self._tool_calls_from(message.get("tool_calls"))
+        except ModelFailure as failure:
+            failure.diagnostic_attributes = diagnostics
+            raise
         content = message.get("content")
-        if content is None and tool_calls:
-            # Chat-completions providers commonly return null content for a
-            # function call. The call must still have audible words before the
-            # pipeline ends, so use the same bounded goodbye as the scripted
-            # model when the provider omits them.
-            content = GOODBYE
+        if content is None:
+            content = ""
         if not isinstance(content, str):
             raise ModelFailure(
-                f"the model's content was not text: {self._provider_detail(content)}"
+                "the model's content was not text",
+                diagnostic_attributes=diagnostics,
             )
 
         content = self._without_api_key(content)
         text = content.strip()
-        if not text and tool_calls:
-            text = GOODBYE
         if not text:
-            raise ModelFailure("the model's answer had no words to speak")
+            if tool_calls:
+                return PersonaReply(
+                    text="",
+                    concluded=False,
+                    tool_calls=tool_calls,
+                    usage=llm_usage(body, selection_model=self._model_name),
+                )
+            raise ModelFailure(
+                "the model's answer had no words to speak",
+                diagnostic_attributes=diagnostics,
+            )
         return PersonaReply(
             text=text,
             concluded=False,
@@ -339,6 +355,39 @@ class OpenAICompatibleModel:
         if self._session is not None:
             await self._session.close()
             self._session = None
+
+
+def _completion_diagnostics(body: object) -> dict[str, object]:
+    """Safe facts from one unusable completion, without response content."""
+    if not isinstance(body, dict):
+        return {}
+    kept: dict[str, object] = {}
+    response_id = body.get("id")
+    if isinstance(response_id, str) and response_id:
+        kept["gen_ai.response.id"] = response_id[:200]
+    served_model = body.get("model")
+    if isinstance(served_model, str) and served_model:
+        kept["gen_ai.response.model"] = served_model[:200]
+    choices = body.get("choices")
+    choice = choices[0] if isinstance(choices, list) and choices else None
+    if isinstance(choice, dict):
+        finish_reason = choice.get("finish_reason")
+        if isinstance(finish_reason, str) and finish_reason:
+            kept["gen_ai.response.finish_reason"] = finish_reason[:100]
+        message = choice.get("message")
+        if isinstance(message, dict):
+            kept["gen_ai.response.refusal_present"] = bool(message.get("refusal"))
+    usage = body.get("usage")
+    if isinstance(usage, dict):
+        for source, target in (
+            ("prompt_tokens", "gen_ai.usage.input_tokens"),
+            ("completion_tokens", "gen_ai.usage.output_tokens"),
+            ("total_tokens", "gen_ai.usage.total_tokens"),
+        ):
+            value = usage.get(source)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                kept[target] = value
+    return kept
 
 
 def build_model_client(

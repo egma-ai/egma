@@ -105,6 +105,17 @@ class LiveKitChat:
         """Expose the room driver for tests."""
         return self._backend
 
+    @property
+    def has_ended(self) -> bool:
+        """Whether the room has already observed a normal remote ending."""
+        return self._backend.has_ended
+
+    def raise_if_failed(self) -> None:
+        try:
+            self._backend.raise_if_failed()
+        except MediaBackendError as refused:
+            raise PlugError(str(refused), ending=refused.ending) from refused
+
     async def open(self) -> str | None:
         """Open the room, require Egma hello, and collect an optional greeting.
         Return None when the agent waits for the persona to speak first.
@@ -147,6 +158,27 @@ class LiveKitChat:
             # Use answer start, excluding the later turn-completion and drain waits.
             answered_at=answer.answer_began_at,
         )
+
+    async def finish(self, text: str) -> None:
+        """Send final persona words without asking the room for another turn."""
+        try:
+            await self._backend.send(text)
+        except MediaBackendError as refused:
+            raise PlugError(str(refused), ending=refused.ending) from refused
+
+    async def wait_ended(self) -> None:
+        """Wait until the room observes a normal remote ending."""
+        try:
+            await self._backend.wait_ended()
+        except MediaBackendError as refused:
+            raise PlugError(str(refused), ending=refused.ending) from refused
+
+    async def wait_failed(self) -> None:
+        """Surface a room transport failure while persona work is pending."""
+        try:
+            await self._backend.wait_failed()
+        except MediaBackendError as refused:
+            raise PlugError(str(refused), ending=refused.ending) from refused
 
     async def close(self) -> None:
         """Leave and clean up the room according to token authority; safe from every

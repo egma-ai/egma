@@ -270,7 +270,10 @@ export async function simulationRoutes(
         traceId === undefined
           ? Promise.resolve(undefined)
           : readTrace(simulationAuth, traceId, { window }).catch(() => undefined),
-        simulation.status !== "completed" || traceId === undefined
+        (simulation.status !== "completed" &&
+          simulation.status !== "failed" &&
+          simulation.status !== "canceled") ||
+        traceId === undefined
           ? Promise.resolve(undefined)
           : readTraceGrading(simulationAuth, {
               source: "simulation",
@@ -433,6 +436,12 @@ export async function simulationRoutes(
         return unprocessable(
           reply,
           "the final platform transcript is still arriving. Grading will start when it is ready.",
+        );
+      }
+      if (requested.kind === "evidence_error") {
+        return unprocessable(
+          reply,
+          "Egma could not collect the complete evidence, so grading cannot run.",
         );
       }
       if (requested.kind === "not_requested") {

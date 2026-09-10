@@ -276,6 +276,10 @@ class RetellTextMode:
         self._history.append({"role": USER_ROLE, "content": text})
         return self._read(await self._exchange())
 
+    async def finish(self, text: str) -> AgentReply:
+        """Send the final persona words through Retell's one completion operation."""
+        return await self.deliver(text)
+
     async def close(self) -> None:
         """Let go of the connection. Safe from every state.
 
