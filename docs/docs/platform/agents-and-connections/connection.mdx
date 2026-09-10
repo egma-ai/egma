@@ -1,0 +1,64 @@
+---
+title: "Connection"
+---
+
+A connection defines how Egma reaches your agent to run simulations. Each connection belongs to one [agent](/docs/platform/agents-and-connections/agent), and an agent can have multiple connections.
+
+For example, you can connect to a Retell agent through text mode, a web call, or its phone number. For a LiveKit agent, Egma joins a room where your agent handles the conversation.
+
+## Choose a connection
+
+Your options depend on the platform your agent runs on.
+
+| Platform | Connection option | What it does |
+| --- | --- | --- |
+| LiveKit | Project credentials | Uses your LiveKit project credentials to create a room and dispatch your agent. Supports voice and text simulations. |
+| LiveKit | Token endpoint | Requests room access from an endpoint you provide. Your server keeps the LiveKit project credentials and handles room setup and agent dispatch. Supports voice and text simulations. |
+| Retell | Text mode | Tests conversation logic through text, without sending audio through the speech stack. |
+| Retell | Web call | Runs a voice conversation over the internet without needing a phone number. |
+| Retell | Phone | Calls your agent through its deployed Retell phone number. |
+
+## Text or voice?
+
+Text simulations help you test how your agent handles a conversation: what it says, which tools it calls, and whether it follows the expected behavior.
+
+Voice simulations also exercise the speech stack. Use them to check the spoken experience, including how the agent hears the caller, responds with audio, and handles timing.
+
+You can start with text while developing a flow, then run the same suite over voice.
+
+## Add a connection
+
+Select the agent you want to connect to, choose an available connection option, and provide its required details.
+
+For LiveKit, you need the agent's dispatch name and either project credentials or a token endpoint. Your agent also needs the Egma SDK configured for simulations.
+
+For Retell, you need access to the agent through a Retell API key. A phone connection also needs a phone number routed to that agent.
+
+Give the connection a name that makes it easy to identify when starting a run, such as “Appointment assistant — voice.”
+
+Follow the setup guide for your platform:
+
+- [Connect a LiveKit agent](/docs/integrations/livekit)
+- [Connect a Retell agent](/docs/integrations/retell)
+
+## Use a connection in a run
+
+When starting a run, select your test suite, agent, and one of that agent's connections.
+
+A run uses one connection for every simulation in the suite. To test the same suite over another connection, start a separate run with that connection.
+
+## Connection capabilities
+
+The connection you choose affects which testing features are available.
+
+Retell text mode supports Retell-managed LLM and conversation-flow agents. Use a voice connection for Retell custom-LLM agents.
+
+Retell phone simulations use the deployed phone route and its normal backend. They do not support test mock tools or test-supplied dynamic variables. Use a Retell web-call connection when you need those controls during a voice simulation.
+
+See [Mock tool responses](/docs/platform/tests/mock-tool-responses) for details.
+
+## Connections and monitoring
+
+Connections are used to run simulations. Production monitoring is configured separately for the agent.
+
+Adding a connection does not turn on production monitoring. See [Set up monitoring](/docs/platform/monitoring/set-up-monitoring) to collect real conversations.

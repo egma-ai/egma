@@ -1,0 +1,45 @@
+---
+title: "Agent"
+---
+
+An agent represents the voice agent you want to test or monitor in Egma. We currently support LiveKit and Retell agents.
+
+For example, if you have a voice agent that handles appointment bookings, you can register it in Egma as “Appointment assistant.” You can then run tests against it and monitor its production conversations.
+
+## Register an agent
+
+Give your agent a name and select its platform: LiveKit or Retell.
+
+Registration creates a record in Egma. Your voice agent continues to run on its existing platform. The next step depends on whether you want to test it, monitor it, or both.
+
+## Test your agent
+
+To run tests, add a [connection](/docs/platform/agents-and-connections/connection) that tells Egma how to reach your agent. When you start a run, select the agent, connection, and test suite.
+
+Tests belong to your project, so you can run the same suite against different agents without creating a separate copy for each one.
+
+## One agent, multiple connections
+
+An agent can have multiple connections. Each connection provides a way to reach the same agent.
+
+For example, a Retell agent could have:
+
+- A text connection to test conversation logic.
+- A web-call connection to test spoken conversations.
+- A phone connection to test its deployed phone route.
+
+Choose the connection you want to use when starting a run.
+
+## Monitor your agent
+
+Production monitoring collects evidence from real conversations so you can review what your agent said and did.
+
+Monitoring is configured separately from simulation connections. You can monitor an agent without creating a test suite or adding a simulation connection.
+
+The setup depends on your platform. Retell monitoring imports calls through its API. LiveKit monitoring uses the Egma SDK in your agent's code.
+
+## Set up your platform
+
+- [Connect a LiveKit agent](/docs/integrations/livekit)
+- [Connect a Retell agent](/docs/integrations/retell)
+- [Set up production monitoring](/docs/platform/monitoring/set-up-monitoring)

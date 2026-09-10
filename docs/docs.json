@@ -42,7 +42,13 @@
           {
             "group": "Platform",
             "pages": [
-              "docs/platform/agents-and-connections",
+              {
+                "group": "Agents & Connections",
+                "pages": [
+                  "docs/platform/agents-and-connections/agent",
+                  "docs/platform/agents-and-connections/connection"
+                ]
+              },
               {
                 "group": "Tests",
                 "pages": [
@@ -336,6 +342,14 @@
   "redirects": [
     {
       "source": "/",
+      "destination": "/docs/get-started/introduction"
+    },
+    {
+      "source": "/docs/platform/agents-and-connections",
+      "destination": "/docs/platform/agents-and-connections/agent"
+    },
+    {
+      "source": "/get-started/introduction",
       "destination": "/docs/get-started/introduction"
     }
   ]
