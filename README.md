@@ -70,8 +70,12 @@ agent's harness, test it, and open a pull request for you to review.
 
 ## 💬 Help and feedback
 
+Read the [docs](https://docs.egma.ai)
 
-Read the [docs](https://docs.egma.ai) or [open a GitHub issue](https://github.com/egma-ai/egma/issues). The [Discord invite](https://example.com/egma-discord-placeholder) is coming soon.
+Join [Discord](https://discord.gg/v4KHSNHfPj)
+
+Open a [GitHub issue](https://github.com/egma-ai/egma/issues).
+
 
 ## ⚖️ License
 
