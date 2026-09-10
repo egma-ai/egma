@@ -1,0 +1,149 @@
+# Egma
+
+> Open-source testing and monitoring for voice agents.
+
+## Docs
+
+- [Introduction](https://docs.egma.ai/docs/get-started/introduction.md)
+- [Quickstart in 5 minutes](https://docs.egma.ai/docs/get-started/quickstart.md): Run your first voice simulation with your coding agent.
+- [Testing Philosophy](https://docs.egma.ai/docs/core-philosophies/testing-philosophy.md)
+- [Monitoring philosophy](https://docs.egma.ai/docs/core-philosophies/monitoring-philosophy.md)
+- [What is an agent?](https://docs.egma.ai/docs/platform/agents-and-connections/agent.md)
+- [Register an agent](https://docs.egma.ai/docs/platform/agents-and-connections/register-an-agent.md)
+- [What is a connection?](https://docs.egma.ai/docs/platform/agents-and-connections/connection.md)
+- [Add a connection](https://docs.egma.ai/docs/platform/agents-and-connections/add-a-connection.md)
+- [What is a test?](https://docs.egma.ai/docs/platform/tests/overview.md)
+- [Create a test](https://docs.egma.ai/docs/platform/tests/create-a-test.md)
+- [Test suites](https://docs.egma.ai/docs/platform/tests/test-suites.md)
+- [Mock tool responses](https://docs.egma.ai/docs/platform/tests/mock-tool-responses.md)
+- [Keep your tests in code](https://docs.egma.ai/docs/platform/tests/write-a-test.md)
+- [What is a persona?](https://docs.egma.ai/docs/platform/personas.md)
+- [Add a persona](https://docs.egma.ai/docs/platform/personas/add-a-persona.md)
+- [Update a persona](https://docs.egma.ai/docs/platform/personas/update-a-persona.md)
+- [What is a run?](https://docs.egma.ai/docs/platform/runs/overview.md)
+- [What is a simulation?](https://docs.egma.ai/docs/platform/runs/simulation.md)
+- [Start a run](https://docs.egma.ai/docs/platform/runs/start-and-follow-a-run.md)
+- [Review a run](https://docs.egma.ai/docs/platform/runs/review-a-run.md)
+- [What is a grader?](https://docs.egma.ai/docs/platform/graders/overview.md)
+- [Add a grader](https://docs.egma.ai/docs/platform/graders/add-a-grader.md)
+- [Update a grader](https://docs.egma.ai/docs/platform/graders/configure-graders.md)
+- [Types of graders](https://docs.egma.ai/docs/platform/graders/types.md)
+- [Built-in graders](https://docs.egma.ai/docs/platform/graders/built-in-graders.md)
+- [Create a custom grader](https://docs.egma.ai/docs/platform/graders/custom-graders.md)
+- [Scores and thresholds](https://docs.egma.ai/docs/platform/graders/scores-and-thresholds.md)
+- [What is monitoring?](https://docs.egma.ai/docs/platform/monitoring/overview.md)
+- [Set up monitoring](https://docs.egma.ai/docs/platform/monitoring/set-up-monitoring.md)
+- [Review production conversations](https://docs.egma.ai/docs/platform/monitoring/review-conversations.md)
+- [What are provider API keys?](https://docs.egma.ai/docs/platform/provider-api-keys.md)
+- [Set up provider API keys](https://docs.egma.ai/docs/platform/provider-api-keys/set-up-provider-api-keys.md)
+- [LiveKit](https://docs.egma.ai/docs/integrations/livekit.md)
+- [Connect a LiveKit agent](https://docs.egma.ai/docs/integrations/livekit/connect.md)
+- [Monitor a LiveKit agent](https://docs.egma.ai/docs/integrations/livekit/monitor.md)
+- [Text connections and Env](https://docs.egma.ai/docs/integrations/livekit/text-and-env.md)
+- [Use a token endpoint](https://docs.egma.ai/docs/integrations/livekit/token-endpoint.md)
+- [Troubleshooting](https://docs.egma.ai/docs/integrations/livekit/troubleshooting.md)
+- [Retell](https://docs.egma.ai/docs/integrations/retell.md)
+- [Connect a Retell agent](https://docs.egma.ai/docs/integrations/retell/connect.md)
+- [Monitor a Retell agent](https://docs.egma.ai/docs/integrations/retell/monitor.md)
+- [Env and mock tools](https://docs.egma.ai/docs/integrations/retell/env-and-mocks.md)
+- [Add a phone connection](https://docs.egma.ai/docs/integrations/retell/phone-connection.md)
+- [Evidence and troubleshooting](https://docs.egma.ai/docs/integrations/retell/evidence-and-troubleshooting.md)
+- [Support](https://docs.egma.ai/docs/support.md)
+
+## Skills, CLI & SDKs
+
+- [Skills and CLI](https://docs.egma.ai/skills-cli-sdks/skills-and-cli.md)
+- [LiveKit Python SDK](https://docs.egma.ai/skills-cli-sdks/sdks/livekit-python.md)
+- [LiveKit JavaScript SDK](https://docs.egma.ai/skills-cli-sdks/sdks/livekit-javascript.md)
+
+## Self-hosting
+
+- [Self-host Egma](https://docs.egma.ai/self-hosting/get-started.md)
+- [Self-hosting support](https://docs.egma.ai/self-hosting/support.md)
+
+## API reference
+
+- [API overview](https://docs.egma.ai/api-reference/overview.md)
+- [Create a run](https://docs.egma.ai/api-reference/create-a-run.md): Run every active test in a suite against one agent connection. Execution and grading continue after this request returns. Keep the returned id to follow progress and inspect results.
+- [List runs](https://docs.egma.ai/api-reference/list-runs.md)
+- [Get a run](https://docs.egma.ai/api-reference/get-a-run.md)
+- [List simulations in a run](https://docs.egma.ai/api-reference/list-simulations.md)
+- [List run events](https://docs.egma.ai/api-reference/list-run-events.md): Read run events in sequence order. Pass each response’s next value as after. Continue until done is true, then inspect the simulation grades for pass or fail results.
+- [Cancel a run](https://docs.egma.ai/api-reference/cancel-a-run.md)
+- [Discover agents on an agent platform](https://docs.egma.ai/api-reference/discover-agents.md): List the Retell agents and connection candidates available to a provider API key. Supply credentials.apiKey or an existing agentId. This request does not register agents or save credentials.
+- [Register an agent](https://docs.egma.ai/api-reference/register-agent.md): Register an agent in your project, with an optional first connection. An existing provider identity can be reused. Check result to see whether Egma created an agent, added a connection, or reused one.
+- [List agents](https://docs.egma.ai/api-reference/list-agents.md)
+- [Get an agent](https://docs.egma.ai/api-reference/get-agent.md)
+- [Update an agent](https://docs.egma.ai/api-reference/update-agent.md)
+- [Archive an agent](https://docs.egma.ai/api-reference/archive-agent.md)
+- [Restore an agent](https://docs.egma.ai/api-reference/restore-agent.md)
+- [List supported connection options](https://docs.egma.ai/api-reference/list-connection-options.md): List the connection options supported by this server. Use each option’s fields and credentialFields to configure an agent connection. This catalog does not check provider accounts or deployment credentials.
+- [Add an agent connection](https://docs.egma.ai/api-reference/add-connection.md): Add a simulation connection to an agent. Use the connection catalog for required fields, Retell discovery for platformAgentId, or your LiveKit worker’s dispatch name for config.agentName.
+- [Get an agent connection](https://docs.egma.ai/api-reference/get-connection.md)
+- [Update an agent connection](https://docs.egma.ai/api-reference/update-connection.md)
+- [Archive an agent connection](https://docs.egma.ai/api-reference/archive-connection.md)
+- [Restore an agent connection](https://docs.egma.ai/api-reference/restore-connection.md)
+- [List test suites](https://docs.egma.ai/api-reference/list-test-suites.md)
+- [Create a test suite](https://docs.egma.ai/api-reference/create-test-suite.md): Creates an empty suite in the current project. Add tests before starting a run. A suite stores no agent or connection; each run selects those and executes every active test in the suite.
+- [Get a test suite](https://docs.egma.ai/api-reference/get-test-suite.md)
+- [Rename a test suite](https://docs.egma.ai/api-reference/update-test-suite.md): Changes the display name without changing the suite's ID or membership. Earlier runs display the current suite name.
+- [Permanently delete a test suite from authoring](https://docs.egma.ai/api-reference/delete-test-suite.md): The suite and its tests leave authoring permanently. Existing run evidence stays readable.
+- [List the active tests in a test suite](https://docs.egma.ai/api-reference/list-tests.md)
+- [Create a test in a test suite](https://docs.egma.ai/api-reference/create-test.md): Creates the test and its first content version in an existing suite. Choose at least one persona. The agent and connection are selected when starting a run, not when creating the test.
+- [Get a test version](https://docs.egma.ai/api-reference/get-test-version.md): Read the frozen scenario, expected behaviors, persona selections, mocks, and context used by a simulation. Later test edits do not change this version.
+- [Get a test](https://docs.egma.ai/api-reference/get-test.md)
+- [Update a test](https://docs.egma.ai/api-reference/update-test.md): Omitted fields keep their current values. Content changes create an immutable version and require expectedVersionId from the last read. Name and description changes keep the content version. Existing simulations retain their original evidence.
+- [Permanently delete a test from authoring](https://docs.egma.ai/api-reference/delete-test.md): The test leaves authoring permanently only while expectedVersionId and expectedRevision are both still current. Existing run evidence stays readable.
+- [List test versions](https://docs.egma.ai/api-reference/list-test-versions.md)
+- [Use a persona](https://docs.egma.ai/api-reference/use-persona.md): Save this project's first model settings for the persona. Omit models to use its declared defaults. Repeated use returns the existing settings; use Update a persona to change them.
+- [List personas](https://docs.egma.ai/api-reference/list-personas.md)
+- [Create a persona](https://docs.egma.ai/api-reference/create-persona.md): Create a project-owned persona with its first behavior version and complete model settings. Omit models to use the declared defaults. Add its ID or unambiguous name to a test to use it.
+- [Get persona authoring choices](https://docs.egma.ai/api-reference/get-persona-form.md): Use this response to choose supported models, a recommended voice, and a valid speech rate before creating or updating a persona.
+- [Get a persona](https://docs.egma.ai/api-reference/get-persona.md)
+- [Update a persona](https://docs.egma.ai/api-reference/update-persona.md): Change project model settings or the current custom behavior. Behavior edits require expectedVersionId and create a version when changed. Model settings and display labels create no version. Egma-owned behavior is read-only; its project settings are editable.
+- [Permanently delete a persona from authoring](https://docs.egma.ai/api-reference/delete-persona.md): The persona leaves every authoring list and picker permanently. Existing run evidence stays readable.
+- [List persona versions](https://docs.egma.ai/api-reference/list-persona-versions.md)
+- [Get a persona's test usage](https://docs.egma.ai/api-reference/get-persona-usage.md)
+- [Get a persona version](https://docs.egma.ai/api-reference/get-persona-version.md)
+- [Clone a persona](https://docs.egma.ai/api-reference/fork-persona.md): Creates an editable custom copy of the persona's current behavior and model settings. The original persona and tests that select it stay unchanged.
+- [Get a simulation](https://docs.egma.ai/api-reference/get-simulation.md): Read a simulation’s test, persona, connection, metrics, transcript, and grades. Execution status and gradingState are separate: a completed simulation may still be grading.
+- [Regrade a simulation](https://docs.egma.ai/api-reference/regrade-simulation.md): Grade a completed simulation again with its original grader selection and recorded evidence. Later grader settings do not apply. Send no body, then follow gradingState with Get a simulation.
+- [List traces](https://docs.egma.ai/api-reference/list-traces.md)
+- [Get a trace](https://docs.egma.ai/api-reference/get-trace.md)
+- [Get a simulation recording link](https://docs.egma.ai/api-reference/get-simulation-recording.md)
+- [Get grader model choices](https://docs.egma.ai/api-reference/get-grader-form.md): Read supported provider/model pairs and default settings before creating or configuring an LLM grader.
+- [List the grader library for a project](https://docs.egma.ai/api-reference/list-grader-library.md): Includes Egma's built-in graders and custom graders owned by this project. activeProjectGraderId identifies a definition already in use by this project; null means it can be added.
+- [Get one grader library entry](https://docs.egma.ai/api-reference/get-grader-library-entry.md): Read the current definition or request an exact definitionVersion from historical grade evidence. Setting definitions describe the values needed when adding the grader to a project.
+- [Update grader instructions](https://docs.egma.ai/api-reference/update-grader-definition.md): Edit the current custom definition's prompt or display labels. Send its definitionVersion as baseDefinitionVersion. A changed prompt creates a version; label edits do not. Egma-owned definitions are read-only.
+- [Use a grader in the current project](https://docs.egma.ai/api-reference/use-grader-in-project.md): Adds an available definition with this project's scope, settings, and pass threshold. These settings apply to future work; adding a grader does not change earlier simulation plans. A definition can be active only once per project. The example settings are for Response latency.
+- [Create and use a custom LLM grader](https://docs.egma.ai/api-reference/create-custom-grader.md): Create a custom LLM grader owned by this project. Set its instructions, model, scope, and pass threshold. Omit settings to save the declared model defaults at creation.
+- [Clone a grader](https://docs.egma.ai/api-reference/clone-grader.md): Copy the current LLM definition and this project's effective settings into an independent custom grader. Historical versions and code graders cannot be cloned. The clone receives no source updates.
+- [List project graders](https://docs.egma.ai/api-reference/list-graders.md): Returns active project policies, including scope, settings, and individual pass thresholds. Use /v1/grader-library to find definitions that are not yet active in this project.
+- [Update a project grader's policy](https://docs.egma.ai/api-reference/update-grader.md): Change model settings, scope, or threshold for future work. Existing simulation plans keep their selected definitions and settings, including when regraded. Expected behaviors has fixed scope; its model and threshold are editable.
+- [Remove an optional grader from a project](https://docs.egma.ai/api-reference/remove-grader.md): Stops selecting this grader for future project work. Existing grades and frozen simulation plans remain readable. Expected behaviors cannot be removed.
+- [Discover Retell voice agents](https://docs.egma.ai/api-reference/discover-retell-voice-agents.md)
+- [Start pulling an agent's production calls](https://docs.egma.ai/api-reference/start-monitoring.md)
+- [Stop pulling an agent's production calls](https://docs.egma.ai/api-reference/stop-monitoring.md)
+- [Apply the complete authored state from a repository](https://docs.egma.ai/api-reference/apply-repository-change-set.md): The complete authored suites and tests are applied atomically. Each test carries its own mock tools and env. Missing resources refuse rather than delete.
+- [List projects](https://docs.egma.ai/api-reference/list-projects.md)
+- [Create a project](https://docs.egma.ai/api-reference/create-project.md)
+- [Get a project](https://docs.egma.ai/api-reference/get-project.md)
+- [Update a project](https://docs.egma.ai/api-reference/update-project.md)
+- [Get the requester's organization](https://docs.egma.ai/api-reference/get-organization.md)
+- [Update the requester's organization](https://docs.egma.ai/api-reference/update-organization.md)
+- [List organization members](https://docs.egma.ai/api-reference/list-members.md)
+- [List pending invitations](https://docs.egma.ai/api-reference/list-invitations.md)
+- [Invite an organization member](https://docs.egma.ai/api-reference/create-invitation.md)
+- [Change a member role](https://docs.egma.ai/api-reference/change-member-role.md)
+- [Remove an organization member](https://docs.egma.ai/api-reference/remove-member.md)
+- [Deactivate a member account](https://docs.egma.ai/api-reference/deactivate-member.md)
+- [List API keys](https://docs.egma.ai/api-reference/list-api-keys.md)
+- [Create an API key](https://docs.egma.ai/api-reference/create-api-key.md)
+- [Revoke an API key](https://docs.egma.ai/api-reference/revoke-api-key.md)
+- [List organization provider API keys](https://docs.egma.ai/api-reference/list-provider-keys.md)
+- [Add or replace an organization provider API key](https://docs.egma.ai/api-reference/put-provider-key.md)
+- [Remove an organization provider API key](https://docs.egma.ai/api-reference/delete-provider-key.md)
+
+## OpenAPI Specs
+
+- [openapi](https://docs.egma.ai/openapi.json)

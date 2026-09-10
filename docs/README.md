@@ -39,7 +39,8 @@ are included automatically.
 
 The specification uses a relative server URL. A Mintlify deployment overlay
 sets the hosted example URL from the CLI's `DEFAULT_PLATFORM_URL`; it changes no
-endpoint definition. The generated theme and short marks also come from the
+endpoint definition. The command also generates `llms.txt` from the current
+navigation and page metadata. The generated theme and short marks come from the
 application's canonical assets. Edit Mintlify-specific CSS in
 `scripts/docs/style.css`.
 

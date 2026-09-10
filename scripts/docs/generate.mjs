@@ -18,6 +18,7 @@ const stableRoutes = {
 };
 const ids = new Set();
 const groups = new Map();
+const apiDescriptions = new Map();
 
 for (const [endpoint, item] of Object.entries(spec.paths)) {
   for (const [method, operation] of Object.entries(item)) {
@@ -30,6 +31,8 @@ for (const [endpoint, item] of Object.entries(spec.paths)) {
     const page = `api-reference/${slug}`;
     if (generated.has(`${page}.mdx`)) throw new Error(`Duplicate API page: ${page}`);
     generated.set(`${page}.mdx`, `---\nsidebarTitle: ${JSON.stringify(operation.summary)}\nopenapi: ${JSON.stringify(`openapi.json ${method.toUpperCase()} ${endpoint}`)}\n---\n`);
+    const description = operation.description?.split(/\n\s*\n/)[0].replace(/\s+/g, ' ').trim();
+    if (description) apiDescriptions.set(page, description.slice(0, 300));
     if (!groups.has(resource)) groups.set(resource, []);
     groups.get(resource).push(page);
   }
@@ -55,6 +58,7 @@ generated.set('deployment-server.overlay.json', json({
 }));
 
 const config = JSON.parse(await read('docs/docs.json'));
+if (!config.name || !config.description) throw new Error('docs.json must name and describe the site.');
 const apiTabs = config.navigation.tabs.filter((tab) => tab.tab === 'API reference');
 if (apiTabs.length !== 1) throw new Error('Expected one API reference tab.');
 const resources = [...resourceOrder.filter((tag) => groups.has(tag)), ...[...groups.keys()].filter((tag) => !resourceOrder.includes(tag)).sort()];
@@ -63,6 +67,44 @@ const apiNavigation = {
   pages: ['api-reference/overview', ...resources.map((group) => ({ group, pages: groups.get(group) }))],
 };
 config.navigation.tabs[config.navigation.tabs.indexOf(apiTabs[0])] = apiNavigation;
+
+function navigationPages(value) {
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) return value.flatMap(navigationPages);
+  if (!value || typeof value !== 'object') return [];
+  return ['tabs', 'groups', 'pages'].flatMap((key) => navigationPages(value[key]));
+}
+
+function frontmatterValue(content, key) {
+  const frontmatter = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(content)?.[1];
+  const raw = new RegExp(`^${key}:\\s*(.+)$`, 'm').exec(frontmatter ?? '')?.[1]?.trim();
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function markdownText(value) {
+  return value.replaceAll('[', '\\[').replaceAll(']', '\\]');
+}
+
+const documentationOrigin = 'https://docs.egma.ai';
+const llms = [`# ${config.name}`, '', `> ${config.description}`, ''];
+for (const tab of config.navigation.tabs) {
+  llms.push(`## ${tab.tab}`, '');
+  for (const page of navigationPages(tab)) {
+    const content = generated.get(`${page}.mdx`) ?? await read(`docs/${page}.mdx`);
+    const title = frontmatterValue(content, 'sidebarTitle') ?? frontmatterValue(content, 'title');
+    if (!title) throw new Error(`Missing title for llms.txt: ${page}`);
+    const description = frontmatterValue(content, 'description') ?? apiDescriptions.get(page);
+    llms.push(`- [${markdownText(title)}](${documentationOrigin}/${page}.md)${description ? `: ${description}` : ''}`);
+  }
+  llms.push('');
+}
+llms.push('## OpenAPI Specs', '', `- [openapi](${documentationOrigin}/openapi.json)`, '');
+generated.set('llms.txt', llms.join('\n'));
 
 // Read the same visual values as the application. Only the Mintlify selectors
 // live in a docs-specific stylesheet; theme values stay in the product theme.
@@ -115,4 +157,4 @@ for (const [file, content] of generated) {
 }
 if (check && drift.length) throw new Error(`Generated docs are stale: ${drift.join(', ')}. Run pnpm docs:generate.`);
 if (!check) for (const file of obsolete) await unlink(path.join(docs, file));
-console.log(`${check ? 'Checked' : 'Generated'} ${ids.size} API operations in ${groups.size} resources, the hosted overlay, and the shared docs theme.`);
+console.log(`${check ? 'Checked' : 'Generated'} ${ids.size} API operations in ${groups.size} resources, the hosted overlay, shared docs theme, and llms.txt.`);
