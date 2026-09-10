@@ -3,21 +3,22 @@ title: "Quickstart in 5 minutes"
 description: "Run your first voice simulation with your coding agent."
 ---
 
-Run your first voice simulation in as little as five minutes with Egma’s skills and your coding agent. Open your voice agent’s repository and give your coding agent this prompt:
+Using a coding agent with egma skills and cli is literally the best way to create, run and grade your first test suite.
+
+Open your voice agent’s repository and give your coding agent this prompt:
 
 ```text
-Set up Egma simulation testing in this repo. Install the skills with:
-npx skills add egma-ai/egma --skill integrate-egma write-egma-tests
+Set up Egma simulation testing in this repo. 
 
-Use integrate-egma to connect my voice agent and write-egma-tests to
-create one test with one persona. Run it over voice, share the results
-link, and wait for the run to finish.
+Install the skills with: `npx skills add egma-ai/egma`
+
+Start a test run and share the live link with me.
 ```
 
-The skill uses [Egma Cloud](https://app.egma.ai), our hosted version, by default. For self-hosting, [set up your instance first](/self-hosting/get-started), then add "Use my Egma instance at `<your-instance-url>`" to the prompt above.
+When you paste this prompt your coding agent will download egma skills. We have two skills - 
+1. integrate-egma skill, which instruct your coding agent on how to register your voice agent and connect it to the egma platform.
+2. write-voice-agent-tests skill - it tells your coding agent how to write good voice agent tests as simple markdown files.
 
-Follow the prompts to install the skills for your coding agent and authorize Egma login. Review the proposed test and mock any tools that could change your data. Open the results link to review the conversation and grading results once they are ready.
+These same skills will also teach your agent on how to start a test run on the egma platform. One a run is in progress, you will be able to see all the simulations running live in the UI. 
 
-For LiveKit, the skill may use a local worker for your first run. Deploy any SDK changes before starting later runs.
-
-Prefer to use the terminal yourself? [Get started with the CLI](/skills-cli-sdks/cli/install).
+Your coding agent will be able to fetch the details of what happened to each of those tests via the CLI. This loop enables a coding agent to autonomously iterate on improving your voice agent once you have defined good tests with the right set of expected behaviors - very much akin to test drien development philosophy.

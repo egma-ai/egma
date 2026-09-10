@@ -2,15 +2,15 @@
 title: "Introduction"
 ---
 
-Egma is an open-source platform for testing and monitoring voice agents. It helps you run simulation tests so that you can be confident in the agents behavior before releasing and then helps you monitor for issues in production.
+Egma is an open-source platform for testing and monitoring voice agents. It helps you run simulation tests so that you can be confident in your agent's behavior before releases and then helps you monitor for issues in production.
 
 You can use [Egma Cloud](https://app.egma.ai) or [self-host](/self-hosting/get-started) Egma on your own infrastructure.
 
 ## Quickstart
 
-Follow the [five-minute quickstart](/docs/get-started/quickstart) guide to create, run and grade your first test suite.
+Follow the [five-minute quickstart](/docs/get-started/quickstart) guide to create, run, and grade your first test suite.
 
-## Why we built Egma?
+## Why we built Egma
 
 We’ve built voice agents in production ourselves. And as developers, one of the most frustrating parts was calling the agent again and again, reciting the same script just to test its behavior. It felt like we’d signed up for creative work and ended up doing grunt work.
 
@@ -24,24 +24,25 @@ First, you need a way to test the major scenarios your agent will face in produc
 
 Which brings us to the second: you need a way to find issues once your agent is in production, whether it’s handling a few dozen conversations or millions. And we don’t mean simply running an LLM as a judge against a fixed checklist. That can help you check for known problems. But what about the problems you haven’t thought to look for?
 
-Good monitoring needs to do both: catch known behaviors drifting and surface unexpected ways your agent is going wrong.
+Good monitoring needs to do both: detect drift in known behaviors and surface unexpected ways your agent is going wrong.
 
-We think its a really hard problem to solve. And having felt it firsthand, we’re deeply motivated to take a shot at it. Egma exists to help developers trust the voice agents they are shipping. 
+We think it's a really hard problem to solve. And having felt it firsthand, we’re deeply motivated to take a shot at it. Egma exists to help developers trust the voice agents they are shipping.
 
 
 ## Our core principles & why you should probably choose Egma
 
-- **Open source** - You should be able to inspect, modify and improve the system that you rely on for your production agent's testing and monitoring. 
-- **Self Hostable** - Unfortunately, open source has not always meant easily self hostable. Voice agents are already handling sensitive data across industries. And in a lot of cases, you might not want to have a long vendor review cycle. Egma is designed to be self hostable. We keep our self hosting guides up-to-date. If you're looking to self host egma, we cna help you with it. 
-- **Bring your own keys** - Platforms that help you do simulation testing already exist. But they all charge a heavy premium on top of inferece. We believe if the industry truly wants to scale simulation testing of voice agents, we need to stop charing premium on inference and start providing infrastrucure to scale simulations. Egma allows you to bring your own STT/LLM/TTS providers and limits. We also provide a 0% markup inference directly within the platform so you don't have to wrestle with multiple keys. Think of egma as posthog for voice agent testing and monitoring!
+- **Open source** - You should be able to inspect, modify, and improve the system that you rely on for your production agent's testing and monitoring.
+- **Self-hostable** - Unfortunately, open source has not always meant easy to self-host. Voice agents are already handling sensitive data across industries. And in a lot of cases, you might not want to have a long vendor review cycle. Egma is designed to be self-hostable. We keep our self-hosting guides up to date. If you're looking to self-host Egma, we can help you with it.
+- **Bring your own keys** - Platforms that help you do simulation testing already exist. But they all charge a heavy premium on top of inference costs. We believe if the industry truly wants to scale simulation testing of voice agents, we need to stop charging a premium on inference and start providing infrastructure to scale simulations. Egma allows you to bring your own STT, LLM, and TTS provider keys. We also provide inference directly within the platform at a 0% markup so you don't have to wrestle with multiple keys. Think of Egma as PostHog for voice agent testing and monitoring!
 - **Keep tests with your code** - Egma tests are simple Markdown files that live alongside your agent code. They give developers and coding agents shared context on how the voice agent should behave. Tests evolve with your code and go through the same reviews, so keeping them in sync is part of your existing workflow.
 
 
 ## Further reading
-1. Read about our [philosophy of voice agent testing]()
-2. Read on how we think about [monitoring built for voice agents]()
+
+1. Read about our [philosophy of voice agent testing](/docs/core-concepts/testing-philosophy).
+2. Read how we think about [monitoring built for voice agents](/docs/core-concepts/monitoring-philosophy).
 
 ## Community & contact
 
 1. Found a bug or have a feature request? [Open a GitHub issue](https://github.com/egma-ai/egma/issues).
-2. Join our [Discord](https://discord.gg/v4KHSNHfPj) for  faster replies!
+2. Join our [Discord](https://discord.gg/v4KHSNHfPj) for faster replies!
