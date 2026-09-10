@@ -74,7 +74,7 @@ Read the [docs](https://docs.egma.ai)
 
 Join [Discord](https://discord.gg/v4KHSNHfPj)
 
-Open a [GitHub issue](https://github.com/egma-ai/egma/issues).
+Open a [GitHub issue](https://github.com/egma-ai/egma/issues)
 
 
 ## ⚖️ License
