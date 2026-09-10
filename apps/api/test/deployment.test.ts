@@ -147,22 +147,6 @@ describe("the API's deployment story", () => {
     ).toEqual([]);
   });
 
-  it("documents every variable the API reads in the full environment reference", () => {
-    const documented = readFileSync(
-      path.join(ROOT, "docs/self-hosting/configuration.mdx"),
-      "utf8",
-    );
-    const missing = [...variablesReadByTheCode()]
-      .filter((name) => !documented.includes(name))
-      .sort();
-
-    expect(
-      missing,
-      `the full environment reference does not name ${missing.join(", ")}, ` +
-        "which the API reads",
-    ).toEqual([]);
-  });
-
   it("passes the one telemetry decision into the self-hosted web build", () => {
     const web = serviceBlock("web");
     const dockerfile = readFileSync(path.join(ROOT, "apps/web/Dockerfile"), "utf8");

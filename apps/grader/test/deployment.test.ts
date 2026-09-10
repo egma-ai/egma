@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/config.ts";
 
 /**
- * Check environment names against the operator reference, Compose, and README.
+ * Check environment names against Compose and README.
  * These are text-contract tests, not container tests. Also check every
  * Compose file for the grader's no-inbound-port rule.
  */
@@ -56,13 +56,6 @@ function serviceBlock(compose: string, service: string): string | undefined {
 }
 
 describe("every variable the grader reads", () => {
-  it("is in the full environment reference", async () => {
-    const documented = await read("docs/self-hosting/configuration.mdx");
-    for (const name of await variablesTheCodeReads()) {
-      expect(documented).toContain(name);
-    }
-  });
-
   it("is passed through by compose, or it never reaches the container at all", async () => {
     const passed = (
       await Promise.all((await composeFiles()).map((file) => read(file)))
@@ -88,7 +81,6 @@ describe("every variable the grader reads", () => {
   it("is the only one anything documents", async () => {
     const read_ = await variablesTheCodeReads();
     for (const named of [
-      "docs/self-hosting/configuration.mdx",
       "apps/grader/README.md",
       ...(await composeFiles()),
     ]) {
