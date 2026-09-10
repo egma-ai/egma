@@ -9,8 +9,8 @@
     "dark": "#c2410c"
   },
   "logo": {
-    "light": "/docs/assets/logo/light.svg",
-    "dark": "/docs/assets/logo/dark.svg",
+    "light": "/docs/assets/logo/mark-light.svg",
+    "dark": "/docs/assets/logo/mark-dark.svg",
     "href": "/docs/get-started/introduction"
   },
   "favicon": "/favicon.svg",
