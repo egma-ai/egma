@@ -2,33 +2,4 @@
 title: "Self-hosting support"
 ---
 
-Start with the [installation checks](/self-hosting/get-started#check-the-installation)
-and [configuration guide](/self-hosting/configuration) when your instance does
-not start or a connected agent cannot complete a simulation.
-
-## Find the failing step
-
-Check the path in order:
-
-1. Run `egma self-host up` from the Egma source checkout and read its result.
-2. Open the instance URL and confirm that you can sign in to your project.
-3. Connect your agent using the [Retell](/docs/integrations/retell) or
-   [LiveKit](/docs/integrations/livekit) guide.
-4. Run one test and inspect its execution and grading results. For a voice
-   simulation, also check that its recording plays.
-
-For remote workers, confirm that the Egma URL is reachable from the worker.
-For recording problems, check the public storage URL from your browser.
-
-## Ask for help
-
-[Open a GitHub issue](https://github.com/egma-ai/egma/issues) with:
-
-- The Egma commit or release and CLI version you use.
-- Your operating system and Docker version.
-- The command or action that failed and its error message.
-- The steps needed to reproduce the problem and what you expected to happen.
-- Whether the failure affects startup, login, a simulation, grading, or monitoring.
-
-Remove API keys, credentials, and customer conversation data from the report.
-Do not attach `.env` or `.egma-platform/platform.env`.
+Need help? [Contact us](/docs/contact-us) or [join our Discord](https://discord.gg/v4KHSNHfPj).

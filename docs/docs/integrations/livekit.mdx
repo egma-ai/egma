@@ -1,20 +1,32 @@
 ---
-title: "LiveKit integration"
-sidebarTitle: "Overview"
+title: "LiveKit Agent Framework"
+sidebarTitle: "LiveKit"
 ---
 
-Start with project credentials. Egma creates a room, dispatches your named
-worker, runs the conversation, and deletes the room when the simulation ends.
-The [token endpoint option](/docs/integrations/livekit/token-endpoint) lets you keep the
-LiveKit key pair on your own server.
+Egma supports first-class integration with the LiveKit agents framework (both Python and JS) - whether you are self-hosting your agent or using LiveKit Cloud.
 
-You need a working LiveKit agent, access to its LiveKit project, and an
-Egma project. For CLI setup, complete [CLI sign-in](/skills-cli-sdks/cli/install#sign-in-and-initialize) first.
+You'll need to integrate egma sdks in your livekit agent's code. The SDK will allow us to get traces from your agent during simulation/ production monitoring, inject mock tools and pass in required dispatch metadata to start the rooms.
+
+## How Egma works with LiveKit agents
+
+### For Simulation
+
+There are two ways to connect your livekit agent to egma:
+1. Using project credentials - In this method, you need to put in your LiveKit WebSocket URL, API key, and API secret. When you trigger a simulation run - the egma platform automatically dispatches your agent to join the simulation room, conducts the conversation and reports . It automatically dispatches your agent and conducts the simulations.
+2. Using the token endpoint method - In this method you handle the dispatch of your livekit agent and give the Egma an API endpoint which it can call to get the required credentials to join the room and conduct the simulation.
+
+You can test your livekit agent in two modalities -
+1. Voice - Conduct full voice to voice simulations. Invokes the entire pipeline and happens in real time.
+2. Chat - Invoke just the harness/ LLM components of your livekit agent. Good for testing core behaviors and runs faster than realtime but will not be able to catch voice level issues.
+
+### For Monitoring
+
+Once you have integrated the SDK, egma can automatically get all the traces from your agent during live production calls (from the built-in OpenTelemetry trace collector of the LiveKit agent framework) and push it to the platform, where you can run graders and detect issues on top of those traces.
 
 ## Guides
 
 - [Connect a LiveKit agent](/docs/integrations/livekit/connect)
 - [Text connections and Env](/docs/integrations/livekit/text-and-env)
 - [Use a token endpoint](/docs/integrations/livekit/token-endpoint)
-- [Troubleshooting](/docs/integrations/livekit/troubleshooting)
 - [Monitor a LiveKit agent](/docs/integrations/livekit/monitor)
+- [Troubleshooting](/docs/integrations/livekit/troubleshooting)

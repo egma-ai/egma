@@ -146,17 +146,9 @@
         "tab": "Skills, CLI & SDKs",
         "groups": [
           {
-            "group": "Skills",
+            "group": "Skills & CLI",
             "pages": [
-              "skills-cli-sdks/skills/install",
-              "skills-cli-sdks/skills/integrate-egma",
-              "skills-cli-sdks/skills/write-tests"
-            ]
-          },
-          {
-            "group": "CLI",
-            "pages": [
-              "skills-cli-sdks/cli/install"
+              "skills-cli-sdks/skills-and-cli"
             ]
           },
           {
@@ -175,7 +167,6 @@
             "group": "How to self-host",
             "pages": [
               "self-hosting/get-started",
-              "self-hosting/configuration",
               "self-hosting/support"
             ]
           }
@@ -407,6 +398,26 @@
     {
       "source": "/docs/platform/runs/cancel-a-run",
       "destination": "/docs/platform/runs/overview"
+    },
+    {
+      "source": "/skills-cli-sdks/skills/install",
+      "destination": "/skills-cli-sdks/skills-and-cli"
+    },
+    {
+      "source": "/skills-cli-sdks/skills/integrate-egma",
+      "destination": "/skills-cli-sdks/skills-and-cli"
+    },
+    {
+      "source": "/skills-cli-sdks/skills/write-tests",
+      "destination": "/skills-cli-sdks/skills-and-cli"
+    },
+    {
+      "source": "/skills-cli-sdks/cli/install",
+      "destination": "/skills-cli-sdks/skills-and-cli"
+    },
+    {
+      "source": "/self-hosting/configuration",
+      "destination": "/self-hosting/get-started#environment-and-secrets"
     }
   ]
 }

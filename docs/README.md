@@ -10,8 +10,8 @@ This is the source for [docs.egma.ai](https://docs.egma.ai). Mintlify reads the
 - `docs/platform/`: agents and connections, tests, personas, runs, graders, monitoring,
   and provider API keys. Related guides stay under their platform topic.
 - `docs/integrations/`: Retell and LiveKit setup.
-- `skills-cli-sdks/`: Skills, CLI, and SDK pages, grouped under their matching navigation sections.
-- `self-hosting/`: installation, configuration, and support.
+- `skills-cli-sdks/`: one Skills and CLI guide plus the published SDK guides.
+- `self-hosting/`: quick setup, environment settings, and support.
 - `api-reference/`: generated endpoint pages plus the written authentication,
   requests, pagination, and errors overview.
 
