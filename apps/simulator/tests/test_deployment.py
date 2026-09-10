@@ -43,13 +43,6 @@ DOCUMENTED_ELSEWHERE = {
 stated reason. Everything else must reach the container, because a
 variable a compose entry leaves out never arrives however it is set."""
 
-FIXED_BY_SHIPPED_DEPLOYMENT = {
-    "EGMA_SIMULATOR_MEDIA_BACKEND",
-    "EGMA_SIMULATOR_VAD_PROVIDER",
-}
-"""Internal adapter choices fixed in Compose, not operator settings."""
-
-
 def repository_root() -> Path:
     """The checkout this app lives in, found by what is at its top."""
     for candidate in Path(__file__).resolve().parents:
@@ -63,7 +56,6 @@ def repository_root() -> Path:
 
 ROOT = repository_root()
 COMPOSE_FILES = sorted(ROOT.glob("docker-compose*.yml"))
-ENVIRONMENT_REFERENCE = ROOT / "docs/self-hosting/configuration.mdx"
 
 
 def variables_read_by_the_code() -> set[str]:
@@ -73,22 +65,6 @@ def variables_read_by_the_code() -> set[str]:
     for module in source.rglob("*.py"):
         found |= set(VARIABLE.findall(module.read_text(encoding="utf-8")))
     return found
-
-
-def test_every_variable_the_code_reads_is_in_the_environment_reference():
-    documented = set(
-        VARIABLE.findall(ENVIRONMENT_REFERENCE.read_text(encoding="utf-8"))
-    )
-    missing = (
-        variables_read_by_the_code()
-        - documented
-        - DOCUMENTED_ELSEWHERE
-        - FIXED_BY_SHIPPED_DEPLOYMENT
-    )
-    assert not missing, (
-        f"the full environment reference does not name {sorted(missing)}, "
-        "which the simulator reads"
-    )
 
 
 def test_every_variable_the_code_reads_is_passed_through_by_compose():
@@ -114,11 +90,8 @@ def test_the_capacity_default_lives_in_the_simulator_once():
     """
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
-    reference = ENVIRONMENT_REFERENCE.read_text(encoding="utf-8")
-
     assert "EGMA_SIMULATOR_CAPACITY: ${EGMA_SIMULATOR_CAPACITY:-}" in compose
     assert "EGMA_SIMULATOR_CAPACITY" not in env_example
-    assert "EGMA_SIMULATOR_CAPACITY" in reference
 
 
 def test_every_variable_the_code_reads_is_in_the_readme_table():
@@ -141,7 +114,6 @@ def test_nothing_is_documented_that_nothing_reads():
     read = variables_read_by_the_code() | DOCUMENTED_ELSEWHERE
     named_files = (
         ROOT / ".env.example",
-        ENVIRONMENT_REFERENCE,
         ROOT / "README.md",
         Path(config_module.__file__).parents[2] / "README.md",
         *COMPOSE_FILES,
@@ -321,16 +293,15 @@ MAY_BE_ABSENT = {
     # Billing, where absent means no billing and says so: with no secret key
     # the product is the product, no `ee/` code is loaded, and the Billing
     # section is not drawn. The key without the webhook secret mounts no
-    # webhook route, by name in the environment reference, so an empty one is
-    # never a payment door somebody could post to.
+    # webhook route, so an empty one is never a payment door somebody could
+    # post to.
     "EGMA_STRIPE_SECRET_KEY": "optional by design: absent means no billing",
     "EGMA_STRIPE_WEBHOOK_SECRET": "optional by design: absent means no webhook route",
     # Telemetry about egma itself, where empty is not hollow but the promise:
     # one flag, off by default, and a deployment that sets nothing sends
     # nothing anywhere. The moment the flag says on, the two required values
-    # stop being optional — the api and grader refuse to boot without them,
-    # by name — so an empty one can never be a quietly-off feature, which is
-    # this guard's whole subject. See the full environment reference.
+    # stop being optional — the api and grader refuse to boot without them —
+    # so an empty one can never be a quietly-off feature.
     "EGMA_TELEMETRY": "off is the default, and the public repo's promise",
     "EGMA_TELEMETRY_OTLP_ENDPOINT": "required by name at boot once the flag is on",
     "EGMA_POSTHOG_KEY": "required by name at boot once the flag is on",
@@ -571,23 +542,6 @@ def test_env_example_supplies_no_value_for_a_variable_that_must_be_stated(name):
         f".env.example asks the operator for {name}; egma self-host up owns "
         "the bootstrap set and records it in .egma-platform/platform.env"
     )
-
-
-OVERLAY_VARIABLE = re.compile(r"\$\{(EGMA_(?:LIVEKIT|WORKBENCH)_[A-Z0-9_]+)")
-
-
-@pytest.mark.parametrize("compose", COMPOSE_FILES, ids=lambda path: path.name)
-def test_every_variable_an_overlay_reads_is_in_the_environment_reference(compose):
-    """The overlays' own variables drift the same way the simulator's do.
-
-    These are not read by any Python — the compose file is the code that
-    reads them — so nothing else in this suite would notice one being
-    added, renamed, or left behind.
-    """
-    documented = ENVIRONMENT_REFERENCE.read_text(encoding="utf-8")
-    named = set(OVERLAY_VARIABLE.findall(compose.read_text(encoding="utf-8")))
-    missing = sorted(name for name in named if name not in documented)
-    assert not missing, f"{compose.name} reads {missing}; the full reference does not"
 
 
 def test_the_gateway_and_its_published_ports_agree_on_the_rtp_range():

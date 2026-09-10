@@ -1,0 +1,80 @@
+---
+title: "Monitor a Retell agent"
+---
+
+Retell monitoring imports completed voice calls with the Retell API. You do not need a test suite or simulation connection.
+
+## Start through the UI
+
+1. Open **Agents → Connect an agent**.
+2. Choose **Monitor production**, then select **Continue**.
+3. Select **Retell** and follow the setup prompts.
+
+Connect your Retell account and choose the voice agent to monitor. For CLI setup, follow the steps below.
+
+Retell monitoring imports calls from Retell voice agents. It does not import
+text-only Retell conversations.
+
+## Connect the agent
+
+Complete [CLI sign-in](/skills-cli-sdks/skills-and-cli#sign-in) and check
+`egma/config.yaml` for the agent. If it is not registered, run:
+
+```bash
+egma agent register --platform retell --name "Front desk"
+```
+
+Set `EGMA_AGENT_ID` to that Egma agent ID. If you have already added a
+[Retell connection](/docs/integrations/retell), use its stored provider ID and key:
+
+```bash
+egma agent monitoring setup --agent "$EGMA_AGENT_ID" --platform retell
+```
+
+For a monitoring-only setup, load the Retell key into `EGMA_RETELL_API_KEY`.
+Discover the provider ID, set `RETELL_AGENT_ID` to the selected ID, then enable
+monitoring:
+
+```bash
+egma agent connection options --platform retell
+
+egma agent monitoring setup \
+  --agent "$EGMA_AGENT_ID" \
+  --platform retell \
+  --retell-agent "$RETELL_AGENT_ID"
+```
+
+You can supply the key through standard input with `--credentials-stdin`
+instead. It accepts a JSON object with an `apiKey` field.
+
+Setup stores the Retell binding and starts importing calls. It does not create
+a simulation connection. One Egma agent monitors one Retell agent; reuse the
+existing binding instead of registering the same Retell agent again.
+
+## Verify an imported call
+
+The first setup imports available completed calls from the previous 30 days.
+Egma checks for new completed calls about every 30 seconds while monitoring
+is enabled. Allow time for Retell to finalize a call and for the import to finish.
+
+Open **Traces** in your Egma project. Find a recent call from the agent,
+open its trace, and check the transcript against that call. If nothing appears:
+
+- Confirm that the call belongs to the Retell agent ID you selected.
+- Check that the call has ended and is available in Retell's history.
+- Open **Agents**, select the agent, and check that **Production monitoring**
+  is **Active**. Its last-received time shows whether a call has arrived.
+- If setup failed, resolve the authorization or provider error that the CLI
+  returned before retrying.
+
+To stop future imports, run:
+
+```bash
+egma agent monitoring stop --agent "$EGMA_AGENT_ID" --platform retell
+```
+
+Previously imported conversations stay available in Egma.
+
+## Review the evidence
+
+[Review production conversations](/docs/platform/monitoring/review-conversations) to inspect transcripts, metrics, and grades.

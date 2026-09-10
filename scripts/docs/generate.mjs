@@ -27,7 +27,7 @@ for (const [endpoint, item] of Object.entries(spec.paths)) {
     if (!/^[a-z][A-Za-z0-9]*$/.test(id ?? '') || ids.has(id) || !resource) throw new Error(`Missing, unsupported, or duplicate operation ID or resource tag: ${method} ${endpoint}`);
     ids.add(id);
     const slug = stableRoutes[id] ?? id.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
-    const page = `api/${slug}`;
+    const page = `api-reference/${slug}`;
     if (generated.has(`${page}.mdx`)) throw new Error(`Duplicate API page: ${page}`);
     generated.set(`${page}.mdx`, `---\nsidebarTitle: ${JSON.stringify(operation.summary)}\nopenapi: ${JSON.stringify(`openapi.json ${method.toUpperCase()} ${endpoint}`)}\n---\n`);
     if (!groups.has(resource)) groups.set(resource, []);
@@ -60,7 +60,7 @@ if (apiTabs.length !== 1) throw new Error('Expected one API reference tab.');
 const resources = [...resourceOrder.filter((tag) => groups.has(tag)), ...[...groups.keys()].filter((tag) => !resourceOrder.includes(tag)).sort()];
 const apiNavigation = {
   tab: 'API reference',
-  pages: ['api/overview', ...resources.map((group) => ({ group, pages: groups.get(group) }))],
+  pages: ['api-reference/overview', ...resources.map((group) => ({ group, pages: groups.get(group) }))],
 };
 config.navigation.tabs[config.navigation.tabs.indexOf(apiTabs[0])] = apiNavigation;
 
@@ -86,17 +86,17 @@ const light = '#' + ember.slice(1).match(/../g).map((channel, index) => Math.rou
 config.colors = { primary, light, dark: primary };
 generated.set('docs.json', json(config));
 for (const mode of ['light', 'dark']) {
-  generated.set(`logo/mark-${mode}.svg`, await read(`apps/web/public/brand/egma-mark-${mode}.svg`));
+  generated.set(`docs/assets/logo/mark-${mode}.svg`, await read(`apps/web/public/brand/egma-mark-${mode}.svg`));
 }
 
-// The API folder contains one written overview and generated operation pages.
+// The API reference folder contains one written overview and generated operation pages.
 // Refuse to delete written pages: a rename should be an explicit docs edit.
 const obsolete = [];
-for (const name of await readdir(path.join(docs, 'api'))) {
-  if (!name.endsWith('.mdx') || name === 'overview.mdx' || generated.has(`api/${name}`)) continue;
-  const old = await read(`docs/api/${name}`);
-  if (!/^---\n(?:sidebarTitle: [^\n]+\n)?openapi: [^\n]+\n---\n$/.test(old)) throw new Error(`Unexpected written API page: api/${name}`);
-  obsolete.push(`api/${name}`);
+for (const name of await readdir(path.join(docs, 'api-reference'))) {
+  if (!name.endsWith('.mdx') || name === 'overview.mdx' || generated.has(`api-reference/${name}`)) continue;
+  const old = await read(`docs/api-reference/${name}`);
+  if (!/^---\n(?:sidebarTitle: [^\n]+\n)?openapi: [^\n]+\n---\n$/.test(old)) throw new Error(`Unexpected written API page: api-reference/${name}`);
+  obsolete.push(`api-reference/${name}`);
 }
 
 const drift = [...obsolete];

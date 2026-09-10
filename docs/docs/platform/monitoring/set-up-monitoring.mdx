@@ -1,0 +1,39 @@
+---
+title: "Set up monitoring"
+---
+
+LiveKit monitoring sends conversation evidence from your worker through the
+Egma SDK. Retell monitoring imports completed calls with the Retell API.
+You do not need a test suite or a simulation run for either setup.
+
+## Start setup
+
+<Tabs>
+  <Tab title="UI">
+    1. Open **Agents** and select **Connect an agent**.
+    2. Choose **Monitor production**, then select **Continue**.
+    3. Select **LiveKit** or **Retell** and follow the setup prompts.
+    4. For LiveKit, add the SDK hook and project key to your worker as described below. For Retell, connect your account and choose the voice agent to monitor.
+    5. Complete a real conversation and check **Traces** for its evidence.
+
+    A LiveKit worker still needs the SDK setup; opening the wizard alone does not enable monitoring.
+
+  </Tab>
+  <Tab title="CLI and SDK">
+    Follow the [LiveKit setup](#livekit) to configure the worker's monitoring hook, or the [Retell setup](#retell) to enable call imports with the CLI.
+
+    Both paths use your existing agent and project. You do not need a test suite or simulation connection.
+  </Tab>
+</Tabs>
+
+## LiveKit
+
+Follow [Monitor a LiveKit agent](/docs/integrations/livekit/monitor) to add the project key and SDK hook, verify a conversation, and stop monitoring when needed.
+
+## Retell
+
+Follow [Monitor a Retell agent](/docs/integrations/retell/monitor) to connect your account, enable call imports, and verify incoming conversations.
+
+## Review the evidence
+
+[Review production conversations](/docs/platform/monitoring/review-conversations) to inspect transcripts, metrics, and grades.

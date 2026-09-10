@@ -1,0 +1,57 @@
+---
+title: "Scores and thresholds"
+---
+
+Each grader returns a score from `0` to `1`, or no score when it cannot grade
+the evidence. A completed grade includes that score, its details, and the pass
+threshold selected for the conversation.
+
+## Read an individual result
+
+| Grade | Individual result |
+| --- | --- |
+| Score is at or above the frozen pass threshold | Passed |
+| Score is below the frozen pass threshold | Failed |
+| Score is unavailable because grading errored | Errored |
+
+Suppose Expected behaviors checks four statements. Three pass, so the grader
+score is `0.75`. With a pass threshold of `1`, that grader fails. With a
+threshold of `0.75`, it passes. The failed statement remains visible in either
+case.
+
+A grading error means Egma could not decide or complete the check. It is
+different from a score of `0`, which means the check ran and failed.
+
+## Read the combined score
+
+When every selected grader has a score, the **combined score** is their
+unweighted arithmetic mean. Scores of `1` and `0.5` produce a combined score of
+`0.75`.
+
+This value helps compare conversations. It has no overall pass threshold.
+Egma does not turn it into a pass/fail result for a simulation, test, suite, or
+run. Read the individual grades to see which checks passed.
+
+The combined score is unavailable when no grader was selected, grading is still
+pending, or a selected grader has no score.
+
+## Separate progress from quality
+
+Grading state describes whether work has finished:
+
+| API state | Meaning |
+| --- | --- |
+| `not_requested` | No grader was selected. |
+| `pending` | Grading is waiting to start. |
+| `running` | A worker is grading the evidence. |
+| `complete` | All requested graders returned scores, including scores that fail their thresholds. |
+| `error` | A grader or the grading work ended with an error. |
+
+`complete` does not guarantee that all agent evidence arrived. Grading can
+proceed with the available evidence when the wait for agent evidence ends.
+Check the simulation's `agentPovIncomplete` field and
+[review the evidence source](/docs/platform/runs/review-a-run#check-which-evidence-arrived)
+when a result appears to omit something the agent did.
+
+A simulation that fails or is canceled before producing a completed trace has
+no grading work to wait for. Its API `gradingState` is `null`.

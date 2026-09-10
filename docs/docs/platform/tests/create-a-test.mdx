@@ -1,0 +1,46 @@
+---
+title: "Create a test"
+---
+
+Keep tests in a [test suite](/docs/platform/tests/test-suites). A suite belongs to your project and holds the tests you review and run together.
+
+<Tabs>
+  <Tab title="UI">
+    1. Open **Tests** and select a suite. If you need a new suite, select **Create suite**, enter its name, and save it.
+    2. In the suite, select **+ Write a test**.
+    3. Enter a **Name**, a **Scenario**, and at least one **Expected behavior**.
+    4. Select one or more **Personas**. Start with **Everyday caller** if it is available in your project.
+    5. Add **Mock tools** or **Env** if the situation needs them, then select **Save test**.
+
+    To edit a saved test, select its cells in the table. Text edits save when you leave the cell. Mock tools and Env open separate JSON editors with a **Save** button.
+
+  </Tab>
+  <Tab title="CLI">
+    First, [install the CLI and sign in](/skills-cli-sdks/skills-and-cli#install-the-cli), then initialize your project. Pull the current tests and list the available personas:
+
+    ```bash
+    egma pull
+    egma persona list
+    ```
+
+    Use an existing suite, or create one:
+
+    ```bash
+    egma suite create appointment-booking --name "Appointment booking"
+    ```
+
+    Create `egma/tests/appointment-booking/book-consultation.md` using the [Keep your tests in code](/docs/platform/tests/write-a-test). Use a persona name returned by `egma persona list`, then save your changes to Egma:
+
+    ```bash
+    egma push
+    ```
+
+    You can also [use your coding agent to write tests](/skills-cli-sdks/skills-and-cli#install-the-skills) from your agent's prompt, tools, and code.
+  </Tab>
+</Tabs>
+
+## Run your tests
+
+A run executes the complete suite against one agent connection. Each test and selected persona combination produces a simulation. Two tests with two personas each produce four simulations.
+
+[Start a run](/docs/platform/runs/start-and-follow-a-run), then inspect each simulation's conversation and grading results. The same suite can run against different connections, so you can check a flow through both text and voice.

@@ -1,0 +1,31 @@
+---
+title: "Retell AI"
+sidebarTitle: "Retell"
+---
+
+Egma supports first-class integration with Retell agents. You can run simulations against your Retell agent and monitor its live production calls.
+
+You'll need to connect your Retell agent to Egma using a Retell API key. Egma uses this access to run simulations, inject mock tool responses and import call data from Retell.
+
+## How Egma works with Retell agents
+
+### For Simulation
+
+There are three ways to connect your Retell agent to Egma:
+1. Text mode - Runs a chat simulation without invoking STT or TTS. It is faster and cheaper, and can invoke mock tools.
+2. Web call - Runs a full voice-to-voice simulation over the internet without calling a phone number. It invokes the full voice pipeline and supports mock tools.
+3. Phone number - Calls the public phone number routed to your agent. It tests the real phone path and latency, but does not support mock tools.
+
+Use text mode to test core conversation behavior quickly. Use a web call to test the full voice pipeline with controlled tool responses. Use a phone number when you need to test the deployed phone path.
+
+### For Monitoring
+
+Once you have enabled Retell monitoring, Egma automatically imports completed production calls from Retell. You can run graders on these calls and detect issues in your production agent.
+
+## Guides
+
+- [Connect a Retell agent](/docs/integrations/retell/connect)
+- [Env and mock tools](/docs/integrations/retell/env-and-mocks)
+- [Add a phone connection](/docs/integrations/retell/phone-connection)
+- [Monitor a Retell agent](/docs/integrations/retell/monitor)
+- [Evidence and troubleshooting](/docs/integrations/retell/evidence-and-troubleshooting)

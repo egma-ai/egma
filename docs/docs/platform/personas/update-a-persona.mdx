@@ -1,0 +1,54 @@
+---
+title: "Update a persona"
+---
+
+Update a persona when you want to change the caller's behavior or how it speaks. Changes apply to future runs.
+
+## Update behavior or settings
+
+<Tabs>
+  <Tab title="UI">
+    1. Open **Personas** and select the persona.
+    2. For a custom persona, select **Edit** to change its identity, personality, or language. For a provided persona, its project settings open directly.
+    3. Review the models, voice, and speech rate, then save your changes.
+
+    Clone a provided persona if you need different behavior; its original behavior is maintained by Egma.
+
+  </Tab>
+  <Tab title="API">
+    Read [Get a persona](/api-reference/get-persona), then use [Update a persona](/api-reference/update-persona). For behavior edits, send the current `versionId` as `expectedVersionId`. Read the persona again if another edit changed its version.
+  </Tab>
+</Tabs>
+
+## Choose models and a voice
+
+Open the persona in **Personas** to view its project settings. For a custom persona, select **Edit** to change its behavior.
+
+Choose the language model, speech-to-text model, text-to-speech model, voice,
+and speech rate. The supported speech rate is `0.6` through `1.5`; `1` is the
+normal rate. You can enter a voice ID from the selected provider even if it is
+not in the recommended list.
+
+These choices belong to your project. Saving them does not change the
+persona's behavior version or another project's settings. Defaults are saved
+on first use and do not replace the choices you have already saved.
+
+## Understand changes and versions
+
+Changing a custom persona's identity, personality, or language creates a new
+immutable behavior version. Its name, description, and project model settings
+can change without creating a behavior version. Version history is read-only.
+For API behavior edits, send the current `versionId` as `expectedVersionId`;
+read the persona again if another edit changed that version.
+
+Egma maintains the behavior of provided personas. Compatible updates apply to
+future runs while keeping your project's model settings and test selections.
+Clones do not receive updates from their source.
+
+A run saves each selected persona's current behavior version and complete
+project settings when it is created. Queued simulations and retries keep that
+selection. After changing behavior or settings, start a new run to use them.
+
+## Bring your own provider keys
+
+Add your keys in [Settings → Provider API Keys](/docs/platform/provider-api-keys). Provider keys and model choices are separate settings. Your keys also apply to predefined personas and model graders. Code graders do not make model calls.

@@ -5,14 +5,18 @@ This is the source for [docs.egma.ai](https://docs.egma.ai). Mintlify reads the
 
 ## Edit a guide
 
-- `guides/`: get started, integrations, testing, monitoring, and grading.
-- `tools/`: one page each for Skills, CLI, LiveKit Python, and LiveKit JavaScript.
-- `self-hosting/`: Get started and Configuration.
-- `api/overview.mdx`: authentication, requests, pagination, and errors.
+- `docs/get-started/`: platform introduction and the five-minute quickstart.
+- `docs/core-philosophies/`: testing and monitoring philosophy.
+- `docs/platform/`: agents and connections, tests, personas, runs, graders, monitoring,
+  and provider API keys. Related guides stay under their platform topic.
+- `docs/integrations/`: Retell and LiveKit setup.
+- `skills-cli-sdks/`: one Skills and CLI guide plus the published SDK guides.
+- `self-hosting/`: quick setup, environment settings, and support.
+- `api-reference/`: generated endpoint pages plus the written authentication,
+  requests, pagination, and errors overview.
 
 Write short instructions with a complete example. Check each command and field
-against its implementation. Add the page to `docs.json`, update its links, and
-keep a redirect when you move a published page.
+against its implementation. Add the page to `docs.json` and update its links.
 
 Describe how the product works today. Check changes merged to `main` while a
 docs pull request is open and update the affected instructions. Explain the
@@ -48,7 +52,7 @@ pnpm install --frozen-lockfile
 pnpm docs:dev --port 8847
 ```
 
-Open `http://localhost:8847/guides/overview`. The command installs a pinned
+Open `http://localhost:8847/docs/get-started/introduction`. The command installs a pinned
 Mintlify CLI into the ignored `.cache/mintlify` directory on first use.
 
 ```bash
@@ -60,16 +64,8 @@ The first command checks contract generation, endpoint coverage, navigation,
 links, redirects, and theme drift. The second runs Mintlify's strict build
 validation. CI runs both.
 
-### Local renderer repair
-
-Mintlify CLI 4.2.876 mutates recursive OpenAPI schemas during validation, then
-fails to serialize them. Our local launcher validates a clone in two pinned
-`@mintlify/prebuild` call sites. It preserves the complete source specification,
-including recursive trace spans. The launcher refuses an unexpected upstream
-version or code shape.
-
-This repair applies to the local CLI. Check Mintlify's hosted pull-request build
-before publishing; the local repair does not change their hosted renderer.
+The launcher pins Mintlify CLI 4.2.882 so local previews and CI use the same
+renderer. It also regenerates the API reference before each command.
 
 ## Publish
 

@@ -1,0 +1,32 @@
+---
+title: "Register an agent"
+---
+
+Registration creates a record in Egma. Your voice agent continues to run on its existing platform. The next step depends on whether you want to test it, monitor it, or both.
+
+<Tabs>
+  <Tab title="UI">
+    1. Open **Agents** in your project and select **Connect an agent**.
+    2. For this example, choose **Run simulations**, then select **Continue**.
+    3. Select **LiveKit**, then select **Continue**.
+    4. Choose **Voice**, then select **Continue**.
+    5. Select **Project credentials**. Enter your LiveKit agent name, WebSocket URL, API key, and API secret. The agent name must match your worker's dispatch name.
+    6. Select **Continue to testing** and follow the SDK setup instructions. Return to **Agents** to find your agent.
+
+    See the [LiveKit guide](/docs/integrations/livekit) for the required worker and SDK setup.
+
+  </Tab>
+  <Tab title="CLI">
+    First, [install the CLI and sign in](/skills-cli-sdks/skills-and-cli#install-the-cli), then initialize your project.
+
+    Register your agent with a name and platform:
+
+    ```bash
+    egma agent register --platform livekit --name "Appointment assistant"
+    ```
+
+    Keep the Egma agent ID printed by the command. You will use it to add a connection or set up monitoring. This ID is separate from your LiveKit worker's dispatch name.
+
+    CLI registration creates the agent record. Add a [connection](/docs/platform/agents-and-connections/add-a-connection) to run simulations, or [set up monitoring](/docs/platform/monitoring/set-up-monitoring).
+  </Tab>
+</Tabs>

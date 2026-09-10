@@ -1,0 +1,24 @@
+---
+title: "Review production conversations"
+---
+
+Open **Traces** in your project to inspect conversations received from your agent.
+
+## Read a conversation
+
+The **Traces** table shows the agent, time, duration, p90 turn latency,
+and trace ID when those values are available. Select a trace to open its
+details and inspect the transcript, metrics, and grades.
+
+To grade incoming conversations, [configure graders](/docs/platform/graders/configure-graders)
+with production scope and the sample percentage you want. A missing grade can
+mean the conversation was outside that scope or sample, is still processing,
+or could not be graded. Check its grading state before treating it as a pass.
+
+Each grade has its own score and threshold. A combined score summarizes the
+selected grades; it does not decide an overall pass or fail. See
+[Scores and thresholds](/docs/platform/graders/scores-and-thresholds).
+
+## Turn a finding into a test
+
+When a production conversation exposes a problem, [create a test](/docs/platform/tests/create-a-test) with the same situation and the behavior you expected. Use test data in place of caller details. Add it to a regression suite after fixing the agent.

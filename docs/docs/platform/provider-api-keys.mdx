@@ -1,0 +1,40 @@
+---
+title: "What are provider API keys?"
+---
+
+Open **Settings → Provider API Keys** to manage keys for your organization.
+These keys pay for calls to model providers. The separate **API keys** page
+creates tokens that authenticate scripts and integrations to Egma.
+
+An organization admin can add, replace, or remove one key for each supported
+provider: OpenAI, Deepgram, and Cartesia. Other members can see which providers
+have a saved key and its masked ending.
+
+Manage these settings through a browser session or an organization API key.
+A project API key cannot read or change organization provider keys, even when
+its owner is an admin.
+
+
+## Set up your keys
+
+Follow [Set up provider API keys](/docs/platform/provider-api-keys/set-up-provider-api-keys) to add, replace, or remove a key.
+
+## Inference credit on Egma Cloud
+
+A call that uses your provider key does not deduct Egma inference credit.
+The provider bills the account that owns your key directly. Usage still
+appears in Egma's usage and cost records.
+
+Funding is separate for each provider. For example, an OpenAI key pays for
+OpenAI calls; Cartesia calls still use Egma credit unless you also add a
+Cartesia key. Your Egma plan fee, usage allowances, and applicable voice
+overages remain in effect.
+
+Choose **Manage key → Remove key** to return a provider to the default keys.
+The confirmation explains that new calls on Egma Cloud will use inference
+credit again. Removing a key does not change who paid for earlier calls.
+
+## Self-hosted deployments
+
+Organization keys take precedence over the deployment's
+[self-hosted environment settings](/self-hosting/get-started#environment-and-secrets).

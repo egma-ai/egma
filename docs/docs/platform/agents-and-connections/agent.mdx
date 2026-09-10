@@ -1,0 +1,31 @@
+---
+title: "What is an agent?"
+---
+
+An agent represents the voice agent you want to test or monitor in Egma. We currently support LiveKit and Retell agents (Please reach out to us if you would like support for another platform)
+
+For example, if you have a voice agent that handles appointment bookings, you can register it in Egma as “Appointment assistant.” You can then run tests against it and monitor its production conversations.
+
+## Register an agent
+
+Follow [register an agent](/docs/platform/agents-and-connections/register-an-agent) for UI steps and CLI commands.
+
+## One agent, multiple connections
+
+An agent can have multiple connections. Each connection provides a way to reach the same agent.
+
+For example, a LiveKit agent could have:
+
+- A text connection to test conversation logic.
+- A voice connection to test spoken conversations.
+
+Choose the connection you want to use when starting a run.
+
+
+
+
+## Set up your platform
+
+- [Connect a LiveKit agent](/docs/integrations/livekit)
+- [Connect a Retell agent](/docs/integrations/retell)
+- [Set up production monitoring](/docs/platform/monitoring/set-up-monitoring)

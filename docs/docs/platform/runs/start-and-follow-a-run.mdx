@@ -1,0 +1,50 @@
+---
+title: "Start a run"
+---
+
+Before starting, connect a [LiveKit](/docs/integrations/livekit) or
+[Retell](/docs/integrations/retell) agent and add at least one test to your suite.
+
+When the run is created, Egma saves the test and persona behavior versions,
+project persona settings, and grader selection, versions, settings, and
+thresholds. Queued simulations and retries use that saved selection. Changes
+to models, voices, or grading policy apply to future runs.
+
+## Start the run
+
+<Tabs>
+  <Tab title="UI">
+    1. Open **Runs** and select **Create a run**.
+    2. Choose your test suite.
+    3. Choose the agent and one of its connections. Review the run settings.
+    4. Select **Start run**.
+    5. Open the run to follow its simulations. Starting successfully does not mean the tests passed.
+
+  </Tab>
+  <Tab title="CLI">
+    Run `egma pull` to refresh the agent and connection IDs in `egma/config.yaml`.
+    Use the IDs for the agent and connection you want to test:
+
+    ```bash
+    egma run create appointment-booking \
+      --agent "$EGMA_AGENT_ID" \
+      --connection "$EGMA_CONNECTION_ID" \
+      --name "Appointment booking check"
+    ```
+
+    `appointment-booking` names a direct directory under `egma/tests/`.
+    `EGMA_AGENT_ID` and `EGMA_CONNECTION_ID` are shell variables you set to the IDs
+    from your configuration.
+
+    The command pushes your local Egma project changes, starts the run, prints its
+    ID and results URL, and returns. A zero exit code means the run started. It does not
+    mean that simulation execution or grading passed.
+
+    If the pre-run push is refused, no run starts. Resolve the reported test change
+    or invalid content first.
+  </Tab>
+</Tabs>
+
+## Next steps
+
+[Review a run](/docs/platform/runs/review-a-run) to inspect conversations and grades.

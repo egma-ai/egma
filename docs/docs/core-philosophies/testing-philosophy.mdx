@@ -1,0 +1,71 @@
+---
+title: "Testing Philosophy"
+---
+
+If you're here reading this, you've probably faced the unpredictable behavior of voice agents. A conversation goes well during testing, then a real caller asks the same thing differently and the agent struggles.
+
+Voice agents are different from regular (text-based) agents as there is limited time for reasoning before a pause starts to feel awkward. The agent also needs to handle the parts of a conversation that words alone don't capture, like tone, timing, background noise, interruptions, and sometimes even a laugh.
+
+Getting an agent to feel natural is hard to pin down. It might answer correctly but pause too long, or sound friendly while missing what the caller asked. “Feels human” is a moving goalpost. To test it, you need to describe the specific behaviors that matter to your users.
+
+The possible scenarios can run into thousands, and some problems will only appear in production. You can still catch many issues with a useful set of tests.
+
+Much of our approach to testing voice agents comes from Anthropic's [Demystifying evals for AI agents](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents). When we were building tests for our own agents, it helped us put clear names to the pieces and understand how they fit together. We highly recommend reading it! You'll recognize several of the ideas below, adapted for voice agents.
+
+## Why we call them tests
+
+We use the word *tests* because it gives us a familiar starting point from tools like pytest and JUnit: put a system in a situation, observe what it does, and compare that with what you expected. In the broader AI world, you'll usually see this called an *eval*, but they mean the same thing for us. The Anthropic blog also uses them interchangeably.
+
+## Anatomy of a test
+
+The [pytest guide to the anatomy of a test](https://docs.pytest.org/en/stable/explanation/anatomy.html) describes four steps: arrange, act, assert, and cleanup. The same structure helps explain a voice test. Prepare the situation, have the conversation, judge the evidence, and reset any test data that could affect the next attempt.
+
+In Egma, the scenario and persona shape the simulated caller. Together, “change an appointment” and “a frustrated caller who speaks Spanish” give the simulator a goal and a way to approach the conversation. It talks to your agent through the selected connection.
+
+Egma records evidence from the conversation, including the transcript and available tool calls and metrics. Graders use the evidence they receive to assess whether the agent met your criteria. For the appointment test, you might expect the agent to explain that the requested time is unavailable, offer an available alternative, and ask for confirmation before booking. Several different conversations could meet those expectations. You usually want to check the behavior without requiring the agent to repeat an exact sentence.
+
+## From a test to a run
+
+To start a run, choose a [test suite](/docs/platform/tests/test-suites), an [agent](/docs/platform/agents-and-connections/agent), and one of that agent's [connections](/docs/platform/agents-and-connections/connection). Each test in the suite already selects one or more personas. Egma runs each test once for every selected persona, producing a separate [simulation](/docs/platform/runs/simulation) for each pair.
+
+For example, a suite with three tests and two personas per test produces six simulations. They all use the same agent and connection. Graders assess the evidence from each simulation.
+
+<img
+  className="block dark:hidden"
+  src="/docs/assets/images/testing-run-light.svg"
+  alt="A test suite with selected personas and an agent with its connection feed into a run. The run creates one simulation per test and persona pair. Graders assess each conversation’s evidence."
+/>
+<img
+  className="hidden dark:block"
+  src="/docs/assets/images/testing-run-dark.svg"
+  alt="A test suite with selected personas and an agent with its connection feed into a run. The run creates one simulation per test and persona pair. Graders assess each conversation’s evidence."
+/>
+
+## Definitions
+
+| Term | What it means in Egma |
+| --- | --- |
+| [Agent](/docs/platform/agents-and-connections/agent) | Your voice agent: the system under test. |
+| [Connection](/docs/platform/agents-and-connections/connection) | How Egma reaches that agent, such as a phone number or LiveKit room. An agent can have several connections. |
+| [Test](/docs/platform/tests/overview) | One situation you want to test, with expected behaviors and one or more personas to act as the caller. |
+| [Persona](/docs/platform/personas) | Who the simulated caller is and how they behave. For example, a frustrated caller who speaks Spanish. The scenario supplies their reason for calling. |
+| [Test suite](/docs/platform/tests/test-suites) | A group of tests you want to run and review together, such as tests for appointment booking. |
+| [Run](/docs/platform/runs/overview) | One execution of a complete test suite against a selected agent through one connection. |
+| [Simulation](/docs/platform/runs/simulation) | One conversation for one test and persona pair within a run. A test with two personas produces two simulations. |
+| [Grader](/docs/platform/graders/overview) | Logic that judges an aspect of the conversation and returns a score. Egma's predefined Expected behaviors grader checks the statements in your test. You can also use other graders. |
+
+
+## Regression and hill-climbing suites
+
+We think about tests in two groups:
+
+- **Regression suites** cover behavior that already works. Run them after changes to see whether you've broken something your users depend on.
+- **Hill-climbing suites** cover behavior you want to improve. You expect some failures today and use the results to track progress with each release.
+
+These describe how you use your suites. Both are ordinary test suites in Egma.
+
+## Start with an everyday caller
+
+We recommend using the [write-egma-tests skill](/skills-cli-sdks/skills-and-cli#install-the-skills) to draft tests from your agent's prompts and tools. Start with an everyday caller persona while you cover the main situations your agent needs to handle. Review the generated tests to make sure their expectations match your product.
+
+Add more personas when you want to explore differences in language or caller behavior. As you add flows and capabilities, add tests for them too. Turn failures from production into regression tests so you can check that the same problem stays fixed.

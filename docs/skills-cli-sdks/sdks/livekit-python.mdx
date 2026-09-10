@@ -1,0 +1,123 @@
+---
+title: "LiveKit Python SDK"
+---
+
+This SDK connects your livekit agent to egma for simulation testing and production monitoring. It records the agent's POV during simulations and lets egma inject mock tools.
+
+We need to do four things to set it up.
+
+## 1. Install the SDK
+
+Install the latest compatible release in the repo where your livekit worker runs. Use the package manager the repo already uses.
+
+```bash
+pip install --upgrade egma
+```
+
+For a repo using uv:
+
+```bash
+uv add --upgrade egma
+```
+
+The SDK supports Python 3.11 or newer and `livekit-agents>=1.6.6,<1.9`, including LiveKit 1.8. It uses OpenAI Python 2. Check compatibility with the worker's existing dependencies before upgrading and keep the resolved versions in the repo's lockfile.
+
+## 2. Setup the worker's environment
+
+Use an egma API key scoped to the project you want to send data to. You can create it through the CLI or the UI.
+
+- **CLI:** from a repo with a logged-in egma CLI and the right project in `egma/config.yaml`, run the command below. Use `egma login` if you need to sign in, and `egma init` if the repo does not have a project setup yet.
+
+  ```bash
+  egma project api-key create --name livekit-worker
+  ```
+
+- **UI:** open your project in [egma](https://app.egma.ai), go to **Settings → API keys**, enter a name, select your project under **Scope**, and click **Create key**.
+
+Copy the key when it is shown. The secret is shown once, and the CLI does not save it.
+
+Set these values in the worker's environment:
+
+```bash
+EGMA_URL=https://api.egma.ai
+EGMA_API_KEY=<your project API key>
+```
+
+For self-hosted egma, use your egma API URL. The worker must be able to reach it. Put the key in the worker's secret store or a gitignored environment file. For a cloud worker, set it in the deployed environment as well.
+
+## 3. Add the integration
+
+There are two functions depending on what you want to setup.
+
+### A. Simulation testing
+
+Call and await `simulation(agent, ctx, session)` after creating the agent and session, before `session.start`. Add this around the existing start call in your job entrypoint:
+
+```python
+from egma import simulation
+
+await simulation(agent, ctx, session)
+await session.start(agent=agent, room=ctx.room)
+```
+
+This is required for every voice and text simulation, even when the test has no mock tools. It sends the agent's traces to the simulation and lets egma answer the tools named under `## Mock tools` in the test. Other tools run their real implementations and are recorded too.
+
+The SDK recognises simulation rooms by the `egma-sim-` prefix. In other rooms, `simulation` does nothing. Keep that prefix reserved for egma simulations.
+
+For text simulations, disable audio and transcription pacing in `egma-sim-chat-` rooms. Use this start call, keeping your normal voice settings in the other branch:
+
+```python
+from livekit.agents import room_io
+
+is_egma_chat = ctx.job.room.name.startswith("egma-sim-chat-")
+options = (
+    room_io.RoomOptions(
+        audio_input=False,
+        audio_output=False,
+        text_output=room_io.TextOutputOptions(sync_transcription=False),
+    )
+    if is_egma_chat
+    else room_io.RoomOptions()
+)
+
+await session.start(agent=agent, room=ctx.room, room_options=options)
+```
+
+Keep the `await simulation(...)` call before this start call. Turn off any separate audio publishers in the text branch too.
+
+If the worker cannot complete the handshake with egma, `simulation` raises `NotReported`. Fix the setup before starting the session. If a mocked tool cannot reach egma during a simulation, that tool errors instead of calling the real backend.
+
+`simulation` has no total startup deadline. It waits for Egma to join and accept the tool configuration while the simulation room stays active. A room disconnect, Egma participant departure, or task cancellation stops the wait. Each RPC attempt keeps its own transport timeout, and transient registration or delivery failures are retried with the same configuration.
+
+When the configured simulation ends, Egma finishes its pending output and leaves the room. The SDK then closes the `AgentSession` that you supplied. An abrupt room disconnect closes it too. This completes LiveKit's native session trace and lets an entrypoint that waits for session close finish without its own timer. The listener is installed only after the exact Egma participant has accepted the tool report, and it is never installed in a production room.
+
+### B. Production monitoring
+
+Call `monitor(ctx)` at the start of the job entrypoint, before `ctx.connect` and `session.start`:
+
+```python
+from egma import monitor
+
+monitor(ctx)
+```
+
+It sends production traces to egma Monitoring. It does nothing in simulation rooms.
+
+If you want both testing and monitoring, add both calls: `monitor(ctx)` at the start of the entrypoint, then `await simulation(agent, ctx, session)` before the session starts. Both use the same environment settings.
+
+The SDK adds egma to a compatible existing OpenTelemetry provider. Keep LiveKit's default of one job per process, so each job's traces stay attached to its own room.
+
+## 4. Run the updated worker and verify
+
+For simulations, register the agent and a connection in egma if you have not already done so. Start the updated worker with an explicit `agent_name` matching that connection. Supply the job dispatch metadata your worker needs for startup.
+
+Keep a local worker running during tests. To use a cloud worker, deploy the SDK changes and environment settings there first. A successful local run does not deploy those changes.
+
+- **Testing:** run a simulation, wait for it to finish, and check that it completed with the agent's POV. If the agent calls a mocked tool, check its recorded arguments and answer too.
+- **Monitoring:** make a production conversation and check that it appears in egma Monitoring.
+
+If no worker joins, check the worker process and agent name. If the handshake fails, check the SDK call and room connection. If traces are missing, check the project key, `EGMA_URL`, and the worker's export logs.
+
+## License
+
+MIT. See [LICENSE](https://github.com/egma-ai/egma/blob/main/sdks/python/LICENSE).

@@ -1,0 +1,47 @@
+---
+title: "Env and mock tools"
+---
+
+First [connect your Retell agent](/docs/integrations/retell/connect).
+
+## Pass data to a test
+
+If the agent normally receives dynamic variables, put their test values in
+the test's `## Env` section:
+
+````markdown
+## Env
+
+```json
+{
+  "retell_dynamic_variables": {
+    "clinic_name": "Oak Street Clinic",
+    "caller_name": "Alex Morgan"
+  }
+}
+```
+````
+
+Use the exact variable names that the agent reads. Values must be strings.
+Do not use names starting with `egma_`; that prefix is reserved. Egma passes
+these variables to text and web-call simulations.
+
+## Mock tool responses
+
+Add a [Mock tools section](/docs/platform/tests/mock-tool-responses) to a test to return a
+controlled response for a selected custom tool. Use the exact tool name and
+the response shape your agent expects. Retell integrations do not need an
+Egma SDK in your backend for this.
+
+Only the tools named in the test are mocked. Other tools still run against
+their real backend. Retell's built-in actions, such as call transfer, SMS,
+digit pressing, and built-in booking, are not replaced by custom-tool mocks.
+These mocks do not replace MCP tools either.
+
+<Warning>
+  Web-call runs with mock tools create a temporary Retell agent version.
+  During that run, this version is **Latest Created**. Keep real phone numbers
+  and environment tags pinned to a serving version or **Latest Published**.
+  An unset phone-number version also uses **Latest Created**. Egma does not
+  change your production routing for you.
+</Warning>
