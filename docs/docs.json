@@ -135,9 +135,9 @@
             ]
           },
           {
-            "group": "Contact us",
+            "group": "Support",
             "pages": [
-              "docs/contact-us"
+              "docs/support"
             ]
           }
         ]
@@ -418,6 +418,10 @@
     {
       "source": "/self-hosting/configuration",
       "destination": "/self-hosting/get-started#environment-and-secrets"
+    },
+    {
+      "source": "/docs/contact-us",
+      "destination": "/docs/support"
     }
   ]
 }
