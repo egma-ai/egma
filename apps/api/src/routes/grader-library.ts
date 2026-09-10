@@ -102,7 +102,7 @@ function requiredEvidence(
     return ["turn_response_latency"];
   }
   return entry.type === "llm_as_judge"
-    ? ["transcript", "ending_outcome", "tool_calls", "observed_metrics", "test_expected_behaviors"]
+    ? ["transcript", "tool_calls", "observed_metrics", "test_expected_behaviors"]
     : [];
 }
 

@@ -90,7 +90,7 @@ describe("the grader library", () => {
       scopeEditable: false,
       modalities: ["chat", "voice"],
       gradingInstructions: expect.stringContaining("every supplied expected behavior"),
-      requiredEvidence: ["transcript", "ending_outcome", "tool_calls", "observed_metrics", "test_expected_behaviors"],
+      requiredEvidence: ["transcript", "tool_calls", "observed_metrics", "test_expected_behaviors"],
       settingDefinitions: expect.arrayContaining([expect.objectContaining({ key: "llm_model" })]),
     });
     expect(expected?.activeProjectGraderId).toMatch(/^grd_/u);

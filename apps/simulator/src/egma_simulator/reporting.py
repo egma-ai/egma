@@ -3,7 +3,9 @@ Validate reports, then serialize and append both document types to one local
 write-ahead log. A single sender retries identical bytes, preserving IDs
 and timestamps for receiver deduplication.
 
-Send the terminal report only after earlier evidence is accepted.
+Send the terminal report after earlier evidence settles. A definitive evidence
+refusal rides with that ending; an unreachable control plane still abandons all
+later delivery.
 Log lines retain their wire shape: contract_version identifies reports;
 resourceSpans identifies OTLP batches.
 Stop retries at the deadline and mark the reporter abandoned so an outage
@@ -97,6 +99,8 @@ class Reporter:
         self._sender: asyncio.Task | None = None
         self.abandoned = False
         """Set once delivery has given up; from then on the WAL is the record."""
+        self.evidence_error: str | None = None
+        """A definitive evidence refusal that a reachable report door can record."""
         self.provider_reference: str | None = None
         """The platform's own identifier for the exchange, once the plug
         offers one; rides the terminal facts."""
@@ -209,12 +213,11 @@ class Reporter:
                 return
             except DocumentRejected as refusal:
                 # The control plane refused the document outright. Resending
-                # the same bytes cannot succeed; the WAL holds the record. A
-                # refused span export ends ordered delivery, because sending a
-                # later terminal report would claim that incomplete evidence
-                # had already landed.
+                # the same bytes cannot succeed; the WAL holds the record.
+                # Continue with later documents, and record a refused span
+                # export on the terminal report as incomplete evidence.
                 if destination is Destination.SPANS:
-                    self.abandoned = True
+                    self.evidence_error = "evidence_collection_error"
                 log_event(
                     logger,
                     logging.ERROR,
@@ -296,6 +299,8 @@ class Reporter:
             "audio": self.audio,
             "provider_reference": self.provider_reference,
         }
+        if self.evidence_error is not None:
+            facts["evidence_error"] = self.evidence_error
         return facts
 
     def completed(self, ending: str, reason: str | None = None) -> None:

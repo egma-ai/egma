@@ -25,9 +25,8 @@ const EVIDENCE: JudgeInput = {
     { at: 1, speaker: "agent", text: "Thanks for calling." },
     { at: 2, speaker: "persona", text: "Move my cleaning to Thursday." },
   ],
-  outcome: { happened: true, endingReason: "persona_concluded", turns: 2 },
   toolCalls: [],
-  measures: [],
+  measures: [{ measure: "turn_response_latency", samples: [420, 630] }],
 };
 
 /**
@@ -199,10 +198,12 @@ describe("one judge call", () => {
     expect(asked).toContain("the agent confirms the new time");
     expect(asked).toContain("## Transcript");
     expect(asked).toContain("[2] persona: Move my cleaning to Thursday.");
-    expect(asked).toContain("## Outcome");
+    expect(asked).not.toContain("## Outcome");
+    expect(asked).not.toContain("persona_concluded");
     expect(asked).toContain("## Tool calls");
     expect(asked).toContain("(no tool calls were recorded)");
     expect(asked).toContain("## Measures");
+    expect(asked).toContain("turn_response_latency: 420, 630");
   });
 
   it("reads back the decision, the reason and the turns it cited", async () => {

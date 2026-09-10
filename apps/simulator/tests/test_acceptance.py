@@ -602,6 +602,18 @@ async def test_a_retell_text_mode_spec_conducts_a_multi_turn_exchange(
             Reply(words="Lakeside Dental, how can I help?"),
             Reply(words="Of course — could I take your name?"),
             Reply(words="Done: Thursday at half past two."),
+            Reply(
+                words="You are welcome. Goodbye.",
+                ends=True,
+                extra=(
+                    {
+                        "role": "tool_call_invocation",
+                        "tool_call_id": "terminal_call",
+                        "name": "end_call",
+                        "arguments": "{}",
+                    },
+                ),
+            ),
         ],
     )
     spec = text_mode_spec(
@@ -627,11 +639,12 @@ async def test_a_retell_text_mode_spec_conducts_a_multi_turn_exchange(
         ("human", "My name is Margaret Hale."),
         ("agent", "Done: Thursday at half past two."),
         ("human", GOODBYE),
+        ("agent", "You are welcome. Goodbye."),
     ]
 
     terminal = terminal_event_for(records, "sim-retell-001")
     assert terminal["status"] == "completed"
-    assert terminal["facts"]["ending"] == "persona_concluded"
+    assert terminal["facts"]["ending"] == "agent_ended"
     assert terminal["facts"]["turn_count"] == len(turns)
     # Text mode returns no durable Retell call reference.
     assert terminal["facts"]["provider_reference"] is None
@@ -639,14 +652,22 @@ async def test_a_retell_text_mode_spec_conducts_a_multi_turn_exchange(
     # And the platform's side of the same story: every completion addressed
     # the agent the connection block named, with persona turns in order.
     stub = running.stub
-    assert len(stub.requests) == 3
+    assert len(stub.requests) == 4
     assert all(
         request["agent_id"] == "agent_lakeside_chat" for request in stub.requests
     )
     assert stub.delivered() == [
         "I need to move my Tuesday cleaning to Thursday.",
         "My name is Margaret Hale.",
+        GOODBYE,
     ]
+
+    spans = [record["span"] for record in spans_for(records, "sim-retell-001")]
+    terminal_tools = [span for span in spans if span["name"] == "tool_call"]
+    assert len(terminal_tools) == 1
+    assert span_attribute(terminal_tools[0], "egma.tool.name") == "end_call"
+    assert span_attribute(terminal_tools[0], "egma.tool.arguments") == "{}"
+    assert span_attribute(terminal_tools[0], "egma.tool.result") is None
 
     simulator.stop()
     assert_kept_secret(sentinel, records=records, simulator=simulator)

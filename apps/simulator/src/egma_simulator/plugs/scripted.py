@@ -130,6 +130,12 @@ class ScriptedCounterpart:
             return AgentReply(text=None, ended=True, tool_calls=called)
         return AgentReply(text=FALLBACK_REPLY, ended=False, tool_calls=called)
 
+    async def finish(self, text: str) -> AgentReply | None:
+        """Accept the final scripted turn without inventing another answer."""
+        del text
+        self._delivered += 1
+        return None
+
     async def close(self) -> None:
         return None
 

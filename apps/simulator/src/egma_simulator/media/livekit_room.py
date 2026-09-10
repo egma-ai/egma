@@ -1684,7 +1684,7 @@ class TextRoom:
             startup = self._startup
             if startup is not None:
                 startup.participant_left(identity)
-            if not self._leaving and (
+            if not self._leaving and not self.failed.is_set() and (
                 startup is None or startup.is_relevant(identity)
             ):
                 self.ended.set()
@@ -1869,7 +1869,8 @@ class TextRoom:
         """Leave the room, and stop reading whatever was still arriving."""
         room, self._room = self._room, None
         self._leaving = True
-        self.ended.set()
+        if not self.failed.is_set():
+            self.ended.set()
         readers = list(self._reading)
         for reader in readers:
             if not reader.done():
@@ -2054,6 +2055,19 @@ class LiveKitChatRoomBackend(RoomLifecycle):
 
     MODALITY = "chat"
 
+    @property
+    def has_ended(self) -> bool:
+        """Whether this room already observed its normal remote ending."""
+        return (
+            self._room is not None
+            and self._room.ended.is_set()
+            and not self._room.failed.is_set()
+        )
+
+    @property
+    def has_failed(self) -> bool:
+        return self._room is not None and self._room.failed.is_set()
+
     def _fresh_room_name(self) -> str:
         """The marked form: ``egma-sim-chat-`` says which kind of
         simulation this room conducts, to a worker deciding its room
@@ -2130,6 +2144,37 @@ class LiveKitChatRoomBackend(RoomLifecycle):
             drain=drain_seconds,
             turn=turn,
             silence_ends_it=True,
+        )
+
+    async def send(self, text: str) -> None:
+        """Send one final turn without opening another answer window."""
+        room = self._room
+        if room is None:
+            raise MediaBackendError("a persona turn was delivered before a room")
+        await room.send(text)
+
+    async def wait_ended(self) -> None:
+        """Wait for the room's observed normal ending."""
+        room = self._room
+        if room is None:
+            raise MediaBackendError("an ending was awaited before a room")
+        await room.ended.wait()
+
+    async def wait_failed(self) -> None:
+        """Wait for the room's transport failure and raise its existing error."""
+        room = self._room
+        if room is None:
+            raise MediaBackendError("a failure was awaited before a room")
+        await room.failed.wait()
+        self.raise_if_failed()
+
+    def raise_if_failed(self) -> None:
+        if not self.has_failed:
+            return
+        raise MediaBackendError(
+            f"the livekit server at {self._server_url} closed "
+            f"{self._room_name} while the exchange was under way",
+            ending=ERROR,
         )
 
     async def _assembled(

@@ -6,9 +6,9 @@ A custom grader uses an LLM to check conversation evidence against your
 instructions. It belongs to one project. You choose its model, scope, and pass
 threshold.
 
-The grader receives the transcript, ending outcome, tool names and arguments,
-observed metrics, and any expected behaviors from the test. Tool return
-payloads are not sent to the LLM. Use rules you can check with this evidence.
+The grader receives the transcript, tool names and arguments, observed metrics,
+and any expected behaviors from the test. Tool return payloads are not sent to
+the LLM. Use rules you can check with this evidence.
 The transcript and tool calls prefer the agent's evidence when available.
 See [Check which evidence arrived](/docs/platform/runs/review-a-run#check-which-evidence-arrived).
 

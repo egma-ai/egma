@@ -376,15 +376,12 @@ async def test_a_chat_livekit_spec_conducts_a_whole_simulation_in_a_room(
     assert assembled.conductor is None
     assert assembled.audio is None
 
-    # Every persona turn that was delivered went out on the topic a
-    # LiveKit session listens to, and nothing else went anywhere. The
-    # concluding goodbye is on the transcript and not on the wire, which
-    # is the conversation loop's own rule and not this plug's: a persona that has
-    # concluded is not waiting for an answer.
-    assert [typed.topic for typed in stub.typed] == [CHAT_TOPIC] * 2
+    # Every persona turn went out on the topic a LiveKit session listens to.
+    # The concluding goodbye is sent once without opening another answer turn.
+    assert [typed.topic for typed in stub.typed] == [CHAT_TOPIC] * 3
     assert [typed.text for typed in stub.typed] == [
         text for speaker, text in turns if speaker == "human"
-    ][:2]
+    ]
 
     # And the room was not left behind.
     assert stub.deleted == [stub.rooms[0].name]
@@ -2230,11 +2227,23 @@ async def test_a_cancel_directive_mid_exchange_still_leaves_no_room_behind(
             super().__init__()
             self._steps = 0
 
-        async def guard(self, coroutine):
+        async def guard(
+            self,
+            coroutine,
+            *,
+            agent_ended=None,
+            agent_failed=None,
+            agent_already_ended=False,
+        ):
             self._steps += 1
             if self._steps > 1:
                 self.request_cancel()
-            return await super().guard(coroutine)
+            return await super().guard(
+                coroutine,
+                agent_ended=agent_ended,
+                agent_failed=agent_failed,
+                agent_already_ended=agent_already_ended,
+            )
 
     stub = ChatStub(greeting="Front desk.", replies=["Noted."])
     conducted, _turns, _assembled = await chat_walk(

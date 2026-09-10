@@ -1,16 +1,13 @@
 import type { Conversation } from "../conversation.ts";
 
 /**
- * Text evidence for an LLM judge: transcript, execution ending, tool calls,
- * and metrics. Grading instructions and expected behaviors travel separately
- * in the question. Validate untyped evidence and represent missing lists
- * as empty arrays.
+ * Text evidence for an LLM judge: transcript, tool calls, and metrics. Grading
+ * instructions and expected behaviors travel separately in the question.
+ * Validate untyped evidence and represent missing lists as empty arrays.
  */
 export type JudgeInput = {
   /** In the order they were spoken, numbered from one. */
   readonly transcript: readonly Turn[];
-  /** How the conversation ended, in the simulator's own words. */
-  readonly outcome: Outcome;
   readonly toolCalls: readonly ToolCall[];
   /** What was measured. A metric measures; a grader judges. */
   readonly measures: readonly Measure[];
@@ -25,17 +22,6 @@ export type Turn = {
   /** `agent`, `persona`, or whatever the simulator wrote. */
   readonly speaker: string;
   readonly text: string;
-};
-
-export type Outcome = {
-  /**
-   * False when evidence cannot be graded; the engine records errors without
-   * calling the model in that case.
-   */
-  readonly happened: boolean;
-  /** The simulator's own word for why it ended, or null. */
-  readonly endingReason: string | null;
-  readonly turns: number;
 };
 
 export type ToolCall = {
@@ -57,12 +43,6 @@ export function judgeInputOf(conversation: Conversation): JudgeInput {
 
   return {
     transcript,
-    outcome: {
-      // The engine rejects ungradable evidence before asking the model.
-      happened: conversation.nothingToJudgeBecause === null,
-      endingReason: conversation.endingReason,
-      turns: transcript.length,
-    },
     toolCalls: toolCallsOf(conversation.events),
 
     measures: conversation.measures.map(({ measure, samples }) => ({
@@ -141,11 +121,6 @@ export function asJudgeReads(input: JudgeInput): string {
       lines.push(`[${turn.at}] ${turn.speaker}: ${turn.text}`);
     }
   }
-
-  lines.push("", "## Outcome");
-  lines.push(
-    `the conversation ended ${input.outcome.endingReason ?? "for no recorded reason"}, after ${input.outcome.turns} turn${input.outcome.turns === 1 ? "" : "s"}`,
-  );
 
   lines.push("", "## Tool calls");
   if (input.toolCalls.length === 0) {

@@ -101,6 +101,7 @@ export type GradingRequestResult =
 export type RegradeTraceResult =
   | { readonly kind: "not_requested" }
   | { readonly kind: "waiting"; readonly for: "evidence" }
+  | { readonly kind: "evidence_error" }
   | {
       readonly kind: "queued";
       readonly jobId: string;
@@ -703,11 +704,81 @@ export const SIMULATION_EVIDENCE_COLLECTION_ERROR = {
     "Egma could not collect the agent's complete evidence before the recovery window ended.",
 } as const;
 
+export const SIMULATOR_EVIDENCE_DELIVERY_ERROR =
+  "simulator_evidence_delivery_error";
+const SIMULATOR_EVIDENCE_COLLECTION_ERROR = {
+  error: "evidence_collection_error",
+  message: "Egma could not collect the simulator's complete evidence.",
+} as const;
+
 /**
  * Persist a terminal evidence error without asking a model to judge incomplete
  * evidence. The terminal Postgres row is the idempotency record across process
  * restarts and is never visible to worker claims.
  */
+export async function recordSimulationEvidenceErrorIn(
+  on: Queryable,
+  auth: AuthContext,
+  input: {
+    readonly simulationId: string;
+    readonly traceId: string;
+    readonly traceStartedAt: Date;
+    readonly runId: string;
+    readonly error?:
+      | typeof SIMULATION_EVIDENCE_COLLECTION_ERROR.error
+      | typeof SIMULATOR_EVIDENCE_DELIVERY_ERROR;
+  },
+): Promise<boolean> {
+  if (await jobForTrace(on, auth, input.traceId) !== undefined) return false;
+
+  const resolved = await pinnedSimulationGradersOn(auth, on, input.simulationId);
+  if (resolved === undefined) {
+    throw new Error(
+      `completed simulation ${input.simulationId} has no grading plan`,
+    );
+  }
+  if (resolved.length === 0) return false;
+
+  const grades = await readTraceGrades(auth, {
+    source: "simulation",
+    traceId: input.traceId,
+    runId: input.runId,
+  });
+  if (allEntriesHaveResults(resolved.map(frozen), grades.current).complete) {
+    return false;
+  }
+
+  const [inserted] = await on
+    .insert(gradingJob)
+    .values({
+      id: newId("gjb"),
+      organizationId: auth.organizationId,
+      projectId: projectOf(auth),
+      source: "simulation",
+      simulationId: input.simulationId,
+      traceId: input.traceId,
+      traceStartedAt: input.traceStartedAt,
+      runId: input.runId,
+      entries: resolved.map(frozen),
+      sequenceBase: maximumGradingSequence(grades.history),
+      attempts: 0,
+      status: "abandoned",
+      lastError: input.error ?? SIMULATION_EVIDENCE_COLLECTION_ERROR.error,
+      finishedAt: new Date(),
+    })
+    .onConflictDoNothing()
+    .returning({ id: gradingJob.id });
+  return inserted !== undefined;
+}
+
+export async function lockSimulationGradingTrace(
+  on: Queryable,
+  auth: AuthContext,
+  traceId: string,
+): Promise<void> {
+  await lockTrace(on, auth, traceId);
+}
+
 async function recordSimulationEvidenceError(
   auth: AuthContext,
   input: {
@@ -732,50 +803,7 @@ async function recordSimulationEvidenceError(
     ) {
       return false;
     }
-    if (await jobForTrace(on, auth, input.traceId) !== undefined) return false;
-
-    const resolved = await pinnedSimulationGradersOn(
-      auth,
-      on,
-      input.simulationId,
-    );
-    if (resolved === undefined) {
-      throw new Error(
-        `completed simulation ${input.simulationId} has no grading plan`,
-      );
-    }
-    if (resolved.length === 0) return false;
-
-    const grades = await readTraceGrades(auth, {
-      source: "simulation",
-      traceId: input.traceId,
-      runId: input.runId,
-    });
-    if (allEntriesHaveResults(resolved.map(frozen), grades.current).complete) {
-      return false;
-    }
-
-    const [inserted] = await on
-      .insert(gradingJob)
-      .values({
-        id: newId("gjb"),
-        organizationId: auth.organizationId,
-        projectId: projectOf(auth),
-        source: "simulation",
-        simulationId: input.simulationId,
-        traceId: input.traceId,
-        traceStartedAt: input.traceStartedAt,
-        runId: input.runId,
-        entries: resolved.map(frozen),
-        sequenceBase: maximumGradingSequence(grades.history),
-        attempts: 0,
-        status: "abandoned",
-        lastError: SIMULATION_EVIDENCE_COLLECTION_ERROR.error,
-        finishedAt: new Date(),
-      })
-      .onConflictDoNothing()
-      .returning({ id: gradingJob.id });
-    return inserted !== undefined;
+    return recordSimulationEvidenceErrorIn(on, auth, input);
   });
 }
 
@@ -1665,12 +1693,19 @@ export async function readTraceGrading(
   const entries = await selectedEntries(db(), auth, ref);
   const grades = await readTraceGrades(auth, ref);
   const job = await jobForTrace(db(), auth, ref.traceId);
-  const evidenceError: TraceGrading["evidenceError"] =
+  let evidenceError: TraceGrading["evidenceError"] =
     job?.status === "abandoned" &&
     job.attempts === 0 &&
     job.lastError === SIMULATION_EVIDENCE_COLLECTION_ERROR.error
       ? SIMULATION_EVIDENCE_COLLECTION_ERROR
       : null;
+  if (
+    job?.status === "abandoned" &&
+    job.attempts === 0 &&
+    job.lastError === SIMULATOR_EVIDENCE_DELIVERY_ERROR
+  ) {
+    evidenceError = SIMULATOR_EVIDENCE_COLLECTION_ERROR;
+  }
 
   let workBlock: TraceGrading["workBlock"] = null;
   if (ref.source === "production" && entries !== undefined && entries.length > 0 && job?.status === "pending") {
@@ -1688,7 +1723,18 @@ export async function readTraceGrading(
   // A production trace can be visible before its explicit end/evidence-ready
   // handshake freezes selection. That is pending, not an empty decision.
   if (entries === undefined) {
-    if (ref.source === "simulation") return undefined;
+    if (ref.source === "simulation") {
+      return evidenceError === null
+        ? undefined
+        : {
+            workBlock,
+            evidenceError,
+            state: "not_requested",
+            history: [],
+            current: [],
+            combinedScore: null,
+          };
+    }
     return {
       workBlock,
       evidenceError,
@@ -2116,6 +2162,9 @@ export async function regradeTrace(
         reopened: false,
         alreadyWaiting: true,
       };
+    }
+    if (existing?.lastError === SIMULATOR_EVIDENCE_DELIVERY_ERROR) {
+      return { kind: "evidence_error" };
     }
     if (ref.source === "simulation") {
       const simulationId = simulationIdOfTrace(ref.traceId);

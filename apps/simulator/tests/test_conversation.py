@@ -15,9 +15,9 @@ import asyncio
 import pytest
 
 from egma_simulator.conversation import Conducted, ConversationControls, conduct
-from egma_simulator.model import GOODBYE, ScriptedModel
+from egma_simulator.model import GOODBYE, ModelFailure, PersonaReply, ScriptedModel
 from egma_simulator.persona import Persona
-from egma_simulator.plugs import AgentReply
+from egma_simulator.plugs import AgentReply, PlugError
 from egma_simulator.plugs.scripted import ScriptedCounterpart
 from egma_simulator.spec import AuthoredPersona
 
@@ -251,6 +251,7 @@ class NotingPlug:
     def __init__(self, *, opening: AgentReply, answers: list[AgentReply]) -> None:
         self.provider_reference = None
         self.delivered = 0
+        self.finished = 0
         self._opening = opening
         self._answers = answers
 
@@ -261,8 +262,339 @@ class NotingPlug:
         self.delivered += 1
         return self._answers.pop(0) if self._answers else AgentReply(text="Go on.")
 
+    async def finish(self, text: str) -> None:
+        del text
+        self.finished += 1
+
     async def close(self) -> None:
         return None
+
+
+class FixedModel:
+    model_name = "fixed"
+
+    def __init__(self, reply: PersonaReply) -> None:
+        self._reply = reply
+
+    async def reply(self, _context) -> PersonaReply:
+        return self._reply
+
+    async def close(self) -> None:
+        return None
+
+
+class TerminalPlug:
+    provider_reference = None
+
+    def __init__(self, final_answer: AgentReply | None = None) -> None:
+        self.ended = asyncio.Event()
+        self.failed = asyncio.Event()
+        self.final_answer = final_answer
+        self.sent: list[str] = []
+
+    async def open(self) -> None:
+        return None
+
+    async def deliver(self, text: str) -> AgentReply:
+        self.sent.append(text)
+        return AgentReply(text="continue")
+
+    async def finish(self, text: str) -> AgentReply | None:
+        self.sent.append(text)
+        return self.final_answer
+
+    async def wait_ended(self) -> None:
+        await self.ended.wait()
+
+    async def wait_failed(self) -> None:
+        await self.failed.wait()
+        self.raise_if_failed()
+
+    def raise_if_failed(self) -> None:
+        if self.failed.is_set():
+            raise PlugError("the chat transport failed")
+
+    @property
+    def has_ended(self) -> bool:
+        return self.ended.is_set() and not self.failed.is_set()
+
+    async def close(self) -> None:
+        return None
+
+
+def fixed_persona(reply: PersonaReply) -> Persona:
+    return Persona(
+        authored=AUTHORED,
+        scenario_instructions="One point.",
+        model=FixedModel(reply),
+    )
+
+
+async def test_a_real_terminal_turn_is_sent_once_before_the_persona_ends():
+    turns, recorder = collect()
+    plug = TerminalPlug(final_answer=AgentReply(text="Take care.", ended=True))
+    reply = PersonaReply(text="Goodbye.", concluded=True)
+    conducted = await conduct(
+        persona=fixed_persona(reply),
+        plug=plug,
+        max_turns=10,
+        max_duration_seconds=30,
+        on_turn=recorder,
+        on_timing=None,
+        controls=ConversationControls(),
+        name="sim:terminal",
+    )
+    assert plug.sent == ["Goodbye."]
+    assert turns == [("human", "Goodbye."), ("agent", "Take care.")]
+    assert conducted.ending == "agent_ended"
+
+
+async def test_a_textless_end_action_makes_no_turn_or_delivery():
+    turns, recorder = collect()
+    plug = TerminalPlug()
+    reply = PersonaReply(text="", concluded=True)
+    conducted = await conduct(
+        persona=fixed_persona(reply),
+        plug=plug,
+        max_turns=10,
+        max_duration_seconds=30,
+        on_turn=recorder,
+        on_timing=None,
+        controls=ConversationControls(),
+        name="sim:textless-terminal",
+    )
+    assert plug.sent == []
+    assert turns == []
+    assert conducted.ending == "persona_concluded"
+
+
+async def test_customer_end_cancels_pending_persona_work_without_a_late_turn():
+    class PendingModel:
+        model_name = "pending"
+
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.canceled = asyncio.Event()
+
+        async def reply(self, _context) -> PersonaReply:
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.canceled.set()
+                raise
+
+        async def close(self) -> None:
+            return None
+
+    model = PendingModel()
+    persona = Persona(
+        authored=AUTHORED, scenario_instructions="One point.", model=model
+    )
+    plug = TerminalPlug()
+    turns, recorder = collect()
+    running = asyncio.create_task(
+        conduct(
+            persona=persona,
+            plug=plug,
+            max_turns=10,
+            max_duration_seconds=30,
+            on_turn=recorder,
+            on_timing=None,
+            controls=ConversationControls(),
+            name="sim:customer-ended",
+        )
+    )
+    await model.started.wait()
+    plug.ended.set()
+    conducted = await running
+    assert model.canceled.is_set()
+    assert turns == []
+    assert plug.sent == []
+    assert conducted.ending == "agent_ended"
+
+
+async def test_customer_end_observed_first_beats_a_failure_ready_before_resume():
+    class RacingModel:
+        model_name = "racing"
+
+        def __init__(self) -> None:
+            self.reply_future = asyncio.get_running_loop().create_future()
+            self.started = asyncio.Event()
+
+        async def reply(self, _context) -> PersonaReply:
+            self.started.set()
+            return await self.reply_future
+
+        async def close(self) -> None:
+            return None
+
+    model = RacingModel()
+    persona = Persona(
+        authored=AUTHORED, scenario_instructions="One point.", model=model
+    )
+    plug = TerminalPlug()
+    turns, recorder = collect()
+    running = asyncio.create_task(
+        conduct(
+            persona=persona,
+            plug=plug,
+            max_turns=10,
+            max_duration_seconds=30,
+            on_turn=recorder,
+            on_timing=None,
+            controls=ConversationControls(),
+            name="sim:ordered-customer-end",
+        )
+    )
+    await model.started.wait()
+    plug.ended.set()
+    model.reply_future.set_exception(ModelFailure("late blank response"))
+    conducted = await running
+    assert conducted.ending == "agent_ended"
+    assert turns == []
+
+
+@pytest.mark.parametrize("immediate", ["failure", "reply"])
+async def test_an_already_observed_customer_end_starts_no_persona_work(immediate):
+    class ImmediateModel:
+        model_name = "immediate"
+
+        def __init__(self) -> None:
+            self.called = False
+
+        async def reply(self, _context) -> PersonaReply:
+            self.called = True
+            if immediate == "failure":
+                raise ModelFailure("must not replace the customer ending")
+            return PersonaReply(text="too late", concluded=False)
+
+        async def close(self) -> None:
+            return None
+
+    model = ImmediateModel()
+    persona = Persona(
+        authored=AUTHORED, scenario_instructions="One point.", model=model
+    )
+    plug = TerminalPlug()
+    plug.ended.set()
+    turns, recorder = collect()
+
+    conducted = await conduct(
+        persona=persona,
+        plug=plug,
+        max_turns=10,
+        max_duration_seconds=30,
+        on_turn=recorder,
+        on_timing=None,
+        controls=ConversationControls(),
+        name="sim:already-ended",
+    )
+
+    assert conducted.ending == "agent_ended"
+    assert model.called is False
+    assert plug.sent == []
+    assert turns == []
+
+
+async def test_an_immediate_persona_failure_without_a_customer_end_still_fails():
+    class FailingModel:
+        model_name = "failing"
+
+        async def reply(self, _context) -> PersonaReply:
+            raise ModelFailure("actual persona failure")
+
+        async def close(self) -> None:
+            return None
+
+    persona = Persona(
+        authored=AUTHORED,
+        scenario_instructions="One point.",
+        model=FailingModel(),
+    )
+    with pytest.raises(ModelFailure, match="actual persona failure"):
+        await conduct(
+            persona=persona,
+            plug=TerminalPlug(),
+            max_turns=10,
+            max_duration_seconds=30,
+            on_turn=collect()[1],
+            on_timing=None,
+            controls=ConversationControls(),
+            name="sim:actual-failure",
+        )
+
+
+async def test_an_already_failed_transport_starts_no_persona_work():
+    model = FixedModel(PersonaReply(text="too late", concluded=False))
+    persona = Persona(
+        authored=AUTHORED, scenario_instructions="One point.", model=model
+    )
+    plug = TerminalPlug()
+    plug.failed.set()
+    turns, recorder = collect()
+
+    with pytest.raises(PlugError, match="transport failed"):
+        await conduct(
+            persona=persona,
+            plug=plug,
+            max_turns=10,
+            max_duration_seconds=30,
+            on_turn=recorder,
+            on_timing=None,
+            controls=ConversationControls(),
+            name="sim:already-failed",
+        )
+    assert plug.sent == []
+    assert turns == []
+
+
+async def test_transport_failure_then_departure_cancels_pending_persona_work():
+    class PendingModel:
+        model_name = "pending"
+
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.canceled = asyncio.Event()
+
+        async def reply(self, _context) -> PersonaReply:
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.canceled.set()
+                raise
+
+        async def close(self) -> None:
+            return None
+
+    model = PendingModel()
+    persona = Persona(
+        authored=AUTHORED, scenario_instructions="One point.", model=model
+    )
+    plug = TerminalPlug()
+    turns, recorder = collect()
+    running = asyncio.create_task(
+        conduct(
+            persona=persona,
+            plug=plug,
+            max_turns=10,
+            max_duration_seconds=30,
+            on_turn=recorder,
+            on_timing=None,
+            controls=ConversationControls(),
+            name="sim:failed-then-left",
+        )
+    )
+    await model.started.wait()
+    plug.failed.set()
+    plug.ended.set()
+
+    with pytest.raises(PlugError, match="transport failed"):
+        await running
+    assert model.canceled.is_set()
+    assert plug.sent == []
+    assert turns == []
 
 
 async def test_what_the_platform_said_rides_the_record_and_not_the_turn():

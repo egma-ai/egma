@@ -57,6 +57,10 @@ class _ConversationStopped(Exception):
     """Internal: a stop cause landed while the loop awaited something."""
 
 
+class _AgentEnded(Exception):
+    """Internal: the adapter observed a normal customer ending."""
+
+
 class ConversationControls:
     """The two hands that may stop a conversation, and the record of which did."""
 
@@ -76,7 +80,14 @@ class ConversationControls:
             self.cause = cause
             self._stopped.set()
 
-    async def guard(self, coroutine: Coroutine[Any, Any, Any]) -> Any:
+    async def guard(
+        self,
+        coroutine: Coroutine[Any, Any, Any],
+        *,
+        agent_ended: Coroutine[Any, Any, None] | None = None,
+        agent_failed: Coroutine[Any, Any, None] | None = None,
+        agent_already_ended: bool = False,
+    ) -> Any:
         """Await one step of the conversation, unless a stop cause lands first.
 
         The step runs as its own task, raced against the stop signal; when
@@ -84,12 +95,43 @@ class ConversationControls:
         the loop can name the cause. Cancellation of the loop itself — the
         service tearing down — passes straight through.
         """
+        if agent_already_ended:
+            coroutine.close()
+            if agent_ended is not None:
+                agent_ended.close()
+            if agent_failed is not None:
+                agent_failed.close()
+            raise _AgentEnded()
+
+        # Start the normal-ending watcher before persona work. This preserves
+        # an ending that lands between the adapter's latch check above and task
+        # scheduling here.
+        departure = (
+            None if agent_ended is None else asyncio.ensure_future(agent_ended)
+        )
+        transport_failure = (
+            None if agent_failed is None else asyncio.ensure_future(agent_failed)
+        )
         step = asyncio.ensure_future(coroutine)
         interrupter = asyncio.ensure_future(self._stopped.wait())
+        first = asyncio.get_running_loop().create_future()
+
+        def observed(cause: str) -> Callable[[asyncio.Future[Any]], None]:
+            def remember(_task: asyncio.Future[Any]) -> None:
+                if not first.done():
+                    first.set_result(cause)
+
+            return remember
+
+        step.add_done_callback(observed("step"))
+        interrupter.add_done_callback(observed("control"))
+        if departure is not None:
+            departure.add_done_callback(observed("agent"))
+        if transport_failure is not None:
+            transport_failure.add_done_callback(observed("failure"))
+        winner: str | None = None
         try:
-            done, _pending = await asyncio.wait(
-                {step, interrupter}, return_when=asyncio.FIRST_COMPLETED
-            )
+            winner = await first
         except asyncio.CancelledError:
             step.cancel()
             raise
@@ -98,12 +140,26 @@ class ConversationControls:
             with contextlib.suppress(asyncio.CancelledError):
                 await interrupter
 
-        if step in done:
+            if departure is not None and winner != "agent":
+                departure.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await departure
+            if transport_failure is not None and winner != "failure":
+                transport_failure.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await transport_failure
+
+        if winner == "step":
             return step.result()
 
         step.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await step
+        if departure is not None and winner == "agent":
+            departure.result()
+            raise _AgentEnded()
+        if transport_failure is not None and winner == "failure":
+            transport_failure.result()
         raise _ConversationStopped()
 
 
@@ -216,6 +272,22 @@ async def conduct(
     def limit_by_turns() -> Conducted:
         return ended(turn_limit_reached(max_turns))
 
+    def wait_for_agent_end() -> Coroutine[Any, Any, None] | None:
+        wait_ended = getattr(plug, "wait_ended", None)
+        return wait_ended() if callable(wait_ended) else None
+
+    def wait_for_agent_failure() -> Coroutine[Any, Any, None] | None:
+        wait_failed = getattr(plug, "wait_failed", None)
+        return wait_failed() if callable(wait_failed) else None
+
+    def raise_if_agent_failed() -> None:
+        check = getattr(plug, "raise_if_failed", None)
+        if callable(check):
+            check()
+
+    def agent_has_ended() -> bool:
+        return bool(getattr(plug, "has_ended", False))
+
     watchdog = asyncio.create_task(
         _duration_watchdog(max_duration_seconds, controls),
         name=f"{name}:watchdog",
@@ -246,15 +318,34 @@ async def conduct(
             # The persona's move — unless the budget is already spent.
             if budget_spent():
                 return limit_by_turns()
-            reply = await controls.guard(persona.next_turn(history))
+            raise_if_agent_failed()
+            reply = await controls.guard(
+                persona.next_turn(history),
+                agent_ended=wait_for_agent_end(),
+                agent_failed=wait_for_agent_failure(),
+                agent_already_ended=agent_has_ended(),
+            )
             # The bill before the words, because the bill is a fact about the
             # request that just returned and the words are about to change the
             # history it was made against.
             if on_provider_usage is not None and reply.usage is not None:
                 await on_provider_usage(reply.usage)
-            await record("human", reply.text)
             if reply.concluded or reply.requests_end_call:
+                if reply.text:
+                    raise_if_agent_failed()
+                    final_answer = await controls.guard(
+                        plug.finish(reply.text),
+                        agent_ended=wait_for_agent_end(),
+                        agent_failed=wait_for_agent_failure(),
+                        agent_already_ended=agent_has_ended(),
+                    )
+                    await record("human", reply.text)
+                    if final_answer is not None:
+                        await record_answer(final_answer)
+                        if final_answer.ended:
+                            return ended(AGENT_ENDED)
                 return ended(PERSONA_CONCLUDED)
+            await record("human", reply.text)
 
             # The agent's move — not asked for when its answer could not
             # be recorded anyway: the limit ends the conversation before a phantom
@@ -291,6 +382,8 @@ async def conduct(
             # with no words is still an answer, and a boundary read off
             # the transcript alone would miss exactly that one.
             await answered()
+    except _AgentEnded:
+        return ended(AGENT_ENDED)
     except _ConversationStopped:
         if controls.cause == CANCEL_DIRECTIVE:
             return Conducted(

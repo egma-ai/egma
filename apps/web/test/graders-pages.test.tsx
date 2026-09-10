@@ -847,8 +847,7 @@ describe("the project Graders surface", () => {
     /* And one line says what the judge can actually see. */
     expect(
       within(sheet).getByText(
-        "The judge reads the transcript, the outcome, the tool calls, and " +
-          "the metrics of one conversation.",
+        "The judge reads the transcript, tool calls, and metrics of one conversation.",
       ),
     ).toBeTruthy();
 
@@ -935,8 +934,7 @@ describe("the project Graders surface", () => {
       [
         "evidence sentence",
         within(sheet).getByText(
-          "The judge reads the transcript, the outcome, the tool calls, and " +
-            "the metrics of one conversation.",
+          "The judge reads the transcript, tool calls, and metrics of one conversation.",
         ),
       ],
       [

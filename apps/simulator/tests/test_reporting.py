@@ -60,14 +60,11 @@ async def test_events_arrive_in_order_with_the_wal_written_first(tmp_path):
     reporter.completed("persona_concluded")
     await reporter.close()
 
-    kinds = [
-        json.loads(document)["events"][0]["kind"] for document in client.delivered
-    ]
+    kinds = [json.loads(document)["events"][0]["kind"] for document in client.delivered]
     assert kinds == ["status", "status"]
 
     event_ids = [
-        json.loads(document)["events"][0]["event_id"]
-        for document in client.delivered
+        json.loads(document)["events"][0]["event_id"] for document in client.delivered
     ]
     assert event_ids == [f"evt-{n:06d}" for n in range(1, 3)]
 
@@ -76,9 +73,11 @@ async def test_events_arrive_in_order_with_the_wal_written_first(tmp_path):
 
     terminal = json.loads(client.delivered[-1])["events"][0]
     assert terminal["facts"]["turn_count"] == 2
-    assert terminal["facts"]["started_at"] == json.loads(client.delivered[0])[
-        "events"
-    ][0]["at"]
+    assert "evidence_error" not in terminal["facts"]
+    assert (
+        terminal["facts"]["started_at"]
+        == json.loads(client.delivered[0])["events"][0]["at"]
+    )
 
 
 async def test_a_transient_failure_resends_the_same_bytes(tmp_path):
@@ -299,9 +298,8 @@ async def test_a_span_batch_that_will_not_land_is_resent_byte_identically(
     assert client.delivered[-1] == batch_attempts[0]
 
 
-async def test_a_refused_span_batch_blocks_the_terminal_report(tmp_path):
-    """A final span rejection keeps the evidence in the log and stops the
-    terminal transition from claiming that a complete trace was accepted."""
+async def test_a_refused_span_batch_marks_the_terminal_report(tmp_path):
+    """A reachable lifecycle door receives the ending and evidence failure."""
 
     class RefusingClient(FakeClient):
         async def spans(self, simulation_id: str, serialized: bytes) -> None:
@@ -318,12 +316,16 @@ async def test_a_refused_span_batch_blocks_the_terminal_report(tmp_path):
     spans.opened()
     spans.turn("agent", "Lakeside Dental.")
     spans.flush()
+    await reporter.drain()
     reporter.execution_ended()
     reporter.completed("persona_concluded")
     await reporter.close()
 
-    assert reporter.abandoned is True
-    assert client.doors == ["report"]
+    assert reporter.abandoned is False
+    assert client.doors == ["report", "report"]
+    terminal = json.loads(client.delivered[-1])["events"][0]
+    assert terminal["status"] == "completed"
+    assert terminal["facts"]["evidence_error"] == "evidence_collection_error"
     wal_lines = (tmp_path / wal_filename("sim-order-4")).read_bytes().splitlines()
     assert [
         "spans" if "resourceSpans" in json.loads(line) else "report"
