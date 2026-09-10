@@ -3,7 +3,7 @@
 
 Egma is an open-source platform for testing voice agents and monitoring them in production.
 
-[Docs](https://docs.egma.ai) · [Egma Cloud](https://app.egma.ai) · [Discord (invite coming soon)](https://example.com/egma-discord-placeholder)
+[Docs](https://docs.egma.ai) · [Egma Cloud](https://app.egma.ai) · [Discord](https://discord.gg/v4KHSNHfPj)
 
 
 ## 🧩 Core features
