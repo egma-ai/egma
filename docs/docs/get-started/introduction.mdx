@@ -1,48 +1,47 @@
 ---
-title: "introduction"
+title: "Introduction"
 ---
 
-Egma is an open-source platform for testing voice agents and monitoring them in production. Check how your agent behaves before release and investigate problems in real conversations.
+Egma is an open-source platform for testing and monitoring voice agents. It helps you run simulation tests so that you can be confident in the agents behavior before releasing and then helps you monitor for issues in production.
 
-Use [Egma Cloud](https://app.egma.ai) or [self-host Egma](/self-hosting/get-started) on your own infrastructure.
+You can use [Egma Cloud](https://app.egma.ai) or [self-host](/self-hosting/get-started) Egma on your own infrastructure.
 
 ## Quickstart
 
-Follow the [five-minute quickstart](/docs/get-started/quickstart) to connect your agent, create a test, and review your first voice simulation.
+Follow the [five-minute quickstart](/docs/get-started/quickstart) guide to create, run and grade your first test suite.
 
 ## Why we built Egma?
 
-When we were building voice products, we spent hours making test calls and investigating problems in production. Every change meant checking the agent’s behavior again. Even after all that testing, real conversations exposed behavior we hadn’t anticipated.
+We’ve built voice agents in production ourselves. And as developers, one of the most frustrating parts was calling the agent again and again, reciting the same script just to test its behavior. It felt like we’d signed up for creative work and ended up doing grunt work.
 
-We built Egma to make those checks repeatable and help us understand failures in production. We wanted to ship voice agents with more confidence and keep checking how they behaved once real people were using them.
+We disliked the grunt work, but we hated unreliable agents even more.
 
-- **Open source.** Inspect the code, adapt it to your workflow, and self-host the platform.
-- **Bring your own keys.** Use your provider keys in Cloud or a self-hosted deployment and pay providers directly for those model calls. Cloud plan and applicable voice usage charges still apply.
-- **Choose your models.** Select from supported language and speech models to suit your tests.
-- **Customize personas.** Set the simulated caller’s behavior, language, and voice to reflect the people your agent serves.
-- **Customize graders.** Write your own grading instructions and set models, pass thresholds, and which conversations to grade.
-- **Keep tests with your code.** Review test changes alongside agent changes and run them from the CLI or your coding agent.
+That frustration led us to a bigger question: how can developers trust the voice agents they’re shipping?
 
-## Testing voice agents
+We believe building that trust takes two things.
 
-Run simulated voice and text conversations against your agent. Save tests in your agent’s repository and run them again when you change its prompts, models, or tools.
+First, you need a way to test the major scenarios your agent will face in production before you release it, without having to make every call yourself. But you can’t test for everything. Agents are probabilistic systems, and the real world is too messy to predict in advance.
 
-- Build regression suites around the tasks your agent needs to handle.
-- Mock selected tool responses to test failures and other situations that are hard to reproduce.
-- Review transcripts, voice simulation recordings, and grading results.
+Which brings us to the second: you need a way to find issues once your agent is in production, whether it’s handling a few dozen conversations or millions. And we don’t mean simply running an LLM as a judge against a fixed checklist. That can help you check for known problems. But what about the problems you haven’t thought to look for?
 
-[Write a test →](/docs/platform/tests/write-a-test)
+Good monitoring needs to do both: catch known behaviors drifting and surface unexpected ways your agent is going wrong.
 
-## Monitoring voice agents
+We think its a really hard problem to solve. And having felt it firsthand, we’re deeply motivated to take a shot at it. Egma exists to help developers trust the voice agents they are shipping. 
 
-Real conversations can expose behavior you didn’t see in testing. Collect production traces to review transcripts, inspect tool calls, and check available performance metrics. Apply graders to check conversations against your agent’s requirements.
 
-Egma supports monitoring for LiveKit agents through its Python and JavaScript SDKs, and for Retell agents through a direct integration.
+## Our core principles & why you should probably choose Egma
 
-[Set up monitoring →](/docs/platform/monitoring/set-up-monitoring)
+- **Open source** - You should be able to inspect, modify and improve the system that you rely on for your production agent's testing and monitoring. 
+- **Self Hostable** - Unfortunately, open source has not always meant easily self hostable. Voice agents are already handling sensitive data across industries. And in a lot of cases, you might not want to have a long vendor review cycle. Egma is designed to be self hostable. We keep our self hosting guides up-to-date. If you're looking to self host egma, we cna help you with it. 
+- **Bring your own keys** - Platforms that help you do simulation testing already exist. But they all charge a heavy premium on top of inferece. We believe if the industry truly wants to scale simulation testing of voice agents, we need to stop charing premium on inference and start providing infrastrucure to scale simulations. Egma allows you to bring your own STT/LLM/TTS providers and limits. We also provide a 0% markup inference directly within the platform so you don't have to wrestle with multiple keys. Think of egma as posthog for voice agent testing and monitoring!
+- **Keep tests with your code** - Egma tests are simple Markdown files that live alongside your agent code. They give developers and coding agents shared context on how the voice agent should behave. Tests evolve with your code and go through the same reviews, so keeping them in sync is part of your existing workflow.
+
+
+## Further reading
+1. Read about our [philosophy of voice agent testing]()
+2. Read on how we think about [monitoring built for voice agents]()
 
 ## Community & contact
 
-Found a bug or have a feature request? [Open a GitHub issue](https://github.com/egma-ai/egma/issues).
-
-[Discord (invite coming soon)](https://example.com/egma-discord-placeholder)
+1. Found a bug or have a feature request? [Open a GitHub issue](https://github.com/egma-ai/egma/issues).
+2. Join our [Discord](https://discord.gg/v4KHSNHfPj) for  faster replies!
