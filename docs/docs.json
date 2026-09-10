@@ -73,9 +73,9 @@
                 "group": "Runs",
                 "pages": [
                   "docs/platform/runs/overview",
+                  "docs/platform/runs/simulation",
                   "docs/platform/runs/start-and-follow-a-run",
-                  "docs/platform/runs/review-a-run",
-                  "docs/platform/runs/cancel-a-run"
+                  "docs/platform/runs/review-a-run"
                 ]
               },
               {
@@ -110,8 +110,28 @@
           {
             "group": "Integrations",
             "pages": [
-              "docs/integrations/retell",
-              "docs/integrations/livekit"
+              {
+                "group": "LiveKit",
+                "pages": [
+                  "docs/integrations/livekit",
+                  "docs/integrations/livekit/connect",
+                  "docs/integrations/livekit/monitor",
+                  "docs/integrations/livekit/text-and-env",
+                  "docs/integrations/livekit/token-endpoint",
+                  "docs/integrations/livekit/troubleshooting"
+                ]
+              },
+              {
+                "group": "Retell",
+                "pages": [
+                  "docs/integrations/retell",
+                  "docs/integrations/retell/connect",
+                  "docs/integrations/retell/monitor",
+                  "docs/integrations/retell/env-and-mocks",
+                  "docs/integrations/retell/phone-connection",
+                  "docs/integrations/retell/evidence-and-troubleshooting"
+                ]
+              }
             ]
           },
           {
@@ -383,6 +403,10 @@
     {
       "source": "/docs/platform/runs/automate-tests-in-ci",
       "destination": "/docs/platform/runs/start-and-follow-a-run"
+    },
+    {
+      "source": "/docs/platform/runs/cancel-a-run",
+      "destination": "/docs/platform/runs/overview"
     }
   ]
 }

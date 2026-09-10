@@ -1,0 +1,115 @@
+---
+title: "Monitor a LiveKit agent"
+---
+
+LiveKit monitoring sends conversation evidence from your worker through the Egma SDK. You do not need a test suite or simulation connection.
+
+## Start through the UI
+
+1. Open **Agents → Connect an agent**.
+2. Choose **Monitor production**, then select **Continue**.
+3. Select **LiveKit** and follow the setup prompts.
+
+Add the project key and SDK hook to your worker using the steps below. Opening the wizard alone does not enable monitoring.
+
+## Create an Egma project key
+
+In your initialized agent repository, run:
+
+```bash
+egma project api-key create --name "LiveKit monitoring"
+```
+
+Copy the key when the CLI prints it. The CLI shows it once and does not save
+it. You can also create a key in **Settings → API keys**.
+
+Add these environment variables to the worker through your normal deployment
+secret store:
+
+| Variable | Value |
+| --- | --- |
+| `EGMA_URL` | `https://app.egma.ai` for hosted Egma, or the public URL of your self-hosted instance. |
+| `EGMA_API_KEY` | The project API key you just created. |
+
+The worker must be able to reach `EGMA_URL`. `localhost` refers to the worker's
+own machine or container, so use a reachable address for a remote deployment.
+
+## Add the monitoring hook
+
+<Tabs>
+  <Tab title="Python">
+    Install the [LiveKit Python SDK](/skills-cli-sdks/sdks/livekit-python):
+
+    ```bash
+    uv add 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'
+    ```
+
+    Add this import to the file that defines your job entrypoint:
+
+    ```python
+    from egma import monitor
+    ```
+
+    Make this the first statement inside the entrypoint, before `ctx.connect`
+    or `AgentSession.start`:
+
+    ```python
+    monitor(ctx)
+    ```
+
+    This requires Python 3.11 or newer and `livekit-agents>=1.6.6,<1.9`.
+  </Tab>
+  <Tab title="JavaScript">
+    Install the [LiveKit JavaScript SDK](/skills-cli-sdks/sdks/livekit-javascript):
+
+    ```bash
+    npm install @egma/livekit
+    ```
+
+    Add this import to your worker:
+
+    ```typescript
+    import { monitor } from "@egma/livekit";
+    ```
+
+    Call the hook at the start of the job entrypoint, before starting the
+    `AgentSession`:
+
+    ```typescript
+    monitor(ctx);
+    ```
+
+    Monitoring requires Node.js 22 or newer and `@livekit/agents>=1.5.5 <2`.
+  </Tab>
+</Tabs>
+
+Apply the code and environment variables to the worker that handles real
+conversations, then restart or redeploy that worker. The hook adds Egma export
+alongside a compatible existing OpenTelemetry setup, including LiveKit Cloud
+observability. It sends spans in batches and flushes the final batch when the
+job ends.
+
+The hook ignores rooms whose names start with `egma-sim-`, so your tests do not
+also appear as production conversations. The separate `simulation` hook sends
+those rooms' evidence to their simulation records. Use both hooks when the
+same worker handles testing and production; both use the same Egma settings.
+Keep the `egma-sim-` prefix reserved when naming your own production rooms.
+
+## Verify a conversation
+
+Complete one normal conversation with the updated worker, then open
+**Traces** in the project that owns the API key. Open the new trace and
+check its transcript and timing.
+
+There is no LiveKit monitoring switch to enable in Egma. The first received
+trace confirms that the worker can send evidence to Egma. If no conversation
+appears, check the worker's OpenTelemetry logs, the project key, and network
+access to `EGMA_URL`.
+
+To stop this worker from sending new production evidence, remove its `monitor`
+call and restart the worker. Existing conversations stay in Egma. Keep
+`simulation` if the worker still handles Egma tests.
+
+## Review the evidence
+
+[Review production conversations](/docs/platform/monitoring/review-conversations) to inspect transcripts, metrics, and grades.

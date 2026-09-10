@@ -1,0 +1,27 @@
+---
+title: "Troubleshooting"
+---
+
+## If the worker does not join or respond
+
+- Check the worker's registered name against `LIVEKIT_AGENT_NAME` and confirm
+  it is connected to the same project as the connection credentials.
+- Check the worker logs for missing dispatch metadata or startup errors.
+- Confirm that the worker calls `simulation` before `session.start`, has a
+  project API key, and can reach `EGMA_URL`. A `NotReported` error means the
+  worker could not complete its startup exchange with Egma; the session does
+  not start.
+- For voice, confirm that the worker publishes audio. For text, check its text
+  input and transcription output rather than waiting for an audio track.
+- For a token endpoint, check the HTTP status, public DNS, returned server URL,
+  and room configuration. An issued token alone does not prove dispatch worked.
+
+The simulation transcript uses the agent's own turns and tool calls. Calls
+answered by a test mock are marked **mocked**; other tools run their real
+implementation and their calls are also recorded. The voice recording keeps
+what the simulated caller heard.
+
+To capture real conversations, add `monitor(ctx)` as described in
+[Set up monitoring](/docs/integrations/livekit/monitor). Both hooks can stay in
+one worker: `simulation` acts only in simulation rooms, and `monitor` acts
+only in production rooms.

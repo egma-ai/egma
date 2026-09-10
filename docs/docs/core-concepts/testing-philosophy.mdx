@@ -26,7 +26,7 @@ Egma records evidence from the conversation, including the transcript and availa
 
 ## From a test to a run
 
-To start a run, choose a [test suite](/docs/platform/tests/test-suites), an [agent](/docs/platform/agents-and-connections/agent), and one of that agent's [connections](/docs/platform/agents-and-connections/connection). Each test in the suite already selects one or more personas. Egma runs each test once for every selected persona, producing a separate simulation for each pair.
+To start a run, choose a [test suite](/docs/platform/tests/test-suites), an [agent](/docs/platform/agents-and-connections/agent), and one of that agent's [connections](/docs/platform/agents-and-connections/connection). Each test in the suite already selects one or more personas. Egma runs each test once for every selected persona, producing a separate [simulation](/docs/platform/runs/simulation) for each pair.
 
 For example, a suite with three tests and two personas per test produces six simulations. They all use the same agent and connection. Graders assess the evidence from each simulation.
 
@@ -49,9 +49,9 @@ For example, a suite with three tests and two personas per test produces six sim
 | [Connection](/docs/platform/agents-and-connections/connection) | How Egma reaches that agent, such as a phone number or LiveKit room. An agent can have several connections. |
 | [Test](/docs/platform/tests/overview) | One situation you want to test, with expected behaviors and one or more personas to act as the caller. |
 | [Persona](/docs/platform/personas) | Who the simulated caller is and how they behave. For example, a frustrated caller who speaks Spanish. The scenario supplies their reason for calling. |
-| Test suite | A group of tests you want to run and review together, such as tests for appointment booking. |
+| [Test suite](/docs/platform/tests/test-suites) | A group of tests you want to run and review together, such as tests for appointment booking. |
 | [Run](/docs/platform/runs/overview) | One execution of a complete test suite against a selected agent through one connection. |
-| Simulation | One conversation for one test and persona pair within a run. A test with two personas produces two simulations. |
+| [Simulation](/docs/platform/runs/simulation) | One conversation for one test and persona pair within a run. A test with two personas produces two simulations. |
 | [Grader](/docs/platform/graders/overview) | Logic that judges an aspect of the conversation and returns a score. Egma's predefined Expected behaviors grader checks the statements in your test. You can also use other graders. |
 
 

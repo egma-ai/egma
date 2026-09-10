@@ -1,0 +1,102 @@
+---
+title: "Connect a LiveKit agent"
+---
+
+## Connect through the UI
+
+1. Open **Agents → Connect an agent**.
+2. Choose **Run simulations**, then **LiveKit**.
+3. Choose **Voice**, then **Project credentials**.
+4. Enter your worker's exact dispatch name, LiveKit WebSocket URL, API key, and API secret.
+5. Select **Continue to testing** and follow the SDK setup prompts. Prepare your worker as described below before starting a run.
+
+For setup steps, see [Add a connection](/docs/platform/agents-and-connections/add-a-connection).
+
+## 1. Prepare the worker
+
+Use the worker and LiveKit project you already run. Set an explicit dispatch
+name in its startup configuration: `agent_name` in Python or `agentName` in
+JavaScript. The name must exactly match the `--livekit-agent-name` value you
+give Egma. A named dispatch cannot reach an unnamed worker.
+
+For example, use `front-desk` as the name in both places. Keep the worker
+running while the tests execute. A local worker can join simulations if it
+connects to the configured LiveKit project. See LiveKit's
+[agent dispatch guide](https://docs.livekit.io/agents/server/agent-dispatch/).
+
+Install the SDK for your language and add
+`await simulation(agent, ctx, session)` after you create the agent and session,
+before `session.start`. This is required for every LiveKit simulation, including
+tests without mock tools. It reports your agent's tools, applies the test's
+mocks, and sends the agent's conversation evidence to Egma. It does nothing in
+production rooms.
+
+<CardGroup cols={2}>
+  <Card title="LiveKit Python SDK" icon="python" href="/skills-cli-sdks/sdks/livekit-python">
+    Install the package and add the simulation hook to your Python worker.
+  </Card>
+  <Card title="LiveKit JavaScript SDK" icon="js" href="/skills-cli-sdks/sdks/livekit-javascript">
+    Install the package and add the simulation hook to your JavaScript or TypeScript worker.
+  </Card>
+</CardGroup>
+
+Create a project API key from your initialized agent repository:
+
+```bash
+egma project api-key create --name "LiveKit worker"
+```
+
+Copy the key when the CLI prints it; it is shown only once. Add these settings
+to the worker through your secret store:
+
+| Variable | Value |
+| --- | --- |
+| `EGMA_URL` | `https://app.egma.ai`, or a URL for your self-hosted Egma instance that the worker can reach. |
+| `EGMA_API_KEY` | The project API key you just created. |
+
+These settings send the agent's evidence to the same Egma project that runs
+the test. They are separate from the LiveKit project credentials used below.
+Restart or redeploy the worker after adding the hook and settings.
+
+## 2. Register the agent in Egma
+
+Check `egma/config.yaml`. Reuse the existing Egma agent if it is already
+registered. Otherwise, run:
+
+```bash
+egma agent register --platform livekit --name "Front desk"
+```
+
+Set `EGMA_AGENT_ID` to the Egma agent ID printed by the command. This ID is
+separate from your LiveKit worker's dispatch name.
+
+## 3. Add a voice connection
+
+Load your existing LiveKit project settings from your secret store. In the
+commands below, `LIVEKIT_URL` is the project's server URL and
+`LIVEKIT_AGENT_NAME` is the explicit worker name from step 1.
+
+```bash
+export EGMA_LIVEKIT_API_KEY="$LIVEKIT_API_KEY"
+export EGMA_LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET"
+
+egma agent connection add \
+  --agent "$EGMA_AGENT_ID" \
+  --access livekit-project-credentials \
+  --modality voice \
+  --livekit-url "$LIVEKIT_URL" \
+  --livekit-agent-name "$LIVEKIT_AGENT_NAME" \
+  --name "LiveKit voice"
+```
+
+The key must belong to the project that runs your worker and permit room and
+agent-dispatch operations. Egma stores the credentials separately from
+`egma/config.yaml`.
+
+For credentials supplied by another process, add `--credentials-stdin` and
+send a JSON object with `apiKey` and `apiSecret` fields through standard input.
+Do not put the secret in command-line arguments.
+
+Keep the connection ID as `EGMA_CONNECTION_ID`, then follow the
+[CLI guide](/skills-cli-sdks/cli/install#create-a-suite-and-a-test) to write a test and
+start a run. A voice simulation waits for your worker to join and publish audio.

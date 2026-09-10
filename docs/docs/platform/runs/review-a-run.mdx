@@ -2,7 +2,7 @@
 title: "Review a run"
 ---
 
-Open the printed URL, or open **Runs** in your project and select the run.
+Open the printed URL in CLI, or open **Runs** in your project UI and select the run.
 
 1. Check execution progress. Each test and persona combination is one
    simulation. A simulation can complete, fail to execute, or be canceled.
@@ -16,41 +16,3 @@ Open the printed URL, or open **Runs** in your project and select the run.
 Execution and grading finish separately. A completed run can still have
 grading in progress, and completed execution can include simulations that
 failed to execute. Check individual simulation and grader results.
-
-### Check which evidence arrived
-
-A simulation can contain Egma's record of the caller and the agent's own
-record of the same conversation. Retell supplies its record through the
-platform; LiveKit sends it through the SDK's `simulation` helper.
-
-The transcript and graders prefer the agent's turns and tool calls when those
-are available. Otherwise, they use the available conversation evidence. The
-recording follows what Egma's caller heard, so its timing can differ from the
-agent's reported timing.
-
-For LiveKit and Retell simulations, grading waits up to 245 seconds after Egma receives the completion report for the final agent record. Grading starts as soon as that record is complete. If the wait ends first, grading can use the available evidence.
-
-[Get a simulation](/api-reference/get-simulation) returns `agentPovComplete` when the final agent record is present. `agentPovIncomplete` is true when the record is explicitly degraded, or still missing after the wait. Existing grades do not change when late evidence arrives; [regrade](/docs/platform/graders/configure-graders#regrade-a-simulation) to use it.
-
-Retell records are checked immediately, every five seconds through the first minute, then at 70, 90, 130, 190, and 240 seconds. Each request has a five-second timeout, with at most 18 requests. Polling stops when the final call record has a usable transcript. After those attempts, Egma does not fetch again automatically; regrading uses stored evidence. LiveKit sends its record through the SDK.
-
-The combined score is a comparison value. Egma does not assign an overall
-pass/fail result to a run. See [Scores and thresholds](/docs/platform/graders/scores-and-thresholds).
-
-### Read timing metrics
-
-Each API metric has a `pov` field that identifies who measured it: `agent` for
-the agent's own evidence or `persona` for Egma's simulated caller. When both
-measure the same event, the API returns the second series in `otherPov`. Egma
-keeps the two sets of samples separate.
-
-`turn_response_latency` measures the wait from the end of the caller's turn to
-the start of the agent's reply. For voice simulations, it starts at the end of
-the caller's played audio, including the voice's trailing padding, and ends
-when the agent's audio reaches the caller. `first_response_latency` measures
-the time from the start of the conversation to the agent's first reply. Both
-use milliseconds. Simulations prefer the caller's series when it is available;
-the agent's series is returned separately in `otherPov`. Production traces use
-the agent's evidence. The
-[Response latency grader](/docs/platform/graders/built-in-graders#response-latency) uses the
-same primary series shown in the metrics.

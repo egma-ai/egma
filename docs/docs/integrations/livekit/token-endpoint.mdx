@@ -1,0 +1,145 @@
+---
+title: "Use a token endpoint"
+---
+
+Choose this option when your server must mint the participant token instead
+of giving Egma a LiveKit project key pair. The endpoint must return access to
+the requested room and arrange the named worker's dispatch. The example below
+does both through LiveKit's room configuration.
+
+For this authentication path, your endpoint owns the room lifecycle. It
+prepares the room, dispatches the requested worker, and cleans the room up
+after Egma leaves.
+
+### Create the endpoint
+
+This example uses Python and FastAPI. Install its dependencies in a server
+project:
+
+```bash
+uv add livekit-api fastapi uvicorn
+```
+
+Set these environment variables on that server:
+
+| Variable | Value |
+| --- | --- |
+| `LIVEKIT_URL` | Your public LiveKit server URL. |
+| `LIVEKIT_API_KEY` | The LiveKit project API key. |
+| `LIVEKIT_API_SECRET` | The matching project secret. |
+| `LIVEKIT_AGENT_NAME` | The allowed worker's explicit dispatch name. |
+| `EGMA_TOKEN_SECRET` | A strong secret used only to authenticate Egma to this endpoint. |
+
+Create `token_server.py`:
+
+```python
+import os
+import secrets
+from datetime import timedelta
+
+from fastapi import FastAPI, Header, HTTPException
+from google.protobuf.json_format import ParseDict
+from livekit import api
+from pydantic import BaseModel, Field
+
+app = FastAPI()
+endpoint_secret = os.environ["EGMA_TOKEN_SECRET"]
+worker_name = os.environ["LIVEKIT_AGENT_NAME"]
+server_url = os.environ["LIVEKIT_URL"]
+
+class Dispatch(BaseModel):
+    agent_name: str
+    metadata: str | None = None
+
+class RoomConfig(BaseModel):
+    agents: list[Dispatch] = Field(min_length=1, max_length=1)
+
+class TokenRequest(BaseModel):
+    room_name: str = Field(pattern=r"^egma-sim-.+", max_length=255)
+    participant_identity: str = Field(pattern=r"^egma-persona-.+", max_length=255)
+    participant_name: str = Field(max_length=255)
+    room_config: RoomConfig
+
+@app.post("/egma/livekit-token", status_code=201)
+async def create_token(body: TokenRequest, authorization: str = Header(default="")):
+    expected = f"Bearer {endpoint_secret}".encode()
+    if not secrets.compare_digest(authorization.encode(), expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if body.room_config.agents[0].agent_name != worker_name:
+        raise HTTPException(status_code=400, detail="Unknown agent")
+
+    room_config = body.room_config.model_dump(exclude_none=True)
+    room_config["empty_timeout"] = 60
+    token = (
+        api.AccessToken(
+            os.environ["LIVEKIT_API_KEY"], os.environ["LIVEKIT_API_SECRET"]
+        )
+        .with_identity(body.participant_identity)
+        .with_name(body.participant_name)
+        .with_grants(api.VideoGrants(
+            room_join=True,
+            room=body.room_name,
+            can_publish=True,
+            can_subscribe=True,
+            can_publish_data=True,
+        ))
+        .with_room_config(ParseDict(room_config, api.RoomConfiguration()))
+        .with_ttl(timedelta(minutes=5))
+    )
+    return {"server_url": server_url, "participant_token": token.to_jwt()}
+```
+
+Start the server and expose this route through your HTTPS reverse proxy:
+
+```bash
+uv run uvicorn token_server:app --host 0.0.0.0 --port 8080
+```
+
+The endpoint preserves the requested worker and its test metadata in the
+token's room configuration. Do not pre-create the room: LiveKit applies that
+configuration when the first participant creates it by joining. This follows
+LiveKit's [token endpoint contract](https://docs.livekit.io/frontends/build/authentication/endpoint/).
+
+The endpoint and returned LiveKit address must resolve to public addresses.
+Use HTTPS for the endpoint and WSS or HTTPS for `LIVEKIT_URL`. These rules also
+apply to self-hosted Egma. For a private-network LiveKit server, use project
+credentials instead.
+
+### Connect Egma to the endpoint
+
+In your agent repository, set `LIVEKIT_TOKEN_ENDPOINT` to the full public URL
+ending in `/egma/livekit-token`. Load the same `EGMA_TOKEN_SECRET` from your
+secret store. This command passes the authorization header through standard
+input:
+
+```bash
+python3 -c 'import json, os; print(json.dumps({"headers": {"Authorization": "Bearer " + os.environ["EGMA_TOKEN_SECRET"]}}))' |
+  egma agent connection add \
+    --agent "$EGMA_AGENT_ID" \
+    --access livekit-token-endpoint \
+    --modality voice \
+    --livekit-agent-name "$LIVEKIT_AGENT_NAME" \
+    --livekit-token-endpoint "$LIVEKIT_TOKEN_ENDPOINT" \
+    --name "LiveKit token endpoint" \
+    --credentials-stdin
+```
+
+For a text connection, use `--modality chat` after adding the worker's [text configuration](/docs/integrations/livekit/text-and-env#add-a-text-connection).
+
+Use the returned connection ID to [start a run with the CLI](/skills-cli-sdks/cli/install#start-a-run).
+Check that the worker joins the `egma-sim-` room and receives any test metadata.
+
+Egma makes one token request per simulation. It allows 20 seconds for the
+response, does not follow redirects, and accepts a response body up to 64 KiB.
+It joins the room once with the participant token. A voice simulation
+publishes and subscribes to audio. A chat simulation joins as one text-only
+client: it publishes no media tracks, subscribes to no audio, and performs no
+audio decoding, speech-to-text, text-to-speech, recording, or voice processing.
+Egma waits 30 seconds for your worker to join and answer, then ends the
+simulation as `agent_never_joined`.
+
+Egma leaves when the conversation ends. It never deletes the room and never
+uses the token again, so your token endpoint owns cleanup for this room.
+Configure your worker to shut down when the caller leaves. A short empty-room
+timeout on your LiveKit project is one way to clean the room up.

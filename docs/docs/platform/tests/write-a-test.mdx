@@ -32,7 +32,7 @@ Create `egma/tests/appointment-booking/book-consultation.md`.
 This example assumes a LiveKit agent with `check_availability` and
 `book_appointment` tools. Match the tool names and answers to your agent before
 running it. Both tools are mocked, so these calls use the test's answers.
-Use a LiveKit voice connection with the [Egma simulation hook](/docs/integrations/livekit#1-prepare-the-worker) configured for this example.
+Use a LiveKit voice connection with the [Egma simulation hook](/docs/integrations/livekit/connect#1-prepare-the-worker) configured for this example.
 
 ````markdown
 ---
@@ -104,7 +104,7 @@ return payloads. For a fixed mock, name the expected outcome in the behavior
 statement. Inspect the tool result in the transcript when you need to check
 what the backend returned.
 
-## Set the agent's startup context
+## Set Env
 
 `Env` supplies context before the conversation starts. It does not set shell
 environment variables or store provider credentials.

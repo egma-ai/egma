@@ -1,0 +1,30 @@
+---
+title: "Add a phone connection"
+---
+
+First [connect your Retell agent](/docs/integrations/retell/connect).
+
+## Test through a Retell phone number
+
+Use this option when you need to test the agent through its deployed Retell
+phone route. Set `RETELL_PHONE_NUMBER` to the E.164 number returned for the
+selected agent by `egma agent connection options`, then add the connection:
+
+```bash
+egma agent connection add \
+  --agent "$EGMA_AGENT_ID" \
+  --access retell-phone-number \
+  --modality voice \
+  --retell-agent "$RETELL_AGENT_ID" \
+  --retell-phone-number "$RETELL_PHONE_NUMBER" \
+  --name "Retell phone"
+```
+
+This places a real phone call when you start a run. Phone simulations use your
+deployed phone route and its normal backend. They do not support test mock
+tools or `retell_dynamic_variables`. Use a web-call connection when you need
+those controls.
+
+For self-hosted Egma, configure the Retell phone prerequisites in
+[Self-hosting configuration](/self-hosting/configuration) before starting a
+phone run.

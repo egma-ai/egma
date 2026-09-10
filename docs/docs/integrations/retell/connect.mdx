@@ -1,0 +1,94 @@
+---
+title: "Connect a Retell agent"
+---
+
+## Connect through the UI
+
+1. Open **Agents → Connect an agent**.
+2. Choose **Run simulations**, then **Retell**.
+3. Enter your Retell API key and select **Find agents**.
+4. Select the Retell agent you want to test.
+5. Choose **Text**, **Web call**, or **Phone call**, then continue through the setup prompts. The available options depend on your Retell agent.
+
+## 1. Find the Retell agent
+
+Load your Retell API key into the `EGMA_RETELL_API_KEY` environment variable
+from your secret store. If your repository already loads `RETELL_API_KEY`, use:
+
+```bash
+export EGMA_RETELL_API_KEY="$RETELL_API_KEY"
+egma agent connection options --platform retell
+```
+
+The command lists available Retell agent IDs and supported connection options.
+Set `RETELL_AGENT_ID` to the exact ID of the agent you want to test. Do not use
+a display name in its place.
+
+For a key supplied by another process, add `--credentials-stdin`. The CLI
+accepts a JSON object with an `apiKey` field through standard input. Do not put
+the key in a command-line argument or commit it to `egma/config.yaml`.
+
+## 2. Register the agent in Egma
+
+Check `egma/config.yaml` first. If it already contains the agent, use that Egma
+agent ID. Otherwise, register it with a name that identifies it in Egma:
+
+```bash
+egma agent register --platform retell --name "Front desk"
+```
+
+Set `EGMA_AGENT_ID` to the Egma ID printed by the command. Registration creates
+the Egma record; the next step connects it to Retell.
+
+## 3. Add a connection
+
+<Tabs>
+  <Tab title="Text">
+    Text mode tests the conversation logic without sending audio through the
+    speech stack. It supports Retell-managed LLM and conversation-flow agents.
+    Retell custom-LLM agents do not support this mode.
+
+    ```bash
+    egma agent connection add \
+      --agent "$EGMA_AGENT_ID" \
+      --access retell-api-key \
+      --modality chat \
+      --retell-agent "$RETELL_AGENT_ID" \
+      --name "Retell text"
+    ```
+  </Tab>
+  <Tab title="Web call">
+    A web-call simulation sends and receives audio over the internet. It does
+    not need a phone number.
+
+    ```bash
+    egma agent connection add \
+      --agent "$EGMA_AGENT_ID" \
+      --access retell-api-key \
+      --modality voice \
+      --retell-agent "$RETELL_AGENT_ID" \
+      --name "Retell web call"
+    ```
+  </Tab>
+</Tabs>
+
+The first connection binds the Egma agent to the selected Retell agent and
+stores its credentials. Later connections for that Egma agent reuse the stored
+Retell ID and key. Supplying a different Retell ID does not change the binding.
+
+To inspect an existing binding's available connections, run:
+
+```bash
+egma agent connection options --platform retell --agent "$EGMA_AGENT_ID"
+```
+
+Keep the new connection ID and use it as `EGMA_CONNECTION_ID` in the
+[CLI run command](/skills-cli-sdks/cli/install#start-a-run).
+
+### Choose the version to test
+
+Egma resolves the Retell agent version once when a run starts. It follows an
+explicit version or environment-tag binding on a phone number routed to the
+agent. Otherwise, it uses the latest published version. Publish the version
+you want tested before running; an unpublished draft is not selected by
+default.

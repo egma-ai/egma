@@ -1,0 +1,56 @@
+---
+title: "Text connections and Env"
+---
+
+First [connect your LiveKit agent](/docs/integrations/livekit/connect) and prepare its worker.
+
+## Add a text connection
+
+Text mode tests conversation logic without the speech stack. First configure
+your worker's text input and transcription output using the chat example in
+the [Python SDK](/skills-cli-sdks/sdks/livekit-python#test-in-chat-mode) or
+[JavaScript SDK](/skills-cli-sdks/sdks/livekit-javascript#test-in-chat-mode) guide. In rooms whose names
+start with `egma-sim-chat-`, disable audio input and output. Keep any separate
+greeting or audio publisher off in that mode.
+
+Then add a second connection:
+
+```bash
+egma agent connection add \
+  --agent "$EGMA_AGENT_ID" \
+  --access livekit-project-credentials \
+  --modality chat \
+  --livekit-url "$LIVEKIT_URL" \
+  --livekit-agent-name "$LIVEKIT_AGENT_NAME" \
+  --name "LiveKit text"
+```
+
+Use this connection's ID when starting a text run. The same suite can run
+against either connection.
+
+## Pass data to a test
+
+If your worker reads startup context from `ctx.job.metadata`, put that context
+in the test's `## Env` section:
+
+````markdown
+## Env
+
+```json
+{
+  "job_dispatch_metadata": {
+    "tenant": "oak-street",
+    "locale": "en-US"
+  }
+}
+```
+````
+
+Use the exact keys your worker reads. Egma serializes this object as the
+dispatch metadata string. Your normal `JSON.parse` or `json.loads` call reads
+it in the worker. A test without this field receives empty dispatch metadata.
+Egma does not add scenario instructions or other Egma fields to it.
+
+To detect a simulation, check whether the room name starts with `egma-sim-`.
+This includes text rooms. Keep that prefix reserved for Egma when your own
+application creates production rooms.

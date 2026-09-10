@@ -1,0 +1,23 @@
+---
+title: "What is a simulation?"
+---
+
+A **simulation** is one conversation between a simulated caller and your voice agent, for one test and persona pair within a [run](/docs/platform/runs/overview).
+
+The test supplies the caller's scenario and expected behaviors. The persona defines who the caller is and how they behave. Egma uses the run's connection to reach your agent and carry out the conversation.
+
+## How tests become simulations
+
+Each test produces one simulation for every persona it selects. A test with **Everyday caller** and **Caller in a hurry** produces two simulations in the same run.
+
+A suite with three tests and two personas per test produces six simulations. All six use the run's selected agent and connection.
+
+## What a simulation captures
+
+A simulation collects evidence from its conversation, including the transcript, recording, and available tool calls and metrics. The evidence available depends on your connection and agent integration.
+
+[Graders](/docs/platform/graders/overview) assess this evidence and return individual scores and explanations. Check whether the conversation completed, then review the grades. A completed conversation does not mean the agent met the test's expected behaviors.
+
+## Review a simulation
+
+Open its run and select the simulation to inspect the conversation and its grades. See [Review a run](/docs/platform/runs/review-a-run) for details.

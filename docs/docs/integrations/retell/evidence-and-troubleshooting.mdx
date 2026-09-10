@@ -1,0 +1,33 @@
+---
+title: "Evidence and troubleshooting"
+---
+
+## Read the simulation's evidence
+
+After a web or phone call ends, Egma reads its call record from Retell and
+adds it to the simulation. The transcript includes the tool calls Retell
+recorded, including calls to your real backend. Calls answered by a test mock
+are marked **mocked**. The voice recording captures what the simulated caller
+heard.
+
+Retell text mode has no stored call record for Egma to import. Egma records the
+complete API exchange it conducted, including the tool results Retell returns.
+Retell does not provide a separate native agent trace for text mode.
+
+If the agent's record is incomplete, check that the ended call is available
+in Retell. Once missing evidence arrives in Egma, you can
+[regrade the simulation](/docs/platform/graders/configure-graders#regrade-a-simulation).
+
+## Enable production monitoring
+
+Follow [Monitor a Retell agent](/docs/integrations/retell/monitor) to import production calls.
+
+## If a simulation cannot reach the agent
+
+- Check that you selected the **Egma** agent and connection IDs from
+  `egma/config.yaml` in the run command.
+- Run connection discovery for that Egma agent to check the Retell binding.
+- For text mode, confirm that Retell manages the agent's LLM or conversation
+  flow. Use a web call for a custom-LLM agent.
+- Check any required dynamic variables and backend access. A connected agent
+  can still fail if its startup context is missing.
