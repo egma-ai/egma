@@ -110,6 +110,19 @@ const RECOMMENDED_MODELS: PersonaModels = {
     speed: 1,
   },
 };
+const CONTROLS = { language: "en-US", emotion: "neutral" as const, accent: "neutral", speechVolume: 1, executionPolicyVersion: 1 };
+const CAPABILITIES = {
+  voices: { status: "supported" as const, choices: [
+    { id: RECOMMENDED_MODELS.tts.voiceId, name: "Calm caller", source: "standard" as const, presentation: "unknown" as const, languages: ["en-US"], accents: ["neutral"] },
+    { id: "male-voice", name: "Miles", source: "standard" as const, presentation: "male" as const, languages: ["en-US"], accents: ["neutral"] },
+    { id: "female-voice", name: "Maya", source: "standard" as const, presentation: "female" as const, languages: ["en-US"], accents: ["neutral"] },
+  ] },
+  language: { status: "supported" as const, choices: ["en-US", "en-GB"] },
+  accent: { status: "supported" as const, choices: ["neutral", "british"] },
+  emotion: { status: "supported" as const, choices: ["neutral", "happy", "angry"] },
+  speed: { status: "supported" as const, range: { minimum: 0.6, maximum: 1.5, step: 0.1 } },
+  speechVolume: { status: "supported" as const, range: { minimum: 0.5, maximum: 1.5, step: 0.1 } },
+};
 
 const PARAMETER_CONTRACT: Persona["parameterContract"] = [
   ...Object.entries({
@@ -161,7 +174,6 @@ const PERSONA_FORM: PersonaForm = {
     },
   ],
   recommendedModels: RECOMMENDED_MODELS,
-  speedRange: { slowest: 0.6, fastest: 1.5 },
 };
 
 function meWith(role: string): Me {
@@ -225,6 +237,8 @@ function apiAnswers(answers: Record<string, Stubbed | readonly Stubbed[]>): {
         answers[key] ??
         (key === "GET /v1/persona-form"
           ? { status: 200, body: PERSONA_FORM }
+          : key === "GET /v1/persona-capabilities"
+            ? { status: 200, body: CAPABILITIES }
           : key === "GET /v1/personas"
             ? { status: 200, body: { personas: [], nextPageToken: null } }
             : at.pathname.endsWith("/versions")
@@ -258,7 +272,7 @@ const RITA: Persona = {
   personality: "Seventy, hard of hearing, and gets louder when she mishears.",
   language: "en-GB",
   parameterContract: PARAMETER_CONTRACT,
-  settings: { id: "ppr_1", models: RECOMMENDED_MODELS, createdAt: "2026-08-15T10:00:00.000Z", updatedAt: "2026-08-20T10:00:00.000Z" },
+  settings: { id: "ppr_1", models: RECOMMENDED_MODELS, controls: CONTROLS, createdAt: "2026-08-15T10:00:00.000Z", updatedAt: "2026-08-20T10:00:00.000Z" },
   archivedAt: null,
   createdAt: "2026-08-15T10:00:00.000Z",
   updatedAt: "2026-08-20T10:00:00.000Z",
@@ -892,7 +906,7 @@ describe("one persona's sheet", () => {
 
   it("adopts a library persona with the selected settings", async () => {
     const updatedModels = { ...RECOMMENDED_MODELS, llm: { provider: "openai", model: "gpt-4o" } };
-    const saved = { ...PREDEFINED, settings: { id: "ppr_0", models: updatedModels, createdAt: PREDEFINED.createdAt, updatedAt: PREDEFINED.updatedAt } };
+    const saved = { ...PREDEFINED, settings: { id: "ppr_0", models: updatedModels, controls: CONTROLS, createdAt: PREDEFINED.createdAt, updatedAt: PREDEFINED.updatedAt } };
     const { asked } = apiAnswers({
       ...screenWith("admin", [PREDEFINED]),
       "GET /v1/personas/prs_0": [{ status: 200, body: PREDEFINED }, { status: 200, body: saved }],
@@ -902,9 +916,33 @@ describe("one persona's sheet", () => {
     const sheet = await openRow("Everyday caller");
     fireEvent.change(within(sheet).getByLabelText("Language model*"), { target: { value: "openai::gpt-4o" } });
     fireEvent.click(within(sheet).getByRole("button", { name: "Use persona" }));
-    await waitFor(() => expect(asked.find(request => request.method === "POST")?.body).toEqual({ projectId: "prj_1", models: updatedModels }));
+    await waitFor(() => expect(asked.find(request => request.method === "POST")?.body).toEqual({ projectId: "prj_1", models: updatedModels, controls: { language: "en-US", emotion: "neutral", accent: "neutral", speechVolume: 1 } }));
     expect(await within(sheet).findByRole("button", { name: "Saved" })).toBeTruthy();
     expect(within(sheet).getByText("Predefined · v1")).toBeTruthy();
+  });
+
+  it("keeps the voice draft across model changes and keeps unknown voices in gender filters", async () => {
+    apiAnswers({
+      ...screenWith("admin", [PREDEFINED]),
+      "GET /v1/personas/prs_0": { status: 200, body: PREDEFINED },
+    });
+    render(<PersonasPage />);
+    const sheet = await openRow("Everyday caller");
+    const stt = await within(sheet).findByLabelText("Speech-to-text*");
+    const tts = within(sheet).getByLabelText("Text-to-speech*");
+    const llm = within(sheet).getByLabelText("Language model*");
+    expect(stt.compareDocumentPosition(tts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tts.compareDocumentPosition(llm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    const voice = within(sheet).getByLabelText("Voice*") as HTMLSelectElement;
+    const original = voice.value;
+    fireEvent.change(tts, { target: { value: "openai::gpt-4o-mini-tts" } });
+    expect(voice.value).toBe(original);
+
+    fireEvent.change(within(sheet).getByLabelText("Voice type"), { target: { value: "female" } });
+    expect(within(voice).getByRole("option", { name: /Maya/u })).toBeTruthy();
+    expect(within(voice).getByRole("option", { name: /Calm caller/u })).toBeTruthy();
+    expect(within(voice).queryByRole("option", { name: /Miles/u })).toBeNull();
   });
 
   it.each(["library", "active"])(
@@ -915,6 +953,7 @@ describe("one persona's sheet", () => {
         settings: action === "library" ? null : {
           id: "ppr_0",
           models: RECOMMENDED_MODELS,
+          controls: CONTROLS,
           createdAt: PREDEFINED.createdAt,
           updatedAt: PREDEFINED.updatedAt,
         },

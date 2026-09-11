@@ -23,6 +23,7 @@ import type { Answer, Refusal } from "../../../../lib/api.ts";
 import {
   behaviorDraftOf,
   BLANK_BEHAVIOR,
+  controlsFrom,
   modelSaid,
   modelsDraftOf,
   modelsFrom,
@@ -192,6 +193,7 @@ export function CreatePersonaSheet({
   const [behavior, setBehavior] = useState<BehaviorDraft>(BLANK_BEHAVIOR);
   const [models, setModels] = useState<ModelsDraft | null>(null);
   const [saving, setSaving] = useState(false);
+  const [settingsValid, setSettingsValid] = useState(false);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
 
   const choices = form?.status === "ready" ? form.value : null;
@@ -270,9 +272,9 @@ export function CreatePersonaSheet({
           ...(description === "" ? {} : { description }),
           identityName: behavior.identityName,
           personality: behavior.personality,
-          language: behavior.language,
           models: modelsFrom(models),
-        },
+          controls: controlsFrom(models),
+        } as Parameters<typeof createPersona>[0],
         { client: platformClient },
       ),
     );
@@ -345,6 +347,8 @@ export function CreatePersonaSheet({
             form={form.value}
             disabled={saving}
             onChange={setModels}
+            projectId={projectId}
+            onValidityChange={setSettingsValid}
           />
         </SheetBody>
         <SheetFooter
@@ -358,7 +362,7 @@ export function CreatePersonaSheet({
             type="submit"
             size="lg"
             busy={saving}
-            disabled={!mayAuthor || saving}
+            disabled={!mayAuthor || saving || !settingsValid}
             {...(mayAuthor || whyNot === undefined ? {} : { why: whyNot })}
           >
             {saving ? "Creating…" : "Create persona"}
@@ -446,17 +450,10 @@ function adopted(
     }
   }
 
-  const theirModels = modelsDraftOf(modelsOfPersona(fromServer));
-  const models = { ...current.models };
-  if (submitted.models !== undefined) {
-    for (const field of Object.keys(current.models) as (keyof ModelsDraft)[]) {
-      models[field] = answered(
-        current.models[field],
-        submitted.models[field],
-        theirModels[field],
-      );
-    }
-  }
+  const theirModels = modelsDraftOf(modelsOfPersona(fromServer), fromServer.settings?.controls);
+  const models = submitted.models !== undefined && sameModelsDraft(current.models, submitted.models)
+    ? theirModels
+    : current.models;
 
   return {
     personaId: current.personaId,
@@ -528,6 +525,7 @@ export function PersonaSheet({
   const [held, setHeld] = useState<Draft | null>(null);
   const [editing, setEditing] = useState(startEditing);
   const [saving, setSaving] = useState(false);
+  const [settingsValid, setSettingsValid] = useState(false);
   const [saved, setSaved] = useState(false);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
 
@@ -549,7 +547,7 @@ export function PersonaSheet({
             name: persona.name,
             description: persona.description ?? "",
             behavior: behaviorDraftOf(persona),
-            models: modelsDraftOf(modelsOfPersona(persona)),
+            models: modelsDraftOf(modelsOfPersona(persona), persona.settings?.controls),
           },
     );
   }, [answer]);
@@ -585,7 +583,7 @@ export function PersonaSheet({
         name: one.name,
         description: one.description ?? "",
         behavior: behaviorDraftOf(one),
-        models: modelsDraftOf(modelsOfPersona(one)),
+        models: modelsDraftOf(modelsOfPersona(one), one.settings?.controls),
       });
     }
   }, [open, startEditing, answer]);
@@ -613,7 +611,7 @@ export function PersonaSheet({
     (held.name !== persona.name ||
       held.description !== (persona.description ?? "") ||
       !sameBehaviorDraft(held.behavior, behaviorDraftOf(persona)) ||
-      !sameModelsDraft(held.models, modelsDraftOf(modelsOfPersona(persona))));
+      !sameModelsDraft(held.models, modelsDraftOf(modelsOfPersona(persona), persona.settings?.controls)));
   useUnsavedChanges(open && changed && !saving, saving);
 
   /**
@@ -684,7 +682,7 @@ export function PersonaSheet({
     const behaviorChanged = persona.owner === "organization" && !sameBehaviorDraft(held.behavior, stored);
     const modelsChanged = !sameModelsDraft(
       held.models,
-      modelsDraftOf(modelsOfPersona(persona)),
+      modelsDraftOf(modelsOfPersona(persona), persona.settings?.controls),
     );
     if (
       !nameChanged &&
@@ -696,7 +694,7 @@ export function PersonaSheet({
     }
 
     const written = await write(
-      persona.settings === null ? usePersona({ personaId: persona.id, projectId, models: modelsFrom(held.models) }, { client: platformClient }) : updatePersona(
+      persona.settings === null ? usePersona({ personaId: persona.id, projectId, models: modelsFrom(held.models), controls: controlsFrom(held.models) } as Parameters<typeof usePersona>[0], { client: platformClient }) : updatePersona(
         {
           personaId: persona.id,
           projectId,
@@ -707,11 +705,10 @@ export function PersonaSheet({
                 expectedVersionId: held.versionId,
                 identityName: held.behavior.identityName,
                 personality: held.behavior.personality,
-                language: held.behavior.language,
               }
             : {}),
-          ...(modelsChanged ? { models: modelsFrom(held.models) } : {}),
-        },
+          ...(modelsChanged ? { models: modelsFrom(held.models), controls: controlsFrom(held.models) } : {}),
+        } as Parameters<typeof updatePersona>[0],
         { client: platformClient },
       ),
       {
@@ -746,7 +743,7 @@ export function PersonaSheet({
           name: persona.name,
           description: persona.description ?? "",
           behavior: behaviorDraftOf(persona),
-          models: modelsDraftOf(modelsOfPersona(persona)),
+          models: modelsDraftOf(modelsOfPersona(persona), persona.settings?.controls),
         });
       }
     });
@@ -806,6 +803,8 @@ export function PersonaSheet({
         form={form.value}
         disabled={!mayAuthor || saving || busy}
         onChange={(models) => edit({ ...draft, models })}
+        projectId={projectId}
+        onValidityChange={setSettingsValid}
       />
     );
   }
@@ -860,7 +859,7 @@ export function PersonaSheet({
             type="submit"
             size="lg"
             busy={saving}
-            disabled={!mayAuthor || (!changed && one.settings !== null) || saving || busy}
+            disabled={!mayAuthor || !settingsValid || (!changed && one.settings !== null) || saving || busy}
             {...why}
           >
             {saving ? "Saving…" : saved && !changed ? "Saved" : one.settings === null ? "Use persona" : "Save changes"}

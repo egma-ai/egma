@@ -14,6 +14,7 @@ import type {
 export type Persona = GetPersonaResponse;
 
 export type PersonaModels = NonNullable<Persona["settings"]>["models"];
+export type PersonaControls = NonNullable<Persona["settings"]>["controls"];
 export type ModelSelection = PersonaModels["llm"];
 export type PersonaPage = ListPersonasResponse;
 
@@ -47,11 +48,11 @@ export const BLANK_BEHAVIOR: BehaviorDraft = {
 };
 
 /** The stored behavior, as the editor holds it. A version reads the same way. */
-export function behaviorDraftOf(stored: BehaviorDraft): BehaviorDraft {
+export function behaviorDraftOf(stored: Omit<BehaviorDraft, "language"> & { readonly language: string | null }): BehaviorDraft {
   return {
     identityName: stored.identityName,
     personality: stored.personality,
-    language: stored.language,
+    language: stored.language ?? "en-US",
   };
 }
 
@@ -74,9 +75,13 @@ export type ModelsDraft = {
   readonly ttsModel: string;
   readonly voiceId: string;
   readonly speed: string;
+  readonly language: string;
+  readonly emotion: PersonaControls["emotion"];
+  readonly accent: string;
+  readonly speechVolume: string;
 };
 
-export function modelsDraftOf(models: PersonaModels): ModelsDraft {
+export function modelsDraftOf(models: PersonaModels, controls?: PersonaControls): ModelsDraft {
   return {
     llmProvider: models.llm.provider,
     llmModel: models.llm.model,
@@ -86,6 +91,19 @@ export function modelsDraftOf(models: PersonaModels): ModelsDraft {
     ttsModel: models.tts.model,
     voiceId: models.tts.voiceId,
     speed: String(models.tts.speed),
+    language: controls?.language ?? "en-US",
+    emotion: controls?.emotion ?? "neutral",
+    accent: controls?.accent ?? "neutral",
+    speechVolume: String(controls?.speechVolume ?? 1),
+  };
+}
+
+export function controlsFrom(draft: ModelsDraft): Omit<PersonaControls, "executionPolicyVersion"> {
+  return {
+    language: draft.language,
+    emotion: draft.emotion,
+    accent: draft.accent,
+    speechVolume: Number(draft.speechVolume),
   };
 }
 
@@ -183,5 +201,16 @@ export function modelsOfPersona(persona: Persona): PersonaModels {
     llm: { provider: String(values.llm_provider), model: String(values.llm_model) },
     stt: { provider: String(values.stt_provider), model: String(values.stt_model) },
     tts: { provider: String(values.tts_provider), model: String(values.tts_model), voiceId: String(values.tts_voice_id), speed: Number(values.tts_speed) },
+  };
+}
+
+export function controlsOfPersona(persona: Persona): Omit<PersonaControls, "executionPolicyVersion"> {
+  if (persona.settings !== null) return persona.settings.controls;
+  const values = Object.fromEntries(persona.parameterContract.map((field) => [field.key, field.defaultValue]));
+  return {
+    language: String(values.language ?? persona.language ?? "en-US"),
+    emotion: String(values.emotion ?? "neutral") as PersonaControls["emotion"],
+    accent: String(values.accent ?? "neutral"),
+    speechVolume: Number(values.speech_volume ?? 1),
   };
 }
