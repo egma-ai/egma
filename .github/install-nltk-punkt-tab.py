@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import io
-from pathlib import Path
 import urllib.request
 import zipfile
+from pathlib import Path
 
 import nltk
-
 
 _CORPUS_URL = (
     "https://raw.githubusercontent.com/nltk/nltk_data/"
