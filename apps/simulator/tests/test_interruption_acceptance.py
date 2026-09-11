@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     TranscriptionFrame,
+    OutputAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -37,9 +38,10 @@ from test_voice import spec_for
 
 
 class _Connection:
-    def __init__(self, transport: ScriptedTransport, *output: FrameProcessor) -> None:
+    def __init__(self, transport: ScriptedTransport, *output: FrameProcessor, after_output: bool = False) -> None:
         self.transport = transport
         self.output = output
+        self.after_output = after_output
 
     @property
     def provider_reference(self) -> None:
@@ -53,7 +55,7 @@ class _Connection:
         media = self.transport.media
         return VoiceMedia(
             input=media.input,
-            output=(*self.output, *media.output),
+            output=((*media.output, *self.output) if self.after_output else (*self.output, *media.output)),
             ended=media.ended,
             input_recorded=media.input_recorded,
             real_time=media.real_time,
@@ -98,6 +100,22 @@ class _ExactSecondTTS(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+class _CancelAfterAcceptedAudio(FrameProcessor):
+    def __init__(self, controls: ConversationControls) -> None:
+        super().__init__()
+        self.controls = controls
+        self.accepted = asyncio.Event()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if direction == FrameDirection.DOWNSTREAM and isinstance(frame, OutputAudioRawFrame):
+            await self.push_frame(frame, direction)
+            self.accepted.set()
+            self.controls.request_cancel()
+            return
+        await self.push_frame(frame, direction)
+
+
 class _HeldModel(ModelClient):
     def __init__(self, replies: list[str]) -> None:
         self._replies = iter(replies)
@@ -131,6 +149,7 @@ async def _conduct_with(
     max_duration_seconds: float = 30,
     interruption_level: str = "frequent",
     simulation_name: str = "sim:interruption-acceptance",
+    output_after_transport: tuple[FrameProcessor, ...] = (),
 ):
     spec = spec_for(
         scenario="Interrupt briefly, then answer each completed agent turn.",
@@ -145,7 +164,7 @@ async def _conduct_with(
         answer_delay_seconds=0,
         ends_after_replies=True,
     )
-    connection = _Connection(transport)
+    connection = _Connection(transport, *output_after_transport, after_output=True)
     legs = SpeechLegs(
         stt=ScriptedSTT(),
         tts=tts,
@@ -316,3 +335,32 @@ async def test_off_never_schedules_or_overlaps(
     agents = [turn for turn in spans if turn[0] == "agent"]
     people = [turn for turn in spans if turn[0] == "human"]
     assert all(not (human[2] < agent[3] and agent[2] < human[3]) for human in people for agent in agents)
+
+
+async def test_run_cancel_after_first_accepted_interruption_audio_wins_immediately(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    controls = ConversationControls()
+    accepted = _CancelAfterAcceptedAudio(controls)
+    model = _HeldModel(["Generated interruption text with an unplayed tail."])
+    model.release.set()
+    tts = _ExactSecondTTS()
+
+    conducted, spans, _audio, _transport, events = await _conduct_with(
+        tmp_path,
+        monkeypatch,
+        model=model,
+        tts=tts,
+        greeting="The agent continues speaking while cancellation arrives. " * 12,
+        replies=[],
+        controls=controls,
+        output_after_transport=(accepted,),
+    )
+
+    assert accepted.accepted.is_set()
+    assert conducted.status == "canceled"
+    human = [turn for turn in spans if turn[0] == "human"]
+    assert all(turn[1] == "" for turn in human)
+    canceled = [event for event in events if event.event == "canceled"]
+    assert canceled and canceled[-1].reason == "simulation_stopped"
+    assert canceled[-1].at_unix_nano is not None
