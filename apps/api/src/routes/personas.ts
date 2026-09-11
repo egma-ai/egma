@@ -43,7 +43,7 @@ import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
 import { registerPlatformOperation } from "../http/platform-operation.ts";
 import { sendRefusal } from "../http/refusals.ts";
-import { discoverCartesiaVoices, personaCapabilityRefusal, resolvePersonaCapabilities, type PersonaVoice } from "../persona-capabilities.ts";
+import { discoverCartesiaVoices, OPENAI_STANDARD_VOICES, personaCapabilityRefusal, resolvePersonaCapabilities, type PersonaVoice } from "../persona-capabilities.ts";
 import { renderPersonaPreview, type PreviewReach } from "../persona-preview.ts";
 import { createVoiceAccessProof, verifiesVoiceAccessProof } from "../persona-voice-proof.ts";
 import { createPreviewSettlementToken } from "../persona-preview-settlement.ts";
@@ -148,6 +148,9 @@ async function settingsRefusal(
   const incompatible = personaCapabilityRefusal(capabilities, { ...controls, speed: models.tts.speed });
   if (incompatible !== undefined) return incompatible;
   const standard = capabilities.voices.choices?.some((voice) => voice.source === "standard" && voice.id === models.tts.voiceId) === true;
+  if (models.tts.provider === "openai" && !standard && OPENAI_STANDARD_VOICES.some((voice) => voice.id === models.tts.voiceId)) {
+    return `models.tts.voiceId: ${models.tts.voiceId} is not supported by ${models.tts.model}.`;
+  }
   if (purpose === "preview" && models.tts.provider === "openai" && !standard &&
       await resolveProviderKeyForAuthoring(auth, "openai") === undefined) {
     return "models.tts.voiceId: Add an organization OpenAI key before previewing an existing voice ID.";
@@ -482,6 +485,8 @@ export async function personaRoutes(
     const llm = catalogEntry("llm", models.llm.provider, models.llm.model);
     if (tts === undefined) return sendRefusal(reply, "unprocessable", "The selected text-to-speech model is not available.");
     if (llm === undefined || llmCredential === undefined) return sendRefusal(reply, "unprocessable", "The selected language model is not available.");
+    const incompatible = await settingsRefusal(options, acting.auth, models, controls, undefined, "preview");
+    if (incompatible !== undefined) return sendRefusal(reply, "unprocessable", incompatible);
     const platformProviders = [...new Set([
       ...(credential.paymentSource === "platform" ? [models.tts.provider] : []),
       ...(llmCredential.paymentSource === "platform" ? [models.llm.provider] : []),
@@ -490,8 +495,6 @@ export async function personaRoutes(
       const funding = await billing().entitlements.mayPlatformKeyFund({ organizationId: auth.organizationId, providers: platformProviders });
       if (!funding.funded) return sendRefusal(reply, "unprocessable", funding.message);
     }
-    const incompatible = await settingsRefusal(options, acting.auth, models, controls, undefined, "preview");
-    if (incompatible !== undefined) return sendRefusal(reply, "unprocessable", incompatible);
     let rendered;
     const previewId = randomUUID();
     const settlementToken = createPreviewSettlementToken({

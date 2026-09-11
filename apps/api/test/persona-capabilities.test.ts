@@ -80,6 +80,15 @@ describe("persona capability resolution", () => {
       reason: "Cartesia sonic-3.5 does not support named accent steering.",
     });
   });
+
+  it("does not assume a professional clone supports a model when compatibility metadata is missing", () => {
+    const result = resolvePersonaCapabilities(
+      { ...selection, ttsProvider: "cartesia", ttsModel: "sonic-3.6", voiceId: "pro", language: "en-US" },
+      [{ id: "pro", name: "Pro", source: "account", presentation: "unknown", languages: [], accents: [], isProfessional: true }],
+    );
+    expect(result.language).toMatchObject({ status: "unknown", reason: expect.stringContaining("Refresh") });
+    expect(result.speed.status).toBe("unknown");
+  });
 });
 
 describe("Cartesia discovery", () => {

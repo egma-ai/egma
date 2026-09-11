@@ -198,6 +198,14 @@ export function resolvePersonaCapabilities(
     const acceptsAccentSteering = selection.ttsModel === "sonic-3.6" || selection.ttsModel === "sonic-3.6-2026-08-27";
     const languageMatches = selection.language === undefined || languages.some((language) => language === selection.language!.toLowerCase().split("-")[0]);
     const professional = selectedVoice?.isProfessional === true;
+    if (professional && selectedVoice.modelIds === undefined) {
+      const reason = "Cartesia did not return model compatibility for this professional clone. Refresh the voice catalog before saving.";
+      return {
+        voices: { status: "supported", choices: accountVoices },
+        language: unknown(reason), accent: unknown(reason), emotion: unknown(reason), speed: unknown(reason),
+        speechVolume: { status: "supported", range: { minimum: 0.5, maximum: 1.5, step: 0.1 } },
+      };
+    }
     const supportsModel = selectedVoice?.modelIds === undefined || selectedVoice.modelIds.includes(selection.ttsModel);
     if (!supportsModel || (professional && selection.ttsModel === "sonic-preview")) {
       const reason = professional
