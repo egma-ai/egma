@@ -144,6 +144,17 @@ describe("one complete persona model selection", () => {
     ).toEqual({ provider, model });
   });
 
+  it.each(["sonic-3.6", "sonic-3.6-2026-08-27"])(
+    "accepts the stable Cartesia TTS model %s",
+    (model) => {
+      expect(catalogEntry("tts", "cartesia", model)).toMatchObject({
+        adapter: "cartesia",
+        recommendedVoiceId: "47c38ca4-5f35-497b-b1a3-415245fb35e1",
+        recommendedSpeed: 1,
+      });
+    },
+  );
+
   it("refuses arbitrary model text even for a known provider", () => {
     expect(() =>
       validPersonaModels({
