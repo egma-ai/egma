@@ -2137,6 +2137,74 @@ describe("the suite-first Tests route", () => {
     });
   });
 
+  it("keeps the picker open when a cross is pressed beside it, and saves both on Done", async () => {
+    const BEN = { id: "prs_2", name: "Calm Ben", archivedAt: null };
+    const CHRIS = { id: "prs_3", name: "Careful Chris", archivedAt: null };
+    routed.pathname = "/projects/prj_1/tests/suites/ste_1";
+    routed.params = { projectId: "prj_1", suiteId: "ste_1" };
+    answers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
+      "/v1/tests": {
+        status: 200,
+        body: { tests: [testBody({ personas: [PERSONA, BEN] })], nextPageToken: null },
+      },
+      "/v1/tests/tst_1": {
+        status: 200,
+        body: testBody({ personas: [PERSONA, CHRIS], version: 2, versionId: "tstv_2" }),
+      },
+      "/v1/personas": {
+        status: 200,
+        body: { personas: [PERSONA, BEN, CHRIS], nextPageToken: null },
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    const written = screen.getByText("Books service").closest("tr");
+    if (written === null) throw new Error("the test's row is not on screen");
+    fireEvent.click(within(written).getByText("Impatient Rita"));
+    fireEvent.click(within(written).getByRole("button", { name: "+ Add a persona" }));
+    const panel = await screen.findByRole("dialog", { name: "Choose personas" });
+    fireEvent.click(await within(panel).findByRole("option", { name: "Careful Chris" }));
+
+    /*
+     * A real press on a cross is a pointerdown before the click, and pointerdown
+     * is what the open panel would dismiss on. It must not: dismissal commits,
+     * an unchanged draft rests the cell, and the click would then land on a
+     * cross that no longer exists.
+     */
+    const cross = within(written).getByRole("button", { name: "Remove Calm Ben" });
+    fireEvent.pointerDown(cross);
+    fireEvent.mouseDown(cross);
+    fireEvent.click(cross);
+
+    // The panel stands, the chip is gone, its row is unticked, nothing is sent.
+    expect(screen.getAllByRole("dialog", { name: "Choose personas" })).toHaveLength(1);
+    expect(
+      within(written)
+        .getAllByRole("listitem")
+        .map((chip) => chip.textContent),
+    ).toEqual(["Impatient Rita", "Careful Chris"]);
+    expect(
+      within(panel).getByRole("option", { name: "Calm Ben" }).getAttribute("aria-checked"),
+    ).toBe("false");
+    expect(sent.some((request) => request.method === "PATCH")).toBe(false);
+
+    // Done commits the tick and the removal together, as one save.
+    fireEvent.click(within(panel).getByRole("button", { name: "Done" }));
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "PATCH")).toEqual([
+        {
+          path: "/v1/tests/tst_1",
+          method: "PATCH",
+          body: { personas: ["prs_1", "prs_3"], expectedVersionId: "tstv_1" },
+        },
+      ]);
+    });
+  });
+
   it("holds the caret in the cell when a cross takes the chip it stood on", async () => {
     const BEN = { id: "prs_2", name: "Calm Ben", archivedAt: null };
     const CHRIS = { id: "prs_3", name: "Careful Chris", archivedAt: null };

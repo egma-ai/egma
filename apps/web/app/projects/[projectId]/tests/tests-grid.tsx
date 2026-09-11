@@ -458,6 +458,22 @@ function PersonaPicker({
          * caret after opening. Pointer dismissal and Escape still close the picker.
          */
         onFocusOutside={(event) => event.preventDefault()}
+        /*
+         * A cross on the cell's own chips is part of this editing surface, so
+         * pressing one does not shut the panel: the persona leaves the draft,
+         * its row unticks, and closing still commits. Left to dismiss, the
+         * close would commit and rest the cell before the press could remove
+         * anybody, and the removal would be lost.
+         */
+        onPointerDownOutside={(event) => {
+          const pressed = event.detail.originalEvent.target;
+          if (
+            pressed instanceof Element &&
+            pressed.closest('[data-slot="persona-chip-remove"]') !== null
+          ) {
+            event.preventDefault();
+          }
+        }}
       >
         <PersonaChoices
           projectId={projectId}
