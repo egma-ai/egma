@@ -91,6 +91,7 @@ export {
   type VoiceSeconds,
 } from "./billing/period-usage.ts";
 export {
+  billing,
   billingIsConfigured,
   faultTolerantEntitlements,
   discardingUsageSink,

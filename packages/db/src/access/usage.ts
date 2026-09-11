@@ -263,6 +263,25 @@ export async function recordProviderUsage(
   };
 }
 
+/** Store priced Preview usage from an authenticated, project-scoped authoring request. */
+export async function recordPersonaPreviewUsage(
+  auth: AuthContext,
+  records: readonly NewUsageRecord[],
+): Promise<RecordedProviderUsage> {
+  if (auth.via !== "session" && auth.via !== "api_key")
+    throw new Error("persona Preview usage requires customer authentication");
+  if (!auth.projectId) throw new Error("persona Preview usage requires a project scope");
+  authorize(auth, "read", { organizationId: auth.organizationId, projectId: auth.projectId });
+  if (records.some((record) => record.identity.work !== "persona_preview"))
+    throw new Error("persona Preview recorder accepts only Preview usage");
+  const spans = await priceUsageSpans(auth, records.map((record) => providerUsageSpan(record)));
+  await appendSpans(auth, spans);
+  return {
+    stored: spans.length,
+    amountMicros: spans.reduce((total, span) => total + (span.usage?.price?.amountMicros ?? 0), 0),
+  };
+}
+
 /** Organization-wide provider/model totals for the shared settings read. */
 export async function readOrganizationUsage(
   auth: AuthContext,

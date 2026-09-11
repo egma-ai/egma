@@ -6,7 +6,7 @@ describe("persona Preview client", () => {
     const fetcher = vi.fn(async (_url, init) => {
       expect(init?.headers).toMatchObject({ Authorization: "Bearer egma_st_fixture" });
       expect(JSON.parse(String(init?.body))).toMatchObject({ requestId: "preview-a" });
-      return new Response(JSON.stringify({ audioBase64: "UklGRg==", contentType: "audio/wav", usage: { provider: "scripted" } }));
+      return new Response(JSON.stringify({ audioBase64: "UklGRg==", contentType: "audio/wav", usage: [{ provider: "scripted" }] }));
     });
     await expect(renderPersonaPreview({ url: "http://simulator:8091", serviceToken: "egma_st_fixture", fetch: fetcher }, { requestId: "preview-a" })).resolves.toMatchObject({ contentType: "audio/wav" });
   });

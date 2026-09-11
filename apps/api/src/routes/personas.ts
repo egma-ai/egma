@@ -23,6 +23,9 @@ import {
   UnprocessableInputError,
   validPersonaModels,
   validPersonaControls,
+  billing,
+  recordPersonaPreviewUsage,
+  type NewUsageRecord,
   WriteAbortedError,
   type AuthContext,
   type Persona,
@@ -32,6 +35,7 @@ import { credentialFor, type ProviderCredentialSource } from "@egma/provider-cre
 import { isId } from "@egma/ids";
 import { personaOperations } from "@egma/platform-api/contract";
 import type { FastifyInstance, FastifyReply } from "fastify";
+import { createHash } from "node:crypto";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, refuseActing, type Acting } from "../http/acting.ts";
@@ -81,22 +85,36 @@ function requestSignal(request: { raw: { once(event: "aborted", listener: () => 
   return controller.signal;
 }
 
-function previewText(language: string, _emotion: string): string {
-  const samples: Readonly<Record<string, string>> = {
-    es: "Hola. Esta es una breve muestra neutral de mi voz para comprobar la configuración seleccionada.",
-    fr: "Bonjour. Voici un court aperçu neutre de ma voix avec les réglages sélectionnés.",
-    de: "Hallo. Dies ist eine kurze neutrale Vorschau meiner Stimme mit den gewählten Einstellungen.",
-  };
-  const base = samples[language.toLowerCase().split("-")[0] ?? ""] ?? "Hello. This is a short, neutral preview of my voice with the selected settings.";
-  return base;
-}
-
 async function authoringCredential(options: PersonaRoutesOptions, auth: AuthContext, provider: string) {
   if (!isModelProvider(provider)) return undefined;
   const customer = await resolveProviderKeyForAuthoring(auth, provider);
-  if (customer !== undefined) return customer;
+  if (customer !== undefined) return { ...customer, paymentSource: "customer" as const };
   const key = credentialFor(await options.providerCredentials.load(), provider);
-  return { key, credentialRef: "deployment" };
+  return { key, credentialRef: `deployment:${createHash("sha256").update(key).digest("hex")}`, paymentSource: "platform" as const };
+}
+
+function previewUsageRecords(
+  usage: readonly Readonly<Record<string, unknown>>[], previewId: string,
+  credentials: ReadonlyMap<string, { credentialRef: string; paymentSource: "customer" | "platform" }>,
+): readonly NewUsageRecord[] {
+  const traceId = createHash("sha256").update(`persona-preview:${previewId}`).digest("hex").slice(0, 32);
+  return usage.flatMap((item, index) => {
+    const provider = item.provider;
+    const credential = typeof provider === "string" ? credentials.get(provider) : undefined;
+    if (typeof provider !== "string" || typeof item.model !== "string" || typeof item.operation !== "string" ||
+        (item.measurement !== "provider_reported" && item.measurement !== "client_measured") ||
+        typeof item.quantities !== "object" || item.quantities === null || credential === undefined) return [];
+    return [{
+      identity: { work: "persona_preview", previewId, spanId: createHash("sha256").update(`${previewId}:${index}`).digest("hex").slice(0, 16) },
+      occurredAt: new Date(), traceId, provider, model: item.model,
+      operation: item.operation as NewUsageRecord["operation"],
+      quantities: item.quantities as NewUsageRecord["quantities"],
+      measurement: item.measurement,
+      ...(typeof item.provider_ref === "string" ? { providerRef: item.provider_ref } : {}),
+      paymentSource: credential.paymentSource, credentialRef: credential.credentialRef,
+      rawUsage: typeof item.raw === "object" && item.raw !== null ? item.raw as Readonly<Record<string, unknown>> : {},
+    }];
+  });
 }
 
 async function settingsRefusal(
@@ -448,7 +466,18 @@ export async function personaRoutes(
     const credential = await authoringCredential(options, acting.auth, models.tts.provider);
     if (credential === undefined) return sendRefusal(reply, "unprocessable", "The selected text-to-speech provider is not available.");
     const tts = catalogEntry("tts", models.tts.provider, models.tts.model);
+    const llmCredential = await authoringCredential(options, acting.auth, models.llm.provider);
+    const llm = catalogEntry("llm", models.llm.provider, models.llm.model);
     if (tts === undefined) return sendRefusal(reply, "unprocessable", "The selected text-to-speech model is not available.");
+    if (llm === undefined || llmCredential === undefined) return sendRefusal(reply, "unprocessable", "The selected language model is not available.");
+    const platformProviders = [...new Set([
+      ...(credential.paymentSource === "platform" ? [models.tts.provider] : []),
+      ...(llmCredential.paymentSource === "platform" ? [models.llm.provider] : []),
+    ])];
+    if (platformProviders.length > 0) {
+      const funding = await billing().entitlements.mayPlatformKeyFund({ organizationId: auth.organizationId, providers: platformProviders });
+      if (!funding.funded) return sendRefusal(reply, "unprocessable", funding.message);
+    }
     const capabilities = resolvePersonaCapabilities({
       ttsProvider: models.tts.provider, ttsModel: models.tts.model,
       sttProvider: models.stt.provider, sttModel: models.stt.model,
@@ -461,13 +490,18 @@ export async function personaRoutes(
     try {
       rendered = await renderPersonaPreview(options.preview, {
         requestId: request.id,
-        text: previewText(controls.language, controls.emotion),
-        models: { tts: { provider: models.tts.provider, model: models.tts.model, adapter: tts.adapter, voiceId: models.tts.voiceId, speed: models.tts.speed, key: credential.key, fundingReceipt: null } },
+        models: {
+          llm: { provider: models.llm.provider, model: models.llm.model, adapter: llm.adapter, key: llmCredential.key, fundingReceipt: null },
+          tts: { provider: models.tts.provider, model: models.tts.model, adapter: tts.adapter, voiceId: models.tts.voiceId, speed: models.tts.speed, key: credential.key, fundingReceipt: null },
+        },
         controls,
       }, requestSignal(request));
     } catch {
       return sendRefusal(reply, "unprocessable", "Preview audio could not be generated with the selected voice and settings. Check provider access, then try again.");
     }
+    await recordPersonaPreviewUsage(acting.auth, previewUsageRecords(rendered.usage, request.id, new Map([
+      [models.llm.provider, llmCredential], [models.tts.provider, credential],
+    ])));
     const customOpenAiVoice = models.tts.provider === "openai" && !resolvePersonaCapabilities({ ttsProvider: models.tts.provider, ttsModel: models.tts.model, sttProvider: models.stt.provider, sttModel: models.stt.model }).voices.choices?.some((voice) => voice.id === models.tts.voiceId);
     const proof = customOpenAiVoice ? createVoiceAccessProof({ organizationId: auth.organizationId, provider: models.tts.provider, credentialRevision: credential.credentialRef, model: models.tts.model, voiceId: models.tts.voiceId }, options.proofSecret) : undefined;
     return reply.send({ audioBase64: rendered.audioBase64, contentType: rendered.contentType, ...(proof === undefined ? {} : { voiceAccessProof: proof.proof }), expiresAt: proof?.expiresAt.toISOString() ?? null, interruptionNotice: "Preview demonstrates voice and sound settings. Test interruptions in a simulation." });

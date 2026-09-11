@@ -8,7 +8,7 @@ export type PreviewRequest = Readonly<Record<string, unknown>>;
 export type PreviewResponse = {
   readonly audioBase64: string;
   readonly contentType: string;
-  readonly usage: Readonly<Record<string, unknown>>;
+  readonly usage: readonly Readonly<Record<string, unknown>>[];
 };
 
 const PREVIEW_TIMEOUT_MILLISECONDS = 15_000;
@@ -29,7 +29,7 @@ export async function renderPersonaPreview(
   if (!response.ok) throw new Error(`Persona Preview renderer failed with status ${response.status}.`);
   const result = await response.json() as Partial<PreviewResponse>;
   if (typeof result.audioBase64 !== "string" || result.audioBase64.length === 0 ||
-      typeof result.contentType !== "string" || typeof result.usage !== "object" || result.usage === null) {
+      typeof result.contentType !== "string" || !Array.isArray(result.usage)) {
     throw new Error("Persona Preview renderer returned an invalid response.");
   }
   return result as PreviewResponse;
