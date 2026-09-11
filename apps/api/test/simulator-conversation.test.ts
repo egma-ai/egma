@@ -1411,6 +1411,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       }> = [];
       let artifact: { file: string; sha256: string; version: string } | undefined;
       let runtime: { name: string; version: string } | undefined;
+      let diagnosticSimulationStatus: string | undefined;
       let diagnosticEvidence: Record<string, unknown> | undefined;
       let diagnosticGrade: {
         result: CurrentGrade["result"];
@@ -1562,6 +1563,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         expect(simulation).toBeDefined();
         const simulationId = simulation!.id;
         const terminalStatus = await waitForTerminal(simulationId, 120_000);
+        diagnosticSimulationStatus = terminalStatus;
         if (terminalStatus !== "completed") {
           const failed = await call("GET", `/v1/simulations/${simulationId}`, { key });
           diagnosticEvidence = failed.body;
@@ -1812,7 +1814,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             outcomes: {
               simulation: typeof diagnosticEvidence?.status === "string"
                 ? diagnosticEvidence.status
-                : "unknown",
+                : diagnosticSimulationStatus ?? "unknown",
               failureType: failure instanceof Error ? failure.name : "unknown",
             },
             ...(diagnosticEvidence === undefined ? {} : {
