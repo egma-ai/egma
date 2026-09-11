@@ -34,6 +34,7 @@ const RETELL_KEY = process.env["SIMULATION_E2E_RETELL_API_KEY"]?.trim() ?? "";
 const MODEL_KEY = process.env["SIMULATION_E2E_MODEL_API_KEY"]?.trim() ??
   process.env["LIVEKIT_E2E_OPENAI_API_KEY"]?.trim() ?? "";
 const LIVE_PERSONA_MODE = process.env["SIMULATION_E2E_PERSONA_MODE"] === "live";
+const PROOF_STEM = `retell-${CONNECTION}-${LIVE_PERSONA_MODE ? "live" : "separate"}-${MOCKS ? "mocked" : "unmocked"}`;
 const SERVICE_TOKEN = "egma_st_held-by-this-test-suite-alone";
 const REPOSITORY = path.join(import.meta.dirname, "../../..");
 const SIMULATOR = path.join(REPOSITORY, "apps/simulator");
@@ -573,7 +574,8 @@ it.skipIf(!ENABLED || storage?.available !== true)(
         body: {
           projectId: identity.project.id,
           name: "Appointment Rita",
-          ...NEUTRAL_PERSON,
+          identityName: NEUTRAL_PERSON.identityName,
+          personality: NEUTRAL_PERSON.personality,
           controls: { speechSpeed: "slow" },
           models: LIVE_PERSONA_MODE ? {
             mode: "live",
@@ -744,7 +746,7 @@ it.skipIf(!ENABLED || storage?.available !== true)(
         time: availability.time,
       });
       await mkdir(proofDirectory, { recursive: true });
-      await writeFile(path.join(proofDirectory, `retell-${CONNECTION}-${MOCKS ? "mocked" : "unmocked"}.json`), JSON.stringify({
+      await writeFile(path.join(proofDirectory, `${PROOF_STEM}.json`), JSON.stringify({
         commitSha: process.env["GITHUB_SHA"] ?? "local-working-tree",
         connection: CONNECTION,
         mocked: MOCKS,
@@ -777,7 +779,7 @@ it.skipIf(!ENABLED || storage?.available !== true)(
       );
       await mkdir(proofDirectory, { recursive: true });
       await writeFile(
-        path.join(proofDirectory, `retell-${CONNECTION}-${MOCKS ? "mocked" : "unmocked"}.log`),
+        path.join(proofDirectory, `${PROOF_STEM}.log`),
         safe,
         { encoding: "utf8", mode: 0o600 },
       );
@@ -786,6 +788,7 @@ it.skipIf(!ENABLED || storage?.available !== true)(
           commitSha: process.env["GITHUB_SHA"] ?? "local-working-tree",
           connection: CONNECTION,
           mocked: MOCKS,
+          personaMode: LIVE_PERSONA_MODE ? "live" : "separate",
           outcomes: {
             simulation: "failed",
             failureType: error instanceof Error ? error.name : "unknown",
@@ -800,7 +803,7 @@ it.skipIf(!ENABLED || storage?.available !== true)(
         secrets,
       ) + "\n";
       await writeFile(
-        path.join(proofDirectory, `retell-${CONNECTION}-${MOCKS ? "mocked" : "unmocked"}.json`),
+        path.join(proofDirectory, `${PROOF_STEM}.json`),
         diagnosticManifest,
         { encoding: "utf8", mode: 0o600 },
       );
@@ -825,11 +828,12 @@ it.skipIf(!ENABLED || storage?.available !== true)(
       if (failures.length > 0) {
         await mkdir(proofDirectory, { recursive: true });
         await writeFile(
-          path.join(proofDirectory, `retell-${CONNECTION}-${MOCKS ? "mocked" : "unmocked"}.json`),
+          path.join(proofDirectory, `${PROOF_STEM}.json`),
           JSON.stringify({
             commitSha: process.env["GITHUB_SHA"] ?? "local-working-tree",
             connection: CONNECTION,
             mocked: MOCKS,
+            personaMode: LIVE_PERSONA_MODE ? "live" : "separate",
             ownedFixture: provisioned === undefined ? null : {
               agentId: provisioned.agentId,
               agentVersion: provisioned.agentVersion,
@@ -848,7 +852,7 @@ it.skipIf(!ENABLED || storage?.available !== true)(
       if (mainSucceeded) {
         const manifestPath = path.join(
           proofDirectory,
-          `retell-${CONNECTION}-${MOCKS ? "mocked" : "unmocked"}.json`,
+          `${PROOF_STEM}.json`,
         );
         const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
           outcomes: Record<string, unknown>;

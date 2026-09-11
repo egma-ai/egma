@@ -498,7 +498,7 @@ jobs:
           retention-days: 14
 
   simulation-e2e-retell:
-    name: Simulation to grade (Retell ${{ matrix.connection }}, ${{ matrix.persona_mode }} persona, mocks on)
+    name: Simulation to grade (Retell ${{ matrix.connection }}, configured personas, mocks on)
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -511,7 +511,6 @@ jobs:
       fail-fast: false
       matrix:
         connection: [text, web]
-        persona_mode: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.gpt_live_personas && '["separate", "live"]' || '["separate"]') }}
         include:
           - connection: text
             tunnel_id_var: SIMULATION_E2E_TUNNEL_TEXT_ID
@@ -597,14 +596,17 @@ jobs:
           EGMA_REQUIRE_OBJECT_STORAGE: "1"
           SIMULATION_E2E_RETELL: "1"
           SIMULATION_E2E_RETELL_CONNECTION: ${{ matrix.connection }}
-          SIMULATION_E2E_PERSONA_MODE: ${{ matrix.persona_mode }}
+          PERSONA_MODES: ${{ github.event_name == 'workflow_dispatch' && inputs.gpt_live_personas && 'separate live' || 'separate' }}
           SIMULATION_E2E_MOCKS: "on"
           SIMULATION_E2E_RETELL_API_KEY: ${{ secrets.SIMULATION_E2E_RETELL_API_KEY }}
           SIMULATION_E2E_MODEL_API_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
-        run: >-
-          pnpm exec vitest run --project fast
-          apps/api/test/retell-live-simulation.test.ts
-          --maxWorkers=1
+        run: |
+          set -eu
+          for persona_mode in $PERSONA_MODES; do
+            SIMULATION_E2E_PERSONA_MODE="$persona_mode" pnpm exec vitest run --project fast \
+              apps/api/test/retell-live-simulation.test.ts \
+              --maxWorkers=1
+          done
       - name: Remove the named public tunnel credential
         if: ${{ always() }}
         run: rm -f "$RUNNER_TEMP/retell-${{ matrix.connection }}-tunnel.json"
@@ -612,7 +614,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: simulation-e2e-retell-${{ matrix.connection }}-${{ matrix.persona_mode }}-on-${{ github.sha }}
+          name: simulation-e2e-retell-${{ matrix.connection }}-configured-personas-on-${{ github.sha }}
           path: .proofs/simulation-e2e/*
           include-hidden-files: true
           if-no-files-found: error

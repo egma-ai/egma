@@ -1503,7 +1503,8 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           body: {
             projectId,
             name: "Focused caller",
-            ...NEUTRAL_PERSON,
+            identityName: NEUTRAL_PERSON.identityName,
+            personality: NEUTRAL_PERSON.personality,
             controls: { speechSpeed: "normal" },
             models: LIVE_PERSONA_MODE ? {
               mode: "live",
