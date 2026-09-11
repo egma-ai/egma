@@ -1,6 +1,6 @@
 /** The raw persona catalog command, through its folder and HTTP seams. */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { runPersonaActionCommand, runPersonasCommand } from "../src/commands/personas.ts";
 import { EMPTY_CONFIG, createEgmaFolder } from "../src/folder/egma-folder.ts";
@@ -34,50 +34,6 @@ beforeEach(async () => {
 afterEach(async () => workspace.remove());
 
 describe("runPersonasCommand", () => {
-  it("aborts the active Preview request when the command is interrupted", async () => {
-    const controller = new AbortController();
-    let receivedSignal: AbortSignal | null = null;
-    const failures: string[] = [];
-    const running = runPersonaActionCommand({
-      access: { url: URL, credentialsFile: workspace.credentialsFile }, cwd: workspace.dir,
-      out: () => undefined, fail: (line) => failures.push(line), signal: controller.signal,
-      fetchImpl: async (_input, init) => {
-        receivedSignal = init?.signal ?? null;
-        return await new Promise<Response>((_resolve, reject) => {
-          receivedSignal?.addEventListener("abort", () => reject(receivedSignal?.reason), { once: true });
-        });
-      },
-    }, "preview", {
-      positionals: [],
-      values: { "--stt-provider": "openai", "--stt-model": "gpt-live-transcribe", "--tts-provider": "openai", "--tts-model": "gpt-4o-mini-tts", "--llm-provider": "openai", "--llm-model": "gpt-4o", "--voice": "alloy" },
-    });
-
-    await vi.waitFor(() => expect(receivedSignal).not.toBeNull());
-    controller.abort("interrupt");
-
-    await expect(running).resolves.toBe(130);
-    expect((receivedSignal as AbortSignal | null)?.aborted).toBe(true);
-    expect(failures).toEqual(["The command was interrupted before it finished."]);
-  });
-
-  it("uses the provider voice accent when a preview omits --accent", async () => {
-    let body: Record<string, unknown> | undefined;
-    const lines: string[] = [];
-    const code = await runPersonaActionCommand({
-      access: { url: URL, credentialsFile: workspace.credentialsFile }, cwd: workspace.dir,
-      out: (line) => lines.push(line), fail: (line) => lines.push(`stderr: ${line}`),
-      fetchImpl: async (_input, init) => {
-        body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-        return new JsonResponse({ audioBase64: "AA==", contentType: "audio/mpeg", expiresAt: null, interruptionNotice: "Use a full simulation." });
-      },
-    }, "preview", {
-      positionals: [],
-      values: { "--stt-provider": "openai", "--stt-model": "gpt-live-transcribe", "--tts-provider": "openai", "--tts-model": "gpt-4o-mini-tts", "--llm-provider": "openai", "--llm-model": "gpt-4o", "--voice": "alloy" },
-    });
-    expect(code).toBe(0);
-    expect(body).toMatchObject({ controls: { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, backgroundSoundId: "none", backgroundVolume: 0.0631, interruptionLevel: "off" } });
-  });
-
   it("uses a predefined persona with its built-in defaults", async () => {
     const requests: Array<{ method: string; body?: Record<string, unknown> }> = [];
     const code = await runPersonaActionCommand({

@@ -11534,9 +11534,6 @@
                       "interruptionLevel"
                     ],
                     "additionalProperties": false
-                  },
-                  "voiceAccessProof": {
-                    "type": "string"
                   }
                 },
                 "additionalProperties": false
@@ -12658,9 +12655,6 @@
                       "interruptionLevel"
                     ],
                     "additionalProperties": false
-                  },
-                  "voiceAccessProof": {
-                    "type": "string"
                   }
                 },
                 "required": [
@@ -13367,7 +13361,7 @@
       "get": {
         "operationId": "getPersonaCapabilities",
         "summary": "Resolve persona capabilities",
-        "description": "Resolve the selected provider, model, voice, and language combination. Status and reason values are authoritative for authoring, Preview, and voice execution.",
+        "description": "Resolve the selected provider, model, voice, and language combination. Status and reason values are authoritative for authoring and voice execution.",
         "tags": [
           "Personas"
         ],
@@ -13889,309 +13883,6 @@
             }
           },
           "404": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "The request rate limit was reached.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds to wait before trying again.",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 1
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/persona-preview": {
-      "post": {
-        "operationId": "previewPersona",
-        "summary": "Preview persona audio",
-        "description": "Generate one short sample with the same capability and speech-rendering path used by voice simulations. This does not create a test or run.",
-        "tags": [
-          "Personas"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "models": {
-                    "type": "object",
-                    "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                    "properties": {
-                      "llm": {
-                        "type": "object",
-                        "properties": {
-                          "provider": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "provider",
-                          "model"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "stt": {
-                        "type": "object",
-                        "properties": {
-                          "provider": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "provider",
-                          "model"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "tts": {
-                        "type": "object",
-                        "properties": {
-                          "provider": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          },
-                          "voiceId": {
-                            "type": "string",
-                            "description": "A voice identifier supported by the selected text-to-speech provider."
-                          },
-                          "speed": {
-                            "type": "number",
-                            "description": "Provider-supported speech rate. Read the selected combination's capability range."
-                          }
-                        },
-                        "required": [
-                          "provider",
-                          "model",
-                          "voiceId",
-                          "speed"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "required": [
-                      "llm",
-                      "stt",
-                      "tts"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "controls": {
-                    "type": "object",
-                    "properties": {
-                      "language": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "emotion": {
-                        "type": "string",
-                        "enum": [
-                          "neutral",
-                          "happy",
-                          "angry",
-                          "frustrated",
-                          "sad",
-                          "anxious"
-                        ]
-                      },
-                      "accent": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "speechVolume": {
-                        "type": "number",
-                        "minimum": 0.5,
-                        "maximum": 1.5
-                      },
-                      "backgroundSoundId": {
-                        "type": "string",
-                        "enum": [
-                          "none",
-                          "office-v1",
-                          "cafe-v1",
-                          "street-traffic-v1",
-                          "crowd-talking-v1",
-                          "inside-car-v1",
-                          "home-tv-v1",
-                          "wind-v1",
-                          "rain-v1"
-                        ]
-                      },
-                      "backgroundVolume": {
-                        "type": "number",
-                        "minimum": 0.015848931924611134,
-                        "maximum": 0.251188643150958
-                      },
-                      "interruptionLevel": {
-                        "type": "string",
-                        "enum": [
-                          "off",
-                          "occasional",
-                          "frequent"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "language",
-                      "emotion",
-                      "accent",
-                      "speechVolume",
-                      "backgroundSoundId",
-                      "backgroundVolume",
-                      "interruptionLevel"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "voiceAccessProof": {
-                    "type": "string",
-                    "description": "A prior short-lived proof for an existing provider voice ID."
-                  }
-                },
-                "required": [
-                  "models",
-                  "controls"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Generated Preview audio and any new voice-access proof.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "audioBase64": {
-                      "type": "string",
-                      "contentEncoding": "base64"
-                    },
-                    "contentType": {
-                      "type": "string"
-                    },
-                    "voiceAccessProof": {
-                      "type": "string"
-                    },
-                    "expiresAt": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "interruptionNotice": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "audioBase64",
-                    "contentType",
-                    "expiresAt",
-                    "interruptionNotice"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "409": {
             "description": "The request was refused.",
             "content": {
               "application/json": {
@@ -14892,9 +14583,6 @@
                       "interruptionLevel"
                     ],
                     "additionalProperties": false
-                  },
-                  "voiceAccessProof": {
-                    "type": "string"
                   },
                   "expectedVersionId": {
                     "type": "string",

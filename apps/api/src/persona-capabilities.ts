@@ -1,4 +1,4 @@
-/** Provider-aware authoring facts shared by save validation, Preview, and execution. */
+/** Provider-aware authoring facts shared by save validation and execution. */
 
 export const PERSONA_EMOTIONS = [
   "neutral",
@@ -52,13 +52,16 @@ export type PersonaCapabilities = {
 
 export function personaCapabilityRefusal(
   capabilities: PersonaCapabilities,
-  selected: { readonly emotion: string; readonly accent: string; readonly speed: number },
+  selected: { readonly emotion: string; readonly accent: string; readonly speed: number; readonly voiceId?: string },
 ): string | undefined {
   for (const [field, capability] of Object.entries(capabilities)) {
     if (capability.status === "unsupported") return `${field}: ${capability.reason ?? "unsupported"}`;
     if (capability.status === "unknown")
       return `${field}: ${capability.reason ?? "support could not be verified"}`;
   }
+  if (selected.voiceId !== undefined && capabilities.voices.choices !== undefined &&
+      !capabilities.voices.choices.some((voice) => voice.id === selected.voiceId))
+    return "models.tts.voiceId: Choose one of the available voices.";
   if (capabilities.emotion.status === "fixed" && selected.emotion !== capabilities.emotion.value)
     return `emotion: ${capabilities.emotion.reason}`;
   if (capabilities.accent.status === "fixed" && selected.accent !== capabilities.accent.value)
@@ -277,7 +280,6 @@ export async function discoverCartesiaVoices(
     if (++pages > 100) throw new Error("Cartesia voice discovery exceeded 100 pages.");
     const url = new URL("https://api.cartesia.ai/voices");
     url.searchParams.set("limit", "100");
-    url.searchParams.append("expand[]", "preview_file_url");
     if (cursor !== undefined) url.searchParams.set("starting_after", cursor);
     let response: Response;
     try {

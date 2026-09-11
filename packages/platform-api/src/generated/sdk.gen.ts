@@ -2,7 +2,7 @@
 
 import { client } from './client.gen.js';
 import { buildClientParams, type Client, type ClientMeta, type Options as Options2, type RequestResult, type TDataShape } from './client/index.js';
-import type { AddConnectionErrors, AddConnectionResponses, ApplyRepositoryChangeSetErrors, ApplyRepositoryChangeSetResponses, ArchiveAgentErrors, ArchiveAgentResponses, ArchiveConnectionErrors, ArchiveConnectionResponses, CancelRunErrors, CancelRunResponses, ChangeMemberRoleErrors, ChangeMemberRoleResponses, CloneGraderErrors, CloneGraderResponses, CreateApiKeyErrors, CreateApiKeyResponses, CreateCustomGraderErrors, CreateCustomGraderResponses, CreateInvitationErrors, CreateInvitationResponses, CreatePersonaErrors, CreatePersonaResponses, CreateProjectErrors, CreateProjectResponses, CreateRunErrors, CreateRunResponses, CreateTestErrors, CreateTestResponses, CreateTestSuiteErrors, CreateTestSuiteResponses, DeactivateMemberErrors, DeactivateMemberResponses, DeletePersonaErrors, DeletePersonaResponses, DeleteProviderKeyErrors, DeleteProviderKeyResponses, DeleteTestErrors, DeleteTestResponses, DeleteTestSuiteErrors, DeleteTestSuiteResponses, DiscoverAgentsErrors, DiscoverAgentsResponses, DiscoverRetellVoiceAgentsErrors, DiscoverRetellVoiceAgentsResponses, ForkPersonaErrors, ForkPersonaResponses, GetAgentErrors, GetAgentResponses, GetConnectionErrors, GetConnectionResponses, GetGraderFormErrors, GetGraderFormResponses, GetGraderLibraryEntryErrors, GetGraderLibraryEntryResponses, GetOrganizationErrors, GetOrganizationResponses, GetPersonaCapabilitiesErrors, GetPersonaCapabilitiesResponses, GetPersonaErrors, GetPersonaFormErrors, GetPersonaFormResponses, GetPersonaResponses, GetPersonaUsageErrors, GetPersonaUsageResponses, GetPersonaVersionErrors, GetPersonaVersionResponses, GetProjectErrors, GetProjectResponses, GetRunErrors, GetRunResponses, GetSimulationErrors, GetSimulationRecordingErrors, GetSimulationRecordingResponses, GetSimulationResponses, GetTestErrors, GetTestResponses, GetTestSuiteErrors, GetTestSuiteResponses, GetTestVersionErrors, GetTestVersionResponses, GetTraceErrors, GetTraceResponses, ListAgentsErrors, ListAgentsResponses, ListApiKeysErrors, ListApiKeysResponses, ListConnectionOptionsErrors, ListConnectionOptionsResponses, ListGraderLibraryErrors, ListGraderLibraryResponses, ListGradersErrors, ListGradersResponses, ListInvitationsErrors, ListInvitationsResponses, ListMembersErrors, ListMembersResponses, ListPersonasErrors, ListPersonasResponses, ListPersonaVersionsErrors, ListPersonaVersionsResponses, ListProjectsErrors, ListProjectsResponses, ListProviderKeysErrors, ListProviderKeysResponses, ListRunEventsErrors, ListRunEventsResponses, ListRunsErrors, ListRunSimulationsErrors, ListRunSimulationsResponses, ListRunsResponses, ListTestsErrors, ListTestsResponses, ListTestSuitesErrors, ListTestSuitesResponses, ListTestVersionsErrors, ListTestVersionsResponses, ListTracesErrors, ListTracesResponses, PreviewPersonaErrors, PreviewPersonaResponses, PutProviderKeyErrors, PutProviderKeyResponses, RegisterAgentErrors, RegisterAgentResponses, RegradeSimulationErrors, RegradeSimulationResponses, RemoveGraderErrors, RemoveGraderResponses, RemoveMemberErrors, RemoveMemberResponses, RestoreAgentErrors, RestoreAgentResponses, RestoreConnectionErrors, RestoreConnectionResponses, RevokeApiKeyErrors, RevokeApiKeyResponses, StartMonitoringErrors, StartMonitoringResponses, StopMonitoringErrors, StopMonitoringResponses, UpdateAgentErrors, UpdateAgentResponses, UpdateConnectionErrors, UpdateConnectionResponses, UpdateGraderDefinitionErrors, UpdateGraderDefinitionResponses, UpdateGraderErrors, UpdateGraderResponses, UpdateOrganizationErrors, UpdateOrganizationResponses, UpdatePersonaErrors, UpdatePersonaResponses, UpdateProjectErrors, UpdateProjectResponses, UpdateTestErrors, UpdateTestResponses, UpdateTestSuiteErrors, UpdateTestSuiteResponses, UseGraderInProjectErrors, UseGraderInProjectResponses, UsePersonaErrors, UsePersonaResponses } from './types.gen.js';
+import type { AddConnectionErrors, AddConnectionResponses, ApplyRepositoryChangeSetErrors, ApplyRepositoryChangeSetResponses, ArchiveAgentErrors, ArchiveAgentResponses, ArchiveConnectionErrors, ArchiveConnectionResponses, CancelRunErrors, CancelRunResponses, ChangeMemberRoleErrors, ChangeMemberRoleResponses, CloneGraderErrors, CloneGraderResponses, CreateApiKeyErrors, CreateApiKeyResponses, CreateCustomGraderErrors, CreateCustomGraderResponses, CreateInvitationErrors, CreateInvitationResponses, CreatePersonaErrors, CreatePersonaResponses, CreateProjectErrors, CreateProjectResponses, CreateRunErrors, CreateRunResponses, CreateTestErrors, CreateTestResponses, CreateTestSuiteErrors, CreateTestSuiteResponses, DeactivateMemberErrors, DeactivateMemberResponses, DeletePersonaErrors, DeletePersonaResponses, DeleteProviderKeyErrors, DeleteProviderKeyResponses, DeleteTestErrors, DeleteTestResponses, DeleteTestSuiteErrors, DeleteTestSuiteResponses, DiscoverAgentsErrors, DiscoverAgentsResponses, DiscoverRetellVoiceAgentsErrors, DiscoverRetellVoiceAgentsResponses, ForkPersonaErrors, ForkPersonaResponses, GetAgentErrors, GetAgentResponses, GetConnectionErrors, GetConnectionResponses, GetGraderFormErrors, GetGraderFormResponses, GetGraderLibraryEntryErrors, GetGraderLibraryEntryResponses, GetOrganizationErrors, GetOrganizationResponses, GetPersonaCapabilitiesErrors, GetPersonaCapabilitiesResponses, GetPersonaErrors, GetPersonaFormErrors, GetPersonaFormResponses, GetPersonaResponses, GetPersonaUsageErrors, GetPersonaUsageResponses, GetPersonaVersionErrors, GetPersonaVersionResponses, GetProjectErrors, GetProjectResponses, GetRunErrors, GetRunResponses, GetSimulationErrors, GetSimulationRecordingErrors, GetSimulationRecordingResponses, GetSimulationResponses, GetTestErrors, GetTestResponses, GetTestSuiteErrors, GetTestSuiteResponses, GetTestVersionErrors, GetTestVersionResponses, GetTraceErrors, GetTraceResponses, ListAgentsErrors, ListAgentsResponses, ListApiKeysErrors, ListApiKeysResponses, ListConnectionOptionsErrors, ListConnectionOptionsResponses, ListGraderLibraryErrors, ListGraderLibraryResponses, ListGradersErrors, ListGradersResponses, ListInvitationsErrors, ListInvitationsResponses, ListMembersErrors, ListMembersResponses, ListPersonasErrors, ListPersonasResponses, ListPersonaVersionsErrors, ListPersonaVersionsResponses, ListProjectsErrors, ListProjectsResponses, ListProviderKeysErrors, ListProviderKeysResponses, ListRunEventsErrors, ListRunEventsResponses, ListRunsErrors, ListRunSimulationsErrors, ListRunSimulationsResponses, ListRunsResponses, ListTestsErrors, ListTestsResponses, ListTestSuitesErrors, ListTestSuitesResponses, ListTestVersionsErrors, ListTestVersionsResponses, ListTracesErrors, ListTracesResponses, PutProviderKeyErrors, PutProviderKeyResponses, RegisterAgentErrors, RegisterAgentResponses, RegradeSimulationErrors, RegradeSimulationResponses, RemoveGraderErrors, RemoveGraderResponses, RemoveMemberErrors, RemoveMemberResponses, RestoreAgentErrors, RestoreAgentResponses, RestoreConnectionErrors, RestoreConnectionResponses, RevokeApiKeyErrors, RevokeApiKeyResponses, StartMonitoringErrors, StartMonitoringResponses, StopMonitoringErrors, StopMonitoringResponses, UpdateAgentErrors, UpdateAgentResponses, UpdateConnectionErrors, UpdateConnectionResponses, UpdateGraderDefinitionErrors, UpdateGraderDefinitionResponses, UpdateGraderErrors, UpdateGraderResponses, UpdateOrganizationErrors, UpdateOrganizationResponses, UpdatePersonaErrors, UpdatePersonaResponses, UpdateProjectErrors, UpdateProjectResponses, UpdateTestErrors, UpdateTestResponses, UpdateTestSuiteErrors, UpdateTestSuiteResponses, UseGraderInProjectErrors, UseGraderInProjectResponses, UsePersonaErrors, UsePersonaResponses } from './types.gen.js';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -1270,14 +1270,12 @@ export const usePersona = <ThrowOnError extends boolean = false>(parameters: {
         backgroundVolume: number;
         interruptionLevel: 'off' | 'occasional' | 'frequent';
     };
-    voiceAccessProof?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<UsePersonaResponses, UsePersonaErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'personaId' },
                 { in: 'body', key: 'projectId' },
                 { in: 'body', key: 'models' },
-                { in: 'body', key: 'controls' },
-                { in: 'body', key: 'voiceAccessProof' }
+                { in: 'body', key: 'controls' }
             ] }]);
     return (options?.client ?? client).post<UsePersonaResponses, UsePersonaErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -1363,7 +1361,6 @@ export const createPersona = <ThrowOnError extends boolean = false>(parameters: 
         backgroundVolume: number;
         interruptionLevel: 'off' | 'occasional' | 'frequent';
     };
-    voiceAccessProof?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<CreatePersonaResponses, CreatePersonaErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'body', key: 'projectId' },
@@ -1372,8 +1369,7 @@ export const createPersona = <ThrowOnError extends boolean = false>(parameters: 
                 { in: 'body', key: 'identityName' },
                 { in: 'body', key: 'personality' },
                 { in: 'body', key: 'models' },
-                { in: 'body', key: 'controls' },
-                { in: 'body', key: 'voiceAccessProof' }
+                { in: 'body', key: 'controls' }
             ] }]);
     return (options?.client ?? client).post<CreatePersonaResponses, CreatePersonaErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -1416,7 +1412,7 @@ export const getPersonaForm = <ThrowOnError extends boolean = false>(parameters?
 /**
  * Resolve persona capabilities
  *
- * Resolve the selected provider, model, voice, and language combination. Status and reason values are authoritative for authoring, Preview, and voice execution.
+ * Resolve the selected provider, model, voice, and language combination. Status and reason values are authoritative for authoring and voice execution.
  */
 export const getPersonaCapabilities = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
@@ -1447,69 +1443,6 @@ export const getPersonaCapabilities = <ThrowOnError extends boolean = false>(par
         url: '/v1/persona-capabilities',
         ...options,
         ...params
-    });
-};
-
-/**
- * Preview persona audio
- *
- * Generate one short sample with the same capability and speech-rendering path used by voice simulations. This does not create a test or run.
- */
-export const previewPersona = <ThrowOnError extends boolean = false>(parameters: {
-    projectId?: string;
-    models: {
-        llm: {
-            provider: string;
-            model: string;
-        };
-        stt: {
-            provider: string;
-            model: string;
-        };
-        tts: {
-            provider: string;
-            model: string;
-            /**
-             * A voice identifier supported by the selected text-to-speech provider.
-             */
-            voiceId: string;
-            /**
-             * Provider-supported speech rate. Read the selected combination's capability range.
-             */
-            speed: number;
-        };
-    };
-    controls: {
-        language: string;
-        emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
-        accent: string;
-        speechVolume: number;
-        backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
-        backgroundVolume: number;
-        interruptionLevel: 'off' | 'occasional' | 'frequent';
-    };
-    voiceAccessProof?: string;
-}, options?: Options<never, ThrowOnError>): RequestResult<PreviewPersonaResponses, PreviewPersonaErrors, ThrowOnError> => {
-    const params = buildClientParams([parameters], [{ args: [
-                { in: 'body', key: 'projectId' },
-                { in: 'body', key: 'models' },
-                { in: 'body', key: 'controls' },
-                { in: 'body', key: 'voiceAccessProof' }
-            ] }]);
-    return (options?.client ?? client).post<PreviewPersonaResponses, PreviewPersonaErrors, ThrowOnError>({
-        security: [{ scheme: 'bearer', type: 'http' }, {
-                in: 'cookie',
-                name: 'egma.session_token',
-                type: 'apiKey'
-            }],
-        url: '/v1/persona-preview',
-        ...options,
-        ...params,
-        headers: {
-            'Content-Type': 'application/json',
-            ...options?.headers,
-            ...params.headers
-        }
     });
 };
 
@@ -1598,7 +1531,6 @@ export const updatePersona = <ThrowOnError extends boolean = false>(parameters: 
         backgroundVolume: number;
         interruptionLevel: 'off' | 'occasional' | 'frequent';
     };
-    voiceAccessProof?: string;
     expectedVersionId?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<UpdatePersonaResponses, UpdatePersonaErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
@@ -1610,7 +1542,6 @@ export const updatePersona = <ThrowOnError extends boolean = false>(parameters: 
                 { in: 'body', key: 'personality' },
                 { in: 'body', key: 'models' },
                 { in: 'body', key: 'controls' },
-                { in: 'body', key: 'voiceAccessProof' },
                 { in: 'body', key: 'expectedVersionId' }
             ] }]);
     return (options?.client ?? client).patch<UpdatePersonaResponses, UpdatePersonaErrors, ThrowOnError>({

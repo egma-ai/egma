@@ -3,13 +3,10 @@ import {
   createTest,
   createTestSuite,
   EGMA_PROVIDED_PERSONAS,
-  openBillingPlugIn,
   RECOMMENDED_PERSONA_MODELS,
   type PersonaModels,
 } from "@egma/db";
 import { newId } from "@egma/ids";
-import Fastify from "fastify";
-import { request as httpRequest } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
@@ -294,17 +291,17 @@ describe("creating and reading a persona", () => {
 
     const carries =
       "a persona body carries projectId, name, description, identityName, " +
-      "personality, models, controls, voiceAccessProof.";
+      "personality, models, controls.";
 
     const retired = {
       traits: { personality: "Old shape.", language: "en-US" },
       accent: "Neutral American English.",
       backgroundNoise: "A quiet room.",
-      // The two tokens the shape this replaced named on every write. There is
-      // no minter for them any more, which is the point: they are text a stale
-      // client would send, and text is all this door has to refuse.
+      // Old authoring tokens have no minter. A stale client must get a clear
+      // refusal instead of a successful write that ignores them.
       revision: "rev_01M0E4EVJ6ECGVJEA4NSBTC0CC",
       expectedRevision: "rev_01M0E4EVJ6ECGVJEA4NSBTC0CC",
+      voiceAccessProof: "retired-preview-proof",
       isDefault: true,
       scenario: "Their Thursday cleaning has to move to next week.",
       goal: "Reschedule the appointment.",
@@ -876,7 +873,7 @@ describe("forking a persona", () => {
       },
     });
     expect(privateVoice.statusCode).toBe(422);
-    expect(privateVoice.body.message).toBe("models.tts.voiceId: Preview this existing OpenAI voice before saving it.");
+    expect(privateVoice.body.message).toBe("models.tts.voiceId: Choose one of the available voices.");
     const incompatibleStandard = await browse("POST", "/v1/personas", ada, {
       projectId: ada.projectId, name: "Invalid standard voice", ...BEHAVIOR,
       models: { ...RECOMMENDED_PERSONA_MODELS, tts: { provider: "openai", model: "tts-1", voiceId: "cedar", speed: 1 } },
@@ -941,123 +938,6 @@ describe("forking a persona", () => {
     const after = await browse("GET", `/v1/personas/${created.id}?projectId=${ada.projectId}`, ada);
     expect(personaIn(after).settings).toEqual(before);
 
-    const invalidPreview = await browse("POST", "/v1/persona-preview", ada, {
-      projectId: ada.projectId,
-      models: RECOMMENDED_PERSONA_MODELS,
-      controls: { ...CONTROLS, emotion: "surprised" },
-    });
-    expect(invalidPreview.statusCode).toBe(422);
-    expect(invalidPreview.body.message).toContain("emotion");
-  });
-});
-
-describe("Preview transport", () => {
-  it("refuses platform-funded Preview before contacting the renderer", async () => {
-    const open = openBillingPlugIn();
-    api = await createApi("persona_preview_funding", {
-      installBilling: true,
-      billing: {
-        ...open,
-        entitlements: {
-          ...open.entitlements,
-          mayPlatformKeyFund: async ({ providers }) => ({
-            funded: false as const,
-            providers,
-            message: "Add provider credit before Preview.",
-          }),
-        },
-      },
-      simulatorPreviewUrl: "http://127.0.0.1:1",
-    });
-    const ada = await signUp(api.app, "preview-funding@acme.example", "Acme");
-    const answer = await browse("POST", "/v1/persona-preview", ada, {
-      projectId: ada.projectId, models: RECOMMENDED_PERSONA_MODELS, controls: CONTROLS,
-    });
-    expect(answer.statusCode).toBe(422);
-    expect(answer.body.message).toBe("Add provider credit before Preview.");
-  });
-
-  it("uses a fresh settlement identity for each authenticated Preview", async () => {
-    const renderer = Fastify();
-    const requestIds: string[] = [];
-    renderer.post("/internal/persona-preview", async (request, reply) => {
-      requestIds.push((request.body as { requestId: string }).requestId);
-      return reply.send({ audioBase64: "UklGRg==", contentType: "audio/wav", usage: [] });
-    });
-    await renderer.listen({ host: "127.0.0.1", port: 0 });
-    const address = renderer.server.address();
-    if (address === null || typeof address === "string") throw new Error("Preview renderer did not bind");
-    try {
-      api = await createApi("persona_preview_identity", { simulatorPreviewUrl: `http://127.0.0.1:${address.port}` });
-      const ada = await signUp(api.app, "preview-id@acme.example", "Acme");
-      for (let index = 0; index < 2; index += 1) {
-        const answer = await browse("POST", "/v1/persona-preview", ada, {
-          projectId: ada.projectId, models: RECOMMENDED_PERSONA_MODELS, controls: CONTROLS,
-        });
-        expect(answer.statusCode, JSON.stringify(answer.body)).toBe(200);
-      }
-      expect(requestIds).toHaveLength(2);
-      expect(requestIds[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f-]{27}$/u);
-      expect(requestIds[1]).not.toBe(requestIds[0]);
-
-      const keySaved = await api.app.inject({
-        method: "PUT", url: "/v1/provider-keys/openai", headers: { cookie: ada.cookie },
-        payload: { key: "test-private-voice-provider-key", expectedRevision: null },
-      });
-      expect(keySaved.statusCode, keySaved.body).toBe(200);
-      const privateModels = {
-        ...RECOMMENDED_PERSONA_MODELS,
-        tts: { ...RECOMMENDED_PERSONA_MODELS.tts, voiceId: "existing-private-voice" },
-      };
-      const preview = await browse("POST", "/v1/persona-preview", ada, {
-        projectId: ada.projectId, models: privateModels, controls: CONTROLS,
-      });
-      expect(preview.statusCode, JSON.stringify(preview.body)).toBe(200);
-      expect(preview.body.voiceAccessProof).toEqual(expect.any(String));
-      const saved = await browse("POST", "/v1/personas", ada, {
-        projectId: ada.projectId, name: "Private voice", ...BEHAVIOR,
-        models: privateModels, controls: CONTROLS, voiceAccessProof: preview.body.voiceAccessProof,
-      });
-      expect(saved.statusCode, JSON.stringify(saved.body)).toBe(201);
-    } finally {
-      await renderer.close();
-    }
-  });
-
-  it("aborts the renderer when the HTTP client disconnects after upload", async () => {
-    const renderer = Fastify();
-    let rendererStarted!: () => void;
-    const started = new Promise<void>((resolve) => { rendererStarted = resolve; });
-    let rendererAborted!: () => void;
-    const aborted = new Promise<void>((resolve) => { rendererAborted = resolve; });
-    renderer.post("/internal/persona-preview", async (request, reply) => {
-      rendererStarted();
-      await new Promise<void>((resolve) => {
-        const canceled = () => { rendererAborted(); resolve(); };
-        request.raw.once("aborted", canceled);
-        reply.raw.once("close", canceled);
-      });
-      return reply.code(499).send();
-    });
-    await renderer.listen({ host: "127.0.0.1", port: 0 });
-    const rendererAddress = renderer.server.address();
-    if (rendererAddress === null || typeof rendererAddress === "string") throw new Error("Preview renderer did not bind");
-    try {
-      api = await createApi("persona_preview_disconnect", { simulatorPreviewUrl: `http://127.0.0.1:${rendererAddress.port}` });
-      const ada = await signUp(api.app, "preview-cancel@acme.example", "Acme");
-      await api.app.listen({ host: "127.0.0.1", port: 0 });
-      const apiAddress = api.app.server.address();
-      if (apiAddress === null || typeof apiAddress === "string") throw new Error("API did not bind");
-      const payload = JSON.stringify({ projectId: ada.projectId, models: RECOMMENDED_PERSONA_MODELS, controls: CONTROLS });
-      const client = httpRequest({ host: "127.0.0.1", port: apiAddress.port, path: "/v1/persona-preview", method: "POST", headers: { cookie: ada.cookie, "content-type": "application/json", "content-length": Buffer.byteLength(payload) } });
-      client.on("error", () => undefined);
-      client.end(payload);
-      await started;
-      client.destroy();
-      await expect(aborted).resolves.toBeUndefined();
-    } finally {
-      await renderer.close();
-    }
   });
 });
 
@@ -1245,16 +1125,6 @@ describe("what a viewer is refused", () => {
         `/v1/personas/${made.id}/fork`,
         { projectId: ada.projectId },
         "fork personas",
-      ],
-      [
-        "POST",
-        "/v1/persona-preview",
-        {
-          projectId: ada.projectId,
-          models: RECOMMENDED_PERSONA_MODELS,
-          controls: CONTROLS,
-        },
-        "preview personas",
       ],
       [
         "DELETE",

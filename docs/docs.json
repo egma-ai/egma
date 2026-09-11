@@ -241,7 +241,6 @@
               "api-reference/create-persona",
               "api-reference/get-persona-form",
               "api-reference/get-persona-capabilities",
-              "api-reference/preview-persona",
               "api-reference/get-persona",
               "api-reference/update-persona",
               "api-reference/delete-persona",

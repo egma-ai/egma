@@ -122,8 +122,6 @@ export type Config = {
    * egma_st_. Claims return provider credentials, so no public default is safe.
    */
   readonly simulatorServiceToken: string;
-  /** Private simulator endpoint used for persona audio Preview rendering. */
-  readonly simulatorPreviewUrl: string;
   /**
    * Where a claimed simulation reads the current provider-key bundle.
    *
@@ -525,17 +523,6 @@ export function loadConfig(
         `${SERVICE_TOKEN_PREFIX} followed by \`openssl rand -hex 32\`.`,
     );
   }
-  const simulatorPreviewUrl = environment.EGMA_SIMULATOR_PREVIEW_URL?.trim() || "http://simulator:8091";
-  let parsedSimulatorPreviewUrl: URL;
-  try {
-    parsedSimulatorPreviewUrl = new URL(simulatorPreviewUrl);
-  } catch {
-    throw new Error("EGMA_SIMULATOR_PREVIEW_URL is not a URL");
-  }
-  if (!["http:", "https:"].includes(parsedSimulatorPreviewUrl.protocol) || parsedSimulatorPreviewUrl.username !== "" || parsedSimulatorPreviewUrl.password !== "") {
-    throw new Error("EGMA_SIMULATOR_PREVIEW_URL must be an HTTP origin without credentials");
-  }
-
   const givenBaseUrl = environment.EGMA_BASE_URL?.trim() || "http://localhost:3101";
   // Keep this check at the service boundary. The CLI is a public package that
   // is compiled, not bundled, so shared runtime code would also have to be
@@ -593,7 +580,6 @@ export function loadConfig(
     trustProxy: flag(environment, "EGMA_TRUST_PROXY", false),
     rateLimitPerMinute,
     simulatorServiceToken,
-    simulatorPreviewUrl: parsedSimulatorPreviewUrl.origin,
     providerCredentials: providerCredentialSource(environment),
     simulationConcurrencyCaps: simulationConcurrencyCaps(environment),
     voiceFleet: voiceFleetSettings(environment, {

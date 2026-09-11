@@ -260,7 +260,6 @@ const CONTEXT_REQUIRING = [
   // a simulation's claim or a grading claim — so the organization and the
   // project come off the row that authorised the work.
   "recordProviderUsage",
-  "recordPersonaPreviewUsage",
   "reconcileGraderCatalog",
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",

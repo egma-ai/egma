@@ -12,7 +12,6 @@ import {
   NotPermittedError,
   permits,
   PROVIDER_CATALOG,
-  catalogEntry,
   isModelProvider,
   EgmaProvidedPersonaError,
   ProjectOutsideOrganizationError,
@@ -24,7 +23,6 @@ import {
   UnprocessableInputError,
   validPersonaModels,
   validPersonaControls,
-  billing,
   WriteAbortedError,
   type AuthContext,
   type Persona,
@@ -34,7 +32,7 @@ import { credentialFor, type ProviderCredentialSource } from "@egma/provider-cre
 import { isId } from "@egma/ids";
 import { personaOperations } from "@egma/platform-api/contract";
 import type { FastifyInstance, FastifyReply } from "fastify";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { actingIn, refuseActing, type Acting } from "../http/acting.ts";
@@ -44,9 +42,6 @@ import { given, text } from "../http/reading.ts";
 import { registerPlatformOperation } from "../http/platform-operation.ts";
 import { sendRefusal } from "../http/refusals.ts";
 import { discoverCartesiaVoices, OPENAI_STANDARD_VOICES, personaCapabilityRefusal, resolvePersonaCapabilities, type PersonaVoice } from "../persona-capabilities.ts";
-import { renderPersonaPreview, type PreviewReach } from "../persona-preview.ts";
-import { createVoiceAccessProof, verifiesVoiceAccessProof } from "../persona-voice-proof.ts";
-import { createPreviewSettlementToken } from "../persona-preview-settlement.ts";
 
 /**
  * Project persona routes expose Egma-provided and Custom definitions.
@@ -62,8 +57,6 @@ export type PersonaRoutesOptions = {
   readonly provider: SessionIdentityProvider;
   readonly rateLimit: RateLimit;
   readonly providerCredentials: ProviderCredentialSource;
-  readonly preview: PreviewReach;
-  readonly proofSecret: string;
 };
 
 type Body = Record<string, unknown>;
@@ -125,8 +118,6 @@ async function settingsRefusal(
   auth: AuthContext,
   models: ReturnType<typeof validPersonaModels>,
   controls: ReturnType<typeof validPersonaControls>,
-  voiceAccessProof: unknown,
-  purpose: "save" | "preview" = "save",
 ): Promise<string | undefined> {
   let voices: readonly PersonaVoice[] = [];
   if (models.tts.provider === "cartesia") {
@@ -145,22 +136,17 @@ async function settingsRefusal(
     sttProvider: models.stt.provider, sttModel: models.stt.model,
     language: controls.language, voiceId: models.tts.voiceId,
   }, voices);
-  const incompatible = personaCapabilityRefusal(capabilities, { ...controls, speed: models.tts.speed });
-  if (incompatible !== undefined) return incompatible;
-  const standard = capabilities.voices.choices?.some((voice) => voice.source === "standard" && voice.id === models.tts.voiceId) === true;
-  if (models.tts.provider === "openai" && !standard && OPENAI_STANDARD_VOICES.some((voice) => voice.id === models.tts.voiceId)) {
+  const supportedVoice = capabilities.voices.choices?.some((voice) => voice.id === models.tts.voiceId) === true;
+  if (models.tts.provider === "openai" && !supportedVoice &&
+      OPENAI_STANDARD_VOICES.some((voice) => voice.id === models.tts.voiceId)) {
     return `models.tts.voiceId: ${models.tts.voiceId} is not supported by ${models.tts.model}.`;
   }
-  if (purpose === "preview" && models.tts.provider === "openai" && !standard &&
-      await resolveProviderKeyForAuthoring(auth, "openai") === undefined) {
-    return "models.tts.voiceId: Add an organization OpenAI key before previewing an existing voice ID.";
-  }
-  if (purpose === "save" && models.tts.provider === "openai" && !standard) {
-    const credential = await resolveProviderKeyForAuthoring(auth, "openai");
-    if (credential === undefined || typeof voiceAccessProof !== "string" || !verifiesVoiceAccessProof(voiceAccessProof, { organizationId: auth.organizationId, provider: "openai", credentialRevision: credential.credentialRef, model: models.tts.model, voiceId: models.tts.voiceId }, options.proofSecret)) {
-      return "models.tts.voiceId: Preview this existing OpenAI voice before saving it.";
-    }
-  }
+  const incompatible = personaCapabilityRefusal(capabilities, {
+    ...controls,
+    speed: models.tts.speed,
+    voiceId: models.tts.voiceId,
+  });
+  if (incompatible !== undefined) return incompatible;
   return undefined;
 }
 
@@ -256,7 +242,6 @@ const PERSONA_BODY_FIELDS = [
   "personality",
   "models",
   "controls",
-  "voiceAccessProof",
 ] as const;
 
 function unknownBody(body: Body, allowed: readonly string[]): string | undefined {
@@ -471,61 +456,6 @@ export async function personaRoutes(
     return reply.send(resolvePersonaCapabilities(selection, voices));
   });
 
-  registerPlatformOperation(app, personaOperations.previewPersona, async (request, reply) => {
-    const { auth } = requesterOf(request);
-    const body = (request.body ?? {}) as Body;
-    const refused = mayAuthor(reply, auth, "preview personas");
-    if (refused !== undefined) return refused;
-    const acting = await projectFor(auth, given(text(body.projectId)));
-    if ("refusal" in acting) return refuseActing(reply, acting);
-    const models = validPersonaModels(body.models);
-    const controls = parsedControls(body.controls);
-    const credential = await authoringCredential(options, acting.auth, models.tts.provider);
-    if (credential === undefined) return sendRefusal(reply, "unprocessable", "The selected text-to-speech provider is not available.");
-    const tts = catalogEntry("tts", models.tts.provider, models.tts.model);
-    const llmCredential = await authoringCredential(options, acting.auth, models.llm.provider);
-    const llm = catalogEntry("llm", models.llm.provider, models.llm.model);
-    if (tts === undefined) return sendRefusal(reply, "unprocessable", "The selected text-to-speech model is not available.");
-    if (llm === undefined || llmCredential === undefined) return sendRefusal(reply, "unprocessable", "The selected language model is not available.");
-    const incompatible = await settingsRefusal(options, acting.auth, models, controls, undefined, "preview");
-    if (incompatible !== undefined) return sendRefusal(reply, "unprocessable", incompatible);
-    const platformProviders = [...new Set([
-      ...(credential.paymentSource === "platform" ? [models.tts.provider] : []),
-      ...(llmCredential.paymentSource === "platform" ? [models.llm.provider] : []),
-    ])];
-    if (platformProviders.length > 0) {
-      const funding = await billing().entitlements.mayPlatformKeyFund({ organizationId: auth.organizationId, providers: platformProviders });
-      if (!funding.funded) return sendRefusal(reply, "unprocessable", funding.message);
-    }
-    let rendered;
-    const previewId = randomUUID();
-    const settlementToken = createPreviewSettlementToken({
-      userId: acting.auth.userId, organizationId: acting.auth.organizationId,
-      projectId: acting.auth.projectId!, role: acting.auth.role, previewId,
-      issuedAt: Date.now(), expiresAt: Date.now() + 10 * 60_000,
-      legs: [
-        { provider: models.llm.provider, model: models.llm.model, operation: llm.adapter, paymentSource: llmCredential.paymentSource, credentialRef: llmCredential.credentialRef },
-        { provider: models.tts.provider, model: models.tts.model, operation: tts.adapter, paymentSource: credential.paymentSource, credentialRef: credential.credentialRef },
-      ],
-    }, options.proofSecret);
-    try {
-      rendered = await renderPersonaPreview(options.preview, {
-        requestId: previewId,
-        usageSettlementToken: settlementToken,
-        models: {
-          llm: { provider: models.llm.provider, model: models.llm.model, adapter: llm.adapter, key: llmCredential.key, fundingReceipt: null },
-          tts: { provider: models.tts.provider, model: models.tts.model, adapter: tts.adapter, voiceId: models.tts.voiceId, speed: models.tts.speed, key: credential.key, fundingReceipt: null },
-        },
-        controls,
-      }, requestSignal(request, reply));
-    } catch {
-      return sendRefusal(reply, "unprocessable", "Preview audio could not be generated with the selected voice and settings. Check provider access, then try again.");
-    }
-    const customOpenAiVoice = models.tts.provider === "openai" && !resolvePersonaCapabilities({ ttsProvider: models.tts.provider, ttsModel: models.tts.model, sttProvider: models.stt.provider, sttModel: models.stt.model }).voices.choices?.some((voice) => voice.id === models.tts.voiceId);
-    const proof = customOpenAiVoice ? createVoiceAccessProof({ organizationId: auth.organizationId, provider: models.tts.provider, credentialRevision: credential.credentialRef, model: models.tts.model, voiceId: models.tts.voiceId }, options.proofSecret) : undefined;
-    return reply.send({ audioBase64: rendered.audioBase64, contentType: rendered.contentType, ...(proof === undefined ? {} : { voiceAccessProof: proof.proof }), expiresAt: proof?.expiresAt.toISOString() ?? null, interruptionNotice: "Preview demonstrates voice and sound settings. Test interruptions in a simulation." });
-  });
-
   /**
    * One persona, live or deleted.
    *
@@ -659,7 +589,7 @@ export async function personaRoutes(
         backgroundSoundId: "none", backgroundVolume: 0.0631, interruptionLevel: "off",
         executionPolicyVersion: 1,
       });
-      const reason = await settingsRefusal(options, acting.auth, models, selectedControls, body.voiceAccessProof);
+      const reason = await settingsRefusal(options, acting.auth, models, selectedControls);
       if (reason !== undefined) return sendRefusal(reply, "unprocessable", reason);
     }
 
@@ -704,7 +634,7 @@ export async function personaRoutes(
     if (models !== undefined) {
       const current = await getPersona(acting.auth, personaId);
       if (current === undefined) return noSuchPersona(reply, personaId);
-      const reason = await settingsRefusal(options, acting.auth, models, controls ?? effectiveControls(current), body.voiceAccessProof);
+      const reason = await settingsRefusal(options, acting.auth, models, controls ?? effectiveControls(current));
       if (reason !== undefined) return sendRefusal(reply, "unprocessable", reason);
     }
 
@@ -734,7 +664,7 @@ export async function personaRoutes(
     const body = (request.body ?? {}) as Body;
     const refused = mayAuthor(reply, auth, "use personas");
     if (refused !== undefined) return refused;
-    const unexpected = unknownBody(body, ["projectId", "models", "controls", "voiceAccessProof"]);
+    const unexpected = unknownBody(body, ["projectId", "models", "controls"]);
     if (unexpected !== undefined) return sendRefusal(reply, "unprocessable", unexpected);
     const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
@@ -744,7 +674,7 @@ export async function personaRoutes(
     if (models !== undefined) {
       const current = await getPersona(acting.auth, personaId);
       if (current === undefined) return noSuchPersona(reply, personaId);
-      const reason = await settingsRefusal(options, acting.auth, models, controls ?? effectiveControls(current), body.voiceAccessProof);
+      const reason = await settingsRefusal(options, acting.auth, models, controls ?? effectiveControls(current));
       if (reason !== undefined) return sendRefusal(reply, "unprocessable", reason);
     }
     const one = await usePersona(acting.auth, personaId, models === undefined ? undefined : controls === undefined ? models : { models, ...controls });

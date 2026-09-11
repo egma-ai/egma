@@ -395,10 +395,6 @@ beforeEach(() => {
   routed.projectId = "prj_1";
   vi.stubGlobal("scrollTo", vi.fn());
   vi.stubGlobal("Request", JsdomCompatibleRequest);
-  vi.stubGlobal("URL", Object.assign(URL, {
-    createObjectURL: vi.fn(() => "blob:persona-preview"),
-    revokeObjectURL: vi.fn(),
-  }));
 });
 
 afterEach(() => {
@@ -976,13 +972,12 @@ describe("one persona's sheet", () => {
     expect(within(voice).queryByRole("option", { name: /Miles/u })).toBeNull();
   });
 
-  it("sends the short-lived proof from an account voice preview when the persona is saved", async () => {
+  it("saves a provider-discovered account voice", async () => {
     const selectedModels = { ...RECOMMENDED_MODELS, llm: { provider: "openai", model: "gpt-5.6-terra" }, tts: { ...RECOMMENDED_MODELS.tts, voiceId: "account-voice" } };
-    const saved = { ...PREDEFINED, settings: { id: "ppr_proof", models: selectedModels, controls: CONTROLS, createdAt: PREDEFINED.createdAt, updatedAt: PREDEFINED.updatedAt } };
+    const saved = { ...PREDEFINED, settings: { id: "ppr_account_voice", models: selectedModels, controls: CONTROLS, createdAt: PREDEFINED.createdAt, updatedAt: PREDEFINED.updatedAt } };
     const { asked } = apiAnswers({
       ...screenWith("admin", [PREDEFINED]),
       "GET /v1/personas/prs_0": { status: 200, body: PREDEFINED },
-      "POST /v1/persona-preview": { status: 200, body: { audioBase64: "AA==", contentType: "audio/mpeg", voiceAccessProof: "proof-from-server", expiresAt: "2099-09-10T20:00:00.000Z", interruptionNotice: "Use a full simulation." } },
       "POST /v1/personas/prs_0/use": { status: 200, body: saved },
     });
     render(<PersonasPage />);
@@ -990,65 +985,13 @@ describe("one persona's sheet", () => {
     const voice = within(sheet).getByLabelText("Voice*") as HTMLSelectElement;
     await waitFor(() => expect(voice.disabled).toBe(false));
     fireEvent.change(voice, { target: { value: "account-voice" } });
-    expect((within(sheet).getByRole("button", { name: "Preview voice" }) as HTMLButtonElement).disabled).toBe(true);
     await waitFor(() => expect(asked.some((request) => request.path.includes("voiceId=account-voice"))).toBe(true));
-    const preview = await within(sheet).findByRole("button", { name: "Preview voice" });
-    await waitFor(() => expect((preview as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(preview);
-    await waitFor(() => expect(asked.some((request) => request.path.startsWith("/v1/persona-preview"))).toBe(true));
-    await within(sheet).findByRole("button", { name: "Preview voice" });
-    fireEvent.click(within(sheet).getByRole("button", { name: "Use persona" }));
-    await waitFor(() => expect(asked.find((request) => request.path.startsWith("/v1/personas/prs_0/use"))?.body).toMatchObject({ voiceAccessProof: "proof-from-server", models: selectedModels }));
-  });
-
-  it("previews an existing OpenAI voice ID before it allows saving", async () => {
-    const { asked } = apiAnswers({
-      ...screenWith("admin", [PREDEFINED]),
-      "GET /v1/personas/prs_0": { status: 200, body: PREDEFINED },
-      "POST /v1/persona-preview": { status: 200, body: { audioBase64: "AA==", contentType: "audio/mpeg", voiceAccessProof: "existing-proof", expiresAt: "2099-09-10T20:00:00.000Z", interruptionNotice: "Use a full simulation." } },
-      "POST /v1/personas/prs_0/use": { status: 200, body: PREDEFINED },
-    });
-    render(<PersonasPage />);
-    const sheet = await openRow("Everyday caller");
-    fireEvent.change(within(sheet).getByLabelText("Text-to-speech*"), { target: { value: "openai::gpt-4o-mini-tts" } });
-    const existingId = await within(sheet).findByLabelText("Existing voice ID [optional]");
-    let typed = "";
-    for (const character of "voice_private_123") {
-      typed += character;
-      fireEvent.change(existingId, { target: { value: typed } });
-      expect((existingId as HTMLInputElement).value).toBe(typed);
-    }
-    await waitFor(() => expect(asked.some((request) => request.path.includes("voiceId=voice_private_123"))).toBe(true));
-    await waitFor(() => expect((within(sheet).getByRole("button", { name: "Use persona" }) as HTMLButtonElement).disabled).toBe(true));
-    expect(within(sheet).getByText("Preview this existing voice ID successfully before you save it.")).toBeTruthy();
-    const preview = within(sheet).getByRole("button", { name: "Preview voice" });
-    await waitFor(() => expect((preview as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(preview);
-    await within(sheet).findByRole("button", { name: "Preview voice" });
-    await waitFor(() => expect((within(sheet).getByRole("button", { name: "Use persona" }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.change(within(sheet).getByLabelText("Interruptions*"), { target: { value: "occasional" } });
-    expect(within(sheet).getByText("This preview is out of date. Select Preview voice to replace it.")).toBeTruthy();
-    expect((within(sheet).getByRole("button", { name: "Use persona" }) as HTMLButtonElement).disabled).toBe(false);
-    fireEvent.click(within(sheet).getByRole("button", { name: "Use persona" }));
-    await waitFor(() => expect(asked.find((request) => request.path.startsWith("/v1/personas/prs_0/use"))?.body).toMatchObject({ voiceAccessProof: "existing-proof", models: { tts: { voiceId: "voice_private_123" } }, controls: { interruptionLevel: "occasional" } }));
-  });
-
-  it("cancels an in-flight voice preview when a sound setting changes", async () => {
-    const abort = vi.spyOn(AbortController.prototype, "abort");
-    const { asked } = apiAnswers({
-      ...screenWith("admin", [PREDEFINED]),
-      "GET /v1/personas/prs_0": { status: 200, body: PREDEFINED },
-      "POST /v1/persona-preview": "never",
-    });
-    render(<PersonasPage />);
-    const sheet = await openRow("Everyday caller");
-    const preview = await within(sheet).findByRole("button", { name: "Preview voice" });
-    await waitFor(() => expect((preview as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(preview);
-    await waitFor(() => expect(asked.some((request) => request.path.startsWith("/v1/persona-preview"))).toBe(true));
-    fireEvent.change(within(sheet).getByLabelText("Interruptions*"), { target: { value: "frequent" } });
-    expect(abort).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(within(sheet).getByRole("button", { name: "Preview voice" })).toBeTruthy());
+    const usePersonaButton = within(sheet).getByRole("button", { name: "Use persona" }) as HTMLButtonElement;
+    await waitFor(() => expect(usePersonaButton.disabled).toBe(false));
+    fireEvent.click(usePersonaButton);
+    await waitFor(() => expect(asked.find((request) => request.path.startsWith("/v1/personas/prs_0/use"))?.body).toMatchObject({ models: selectedModels }));
+    expect(within(sheet).queryByRole("button", { name: "Preview voice" })).toBeNull();
+    expect(within(sheet).queryByLabelText("Existing voice ID [optional]")).toBeNull();
   });
 
   it("keeps a saved locale when the capability API uses its base language", async () => {
@@ -1063,7 +1006,6 @@ describe("one persona's sheet", () => {
     const language = within(sheet).getByLabelText("Language*") as HTMLSelectElement;
     await waitFor(() => expect(language.value).toBe("en-US"));
     expect(within(language).getByRole("option", { name: "English (United States) · Saved locale" })).toBeTruthy();
-    await waitFor(() => expect((within(sheet).getByRole("button", { name: "Preview voice" }) as HTMLButtonElement).disabled).toBe(false));
   });
 
   it("keeps fixed conflicts and gives explicit repair actions", async () => {

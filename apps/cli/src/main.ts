@@ -74,7 +74,6 @@ export const COMMANDS = [
   "persona create",
   "persona clone",
   "persona update",
-  "persona preview",
   "suite create",
   "suite delete",
   "test delete",
@@ -183,10 +182,9 @@ const SCHEMAS: Readonly<Record<Command, OptionSchema>> = {
   "persona settings": { values: [REPOSITORY_OPTION], positionals: 1 },
   "persona clone": { values: [REPOSITORY_OPTION], positionals: 1 },
   "persona capabilities": { values: ["--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--voice", "--language", REPOSITORY_OPTION], positionals: 0 },
-  "persona use": { values: ["--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice", "--speed", "--language", "--emotion", "--accent", "--speech-volume", "--background-sound", "--background-volume", "--interruption-level", "--voice-access-proof", REPOSITORY_OPTION], positionals: 1 },
-  "persona create": { values: ["--name", "--description", "--identity-name", "--personality", "--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice", "--speed", "--language", "--emotion", "--accent", "--speech-volume", "--background-sound", "--background-volume", "--interruption-level", "--voice-access-proof", REPOSITORY_OPTION], positionals: 0 },
-  "persona update": { values: ["--name", "--description", "--identity-name", "--personality", "--expected-version", "--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice", "--speed", "--language", "--emotion", "--accent", "--speech-volume", "--background-sound", "--background-volume", "--interruption-level", "--voice-access-proof", REPOSITORY_OPTION], positionals: 1 },
-  "persona preview": { values: ["--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice", "--speed", "--language", "--emotion", "--accent", "--speech-volume", "--background-sound", "--background-volume", "--interruption-level", "--voice-access-proof", REPOSITORY_OPTION], positionals: 0 },
+  "persona use": { values: ["--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice", "--speed", "--language", "--emotion", "--accent", "--speech-volume", "--background-sound", "--background-volume", "--interruption-level", REPOSITORY_OPTION], positionals: 1 },
+  "persona create": { values: ["--name", "--description", "--identity-name", "--personality", "--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice", "--speed", "--language", "--emotion", "--accent", "--speech-volume", "--background-sound", "--background-volume", "--interruption-level", REPOSITORY_OPTION], positionals: 0 },
+  "persona update": { values: ["--name", "--description", "--identity-name", "--personality", "--expected-version", "--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice", "--speed", "--language", "--emotion", "--accent", "--speech-volume", "--background-sound", "--background-volume", "--interruption-level", REPOSITORY_OPTION], positionals: 1 },
   "suite create": {
     values: ["--name", REPOSITORY_OPTION],
     positionals: 1,
@@ -413,7 +411,7 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
     "",
     "The secret is printed once. The CLI does not save it.",
   ],
-  persona: ["Usage:", "  egma persona <list|settings|capabilities|use|create|clone|update|preview>", "", "All persona commands are promptless. Run a command with --help for its exact inputs."],
+  persona: ["Usage:", "  egma persona <list|settings|capabilities|use|create|clone|update>", "", "All persona commands are promptless. Run a command with --help for its exact inputs."],
   suite: [
     "Usage:",
     "  egma suite create <directory> --name <name> [--cwd <path>]",
@@ -557,11 +555,10 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
   "persona list": ["Usage:", "  egma persona list [--cwd <path>]", "", "List persona definitions available in the bound Project.", "Model and voice settings are shared by that Project's tests and edited in Personas."],
   "persona settings": ["Usage:", "  egma persona settings <Persona ID> [--cwd <path>]", "", "Print the persona and this Project's saved settings as JSON."],
   "persona capabilities": ["Usage:", "  egma persona capabilities --stt-provider <id> --stt-model <id> --tts-provider <id> --tts-model <id> [--language <tag>] [--voice <id>] [--cwd <path>]", "", "Print the supported voice, language, accent, emotion, rate, and volume choices as JSON."],
-  "persona use": ["Usage:", "  egma persona use <Persona ID> [--stt-provider <id>] [--stt-model <id>] [--tts-provider <id>] [--tts-model <id>]", "  [--llm-provider <id>] [--llm-model <id>] [--voice <id>] [--language <tag>] [--emotion <value>] [--accent <value>]", "  [--speed <number>] [--speech-volume <number>] [--background-sound <id>] [--background-volume <linear-gain>]", "  [--interruption-level <off|occasional|frequent>] [--voice-access-proof <proof>] [--cwd <path>]", "", "Save this Project's first settings for a predefined persona.", "With no settings, use the persona's built-in defaults. Run persona capabilities before overriding them."],
-  "persona create": ["Usage:", "  egma persona create --name <name> [--description <text>] --identity-name <name> --personality <text>", "  --stt-provider <id> --stt-model <id> --tts-provider <id> --tts-model <id> --llm-provider <id> --llm-model <id> --voice <id>", "  [--language <tag>] [--emotion <value>] [--accent <value>] [--speed <number>] [--speech-volume <number>]", "  [--background-sound <id>] [--background-volume <linear-gain>] [--interruption-level <off|occasional|frequent>] [--voice-access-proof <proof>] [--cwd <path>]", "", "Create an independent custom persona. Use capabilities first to choose valid settings."],
+  "persona use": ["Usage:", "  egma persona use <Persona ID> [--stt-provider <id>] [--stt-model <id>] [--tts-provider <id>] [--tts-model <id>]", "  [--llm-provider <id>] [--llm-model <id>] [--voice <id>] [--language <tag>] [--emotion <value>] [--accent <value>]", "  [--speed <number>] [--speech-volume <number>] [--background-sound <id>] [--background-volume <linear-gain>]", "  [--interruption-level <off|occasional|frequent>] [--cwd <path>]", "", "Save this Project's first settings for a predefined persona.", "With no settings, use the persona's built-in defaults. Run persona capabilities before overriding them."],
+  "persona create": ["Usage:", "  egma persona create --name <name> [--description <text>] --identity-name <name> --personality <text>", "  --stt-provider <id> --stt-model <id> --tts-provider <id> --tts-model <id> --llm-provider <id> --llm-model <id> --voice <id>", "  [--language <tag>] [--emotion <value>] [--accent <value>] [--speed <number>] [--speech-volume <number>]", "  [--background-sound <id>] [--background-volume <linear-gain>] [--interruption-level <off|occasional|frequent>] [--cwd <path>]", "", "Create an independent custom persona. Use capabilities first to choose valid settings."],
   "persona clone": ["Usage:", "  egma persona clone <Persona ID> [--cwd <path>]", "", "Clone effective behavior and settings into an independent custom persona."],
-  "persona update": ["Usage:", "  egma persona update <Persona ID> [--name <name>] [--description <text>] [--identity-name <name>] [--personality <text>] [--expected-version <id>]", "  [--stt-provider <id>] [--stt-model <id>] [--tts-provider <id>] [--tts-model <id>] [--llm-provider <id>] [--llm-model <id>] [--voice <id>]", "  [--language <tag>] [--emotion <value>] [--accent <value>] [--speed <number>] [--speech-volume <number>]", "  [--background-sound <id>] [--background-volume <linear-gain>] [--interruption-level <off|occasional|frequent>] [--voice-access-proof <proof>] [--cwd <path>]", "", "Update only the supplied fields. Behavior changes also need --expected-version."],
-  "persona preview": ["Usage:", "  egma persona preview --stt-provider <id> --stt-model <id> --tts-provider <id> --tts-model <id> --llm-provider <id> --llm-model <id> --voice <id>", "  [--language <tag>] [--emotion <value>] [--accent <value>] [--speed <number>] [--speech-volume <number>]", "  [--background-sound <id>] [--background-volume <linear-gain>] [--interruption-level <off|occasional|frequent>] [--voice-access-proof <proof>] [--cwd <path>]", "", "Print a short base64 audio preview response. Interruptions require a full simulation."],
+  "persona update": ["Usage:", "  egma persona update <Persona ID> [--name <name>] [--description <text>] [--identity-name <name>] [--personality <text>] [--expected-version <id>]", "  [--stt-provider <id>] [--stt-model <id>] [--tts-provider <id>] [--tts-model <id>] [--llm-provider <id>] [--llm-model <id>] [--voice <id>]", "  [--language <tag>] [--emotion <value>] [--accent <value>] [--speed <number>] [--speech-volume <number>]", "  [--background-sound <id>] [--background-volume <linear-gain>] [--interruption-level <off|occasional|frequent>] [--cwd <path>]", "", "Update only the supplied fields. Behavior changes also need --expected-version."],
   "suite create": [
     "Usage:",
     "  egma suite create <directory> --name <name> [--cwd <path>]",
@@ -647,8 +644,6 @@ function requiredArguments(
     case "persona use":
     case "persona update":
       return null;
-    case "persona preview":
-      return required(invocation, ["--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice"]);
     case "run create":
       return required(invocation, ["--agent", "--connection"]);
     default:
@@ -758,9 +753,8 @@ async function dispatch(
     case "persona create":
     case "persona clone":
     case "persona update":
-    case "persona preview":
       return withCommandSignal(async (signal) =>
-        runPersonaActionCommand({ ...options, signal }, invocation.command.slice("persona ".length) as "settings" | "capabilities" | "use" | "create" | "clone" | "update" | "preview", args),
+        runPersonaActionCommand({ ...options, signal }, invocation.command.slice("persona ".length) as "settings" | "capabilities" | "use" | "create" | "clone" | "update", args),
       );
     case "suite create":
       return withCommandSignal(async (signal) =>
