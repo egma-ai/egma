@@ -164,6 +164,7 @@ class LiveKitBackend:
             # SIP leg, and that identity is what the report carries as its
             # join to the platform's own telemetry.
             participant_name="agent-under-test",
+            hide_phone_number=True,
             wait_until_answered=True,
             play_dialtone=False,
         )

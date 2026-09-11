@@ -576,11 +576,20 @@ it.skipIf(!ENABLED || storage?.available !== true)(
           name: "Appointment Rita",
           identityName: NEUTRAL_PERSON.identityName,
           personality: NEUTRAL_PERSON.personality,
-          controls: { speechSpeed: "slow" },
+          controls: {
+            language: "en-US",
+            emotion: "neutral",
+            accent: "voice_default",
+            speechSpeed: "slow",
+            speechVolume: 1,
+            backgroundSoundId: "none",
+            backgroundVolume: 0.0631,
+            interruptionLevel: "none",
+          },
           models: LIVE_PERSONA_MODE ? {
             mode: "live",
             llm: { provider: "openai", model: "gpt-4o-mini" },
-            live: { provider: "openai", model: "gpt-live-1", voiceId: "alloy" },
+            live: { provider: "openai", model: "gpt-live-1", adapter: "openai_live", voiceId: "alloy" },
           } : {
             mode: "separate",
             llm: { provider: "openai", model: "gpt-4o-mini" },
