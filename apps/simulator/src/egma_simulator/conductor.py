@@ -1192,15 +1192,23 @@ class _InterruptionPlayout(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
+        interruption_audio = (
+            direction == FrameDirection.DOWNSTREAM
+            and isinstance(frame, OutputAudioRawFrame)
+            and frame.metadata.get(_INTERRUPTION_AUDIO) is True
+        )
+        if interruption_audio:
+            # Reaching this processor means every transport output processor
+            # accepted the frame. Recording happens downstream on the same frame.
+            self._conductor.interruption_playout_started()
         await self.push_frame(frame, direction)
         if direction != FrameDirection.DOWNSTREAM or not isinstance(
             frame, OutputAudioRawFrame
         ):
             return
-        if frame.metadata.get(_INTERRUPTION_AUDIO) is True:
+        if interruption_audio:
             if not self._conductor.interruption_playout_may_continue():
                 return
-            self._conductor.interruption_playout_started()
         if frame.metadata.get(_INTERRUPTION_CAP_END) is True:
             await self.push_frame(InterruptionFrame(), FrameDirection.UPSTREAM)
             await self.push_frame(TTSStoppedFrame())
@@ -1390,6 +1398,7 @@ class VoiceConductor:
         self._control_tasks: set[asyncio.Task[None]] = set()
         self._interruptions: _InterruptionScheduler | None = None
         self._discard_deliberate_audio = False
+        self._cancel_after_accepted_audio: str | None = None
         self._random = random.Random()
         self._agent_speech_began: MediaPosition | None = None
         self._agent_speech_ended: MediaPosition | None = None
@@ -1556,15 +1565,24 @@ class VoiceConductor:
     def interruption_playout_may_continue(self) -> bool:
         media = self._media
         if self._controls.cause is not None:
-            self.interruption_canceled("simulation_stopped", force=True)
+            self._cancel_delivering_after_recording("simulation_stopped")
             return False
         if media is not None and media.failed.is_set():
-            self.interruption_canceled("transport_failed", force=True)
+            self._cancel_delivering_after_recording("transport_failed")
             return False
         if self._agent_departed or (media is not None and media.ended.is_set()):
-            self.interruption_canceled("agent_disconnected", force=True)
+            self._cancel_delivering_after_recording("agent_disconnected")
             return False
         return True
+
+    def _cancel_delivering_after_recording(self, reason: str) -> None:
+        if self.deliberate_delivering and self._persona_began is None:
+            self._cancel_after_accepted_audio = reason
+            self._discard_deliberate_audio = True
+            if self._interruptions is not None:
+                self._interruptions.cancel_owned_work()
+            return
+        self.interruption_canceled(reason, force=True)
 
     def deliberate_audio_discarded(self) -> None:
         self._discard_deliberate_audio = False
@@ -1584,6 +1602,7 @@ class VoiceConductor:
         ended = self._persona_ended if was_delivering else None
         self._interruption_state = "listening"
         self._interruption_idle.set()
+        self._cancel_after_accepted_audio = None
         self._interruption_due_at = None
         generated_text = self._pending_persona_text
         self._pending_persona_text = None
@@ -2136,6 +2155,9 @@ class VoiceConductor:
                 self._pending_silence_follow_up = 0
         self._persona_ended = recorded_until
         self.media_advanced()
+        cancel = self._cancel_after_accepted_audio
+        if cancel is not None:
+            self.interruption_canceled(cancel, force=True)
 
     def persona_interrupted(self, *, heard_through: MediaPosition) -> None:
         """Start waiting from the last audio heard before an interruption.
