@@ -7,6 +7,7 @@ not_answered; connection and carrier faults are error.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -19,6 +20,7 @@ from pipecat.frames.frames import (
     Frame,
     InterruptionFrame,
     OutputAudioRawFrame,
+    TTSStoppedFrame,
     UninterruptibleFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -153,6 +155,7 @@ class PlayoutClock:
 
     def __init__(self) -> None:
         self._playing_through: float | None = None
+        self._cleared = asyncio.Event()
 
     def place(self, now: float, seconds: float) -> float:
         """Where the next ``seconds`` of audio start, and take that room."""
@@ -164,6 +167,20 @@ class PlayoutClock:
     def cleared(self) -> None:
         """The transport dropped whatever it had not played yet."""
         self._playing_through = None
+        self._cleared.set()
+        self._cleared = asyncio.Event()
+
+    async def wait_until_played(self) -> None:
+        """Wait until audio already accepted by the transport has played."""
+        through = self._playing_through
+        if through is None:
+            return
+        cleared = self._cleared
+        remaining = through - time.monotonic()
+        if remaining <= 0:
+            return
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(cleared.wait(), remaining)
 
 
 class PlayoutStamp(FrameProcessor):
@@ -172,9 +189,10 @@ class PlayoutStamp(FrameProcessor):
     Report interruptions so the recording discards audio removed before playback.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, wait_for_playout: bool = False) -> None:
         super().__init__()
         self._playout = PlayoutClock()
+        self._wait_for_playout = wait_for_playout
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
@@ -188,6 +206,8 @@ class PlayoutStamp(FrameProcessor):
         elif isinstance(frame, InterruptionFrame):
             played_out_at(frame, time.monotonic())
             self._playout.cleared()
+        elif isinstance(frame, TTSStoppedFrame) and self._wait_for_playout:
+            await self._playout.wait_until_played()
         await self.push_frame(frame, direction)
 
 

@@ -591,6 +591,15 @@ class _EvidenceRecorder(AudioBufferProcessor):
         return Fraction(self._sample_at(played), self.sample_rate)
 
     @property
+    def clock_position(self) -> MediaPosition:
+        """Where real playout has reached on the recording clock."""
+        if not self.sample_rate or self._origin_seconds is None:
+            return Fraction(0)
+        if not self._real_time:
+            return self.position
+        return Fraction(self._sample_at(_monotonic()), self.sample_rate)
+
+    @property
     def position(self) -> MediaPosition:
         """The last instant either side put audio on the recording."""
         if not self.sample_rate:
@@ -1559,13 +1568,26 @@ class VoiceConductor:
         self._agent_speech_ended = self._position
         self._segment_waiting_for_interruption_owner = False
         self._interruption_due_at = None
-        if self._interruption_state in {
+        queued_deliberate_audio = (
+            self._interruption_state == "delivering"
+            and not self._deliberate_playout_has_begun()
+        )
+        if queued_deliberate_audio or self._interruption_state in {
             "scheduled",
             "preparing",
             "ready",
             "awaiting_playout",
         }:
-            self.interruption_canceled("agent_stopped_before_playout")
+            self.interruption_canceled(
+                "agent_stopped_before_playout", force=queued_deliberate_audio
+            )
+
+    def _deliberate_playout_has_begun(self) -> bool:
+        began = self._interruption_playout_began
+        recorder = self._recorder
+        return began is not None and (
+            recorder is None or recorder.clock_position >= began
+        )
 
     def interruption_preparing(self) -> None:
         if self._interruption_state != "scheduled":
@@ -1679,8 +1701,9 @@ class VoiceConductor:
             return
         was_delivering = self._interruption_state == "delivering"
         was_awaiting_playout = self._interruption_state == "awaiting_playout"
-        began = self._persona_began if was_delivering else None
-        ended = self._persona_ended if was_delivering else None
+        heard_audio = was_delivering and self._deliberate_playout_has_begun()
+        began = self._persona_began if heard_audio else None
+        ended = self._persona_ended if heard_audio else None
         self._interruption_state = "listening"
         self._interruption_idle.set()
         self._cancel_after_accepted_audio = None
