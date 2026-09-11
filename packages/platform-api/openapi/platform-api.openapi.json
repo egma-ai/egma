@@ -11528,8 +11528,15 @@
                       "description": "How the caller behaves and speaks. Put the situation and goal in the test scenario."
                     },
                     "language": {
-                      "type": "string",
-                      "description": "The caller's language, such as en-US."
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Historical core language. New persona versions use controls.language and return null here."
                     },
                     "parameterContract": {
                       "type": "array",
@@ -11682,6 +11689,48 @@
                               ],
                               "additionalProperties": false
                             },
+                            "controls": {
+                              "type": "object",
+                              "properties": {
+                                "language": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "emotion": {
+                                  "type": "string",
+                                  "enum": [
+                                    "neutral",
+                                    "happy",
+                                    "angry",
+                                    "frustrated",
+                                    "sad",
+                                    "anxious"
+                                  ]
+                                },
+                                "accent": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "speechVolume": {
+                                  "type": "number",
+                                  "minimum": 0.5,
+                                  "maximum": 1.5
+                                },
+                                "executionPolicyVersion": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "readOnly": true
+                                }
+                              },
+                              "required": [
+                                "language",
+                                "emotion",
+                                "accent",
+                                "speechVolume",
+                                "executionPolicyVersion"
+                              ],
+                              "additionalProperties": false
+                            },
                             "createdAt": {
                               "type": "string",
                               "format": "date-time"
@@ -11694,6 +11743,7 @@
                           "required": [
                             "id",
                             "models",
+                            "controls",
                             "createdAt",
                             "updatedAt"
                           ],
@@ -11937,8 +11987,15 @@
                             "description": "How the caller behaves and speaks. Put the situation and goal in the test scenario."
                           },
                           "language": {
-                            "type": "string",
-                            "description": "The caller's language, such as en-US."
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Historical core language. New persona versions use controls.language and return null here."
                           },
                           "parameterContract": {
                             "type": "array",
@@ -12091,6 +12148,48 @@
                                     ],
                                     "additionalProperties": false
                                   },
+                                  "controls": {
+                                    "type": "object",
+                                    "properties": {
+                                      "language": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "emotion": {
+                                        "type": "string",
+                                        "enum": [
+                                          "neutral",
+                                          "happy",
+                                          "angry",
+                                          "frustrated",
+                                          "sad",
+                                          "anxious"
+                                        ]
+                                      },
+                                      "accent": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "speechVolume": {
+                                        "type": "number",
+                                        "minimum": 0.5,
+                                        "maximum": 1.5
+                                      },
+                                      "executionPolicyVersion": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "readOnly": true
+                                      }
+                                    },
+                                    "required": [
+                                      "language",
+                                      "emotion",
+                                      "accent",
+                                      "speechVolume",
+                                      "executionPolicyVersion"
+                                    ],
+                                    "additionalProperties": false
+                                  },
                                   "createdAt": {
                                     "type": "string",
                                     "format": "date-time"
@@ -12103,6 +12202,7 @@
                                 "required": [
                                   "id",
                                   "models",
+                                  "controls",
                                   "createdAt",
                                   "updatedAt"
                                 ],
@@ -12294,10 +12394,6 @@
                     "type": "string",
                     "description": "How the caller behaves and speaks. Put the situation and goal in the test scenario."
                   },
-                  "language": {
-                    "type": "string",
-                    "description": "The caller's language, such as en-US."
-                  },
                   "models": {
                     "type": "object",
                     "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
@@ -12367,13 +12463,57 @@
                       "tts"
                     ],
                     "additionalProperties": false
+                  },
+                  "controls": {
+                    "type": "object",
+                    "properties": {
+                      "language": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "emotion": {
+                        "type": "string",
+                        "enum": [
+                          "neutral",
+                          "happy",
+                          "angry",
+                          "frustrated",
+                          "sad",
+                          "anxious"
+                        ]
+                      },
+                      "accent": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "speechVolume": {
+                        "type": "number",
+                        "minimum": 0.5,
+                        "maximum": 1.5
+                      },
+                      "executionPolicyVersion": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "readOnly": true
+                      }
+                    },
+                    "required": [
+                      "language",
+                      "emotion",
+                      "accent",
+                      "speechVolume",
+                      "executionPolicyVersion"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "voiceAccessProof": {
+                    "type": "string"
                   }
                 },
                 "required": [
                   "name",
                   "identityName",
-                  "personality",
-                  "language"
+                  "personality"
                 ],
                 "additionalProperties": false,
                 "examples": [
@@ -12382,7 +12522,6 @@
                     "description": "A caller who wants a brief appointment booking conversation.",
                     "identityName": "Morgan Chen",
                     "personality": "Answers briefly, asks for the earliest appointment, and stays polite when asking the agent to get to the point.",
-                    "language": "en-US",
                     "models": {
                       "llm": {
                         "provider": "openai",
@@ -12458,8 +12597,15 @@
                       "description": "How the caller behaves and speaks. Put the situation and goal in the test scenario."
                     },
                     "language": {
-                      "type": "string",
-                      "description": "The caller's language, such as en-US."
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Historical core language. New persona versions use controls.language and return null here."
                     },
                     "parameterContract": {
                       "type": "array",
@@ -12612,6 +12758,48 @@
                               ],
                               "additionalProperties": false
                             },
+                            "controls": {
+                              "type": "object",
+                              "properties": {
+                                "language": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "emotion": {
+                                  "type": "string",
+                                  "enum": [
+                                    "neutral",
+                                    "happy",
+                                    "angry",
+                                    "frustrated",
+                                    "sad",
+                                    "anxious"
+                                  ]
+                                },
+                                "accent": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "speechVolume": {
+                                  "type": "number",
+                                  "minimum": 0.5,
+                                  "maximum": 1.5
+                                },
+                                "executionPolicyVersion": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "readOnly": true
+                                }
+                              },
+                              "required": [
+                                "language",
+                                "emotion",
+                                "accent",
+                                "speechVolume",
+                                "executionPolicyVersion"
+                              ],
+                              "additionalProperties": false
+                            },
                             "createdAt": {
                               "type": "string",
                               "format": "date-time"
@@ -12624,6 +12812,7 @@
                           "required": [
                             "id",
                             "models",
+                            "controls",
                             "createdAt",
                             "updatedAt"
                           ],
@@ -13008,6 +13197,852 @@
         }
       }
     },
+    "/v1/persona-capabilities": {
+      "get": {
+        "operationId": "getPersonaCapabilities",
+        "summary": "Resolve persona capabilities",
+        "description": "Resolve the selected provider, model, voice, and language combination. Status and reason values are authoritative for authoring, Preview, and voice execution.",
+        "tags": [
+          "Personas"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "ttsProvider",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ttsModel",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sttProvider",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sttModel",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "voiceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "refresh",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Capabilities for the selected combination.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "voices": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "supported",
+                            "fixed",
+                            "unsupported",
+                            "unknown"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "choices": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "source": {
+                                "type": "string",
+                                "enum": [
+                                  "standard",
+                                  "account"
+                                ]
+                              },
+                              "presentation": {
+                                "type": "string",
+                                "enum": [
+                                  "male",
+                                  "female",
+                                  "neutral",
+                                  "unknown"
+                                ]
+                              },
+                              "languages": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "accents": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "name",
+                              "source",
+                              "presentation",
+                              "languages",
+                              "accents"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "value": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "source": {
+                              "type": "string",
+                              "enum": [
+                                "standard",
+                                "account"
+                              ]
+                            },
+                            "presentation": {
+                              "type": "string",
+                              "enum": [
+                                "male",
+                                "female",
+                                "neutral",
+                                "unknown"
+                              ]
+                            },
+                            "languages": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "accents": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "name",
+                            "source",
+                            "presentation",
+                            "languages",
+                            "accents"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "range": {
+                          "type": "object",
+                          "properties": {
+                            "minimum": {
+                              "type": "number"
+                            },
+                            "maximum": {
+                              "type": "number"
+                            },
+                            "step": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "minimum",
+                            "maximum",
+                            "step"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "language": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "supported",
+                            "fixed",
+                            "unsupported",
+                            "unknown"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "choices": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "value": {
+                          "type": "string"
+                        },
+                        "range": {
+                          "type": "object",
+                          "properties": {
+                            "minimum": {
+                              "type": "number"
+                            },
+                            "maximum": {
+                              "type": "number"
+                            },
+                            "step": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "minimum",
+                            "maximum",
+                            "step"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "accent": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "supported",
+                            "fixed",
+                            "unsupported",
+                            "unknown"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "choices": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "value": {
+                          "type": "string"
+                        },
+                        "range": {
+                          "type": "object",
+                          "properties": {
+                            "minimum": {
+                              "type": "number"
+                            },
+                            "maximum": {
+                              "type": "number"
+                            },
+                            "step": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "minimum",
+                            "maximum",
+                            "step"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "emotion": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "supported",
+                            "fixed",
+                            "unsupported",
+                            "unknown"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "choices": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "value": {
+                          "type": "string"
+                        },
+                        "range": {
+                          "type": "object",
+                          "properties": {
+                            "minimum": {
+                              "type": "number"
+                            },
+                            "maximum": {
+                              "type": "number"
+                            },
+                            "step": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "minimum",
+                            "maximum",
+                            "step"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "speed": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "supported",
+                            "fixed",
+                            "unsupported",
+                            "unknown"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "choices": {
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
+                        },
+                        "value": {
+                          "type": "number"
+                        },
+                        "range": {
+                          "type": "object",
+                          "properties": {
+                            "minimum": {
+                              "type": "number"
+                            },
+                            "maximum": {
+                              "type": "number"
+                            },
+                            "step": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "minimum",
+                            "maximum",
+                            "step"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "speechVolume": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "supported",
+                            "fixed",
+                            "unsupported",
+                            "unknown"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "choices": {
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
+                        },
+                        "value": {
+                          "type": "number"
+                        },
+                        "range": {
+                          "type": "object",
+                          "properties": {
+                            "minimum": {
+                              "type": "number"
+                            },
+                            "maximum": {
+                              "type": "number"
+                            },
+                            "step": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "minimum",
+                            "maximum",
+                            "step"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "voices",
+                    "language",
+                    "accent",
+                    "emotion",
+                    "speed",
+                    "speechVolume"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/persona-preview": {
+      "post": {
+        "operationId": "previewPersona",
+        "summary": "Preview persona audio",
+        "description": "Generate one short sample with the same capability and speech-rendering path used by voice simulations. This does not create a test or run.",
+        "tags": [
+          "Personas"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "models": {
+                    "type": "object",
+                    "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
+                    "properties": {
+                      "llm": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "model"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "stt": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "model"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "tts": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "type": "string"
+                          },
+                          "voiceId": {
+                            "type": "string",
+                            "description": "A voice identifier supported by the selected text-to-speech provider."
+                          },
+                          "speed": {
+                            "type": "number",
+                            "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "model",
+                          "voiceId",
+                          "speed"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "llm",
+                      "stt",
+                      "tts"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "controls": {
+                    "type": "object",
+                    "properties": {
+                      "language": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "emotion": {
+                        "type": "string",
+                        "enum": [
+                          "neutral",
+                          "happy",
+                          "angry",
+                          "frustrated",
+                          "sad",
+                          "anxious"
+                        ]
+                      },
+                      "accent": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "speechVolume": {
+                        "type": "number",
+                        "minimum": 0.5,
+                        "maximum": 1.5
+                      },
+                      "executionPolicyVersion": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "readOnly": true
+                      }
+                    },
+                    "required": [
+                      "language",
+                      "emotion",
+                      "accent",
+                      "speechVolume",
+                      "executionPolicyVersion"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "voiceAccessProof": {
+                    "type": "string",
+                    "description": "A prior short-lived proof for an existing provider voice ID."
+                  }
+                },
+                "required": [
+                  "models",
+                  "controls"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Generated Preview audio and any new voice-access proof.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "audioBase64": {
+                      "type": "string",
+                      "contentEncoding": "base64"
+                    },
+                    "contentType": {
+                      "type": "string"
+                    },
+                    "voiceAccessProof": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "interruptionNotice": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "audioBase64",
+                    "contentType",
+                    "expiresAt",
+                    "interruptionNotice"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request was refused.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The request rate limit was reached.",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before trying again.",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/personas/{personaId}": {
       "get": {
         "operationId": "getPersona",
@@ -13096,8 +14131,15 @@
                       "description": "How the caller behaves and speaks. Put the situation and goal in the test scenario."
                     },
                     "language": {
-                      "type": "string",
-                      "description": "The caller's language, such as en-US."
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Historical core language. New persona versions use controls.language and return null here."
                     },
                     "parameterContract": {
                       "type": "array",
@@ -13250,6 +14292,48 @@
                               ],
                               "additionalProperties": false
                             },
+                            "controls": {
+                              "type": "object",
+                              "properties": {
+                                "language": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "emotion": {
+                                  "type": "string",
+                                  "enum": [
+                                    "neutral",
+                                    "happy",
+                                    "angry",
+                                    "frustrated",
+                                    "sad",
+                                    "anxious"
+                                  ]
+                                },
+                                "accent": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "speechVolume": {
+                                  "type": "number",
+                                  "minimum": 0.5,
+                                  "maximum": 1.5
+                                },
+                                "executionPolicyVersion": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "readOnly": true
+                                }
+                              },
+                              "required": [
+                                "language",
+                                "emotion",
+                                "accent",
+                                "speechVolume",
+                                "executionPolicyVersion"
+                              ],
+                              "additionalProperties": false
+                            },
                             "createdAt": {
                               "type": "string",
                               "format": "date-time"
@@ -13262,6 +14346,7 @@
                           "required": [
                             "id",
                             "models",
+                            "controls",
                             "createdAt",
                             "updatedAt"
                           ],
@@ -13452,10 +14537,6 @@
                     "type": "string",
                     "description": "How the caller behaves and speaks. Put the situation and goal in the test scenario."
                   },
-                  "language": {
-                    "type": "string",
-                    "description": "The caller's language, such as en-US."
-                  },
                   "models": {
                     "type": "object",
                     "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
@@ -13526,6 +14607,51 @@
                     ],
                     "additionalProperties": false
                   },
+                  "controls": {
+                    "type": "object",
+                    "properties": {
+                      "language": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "emotion": {
+                        "type": "string",
+                        "enum": [
+                          "neutral",
+                          "happy",
+                          "angry",
+                          "frustrated",
+                          "sad",
+                          "anxious"
+                        ]
+                      },
+                      "accent": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "speechVolume": {
+                        "type": "number",
+                        "minimum": 0.5,
+                        "maximum": 1.5
+                      },
+                      "executionPolicyVersion": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "readOnly": true
+                      }
+                    },
+                    "required": [
+                      "language",
+                      "emotion",
+                      "accent",
+                      "speechVolume",
+                      "executionPolicyVersion"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "voiceAccessProof": {
+                    "type": "string"
+                  },
                   "expectedVersionId": {
                     "type": "string",
                     "minLength": 1,
@@ -13590,8 +14716,15 @@
                       "description": "How the caller behaves and speaks. Put the situation and goal in the test scenario."
                     },
                     "language": {
-                      "type": "string",
-                      "description": "The caller's language, such as en-US."
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Historical core language. New persona versions use controls.language and return null here."
                     },
                     "parameterContract": {
                       "type": "array",
@@ -13744,6 +14877,48 @@
                               ],
                               "additionalProperties": false
                             },
+                            "controls": {
+                              "type": "object",
+                              "properties": {
+                                "language": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "emotion": {
+                                  "type": "string",
+                                  "enum": [
+                                    "neutral",
+                                    "happy",
+                                    "angry",
+                                    "frustrated",
+                                    "sad",
+                                    "anxious"
+                                  ]
+                                },
+                                "accent": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "speechVolume": {
+                                  "type": "number",
+                                  "minimum": 0.5,
+                                  "maximum": 1.5
+                                },
+                                "executionPolicyVersion": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "readOnly": true
+                                }
+                              },
+                              "required": [
+                                "language",
+                                "emotion",
+                                "accent",
+                                "speechVolume",
+                                "executionPolicyVersion"
+                              ],
+                              "additionalProperties": false
+                            },
                             "createdAt": {
                               "type": "string",
                               "format": "date-time"
@@ -13756,6 +14931,7 @@
                           "required": [
                             "id",
                             "models",
+                            "controls",
                             "createdAt",
                             "updatedAt"
                           ],
@@ -14096,8 +15272,15 @@
                             "description": "How the caller behaves and speaks. Put the situation and goal in the test scenario."
                           },
                           "language": {
-                            "type": "string",
-                            "description": "The caller's language, such as en-US."
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Historical core language. New persona versions use controls.language and return null here."
                           },
                           "parameterContract": {
                             "type": "array",
@@ -14490,8 +15673,15 @@
                       "description": "How the caller behaves and speaks. Put the situation and goal in the test scenario."
                     },
                     "language": {
-                      "type": "string",
-                      "description": "The caller's language, such as en-US."
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Historical core language. New persona versions use controls.language and return null here."
                     },
                     "parameterContract": {
                       "type": "array",
@@ -14754,8 +15944,15 @@
                       "description": "How the caller behaves and speaks. Put the situation and goal in the test scenario."
                     },
                     "language": {
-                      "type": "string",
-                      "description": "The caller's language, such as en-US."
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Historical core language. New persona versions use controls.language and return null here."
                     },
                     "parameterContract": {
                       "type": "array",
@@ -14908,6 +16105,48 @@
                               ],
                               "additionalProperties": false
                             },
+                            "controls": {
+                              "type": "object",
+                              "properties": {
+                                "language": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "emotion": {
+                                  "type": "string",
+                                  "enum": [
+                                    "neutral",
+                                    "happy",
+                                    "angry",
+                                    "frustrated",
+                                    "sad",
+                                    "anxious"
+                                  ]
+                                },
+                                "accent": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "speechVolume": {
+                                  "type": "number",
+                                  "minimum": 0.5,
+                                  "maximum": 1.5
+                                },
+                                "executionPolicyVersion": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "readOnly": true
+                                }
+                              },
+                              "required": [
+                                "language",
+                                "emotion",
+                                "accent",
+                                "speechVolume",
+                                "executionPolicyVersion"
+                              ],
+                              "additionalProperties": false
+                            },
                             "createdAt": {
                               "type": "string",
                               "format": "date-time"
@@ -14920,6 +16159,7 @@
                           "required": [
                             "id",
                             "models",
+                            "controls",
                             "createdAt",
                             "updatedAt"
                           ],
