@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { runPersonasCommand } from "../src/commands/personas.ts";
+import { runPersonaActionCommand, runPersonasCommand } from "../src/commands/personas.ts";
 import { EMPTY_CONFIG, createEgmaFolder } from "../src/folder/egma-folder.ts";
 import { makeWorkspace, type Workspace } from "./support/workspace.ts";
 
@@ -34,6 +34,80 @@ beforeEach(async () => {
 afterEach(async () => workspace.remove());
 
 describe("runPersonasCommand", () => {
+  it("uses the provider voice accent when a preview omits --accent", async () => {
+    let body: Record<string, unknown> | undefined;
+    const lines: string[] = [];
+    const code = await runPersonaActionCommand({
+      access: { url: URL, credentialsFile: workspace.credentialsFile }, cwd: workspace.dir,
+      out: (line) => lines.push(line), fail: (line) => lines.push(`stderr: ${line}`),
+      fetchImpl: async (_input, init) => {
+        body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new JsonResponse({ audioBase64: "AA==", contentType: "audio/mpeg", expiresAt: null, interruptionNotice: "Use a full simulation." });
+      },
+    }, "preview", {
+      positionals: [],
+      values: { "--stt-provider": "openai", "--stt-model": "gpt-live-transcribe", "--tts-provider": "openai", "--tts-model": "gpt-4o-mini-tts", "--llm-provider": "openai", "--llm-model": "gpt-4o", "--voice": "alloy" },
+    });
+    expect(code).toBe(0);
+    expect(body).toMatchObject({ controls: { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1 } });
+  });
+
+  it("uses a predefined persona with its built-in defaults", async () => {
+    const requests: Array<{ method: string; body?: Record<string, unknown> }> = [];
+    const code = await runPersonaActionCommand({
+      access: { url: URL, credentialsFile: workspace.credentialsFile }, cwd: workspace.dir,
+      out: () => undefined, fail: () => undefined,
+      fetchImpl: async (_input, init) => {
+        const method = init?.method ?? "GET";
+        requests.push({ method, ...(init?.body === undefined ? {} : { body: JSON.parse(String(init.body)) as Record<string, unknown> }) });
+        if (method === "GET") return new JsonResponse({
+          id: "prs_default", language: null, settings: null,
+          parameterContract: [
+            ["llm_provider", "openai"], ["llm_model", "gpt-4o"], ["stt_provider", "deepgram"], ["stt_model", "nova-3"],
+            ["tts_provider", "openai"], ["tts_model", "gpt-4o-mini-tts"], ["tts_voice_id", "alloy"], ["tts_speed", 1],
+            ["language", "en-US"], ["emotion", "neutral"], ["accent", "voice_default"], ["speech_volume", 1],
+          ].map(([key, defaultValue]) => ({ key, defaultValue })),
+        });
+        return new JsonResponse({ id: "prs_default" });
+      },
+    }, "use", { positionals: ["prs_default"], values: {} });
+
+    expect(code).toBe(0);
+    expect(requests.map((request) => request.method)).toEqual(["GET", "POST"]);
+    expect(requests[1]?.body).toMatchObject({
+      projectId: PROJECT_ID,
+      models: { llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "deepgram", model: "nova-3" }, tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy", speed: 1 } },
+      controls: { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1 },
+    });
+  });
+
+  it("merges one updated control into all saved persona settings", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const code = await runPersonaActionCommand({
+      access: { url: URL, credentialsFile: workspace.credentialsFile }, cwd: workspace.dir,
+      out: () => undefined, fail: () => undefined,
+      fetchImpl: async (_input, init) => {
+        if ((init?.method ?? "GET") === "GET") return new JsonResponse({
+          id: "prs_saved", parameterContract: [], language: null,
+          settings: {
+            models: { llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "deepgram", model: "nova-3" }, tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy", speed: 0.9 } },
+            controls: { language: "es-ES", emotion: "happy", accent: "voice_default", speechVolume: 0.8, executionPolicyVersion: 1 },
+          },
+        });
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new JsonResponse({ id: "prs_saved" });
+      },
+    }, "update", { positionals: ["prs_saved"], values: { "--speech-volume": "1.2" } });
+
+    expect(code).toBe(0);
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({
+      models: { llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "deepgram", model: "nova-3" }, tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy", speed: 0.9 } },
+      controls: { language: "es-ES", emotion: "happy", accent: "voice_default", speechVolume: 1.2 },
+    });
+    expect((bodies[0]?.controls as Record<string, unknown>).executionPolicyVersion).toBeUndefined();
+  });
+
   it("lists every valid persona id and name from the bound project", async () => {
     const requested: URL[] = [];
     const lines: string[] = [];

@@ -193,6 +193,7 @@ export function CreatePersonaSheet({
   const [models, setModels] = useState<ModelsDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [settingsValid, setSettingsValid] = useState(true);
+  const [voiceAccessProof, setVoiceAccessProof] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
 
   const choices = form?.status === "ready" ? form.value : null;
@@ -231,6 +232,7 @@ export function CreatePersonaSheet({
     setModels(known === null ? null : modelsDraftOf(known.recommendedModels));
     setSaving(false);
     setRefusal(null);
+    setVoiceAccessProof(null);
   }, [open]);
 
   /**
@@ -273,6 +275,7 @@ export function CreatePersonaSheet({
           personality: behavior.personality,
           models: modelsFrom(models),
           controls: controlsFrom(models),
+          ...(voiceAccessProof === null ? {} : { voiceAccessProof }),
         } as Parameters<typeof createPersona>[0],
         { client: platformClient },
       ),
@@ -348,6 +351,7 @@ export function CreatePersonaSheet({
             onChange={setModels}
             projectId={projectId}
             onValidityChange={setSettingsValid}
+            onVoiceAccessProof={setVoiceAccessProof}
           />
         </SheetBody>
         <SheetFooter
@@ -525,6 +529,7 @@ export function PersonaSheet({
   const [editing, setEditing] = useState(startEditing);
   const [saving, setSaving] = useState(false);
   const [settingsValid, setSettingsValid] = useState(true);
+  const [voiceAccessProof, setVoiceAccessProof] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
 
@@ -693,7 +698,7 @@ export function PersonaSheet({
     }
 
     const written = await write(
-      persona.settings === null ? usePersona({ personaId: persona.id, projectId, models: modelsFrom(held.models), controls: controlsFrom(held.models) } as Parameters<typeof usePersona>[0], { client: platformClient }) : updatePersona(
+      persona.settings === null ? usePersona({ personaId: persona.id, projectId, models: modelsFrom(held.models), controls: controlsFrom(held.models), ...(voiceAccessProof === null ? {} : { voiceAccessProof }) } as Parameters<typeof usePersona>[0], { client: platformClient }) : updatePersona(
         {
           personaId: persona.id,
           projectId,
@@ -707,6 +712,7 @@ export function PersonaSheet({
               }
             : {}),
           ...(modelsChanged ? { models: modelsFrom(held.models), controls: controlsFrom(held.models) } : {}),
+          ...(voiceAccessProof === null ? {} : { voiceAccessProof }),
         } as Parameters<typeof updatePersona>[0],
         { client: platformClient },
       ),
@@ -804,6 +810,7 @@ export function PersonaSheet({
         onChange={(models) => edit({ ...draft, models })}
         projectId={projectId}
         onValidityChange={setSettingsValid}
+        onVoiceAccessProof={setVoiceAccessProof}
       />
     );
   }

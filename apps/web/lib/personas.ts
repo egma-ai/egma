@@ -93,7 +93,7 @@ export function modelsDraftOf(models: PersonaModels, controls?: PersonaControls)
     speed: String(models.tts.speed),
     language: controls?.language ?? "en-US",
     emotion: controls?.emotion ?? "neutral",
-    accent: controls?.accent ?? "neutral",
+    accent: controls?.accent ?? "voice_default",
     speechVolume: String(controls?.speechVolume ?? 1),
   };
 }
@@ -210,7 +210,7 @@ export function controlsOfPersona(persona: Persona): Omit<PersonaControls, "exec
   return {
     language: String(values.language ?? persona.language ?? "en-US"),
     emotion: String(values.emotion ?? "neutral") as PersonaControls["emotion"],
-    accent: String(values.accent ?? "neutral"),
+    accent: String(values.accent ?? "voice_default"),
     speechVolume: Number(values.speech_volume ?? 1),
   };
 }

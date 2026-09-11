@@ -110,15 +110,16 @@ const RECOMMENDED_MODELS: PersonaModels = {
     speed: 1,
   },
 };
-const CONTROLS = { language: "en-US", emotion: "neutral" as const, accent: "neutral", speechVolume: 1, executionPolicyVersion: 1 };
+const CONTROLS = { language: "en-US", emotion: "neutral" as const, accent: "voice_default", speechVolume: 1, executionPolicyVersion: 1 };
 const CAPABILITIES = {
   voices: { status: "supported" as const, choices: [
     { id: RECOMMENDED_MODELS.tts.voiceId, name: "Calm caller", source: "standard" as const, presentation: "unknown" as const, languages: ["en-US"], accents: ["neutral"] },
     { id: "male-voice", name: "Miles", source: "standard" as const, presentation: "male" as const, languages: ["en-US"], accents: ["neutral"] },
     { id: "female-voice", name: "Maya", source: "standard" as const, presentation: "female" as const, languages: ["en-US"], accents: ["neutral"] },
+    { id: "account-voice", name: "Team voice", source: "account" as const, presentation: "unknown" as const, languages: ["en-US"], accents: ["voice_default"] },
   ] },
   language: { status: "supported" as const, choices: ["en-US", "en-GB"] },
-  accent: { status: "supported" as const, choices: ["neutral", "british"] },
+  accent: { status: "supported" as const, choices: ["voice_default", "british"] },
   emotion: { status: "supported" as const, choices: ["neutral", "happy", "angry"] },
   speed: { status: "supported" as const, range: { minimum: 0.6, maximum: 1.5, step: 0.1 } },
   speechVolume: { status: "supported" as const, range: { minimum: 0.5, maximum: 1.5, step: 0.1 } },
@@ -385,6 +386,10 @@ beforeEach(() => {
   routed.search = "";
   routed.projectId = "prj_1";
   vi.stubGlobal("scrollTo", vi.fn());
+  vi.stubGlobal("URL", Object.assign(URL, {
+    createObjectURL: vi.fn(() => "blob:persona-preview"),
+    revokeObjectURL: vi.fn(),
+  }));
 });
 
 afterEach(() => {
@@ -636,7 +641,7 @@ describe("authoring a persona", () => {
       identityName: "Priya",
       personality: "Wants the answer in one sentence.",
       models: RECOMMENDED_MODELS,
-      controls: { language: "en-GB", emotion: "neutral", accent: "neutral", speechVolume: 1 },
+      controls: { language: "en-GB", emotion: "neutral", accent: "voice_default", speechVolume: 1 },
     });
     /* No traits wrapper, and no description nobody typed. */
     expect(written).not.toHaveProperty("traits");
@@ -731,7 +736,7 @@ describe("one persona's sheet", () => {
     const sheet = await openRow("Impatient Rita");
     fireEvent.change(within(sheet).getByLabelText("Language model*"), { target: { value: "openai::gpt-4o" } });
     fireEvent.click(within(sheet).getByRole("button", { name: "Save changes" }));
-    await waitFor(() => expect(asked.find(request => request.method === "PATCH")?.body).toEqual({ projectId: "prj_1", models: updatedModels, controls: { language: "en-US", emotion: "neutral", accent: "neutral", speechVolume: 1 } }));
+    await waitFor(() => expect(asked.find(request => request.method === "PATCH")?.body).toEqual({ projectId: "prj_1", models: updatedModels, controls: { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1 } }));
     await waitFor(() => expect((within(sheet).getByRole("button", { name: "Saved" }) as HTMLButtonElement).disabled).toBe(true));
     expect(within(sheet).getByRole("status").textContent).toBe("Persona saved.");
     expect(within(sheet).getByText("Custom · v3")).toBeTruthy();
@@ -907,7 +912,7 @@ describe("one persona's sheet", () => {
     const sheet = await openRow("Everyday caller");
     fireEvent.change(within(sheet).getByLabelText("Language model*"), { target: { value: "openai::gpt-4o" } });
     fireEvent.click(within(sheet).getByRole("button", { name: "Use persona" }));
-    await waitFor(() => expect(asked.find(request => request.method === "POST")?.body).toEqual({ projectId: "prj_1", models: updatedModels, controls: { language: "en-US", emotion: "neutral", accent: "neutral", speechVolume: 1 } }));
+    await waitFor(() => expect(asked.find(request => request.method === "POST")?.body).toEqual({ projectId: "prj_1", models: updatedModels, controls: { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1 } }));
     expect(await within(sheet).findByRole("button", { name: "Saved" })).toBeTruthy();
     expect(within(sheet).getByText("Predefined · v1")).toBeTruthy();
   });
@@ -936,6 +941,87 @@ describe("one persona's sheet", () => {
     expect(within(voice).getByRole("option", { name: /Maya/u })).toBeTruthy();
     expect(within(voice).getByRole("option", { name: /Calm caller/u })).toBeTruthy();
     expect(within(voice).queryByRole("option", { name: /Miles/u })).toBeNull();
+  });
+
+  it("sends the short-lived proof from an account voice preview when the persona is saved", async () => {
+    const selectedModels = { ...RECOMMENDED_MODELS, llm: { provider: "openai", model: "gpt-5.6-terra" }, tts: { ...RECOMMENDED_MODELS.tts, voiceId: "account-voice" } };
+    const saved = { ...PREDEFINED, settings: { id: "ppr_proof", models: selectedModels, controls: CONTROLS, createdAt: PREDEFINED.createdAt, updatedAt: PREDEFINED.updatedAt } };
+    const { asked } = apiAnswers({
+      ...screenWith("admin", [PREDEFINED]),
+      "GET /v1/personas/prs_0": { status: 200, body: PREDEFINED },
+      "POST /v1/persona-preview": { status: 200, body: { audioBase64: "AA==", contentType: "audio/mpeg", voiceAccessProof: "proof-from-server", expiresAt: "2026-09-10T20:00:00.000Z", interruptionNotice: "Use a full simulation." } },
+      "POST /v1/personas/prs_0/use": { status: 200, body: saved },
+    });
+    render(<PersonasPage />);
+    const sheet = await openRow("Everyday caller");
+    const voice = within(sheet).getByLabelText("Voice*") as HTMLSelectElement;
+    await waitFor(() => expect(voice.disabled).toBe(false));
+    fireEvent.change(voice, { target: { value: "account-voice" } });
+    expect((within(sheet).getByRole("button", { name: "Preview voice" }) as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() => expect(asked.some((request) => request.path.includes("voiceId=account-voice"))).toBe(true));
+    const preview = await within(sheet).findByRole("button", { name: "Preview voice" });
+    await waitFor(() => expect((preview as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(preview);
+    await waitFor(() => expect(asked.some((request) => request.path.startsWith("/v1/persona-preview"))).toBe(true));
+    await within(sheet).findByRole("button", { name: "Preview voice" });
+    fireEvent.click(within(sheet).getByRole("button", { name: "Use persona" }));
+    await waitFor(() => expect(asked.find((request) => request.path.startsWith("/v1/personas/prs_0/use"))?.body).toMatchObject({ voiceAccessProof: "proof-from-server", models: selectedModels }));
+  });
+
+  it("previews an existing OpenAI voice ID before it allows saving", async () => {
+    const { asked } = apiAnswers({
+      ...screenWith("admin", [PREDEFINED]),
+      "GET /v1/personas/prs_0": { status: 200, body: PREDEFINED },
+      "POST /v1/persona-preview": { status: 200, body: { audioBase64: "AA==", contentType: "audio/mpeg", voiceAccessProof: "existing-proof", expiresAt: "2026-09-10T20:00:00.000Z", interruptionNotice: "Use a full simulation." } },
+      "POST /v1/personas/prs_0/use": { status: 200, body: PREDEFINED },
+    });
+    render(<PersonasPage />);
+    const sheet = await openRow("Everyday caller");
+    fireEvent.change(within(sheet).getByLabelText("Text-to-speech*"), { target: { value: "openai::gpt-4o-mini-tts" } });
+    const existingId = await within(sheet).findByLabelText("Existing voice ID [optional]");
+    fireEvent.change(existingId, { target: { value: "voice_private_123" } });
+    await waitFor(() => expect(asked.some((request) => request.path.includes("voiceId=voice_private_123"))).toBe(true));
+    expect((within(sheet).getByRole("button", { name: "Use persona" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(sheet).getByText("Preview this existing voice ID successfully before you save it.")).toBeTruthy();
+    const preview = within(sheet).getByRole("button", { name: "Preview voice" });
+    await waitFor(() => expect((preview as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(preview);
+    await within(sheet).findByRole("button", { name: "Preview voice" });
+    await waitFor(() => expect((within(sheet).getByRole("button", { name: "Use persona" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(within(sheet).getByRole("button", { name: "Use persona" }));
+    await waitFor(() => expect(asked.find((request) => request.path.startsWith("/v1/personas/prs_0/use"))?.body).toMatchObject({ voiceAccessProof: "existing-proof", models: { tts: { voiceId: "voice_private_123" } } }));
+  });
+
+  it("keeps a saved locale when the capability API uses its base language", async () => {
+    const localePersona = { ...RITA, settings: { ...RITA.settings!, controls: { ...CONTROLS, language: "en-US" } } };
+    apiAnswers({
+      ...screenWith("admin", [localePersona]),
+      "GET /v1/personas/prs_1": { status: 200, body: localePersona },
+      "GET /v1/persona-capabilities": { status: 200, body: { ...CAPABILITIES, language: { status: "supported", choices: ["en", "es"] } } },
+    });
+    render(<PersonasPage />);
+    const sheet = await openRow("Impatient Rita");
+    const language = within(sheet).getByLabelText("Language*") as HTMLSelectElement;
+    await waitFor(() => expect(language.value).toBe("en-US"));
+    expect(within(language).getByRole("option", { name: "en-US · Saved locale" })).toBeTruthy();
+    expect((within(sheet).getByRole("button", { name: "Preview voice" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("keeps fixed conflicts and gives explicit repair actions", async () => {
+    const conflicted = { ...RITA, settings: { ...RITA.settings!, controls: { ...CONTROLS, emotion: "angry" as const, accent: "british" } } };
+    apiAnswers({
+      ...screenWith("admin", [conflicted]),
+      "GET /v1/personas/prs_1": { status: 200, body: conflicted },
+      "GET /v1/persona-capabilities": { status: 200, body: { ...CAPABILITIES, emotion: { status: "fixed", value: "neutral" }, accent: { status: "fixed", value: "voice_default" } } },
+    });
+    render(<PersonasPage />);
+    const sheet = await openRow("Impatient Rita");
+    expect((await within(sheet).findByLabelText("Emotion*") as HTMLSelectElement).value).toBe("angry");
+    expect((within(sheet).getByLabelText("Accent*") as HTMLSelectElement).value).toBe("british");
+    expect((within(sheet).getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(sheet).getByRole("button", { name: "Use Neutral" }));
+    fireEvent.click(within(sheet).getByRole("button", { name: "Use voice default" }));
+    await waitFor(() => expect((within(sheet).getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(false));
   });
 
   it.each(["library", "active"])(
