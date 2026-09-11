@@ -120,7 +120,7 @@ def assemble(
     return Assembled(
         conductor=VoiceConductor(
             connection=plug,
-            voice=voice_from_models(spec.models),
+            voice=voice_from_models(spec.models, spec.persona.parameters),
             speech=speech,
             blobs=blobs,
             recording_key=f"{spec.simulation_id}/{RECORDING_NAME}",

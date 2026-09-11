@@ -11,11 +11,19 @@ from egma_simulator.config import STT_PROVIDERS, TTS_PROVIDERS
 from egma_simulator.model import ModelFailure, OpenAICompatibleModel, build_model_client
 from egma_simulator.spec import (
     ModelSelection,
+    PersonaParameters,
     SelectedModels,
     SimulationSpec,
     SpeechSelection,
 )
-from egma_simulator.speech import SpeechProviders, _ears, _mouth, voice_from_models
+from egma_simulator.speech import (
+    SpeechProviders,
+    _ears,
+    _mouth,
+    apply_pcm_gain,
+    tts_delivery_instructions,
+    voice_from_models,
+)
 
 STT_ADAPTERS = (
     ("cartesia", "cartesia_manual", "ink-2", "CartesiaSTTService"),
@@ -194,3 +202,33 @@ def test_tts_dispatch_uses_adapter_not_provider():
     providers = SpeechProviders.from_models(models, vad="silero").checked()
 
     assert providers.tts == "openai"
+
+
+def test_runtime_controls_reach_the_selected_voice_and_delivery():
+    voice = voice_from_models(
+        selected(),
+        PersonaParameters(
+            language="es-MX",
+            emotion="angry",
+            accent="mexican",
+            speech_volume=1.25,
+        ),
+    )
+
+    assert voice.language == "es-MX"
+    assert voice.speech_volume == 1.25
+    assert tts_delivery_instructions(voice) == (
+        "Speak in es-MX. Use a consistently angry emotional delivery. "
+        "Use the mexican accent."
+    )
+
+
+def test_speech_gain_is_independent_and_clips_pcm_samples():
+    pcm = (10_000).to_bytes(2, "little", signed=True) + (30_000).to_bytes(
+        2, "little", signed=True
+    )
+
+    gained = apply_pcm_gain(pcm, 1.5)
+
+    assert int.from_bytes(gained[:2], "little", signed=True) == 15_000
+    assert int.from_bytes(gained[2:], "little", signed=True) == 32_767

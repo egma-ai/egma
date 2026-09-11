@@ -43,7 +43,7 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 
 from .config import STT_PROVIDERS, TTS_PROVIDERS, VAD_PROVIDERS
 from .provider_keys import ProviderKeyUnavailable, authentication_rejected
-from .spec import SelectedModels
+from .spec import PersonaParameters, SelectedModels
 from .usage import ProviderUsage, realtime_transcription_usage
 
 logger = logging.getLogger(__name__)
@@ -94,15 +94,68 @@ class PersonaVoice:
     voice_id: str
     provider: str | None
     speed: float | None
+    language: str | None = None
+    emotion: str = "neutral"
+    accent: str = "voice_default"
+    speech_volume: float = 1.0
 
 
-def voice_from_models(models: SelectedModels) -> PersonaVoice:
+def voice_from_models(
+    models: SelectedModels, parameters: PersonaParameters | None = None
+) -> PersonaVoice:
     """Read the technical voice from its one owner."""
     return PersonaVoice(
         voice_id=models.tts.voice_id,
         provider=models.tts.provider,
         speed=models.tts.speed,
+        language=None if parameters is None else parameters.language,
+        emotion="neutral" if parameters is None else parameters.emotion,
+        accent="voice_default" if parameters is None else parameters.accent,
+        speech_volume=1.0 if parameters is None else parameters.speech_volume,
     )
+
+
+def tts_delivery_instructions(voice: PersonaVoice) -> str | None:
+    """Stable delivery instructions for an instruction-capable TTS model."""
+    parts: list[str] = []
+    if voice.language:
+        parts.append(f"Speak in {voice.language}.")
+    if voice.emotion != "neutral":
+        parts.append(f"Use a consistently {voice.emotion} emotional delivery.")
+    if voice.accent != "voice_default":
+        parts.append(f"Use the {voice.accent} accent.")
+    return " ".join(parts) or None
+
+
+def apply_pcm_gain(pcm: bytes, gain: float) -> bytes:
+    """Apply a linear gain to signed 16-bit PCM and clip safely."""
+    samples = array("h")
+    samples.frombytes(pcm[: len(pcm) // SAMPLE_WIDTH_BYTES * SAMPLE_WIDTH_BYTES])
+    if sys.byteorder != "little":
+        samples.byteswap()
+    for index, sample in enumerate(samples):
+        samples[index] = max(-32768, min(32767, round(sample * gain)))
+    if sys.byteorder != "little":
+        samples.byteswap()
+    return samples.tobytes()
+
+
+class SpeechGain(FrameProcessor):
+    """Apply Egma speech gain after TTS and before transport and recording."""
+
+    def __init__(self, gain: float) -> None:
+        super().__init__()
+        self.gain = gain
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if isinstance(frame, TTSAudioRawFrame) and self.gain != 1.0:
+            frame = TTSAudioRawFrame(
+                audio=apply_pcm_gain(frame.audio, self.gain),
+                sample_rate=frame.sample_rate,
+                num_channels=frame.num_channels,
+            )
+        await self.push_frame(frame, direction)
 
 
 # -- The scripted codec ------------------------------------------------------
@@ -486,7 +539,7 @@ def build_legs(providers: SpeechProviders, *, voice: PersonaVoice) -> SpeechLegs
     """
     providers = providers.checked()
     speaking, spoken_with, closers = _mouth(providers, voice)
-    listening_leg, listening = _ears(providers)
+    listening_leg, listening = _ears(providers, language=voice.language)
     return SpeechLegs(
         stt=listening_leg,
         tts=speaking,
@@ -569,12 +622,12 @@ def _mouth(
 
 
 def _ears(
-    providers: SpeechProviders,
+    providers: SpeechProviders, *, language: str | None = None
 ) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None]:
     if providers.stt == "openai_realtime":
-        return _openai_realtime_ears(providers)
+        return _openai_realtime_ears(providers, language=language)
     if providers.stt == "cartesia_manual":
-        return _cartesia_ears(providers)
+        return _cartesia_ears(providers, language=language)
     if providers.stt != "deepgram":
         return ScriptedSTT(), None
 
@@ -596,7 +649,9 @@ def _ears(
 
     leg = DeepgramSTTService(
         api_key=providers.stt_key,
-        settings=DeepgramSTTService.Settings(model=providers.stt_model),
+        settings=DeepgramSTTService.Settings(
+            model=providers.stt_model, language=language
+        ),
     )
 
     async def connected() -> None:
@@ -655,7 +710,7 @@ def _connection_opened_by(leg: FrameProcessor) -> asyncio.Event:
 
 
 def _cartesia_ears(
-    providers: SpeechProviders,
+    providers: SpeechProviders, *, language: str | None = None
 ) -> tuple[FrameProcessor, Callable[[], Awaitable[None]]]:
     """What the agent said, streamed through Cartesia's stock STT service.
 
@@ -675,7 +730,9 @@ def _cartesia_ears(
 
     leg = CartesiaSTTService(
         api_key=providers.stt_key,
-        settings=CartesiaSTTService.Settings(model=providers.stt_model),
+        settings=CartesiaSTTService.Settings(
+            model=providers.stt_model, language=language
+        ),
     )
     opened = _connection_opened_by(leg)
 
@@ -740,8 +797,12 @@ def _cartesia_mouth(
     settings = CartesiaTTSService.Settings(
         model=providers.tts_model,
         voice=spoken_with.voice_id,
+        language=spoken_with.language,
     )
-    settings.generation_config = GenerationConfig(speed=spoken_with.speed)
+    settings.generation_config = GenerationConfig(
+        speed=spoken_with.speed,
+        emotion=None if spoken_with.emotion == "neutral" else spoken_with.emotion,
+    )
 
     leg = CartesiaTTSService(
         api_key=providers.tts_key,
@@ -809,6 +870,9 @@ def _openai_mouth(
     )
     if spoken_with.speed is not None:
         settings.speed = spoken_with.speed
+    instructions = tts_delivery_instructions(spoken_with)
+    if instructions is not None:
+        settings.instructions = instructions
     leg = OpenAITTSService(
         api_key=providers.tts_key,
         settings=settings,
@@ -820,7 +884,7 @@ def _openai_mouth(
 
 
 def _openai_realtime_ears(
-    providers: SpeechProviders,
+    providers: SpeechProviders, *, language: str | None = None
 ) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None]:
     """Streaming OpenAI transcription using local VAD boundaries from _AgentEar.
     The same boundaries drive transcript commits and recorded timing.
@@ -936,7 +1000,9 @@ def _openai_realtime_ears(
         # default, because a release changing it would move where a turn
         # ends without moving anything in this repository.
         turn_detection=False,
-        settings=OpenAIRealtimeSTTService.Settings(model=providers.stt_model),
+        settings=OpenAIRealtimeSTTService.Settings(
+            model=providers.stt_model, language=language
+        ),
     )
 
     opened = _connection_opened_by(leg)

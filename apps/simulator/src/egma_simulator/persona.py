@@ -49,6 +49,7 @@ Your name is {name}. Give that name when the agent asks who is calling, and use 
 
 - Stay in character’s personality for the whole exchange. Never mention being a simulator, or an AI.
 - The roleplay language is {language}
+- Express a consistent {emotion} emotional state in your wording for the whole exchange.
 - You are allowed to make up details in order to fulfill the scenario unless explicitly stated otherwise. Examples include appointment details, or other details that someone in your situation might have handy. Your name is not one of them: it is given above, and you never answer to another.
 - Pursue what you came for until it is concluded to your satisfaction, and let your personality decide how patiently.
 - When your goal is concluded and nothing further is needed, say a brief goodbye and end your reply with the `end_call` tool
@@ -64,6 +65,9 @@ def compose_system_prompt(
         personality=authored.personality,
         scenario=scenario_instructions,
         language=authored.language,
+        emotion=(
+            authored.parameters.emotion if authored.parameters is not None else "neutral"
+        ),
     )
 
 

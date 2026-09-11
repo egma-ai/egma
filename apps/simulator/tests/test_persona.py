@@ -25,7 +25,7 @@ from egma_simulator.persona import (
     compose_system_prompt,
     messages_for,
 )
-from egma_simulator.spec import AuthoredPersona, SimulationSpec
+from egma_simulator.spec import AuthoredPersona, PersonaParameters, SimulationSpec
 
 AUTHORED = AuthoredPersona(
     name="Margaret",
@@ -62,6 +62,7 @@ Your name is {AUTHORED.name}. Give that name when the agent asks who is calling,
 
 - Stay in character’s personality for the whole exchange. Never mention being a simulator, or an AI.
 - The roleplay language is {AUTHORED.language}
+- Express a consistent neutral emotional state in your wording for the whole exchange.
 - You are allowed to make up details in order to fulfill the scenario unless explicitly stated otherwise. Examples include appointment details, or other details that someone in your situation might have handy. Your name is not one of them: it is given above, and you never answer to another.
 - Pursue what you came for until it is concluded to your satisfaction, and let your personality decide how patiently.
 - When your goal is concluded and nothing further is needed, say a brief goodbye and end your reply with the `end_call` tool
@@ -95,6 +96,20 @@ def test_the_system_prompt_carries_no_technical_settings():
 
     assert '"voice"' not in prompt
     assert '"models"' not in prompt
+
+
+def test_new_parameters_drive_language_and_fixed_emotional_wording():
+    authored = AuthoredPersona(
+        name="Margaret",
+        personality=AUTHORED.personality,
+        language="es-MX",
+        parameters=PersonaParameters(language="es-MX", emotion="frustrated"),
+    )
+
+    prompt = compose_system_prompt(authored, SCENARIO)
+
+    assert "roleplay language is es-MX" in prompt
+    assert "consistent frustrated emotional state" in prompt
 
 
 def test_the_prompt_offers_one_way_to_conclude_and_not_the_retired_marker():
