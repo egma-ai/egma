@@ -68,8 +68,8 @@ it("freezes shared grader and persona selections together while later work recei
     return response.json();
   }
   const projects = [
-    { projectId: who.projectId, model: "gpt-4o-mini", speed: 0.85, voice: "alloy", live: false },
-    { projectId: second.id, model: "gpt-5.6-terra", speed: 1, voice: "marin", live: true },
+    { projectId: who.projectId, model: "gpt-4o-mini", speed: 0.85, resolvedSpeed: 0.8, voice: "alloy", live: false },
+    { projectId: second.id, model: "gpt-5.6-terra", speed: 1, resolvedSpeed: 1, voice: "marin", live: true },
   ];
   const prepared = [];
   for (const [index, project] of projects.entries()) {
@@ -144,7 +144,7 @@ it("freezes shared grader and persona selections together while later work recei
     const current = await request(project.projectId, "GET", `/v1/personas/${persona.id}`);
     expect(current).toMatchObject({ version: releasedPersona.version, settings: { id: project.personaSettingsId, models: project.live
       ? { mode: "live", llm: { model: project.model }, live: { voiceId: project.voice } }
-      : { mode: "separate", llm: { model: project.model }, tts: { speed: project.speed, voiceId: project.voice } } } });
+      : { mode: "separate", llm: { model: project.model }, tts: { speed: project.resolvedSpeed, voiceId: project.voice } } } });
     const policy = await request(project.projectId, "GET", "/v1/graders");
     expect(policy.graders).toEqual(expect.arrayContaining([expect.objectContaining({ id: project.projectGraderId, settings: { llm_provider: "openai", llm_model: project.model } })]));
   }
@@ -175,7 +175,7 @@ it("freezes shared grader and persona selections together while later work recei
     expect(spec.persona).toMatchObject({ personality: originalPersona.personality });
     expect(spec.models).toMatchObject(project.live
       ? { mode: "live", llm: { provider: "openai", model: project.model }, live: { provider: "openai", model: "gpt-live-1", adapter: "openai_live", voice_id: project.voice } }
-      : { mode: "separate", llm: { provider: "openai", model: project.model }, stt: { provider: "deepgram", model: "nova-3-general" }, tts: { provider: "openai", model: "tts-1", voice_id: project.voice, speed: project.speed } });
+      : { mode: "separate", llm: { provider: "openai", model: project.model }, stt: { provider: "deepgram", model: "nova-3-general" }, tts: { provider: "openai", model: "tts-1", voice_id: project.voice, speed: project.resolvedSpeed } });
     const auth = { ...firstAuth, projectId: project.projectId };
     await completeWithEvidence(auth, oldRun.runId, oldRun.simulationId, project, "after-shared-release");
   }
