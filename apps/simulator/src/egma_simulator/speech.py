@@ -878,17 +878,68 @@ def _openai_mouth(
         async def run_tts(
             self, text: str, context_id: str
         ) -> AsyncGenerator[Frame, None]:
+            from openai import BadRequestError
             from pipecat.frames.frames import ErrorFrame
+            from pipecat.services.openai.tts import VALID_VOICES
 
             spoke = False
             try:
-                async for frame in super().run_tts(text, context_id):
-                    if isinstance(frame, ErrorFrame):
-                        yield frame
-                        await self.remove_audio_context(context_id)
+                voice_id = self._settings.voice
+                if not isinstance(voice_id, str) or not voice_id:
+                    yield ErrorFrame(error="OpenAI TTS voice must be specified")
+                    return
+                if voice_id.startswith("voice_"):
+                    create_params: dict[str, Any] = {
+                        "input": text,
+                        "model": self._settings.model,
+                        "voice": {"id": voice_id},
+                        "response_format": "pcm",
+                    }
+                    if self._settings.instructions:
+                        create_params["instructions"] = self._settings.instructions
+                    if self._settings.speed:
+                        create_params["speed"] = self._settings.speed
+                    try:
+                        async with self._client.audio.speech.with_streaming_response.create(
+                            **create_params
+                        ) as response:
+                            if response.status_code != 200:
+                                error = await response.text()
+                                yield ErrorFrame(
+                                    error=(
+                                        "Error getting audio "
+                                        f"(status: {response.status_code}, error: {error})"
+                                    )
+                                )
+                                return
+                            await self.start_tts_usage_metrics(text)
+                            async for chunk in response.iter_bytes(self.chunk_size):
+                                if chunk:
+                                    await self.stop_ttfb_metrics()
+                                    yield TTSAudioRawFrame(
+                                        chunk,
+                                        self.sample_rate,
+                                        1,
+                                        context_id=context_id,
+                                    )
+                                    spoke = True
+                    except BadRequestError as fault:
+                        yield ErrorFrame(error=f"Unknown error occurred: {fault}")
                         return
-                    spoke = spoke or isinstance(frame, TTSAudioRawFrame)
-                    yield frame
+                else:
+                    if voice_id not in VALID_VOICES:
+                        yield ErrorFrame(
+                            error=f"OpenAI TTS voice {voice_id!r} is not supported"
+                        )
+                        return
+                    frames = super().run_tts(text, context_id)
+                    async for frame in frames:
+                        if isinstance(frame, ErrorFrame):
+                            yield frame
+                            await self.remove_audio_context(context_id)
+                            return
+                        spoke = spoke or isinstance(frame, TTSAudioRawFrame)
+                        yield frame
             except asyncio.CancelledError:
                 await self.remove_audio_context(context_id)
                 raise

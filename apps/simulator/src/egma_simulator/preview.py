@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     TextFrame,
     TTSAudioRawFrame,
 )
+from pipecat.metrics.metrics import TTSUsageMetricsData
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -107,6 +108,7 @@ class _AudioCollector(FrameProcessor):
         self.finished = asyncio.Event()
         self.capped = False
         self.usage: ProviderUsage | None = None
+        self.tts_characters: int | None = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
@@ -124,6 +126,8 @@ class _AudioCollector(FrameProcessor):
             for metric in frame.data:
                 if isinstance(metric, ProviderUsageMetricsData):
                     self.usage = metric.usage
+                elif isinstance(metric, TTSUsageMetricsData):
+                    self.tts_characters = metric.value
         elif isinstance(frame, LLMFullResponseEndFrame):
             self.finished.set()
         await self.push_frame(frame, direction)
@@ -237,9 +241,9 @@ async def render_preview(body: dict) -> dict:
         if mixer is not None:
             await mixer.stop()
     tts_usage = collector.usage
-    if tts_usage is None:
+    if tts_usage is None and collector.tts_characters is not None:
         tts_usage = characters_usage(
-            len(text),
+            collector.tts_characters,
             provider=selected["provider"],
             model=selected["model"],
             operation=selected["adapter"],
