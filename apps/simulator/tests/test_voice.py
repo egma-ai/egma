@@ -405,8 +405,9 @@ async def test_incoming_audio_continues_while_the_persona_thinks(
         return await reply_to(persona, messages)
 
     monkeypatch.setattr(Persona, "reply_to", delayed)
-    observed = await observe(
-        conductor, assembled, spec, controls=ConversationControls()
+    observed = await asyncio.wait_for(
+        observe(conductor, assembled, spec, controls=ConversationControls()),
+        timeout=3,
     )
     assert observed.conducted.status == "completed"
 
@@ -1213,6 +1214,118 @@ async def test_genuine_overlap_stays_in_the_transcript_and_recording(
         "turn_response_latency",
     ):
         assert measure not in observed.named
+
+
+async def test_frequent_interruption_is_audible_over_continuous_agent_speech(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The policy releases real persona PCM before a long agent turn ends."""
+    long_greeting = "Please keep listening while I explain every detail. " * 8
+    long_interruption = "Wait, " + "I need to clarify this important detail " * 12 + "."
+    deliberate_requests = 0
+    original_reply = Persona.reply_to
+
+    async def count_deliberate(self: Persona, context):
+        nonlocal deliberate_requests
+        if any(
+            "Interrupt now" in message.get("content", "")
+            for message in context.get_messages()
+        ):
+            deliberate_requests += 1
+        return await original_reply(self, context)
+
+    monkeypatch.setattr(Persona, "reply_to", count_deliberate)
+    spec = spec_for(
+        scenario=f"{long_interruption} Then answer the remaining question.",
+        greeting=long_greeting,
+        replies=["I will continue with another detailed explanation. " * 8],
+        max_turns=3,
+    )
+    assembled = assemble(
+        spec,
+        blobs=FilesystemBlobStore(tmp_path),
+        speech=SCRIPTED_PAIR,
+        parameters=ConductParameters(
+            agent_opening_seconds=30,
+            interruption_level="frequent",
+        ),
+    )
+    conductor = assembled.conductor
+    assert conductor is not None
+    observed = await observe(
+        conductor, assembled, spec, controls=ConversationControls()
+    )
+
+    persona = next(span for span in observed.spans if span[0] == "human")
+    agent = next(span for span in observed.spans if span[0] == "agent")
+    assert persona[2] < agent[3] and agent[2] < persona[3]
+    assert persona[3] - persona[2] <= 3_000_000_000
+    assert persona[1] == "[deliberate interruption audio truncated at three seconds]"
+    assert deliberate_requests == 1
+
+    audio = observed.assembled.audio
+    assert audio is not None
+    persona_track, agent_track, _rate = channels_of(
+        (tmp_path / audio["recording"]).read_bytes()
+    )
+    assert any(
+        persona_track[offset : offset + 2] != b"\x00\x00"
+        and agent_track[offset : offset + 2] != b"\x00\x00"
+        for offset in range(0, min(len(persona_track), len(agent_track)), 2)
+    )
+
+
+async def test_agent_stop_before_delayed_interruption_playout_yields_to_normal_reply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    original_reply = Persona.reply_to
+    deliberate_requests = 0
+
+    async def delayed_interruption(self: Persona, context):
+        nonlocal deliberate_requests
+        messages = context.get_messages()
+        if any("Interrupt now" in message.get("content", "") for message in messages):
+            deliberate_requests += 1
+            await asyncio.sleep(0.2)
+        return await original_reply(self, context)
+
+    monkeypatch.setattr(Persona, "reply_to", delayed_interruption)
+    spec = spec_for(
+        scenario="This is the normal answer.",
+        greeting="A short agent statement that ends soon.",
+        replies=["Thank you."],
+        max_turns=3,
+    )
+    assembled = assemble(
+        spec,
+        blobs=FilesystemBlobStore(tmp_path),
+        speech=SCRIPTED_PAIR,
+        parameters=ConductParameters(interruption_level="frequent"),
+    )
+    conductor = assembled.conductor
+    assert conductor is not None
+    conductor._random.uniform = lambda _low, _high: 0.1
+    observed = await observe(
+        conductor, assembled, spec, controls=ConversationControls()
+    )
+
+    agents = [turn for turn in observed.spans if turn[0] == "agent"]
+    assert [turn[1] for turn in agents] == [
+        "A short agent statement that ends soon.",
+        "Thank you.",
+    ]
+    agent = agents[0]
+    assert all(
+        not (turn[2] < agent[3] and agent[2] < turn[3])
+        for turn in observed.spans
+        if turn[0] == "human"
+    )
+    assert [turn for turn in observed.turns if turn[0] == "human"] == [
+        ("human", "This is the normal answer.")
+    ]
+    # Each continuous agent segment gets at most one attempt. The first canceled
+    # attempt did not create a delivered-interruption cooldown for the next segment.
+    assert deliberate_requests == 2
 
 
 # -- What the legs are, and whose voice --------------------------------------

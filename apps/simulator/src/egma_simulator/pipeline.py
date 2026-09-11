@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .background import BackgroundSound
 from .blob import BlobStore
@@ -129,7 +129,18 @@ def assemble(
             speech=speech,
             blobs=blobs,
             recording_key=f"{spec.simulation_id}/{RECORDING_NAME}",
-            parameters=parameters or DEFAULT_CONDUCT,
+            parameters=(
+                parameters
+                if parameters is not None
+                else replace(
+                    DEFAULT_CONDUCT,
+                    interruption_level=(
+                        "off"
+                        if persona_parameters is None
+                        else persona_parameters.interruption_level
+                    ),
+                )
+            ),
         ),
         mock_tools=mock_tools,
     )
