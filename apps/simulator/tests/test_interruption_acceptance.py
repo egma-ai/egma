@@ -377,16 +377,23 @@ async def test_run_cancel_after_first_accepted_interruption_audio_wins_immediate
     model = _HeldModel(["Generated interruption text with an unplayed tail."])
     model.release.set()
     tts = _ExactSecondTTS()
-
+    greeting = "The agent continues speaking while cancellation arrives. " * 12
+    transport = ScriptedTransport(
+        greeting=greeting,
+        replies=[],
+        answer_delay_seconds=0,
+        ends_after_replies=False,
+    )
     conducted, spans, _audio, _transport, events = await _conduct_with(
         tmp_path,
         monkeypatch,
         model=model,
         tts=tts,
-        greeting="The agent continues speaking while cancellation arrives. " * 12,
+        greeting=greeting,
         replies=[],
         controls=controls,
         output_after_transport=(accepted,),
+        transport=transport,
     )
 
     assert accepted.accepted.is_set()
