@@ -489,15 +489,55 @@ jobs:
   simulation-e2e-retell:
     name: Simulation to grade (Retell ${{ matrix.connection }}, mocks on)
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'workflow_dispatch' }}
-    # GitHub's runner resolves newly announced public callback hostnames reliably.
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    concurrency:
+      # Each hostname must point at only one ephemeral runner at a time. Text and
+      # web use separate tunnels, so their matrix jobs can still run together.
+      group: simulation-e2e-retell-${{ matrix.connection }}
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:
-        connection: [text, web]
+        include:
+          - connection: text
+            tunnel_id_var: SIMULATION_E2E_TUNNEL_TEXT_ID
+            tunnel_url_var: SIMULATION_E2E_TUNNEL_TEXT_URL
+            tunnel_credentials_secret: SIMULATION_E2E_TUNNEL_TEXT_CREDENTIALS
+          - connection: web
+            tunnel_id_var: SIMULATION_E2E_TUNNEL_WEB_ID
+            tunnel_url_var: SIMULATION_E2E_TUNNEL_WEB_URL
+            tunnel_credentials_secret: SIMULATION_E2E_TUNNEL_WEB_CREDENTIALS
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the named public tunnel
+        env:
+          TUNNEL_ID: ${{ vars[matrix.tunnel_id_var] }}
+          TUNNEL_URL: ${{ vars[matrix.tunnel_url_var] }}
+          TUNNEL_CREDENTIALS: ${{ secrets[matrix.tunnel_credentials_secret] }}
+        run: |
+          set -eu
+          test -n "$TUNNEL_ID" || { echo "The named Cloudflare tunnel ID for ${{ matrix.connection }} is required." >&2; exit 1; }
+          test -n "$TUNNEL_URL" || { echo "The named Cloudflare tunnel URL for ${{ matrix.connection }} is required." >&2; exit 1; }
+          test -n "$TUNNEL_CREDENTIALS" || { echo "The named Cloudflare tunnel credentials for ${{ matrix.connection }} are required." >&2; exit 1; }
+
+          credential_file="$RUNNER_TEMP/retell-${{ matrix.connection }}-tunnel.json"
+          umask 077
+          printf '%s' "$TUNNEL_CREDENTIALS" > "$credential_file"
+          chmod 600 "$credential_file"
+          jq -e --arg tunnel_id "$TUNNEL_ID" '
+            (.AccountTag | type == "string" and length > 0) and
+            (.TunnelSecret | type == "string" and length > 0) and
+            (.TunnelID | type == "string" and length > 0) and
+            .TunnelID == $tunnel_id
+          ' "$credential_file" >/dev/null || {
+            echo "The named Cloudflare tunnel credentials for ${{ matrix.connection }} are invalid or belong to another tunnel." >&2
+            exit 1
+          }
+
+          echo "SIMULATION_E2E_TUNNEL_ID=$TUNNEL_ID" >> "$GITHUB_ENV"
+          echo "SIMULATION_E2E_TUNNEL_URL=$TUNNEL_URL" >> "$GITHUB_ENV"
+          echo "SIMULATION_E2E_TUNNEL_CREDENTIALS_FILE=$credential_file" >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -551,6 +591,9 @@ jobs:
           pnpm exec vitest run --project fast
           apps/api/test/retell-live-simulation.test.ts
           --maxWorkers=1
+      - name: Remove the named public tunnel credential
+        if: ${{ always() }}
+        run: rm -f "$RUNNER_TEMP/retell-${{ matrix.connection }}-tunnel.json"
       - name: Upload redacted proof manifest
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
