@@ -5490,11 +5490,9 @@ it(
       await walk.evaluate('document.documentElement.dataset.theme = "dark"');
       await walk.locator("#persona-tts-voice").focus();
       await walk.keyboard.press("Tab");
-      expect(
-        await walk
-          .locator("#persona-existing-voice-id")
-          .evaluate(element => element === element.ownerDocument.activeElement),
-      ).toBe(true);
+      expect(await walk.evaluate("document.activeElement?.id")).toBe(
+        "persona-interruption-level",
+      );
       expect(
         await walk.evaluate(
           "document.documentElement.scrollWidth <= window.innerWidth",
