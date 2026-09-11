@@ -34,10 +34,13 @@ import {
   defaultPersonaParameterValues,
   PERSONA_PARAMETER_CONTRACT,
   personaParameterContract,
+  personaControlsOfParameters,
   personaModelParameterValues,
+  personaModelsOfParameters,
   personaParametersOfSettings,
   validatePersonaParameterContract,
   validatePersonaParameterValues,
+  type PersonaParameterValues,
   type PersonaSettings,
 } from "../persona-library/parameters.ts";
 import type { GraderParameter } from "../grader-library/parameters.ts";
@@ -727,6 +730,15 @@ export async function editPersona(
           : changes.language ?? current.language,
       });
       const coreChanged = !sameBehavior(current, asked);
+      const legacyUpgrade =
+        (askedModels !== undefined || askedSettings !== undefined) &&
+        !current.parameterContract.some(
+          (field) => field.key === "execution_policy_version",
+        );
+      let nextContract = current.parameterContract;
+      let settingsUpdate:
+        | { id: string; parameterValues: PersonaParameterValues }
+        | undefined;
       if (askedModels !== undefined || askedSettings !== undefined) {
         const projectId = auth.projectId ?? locked.projectId;
         if (projectId === null || projectId === undefined) {
@@ -742,25 +754,42 @@ export async function editPersona(
           undefined,
           true,
         );
-        const values = validatePersonaParameterValues(
-          current.parameterContract,
-          askedSettings ?? {
-            ...settings.parameterValues,
-            ...personaModelParameterValues(askedModels!),
-          },
-        );
+        const candidate = legacyUpgrade
+          ? askedSettings ?? {
+              ...defaultPersonaParameterValues(
+                personaParameterContract(askedModels),
+              ),
+              ...settings.parameterValues,
+              ...(current.language === null
+                ? {}
+                : { language: current.language }),
+              ...personaModelParameterValues(askedModels!),
+            }
+          : askedSettings ?? {
+              ...settings.parameterValues,
+              ...personaModelParameterValues(askedModels!),
+            };
+        if (legacyUpgrade) {
+          nextContract = personaParameterContract(
+            personaModelsOfParameters(candidate),
+            personaControlsOfParameters(candidate),
+          );
+        }
+        const values = validatePersonaParameterValues(nextContract, candidate);
         if (
           JSON.stringify(settings.parameterValues) !== JSON.stringify(values)
         ) {
-          await tx
-            .update(projectPersona)
-            .set({ parameterValues: values, updatedAt: new Date() })
-            .where(eq(projectPersona.id, settings.id));
+          settingsUpdate = { id: settings.id, parameterValues: values };
         }
       }
       let versionId = current.id;
-      if (coreChanged) {
-        await assertPersonaSettingsCompatibleOn(tx, id, current.parameterContract, current.parameterContract);
+      if (coreChanged || legacyUpgrade) {
+        await assertPersonaSettingsCompatibleOn(
+          tx,
+          id,
+          current.parameterContract,
+          current.parameterContract,
+        );
         versionId = newId("prsv");
         await tx
           .insert(personaVersion)
@@ -769,16 +798,16 @@ export async function editPersona(
             personaId: id,
             version: current.version + 1,
             ...asked,
-            language: current.parameterContract.some(
+            language: nextContract.some(
               (field) => field.key === "language",
             )
               ? null
               : asked.language,
-            parameterContract: current.parameterContract,
+            parameterContract: nextContract,
             createdBy: auth.userId,
           });
       }
-      if (coreChanged || metadataRequested) {
+      if (coreChanged || legacyUpgrade || metadataRequested) {
         await tx
           .update(persona)
           .set({
@@ -790,6 +819,15 @@ export async function editPersona(
             updatedAt: new Date(),
           })
           .where(eq(persona.id, id));
+      }
+      if (settingsUpdate !== undefined) {
+        await tx
+          .update(projectPersona)
+          .set({
+            parameterValues: settingsUpdate.parameterValues,
+            updatedAt: new Date(),
+          })
+          .where(eq(projectPersona.id, settingsUpdate.id));
       }
       return readPersonaOn(tx, auth, id);
     }),

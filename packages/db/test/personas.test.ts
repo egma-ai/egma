@@ -14,6 +14,7 @@ import {
   PERSONA_PARAMETER_CONTRACT,
   EGMA_PROVIDED_PERSONAS,
   defaultPersonaParameterValues,
+  legacyPersonaParameterContract,
   type NewPersona,
   type PersonaChanges,
   type Role,
@@ -198,6 +199,65 @@ describe("a credential for the whole organization", () => {
 });
 
 describe("editing a persona's personality", () => {
+  it("upgrades legacy settings through one append-only version", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
+    const legacyContract = legacyPersonaParameterContract();
+    const legacyVersionId = newId("prsv");
+    await database.sql(
+      `insert into persona_definition_version
+         (id, persona_id, version, identity_name, personality, language,
+          parameter_contract, created_by)
+       select $2, persona_id, 2, identity_name, personality, 'es-ES', $3::jsonb,
+              created_by
+         from persona_definition_version
+        where id=$1`,
+      [created.versionId, legacyVersionId, JSON.stringify(legacyContract)],
+    );
+    await database.sql(
+      "update persona_definition set current_version_id=$2 where id=$1",
+      [created.id, legacyVersionId],
+    );
+    await database.sql(
+      "update project_persona set parameter_values=$2::jsonb where id=$1",
+      [
+        created.settings!.id,
+        JSON.stringify(defaultPersonaParameterValues(legacyContract)),
+      ],
+    );
+
+    const settings = {
+      models: RECOMMENDED_PERSONA_MODELS,
+      language: "es-ES",
+      emotion: "happy" as const,
+      accent: "voice_default",
+      speechVolume: 1.1,
+      executionPolicyVersion: 1,
+      backgroundSoundId: "office-v1" as const,
+      backgroundVolume: 0.0631,
+      interruptionLevel: "occasional" as const,
+    };
+    const upgraded = await editPersona(actingAsAcme(), created.id, { settings });
+
+    expect(upgraded).toMatchObject({ version: 3, language: "es-ES" });
+    expect(upgraded?.settings?.models).toEqual(settings.models);
+    expect(upgraded?.settings?.parameterValues).toMatchObject({
+      language: "es-ES",
+      emotion: "happy",
+      accent: "voice_default",
+      speech_volume: 1.1,
+      execution_policy_version: 1,
+      background_sound_id: "office-v1",
+      background_volume: 0.0631,
+      interruption_level: "occasional",
+    });
+    const legacy = await getPersonaVersion(actingAsAcme(), legacyVersionId);
+    expect(legacy).toMatchObject({ version: 2, language: "es-ES" });
+    expect(legacy?.parameterContract).toEqual(legacyContract);
+    const current = await getPersonaVersion(actingAsAcme(), upgraded!.versionId);
+    expect(current).toMatchObject({ version: 3, language: null });
+    expect(current?.parameterContract).toHaveLength(16);
+  });
+
   it("creates version 2, moves the pointer, and leaves version 1 untouched", async () => {
     const created = await createPersona(actingAsAcme(), rita);
 
