@@ -801,8 +801,11 @@ export async function editPersona(
         );
         if (!legacyUpgrade) {
           const existingControls = personaControlsOfParameters(settings.parameterValues);
+          const selectedModels = askedModels === undefined || askedModels.mode === "live"
+            ? askedModels
+            : { ...askedModels, tts: { ...askedModels.tts, speed: PERSONA_SPEECH_SPEED_TARGETS[existingControls.speechSpeed] } };
           const selectedSettings: PersonaSettings = askedSettings === undefined
-            ? { models: askedModels!, ...existingControls }
+            ? { models: selectedModels!, ...existingControls }
             : { models: personaModelsOfParameters(askedSettings), ...personaControlsOfParameters(askedSettings) };
           const selectedContract = personaParameterContract(selectedSettings.models, selectedSettings);
           const selectedValues = personaParametersOfSettings(selectedSettings);
