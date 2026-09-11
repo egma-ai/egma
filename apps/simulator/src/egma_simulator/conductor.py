@@ -1030,7 +1030,9 @@ class _PersonaBrain(FrameProcessor):
     async def _answer_when_idle(self, frame: _AgentFinished, said: str) -> None:
         try:
             async with self._answer_lock:
-                await self._replies.wait_idle()
+                while self._replies.busy or self._conductor.deliberate_response_owned:
+                    await self._replies.wait_idle()
+                    await self._conductor.wait_until_interruption_idle()
                 if not self._conductor.is_ending:
                     await self._answer(
                         frame.heard_a_turn,
@@ -1388,6 +1390,9 @@ class VoiceConductor:
         self._interruption_due_at: MediaPosition | None = None
         self._interruption_attempted = False
         self._interruption_state = "listening"
+        self._interruption_idle = asyncio.Event()
+        self._interruption_idle.set()
+        self._segment_waiting_for_interruption_owner = False
         self._last_interruption_end: MediaPosition | None = None
         self._deliberate_capped = False
 
@@ -1473,6 +1478,16 @@ class VoiceConductor:
         self._agent_speech_began = self._position
         self._agent_speech_ended = None
         self._interruption_attempted = False
+        if self.deliberate_response_owned:
+            self._segment_waiting_for_interruption_owner = True
+            return
+        self._arm_interruption_for_active_segment()
+
+    def _arm_interruption_for_active_segment(self) -> None:
+        self._segment_waiting_for_interruption_owner = False
+        if self.is_ending or self._agent_speech_ended is not None:
+            self._interruption_due_at = None
+            return
         level = self._parameters.interruption_level
         policy = {"occasional": ((6.0, 10.0), 30.0), "frequent": ((2.0, 4.0), 12.0)}
         selected = policy.get(level)
@@ -1480,14 +1495,11 @@ class VoiceConductor:
             self._interruption_due_at = None
             return
         delay_range, cooldown = selected
-        if (
-            self._last_interruption_end is not None
-            and self._position - self._last_interruption_end < _seconds(cooldown)
-        ):
-            self._interruption_due_at = None
-            return
         delay = self._random.uniform(*delay_range)
-        self._interruption_due_at = self._position + _seconds(delay)
+        due_at = self._agent_speech_began + _seconds(delay)
+        if self._last_interruption_end is not None:
+            due_at = max(due_at, self._last_interruption_end + _seconds(cooldown))
+        self._interruption_due_at = due_at
         self._interruption_state = "scheduled"
         self._report_interruption(
             InterruptionEvidence(
@@ -1506,6 +1518,7 @@ class VoiceConductor:
 
     def agent_speech_stopped(self) -> None:
         self._agent_speech_ended = self._position
+        self._segment_waiting_for_interruption_owner = False
         self._interruption_due_at = None
         if self._interruption_state in {
             "scheduled",
@@ -1521,6 +1534,10 @@ class VoiceConductor:
         self._interruption_attempted = True
         self._interruption_due_at = None
         self._interruption_state = "preparing"
+        self._interruption_idle.clear()
+
+    async def wait_until_interruption_idle(self) -> None:
+        await self._interruption_idle.wait()
 
     def interruption_audio_queued(self) -> None:
         self._interruption_state = "awaiting_playout"
@@ -1535,9 +1552,10 @@ class VoiceConductor:
         if self._controls.cause is not None:
             self.interruption_canceled("simulation_stopped", force=True)
             return False
-        if self._agent_departed or (
-            media is not None and (media.ended.is_set() or media.failed.is_set())
-        ):
+        if media is not None and media.failed.is_set():
+            self.interruption_canceled("transport_failed", force=True)
+            return False
+        if self._agent_departed or (media is not None and media.ended.is_set()):
             self.interruption_canceled("agent_disconnected", force=True)
             return False
         return True
@@ -1559,6 +1577,7 @@ class VoiceConductor:
         began = self._persona_began if was_delivering else None
         ended = self._persona_ended if was_delivering else None
         self._interruption_state = "listening"
+        self._interruption_idle.set()
         self._interruption_due_at = None
         generated_text = self._pending_persona_text
         self._pending_persona_text = None
@@ -1586,6 +1605,8 @@ class VoiceConductor:
             attributes={"egma.interruption.cancel_reason": reason},
         )
         self.media_advanced()
+        if self._segment_waiting_for_interruption_owner:
+            self._arm_interruption_for_active_segment()
 
     def _report_interruption(self, evidence: InterruptionEvidence) -> None:
         if self._on_interruption is not None:
@@ -1802,10 +1823,13 @@ class VoiceConductor:
             if self._ignored_pipeline_faults:
                 self._ignored_pipeline_faults -= 1
                 return
-            if self.deliberate_response_owned and not self.deliberate_delivering:
+            if self.deliberate_response_owned:
                 if processor is model:
                     self._interruption_model_fault_observed = True
-                self.interruption_canceled("speech_provider_failed_before_playout")
+                self.interruption_canceled(
+                    "speech_provider_failed",
+                    force=self.deliberate_delivering,
+                )
                 return
             if isinstance(exception, ProviderKeyUnavailable):
                 self._brain_fault = exception
@@ -2171,6 +2195,7 @@ class VoiceConductor:
             )
             self._last_interruption_end = ended
             self._interruption_state = "listening"
+            self._interruption_idle.set()
             self._deliberate_capped = False
             log_event(
                 logger,
@@ -2183,6 +2208,8 @@ class VoiceConductor:
                     "egma.interruption.overlap_end_ns": self._at(overlap_end),
                 },
             )
+            if self._segment_waiting_for_interruption_owner:
+                self._arm_interruption_for_active_segment()
         self._record.persona_last_stopped_at = ended
         self._record.persona_response_pending = False
         self._record.quiet_since = max(self._record.quiet_since, ended)
@@ -2317,6 +2344,7 @@ class VoiceConductor:
     async def _agent_left(self) -> None:
         """Finish any active input turn before recording a normal departure."""
         self._agent_departed = True
+        self.interruption_canceled("agent_disconnected", force=True)
         if self._ear is not None:
             await self._ear.finalize_active_utterance()
         self.media_advanced()

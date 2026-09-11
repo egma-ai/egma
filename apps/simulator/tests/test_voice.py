@@ -31,7 +31,11 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from egma_simulator import conductor as conductor_module
 from egma_simulator.blob import FilesystemBlobStore
-from egma_simulator.conductor import ConductParameters, VoiceConductor
+from egma_simulator.conductor import (
+    ConductParameters,
+    InterruptionEvidence,
+    VoiceConductor,
+)
 from egma_simulator.contract import ERROR
 from egma_simulator.conversation import (
     Conducted,
@@ -92,6 +96,8 @@ class Observed:
     measures: list[tuple[str, float]] = field(default_factory=list)
     """Each measurement, as the name and the milliseconds its span holds."""
 
+    interruptions: list[InterruptionEvidence] = field(default_factory=list)
+
     @property
     def turns(self) -> list[tuple[str, str]]:
         return [(speaker, text) for speaker, text, _began, _ended in self.spans]
@@ -150,6 +156,7 @@ async def observe(
     """
     spans = [] if spans is None else spans
     measures: list[tuple[str, float]] = []
+    interruptions: list[InterruptionEvidence] = []
 
     async def on_utterance(speaker: str, text: str, began: int, ended: int) -> None:
         spans.append((speaker, text, began, ended))
@@ -169,9 +176,14 @@ async def observe(
         name="sim:voice-test",
         on_utterance=on_utterance,
         on_measured=on_measured,
+        on_interruption=interruptions.append,
     )
     return Observed(
-        conducted=conducted, assembled=assembled, spans=spans, measures=measures
+        conducted=conducted,
+        assembled=assembled,
+        spans=spans,
+        measures=measures,
+        interruptions=interruptions,
     )
 
 
@@ -1399,6 +1411,55 @@ async def test_failed_deliberate_model_request_does_not_steal_normal_reply(
     assert [turn for turn in observed.turns if turn[0] == "human"] == [
         ("human", "This normal reply still belongs to the completed agent turn.")
     ]
+
+
+async def test_failed_deliberate_tts_before_audio_yields_to_normal_reply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    original_speak = ScriptedTTS._speak
+    attempts = 0
+
+    async def fail_first_speech(self: ScriptedTTS, text: str) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("deliberate speech request failed")
+        await original_speak(self, text)
+
+    monkeypatch.setattr(ScriptedTTS, "_speak", fail_first_speech)
+    spec = spec_for(
+        scenario="This normal reply remains available after speech synthesis fails.",
+        greeting="A long agent statement that keeps going past the interruption time.",
+        replies=["Thanks."],
+        max_turns=3,
+    )
+    assembled = assemble(
+        spec,
+        blobs=FilesystemBlobStore(tmp_path),
+        speech=SCRIPTED_PAIR,
+        parameters=ConductParameters(interruption_level="frequent"),
+    )
+    conductor = assembled.conductor
+    assert conductor is not None
+    conductor._random.uniform = lambda _low, _high: 0.1
+
+    observed = await observe(
+        conductor, assembled, spec, controls=ConversationControls()
+    )
+
+    # The failed deliberate request is followed by the ordinary answer. A later
+    # concluding turn may add one more successful speech request.
+    assert attempts >= 2
+    assert (
+        "human",
+        "This normal reply remains available after speech synthesis fails.",
+    ) in observed.turns
+    canceled = [
+        event for event in observed.interruptions if event.event == "canceled"
+    ]
+    assert [event.reason for event in canceled] == ["speech_provider_failed"]
+    assert canceled[0].began_unix_nano is None
+    assert canceled[0].ended_unix_nano is None
 
 
 # -- What the legs are, and whose voice --------------------------------------
