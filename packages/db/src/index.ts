@@ -266,6 +266,10 @@ export { usePersona, PersonaVersionConflictError } from "./access/personas.ts";
 export {
   defaultPersonaParameterValues,
   legacyPersonaParameterContract,
+  ticket01PersonaParameterContract,
+  BACKGROUND_SOUND_IDS,
+  BACKGROUND_VOLUME_DEFAULT,
+  BACKGROUND_VOLUME_RANGE,
   PERSONA_EMOTIONS,
   PERSONA_EXECUTION_POLICY_VERSION,
   PERSONA_PARAMETER_CONTRACT,
@@ -281,6 +285,7 @@ export {
   validatePersonaParameterContract,
   validatePersonaParameterValues,
   type PersonaControls,
+  type BackgroundSoundId,
   type PersonaEmotion,
   type PersonaParameterValues,
   type PersonaSettings,

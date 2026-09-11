@@ -22,6 +22,13 @@
       "when": 1789093839387,
       "tag": "0002_melodic_switch",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789171200000,
+      "tag": "0003_persona_background_sound",
+      "breakpoints": true
     }
   ]
 }

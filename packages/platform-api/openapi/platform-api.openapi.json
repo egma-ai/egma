@@ -11495,13 +11495,34 @@
                         "type": "number",
                         "minimum": 0.5,
                         "maximum": 1.5
+                      },
+                      "backgroundSoundId": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "office-v1",
+                          "cafe-v1",
+                          "street-traffic-v1",
+                          "crowd-talking-v1",
+                          "inside-car-v1",
+                          "home-tv-v1",
+                          "wind-v1",
+                          "rain-v1"
+                        ]
+                      },
+                      "backgroundVolume": {
+                        "type": "number",
+                        "minimum": 0.015848931924611134,
+                        "maximum": 0.251188643150958
                       }
                     },
                     "required": [
                       "language",
                       "emotion",
                       "accent",
-                      "speechVolume"
+                      "speechVolume",
+                      "backgroundSoundId",
+                      "backgroundVolume"
                     ],
                     "additionalProperties": false
                   },
@@ -11759,6 +11780,25 @@
                                   "type": "integer",
                                   "minimum": 1,
                                   "readOnly": true
+                                },
+                                "backgroundSoundId": {
+                                  "type": "string",
+                                  "enum": [
+                                    "none",
+                                    "office-v1",
+                                    "cafe-v1",
+                                    "street-traffic-v1",
+                                    "crowd-talking-v1",
+                                    "inside-car-v1",
+                                    "home-tv-v1",
+                                    "wind-v1",
+                                    "rain-v1"
+                                  ]
+                                },
+                                "backgroundVolume": {
+                                  "type": "number",
+                                  "minimum": 0.015848931924611134,
+                                  "maximum": 0.251188643150958
                                 }
                               },
                               "required": [
@@ -11766,7 +11806,9 @@
                                 "emotion",
                                 "accent",
                                 "speechVolume",
-                                "executionPolicyVersion"
+                                "executionPolicyVersion",
+                                "backgroundSoundId",
+                                "backgroundVolume"
                               ],
                               "additionalProperties": false
                             },
@@ -12218,6 +12260,25 @@
                                         "type": "integer",
                                         "minimum": 1,
                                         "readOnly": true
+                                      },
+                                      "backgroundSoundId": {
+                                        "type": "string",
+                                        "enum": [
+                                          "none",
+                                          "office-v1",
+                                          "cafe-v1",
+                                          "street-traffic-v1",
+                                          "crowd-talking-v1",
+                                          "inside-car-v1",
+                                          "home-tv-v1",
+                                          "wind-v1",
+                                          "rain-v1"
+                                        ]
+                                      },
+                                      "backgroundVolume": {
+                                        "type": "number",
+                                        "minimum": 0.015848931924611134,
+                                        "maximum": 0.251188643150958
                                       }
                                     },
                                     "required": [
@@ -12225,7 +12286,9 @@
                                       "emotion",
                                       "accent",
                                       "speechVolume",
-                                      "executionPolicyVersion"
+                                      "executionPolicyVersion",
+                                      "backgroundSoundId",
+                                      "backgroundVolume"
                                     ],
                                     "additionalProperties": false
                                   },
@@ -12529,13 +12592,34 @@
                         "type": "number",
                         "minimum": 0.5,
                         "maximum": 1.5
+                      },
+                      "backgroundSoundId": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "office-v1",
+                          "cafe-v1",
+                          "street-traffic-v1",
+                          "crowd-talking-v1",
+                          "inside-car-v1",
+                          "home-tv-v1",
+                          "wind-v1",
+                          "rain-v1"
+                        ]
+                      },
+                      "backgroundVolume": {
+                        "type": "number",
+                        "minimum": 0.015848931924611134,
+                        "maximum": 0.251188643150958
                       }
                     },
                     "required": [
                       "language",
                       "emotion",
                       "accent",
-                      "speechVolume"
+                      "speechVolume",
+                      "backgroundSoundId",
+                      "backgroundVolume"
                     ],
                     "additionalProperties": false
                   },
@@ -12822,6 +12906,25 @@
                                   "type": "integer",
                                   "minimum": 1,
                                   "readOnly": true
+                                },
+                                "backgroundSoundId": {
+                                  "type": "string",
+                                  "enum": [
+                                    "none",
+                                    "office-v1",
+                                    "cafe-v1",
+                                    "street-traffic-v1",
+                                    "crowd-talking-v1",
+                                    "inside-car-v1",
+                                    "home-tv-v1",
+                                    "wind-v1",
+                                    "rain-v1"
+                                  ]
+                                },
+                                "backgroundVolume": {
+                                  "type": "number",
+                                  "minimum": 0.015848931924611134,
+                                  "maximum": 0.251188643150958
                                 }
                               },
                               "required": [
@@ -12829,7 +12932,9 @@
                                 "emotion",
                                 "accent",
                                 "speechVolume",
-                                "executionPolicyVersion"
+                                "executionPolicyVersion",
+                                "backgroundSoundId",
+                                "backgroundVolume"
                               ],
                               "additionalProperties": false
                             },
@@ -13903,13 +14008,34 @@
                         "type": "number",
                         "minimum": 0.5,
                         "maximum": 1.5
+                      },
+                      "backgroundSoundId": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "office-v1",
+                          "cafe-v1",
+                          "street-traffic-v1",
+                          "crowd-talking-v1",
+                          "inside-car-v1",
+                          "home-tv-v1",
+                          "wind-v1",
+                          "rain-v1"
+                        ]
+                      },
+                      "backgroundVolume": {
+                        "type": "number",
+                        "minimum": 0.015848931924611134,
+                        "maximum": 0.251188643150958
                       }
                     },
                     "required": [
                       "language",
                       "emotion",
                       "accent",
-                      "speechVolume"
+                      "speechVolume",
+                      "backgroundSoundId",
+                      "backgroundVolume"
                     ],
                     "additionalProperties": false
                   },
@@ -14333,6 +14459,25 @@
                                   "type": "integer",
                                   "minimum": 1,
                                   "readOnly": true
+                                },
+                                "backgroundSoundId": {
+                                  "type": "string",
+                                  "enum": [
+                                    "none",
+                                    "office-v1",
+                                    "cafe-v1",
+                                    "street-traffic-v1",
+                                    "crowd-talking-v1",
+                                    "inside-car-v1",
+                                    "home-tv-v1",
+                                    "wind-v1",
+                                    "rain-v1"
+                                  ]
+                                },
+                                "backgroundVolume": {
+                                  "type": "number",
+                                  "minimum": 0.015848931924611134,
+                                  "maximum": 0.251188643150958
                                 }
                               },
                               "required": [
@@ -14340,7 +14485,9 @@
                                 "emotion",
                                 "accent",
                                 "speechVolume",
-                                "executionPolicyVersion"
+                                "executionPolicyVersion",
+                                "backgroundSoundId",
+                                "backgroundVolume"
                               ],
                               "additionalProperties": false
                             },
@@ -14643,13 +14790,34 @@
                         "type": "number",
                         "minimum": 0.5,
                         "maximum": 1.5
+                      },
+                      "backgroundSoundId": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "office-v1",
+                          "cafe-v1",
+                          "street-traffic-v1",
+                          "crowd-talking-v1",
+                          "inside-car-v1",
+                          "home-tv-v1",
+                          "wind-v1",
+                          "rain-v1"
+                        ]
+                      },
+                      "backgroundVolume": {
+                        "type": "number",
+                        "minimum": 0.015848931924611134,
+                        "maximum": 0.251188643150958
                       }
                     },
                     "required": [
                       "language",
                       "emotion",
                       "accent",
-                      "speechVolume"
+                      "speechVolume",
+                      "backgroundSoundId",
+                      "backgroundVolume"
                     ],
                     "additionalProperties": false
                   },
@@ -14912,6 +15080,25 @@
                                   "type": "integer",
                                   "minimum": 1,
                                   "readOnly": true
+                                },
+                                "backgroundSoundId": {
+                                  "type": "string",
+                                  "enum": [
+                                    "none",
+                                    "office-v1",
+                                    "cafe-v1",
+                                    "street-traffic-v1",
+                                    "crowd-talking-v1",
+                                    "inside-car-v1",
+                                    "home-tv-v1",
+                                    "wind-v1",
+                                    "rain-v1"
+                                  ]
+                                },
+                                "backgroundVolume": {
+                                  "type": "number",
+                                  "minimum": 0.015848931924611134,
+                                  "maximum": 0.251188643150958
                                 }
                               },
                               "required": [
@@ -14919,7 +15106,9 @@
                                 "emotion",
                                 "accent",
                                 "speechVolume",
-                                "executionPolicyVersion"
+                                "executionPolicyVersion",
+                                "backgroundSoundId",
+                                "backgroundVolume"
                               ],
                               "additionalProperties": false
                             },
@@ -16140,6 +16329,25 @@
                                   "type": "integer",
                                   "minimum": 1,
                                   "readOnly": true
+                                },
+                                "backgroundSoundId": {
+                                  "type": "string",
+                                  "enum": [
+                                    "none",
+                                    "office-v1",
+                                    "cafe-v1",
+                                    "street-traffic-v1",
+                                    "crowd-talking-v1",
+                                    "inside-car-v1",
+                                    "home-tv-v1",
+                                    "wind-v1",
+                                    "rain-v1"
+                                  ]
+                                },
+                                "backgroundVolume": {
+                                  "type": "number",
+                                  "minimum": 0.015848931924611134,
+                                  "maximum": 0.251188643150958
                                 }
                               },
                               "required": [
@@ -16147,7 +16355,9 @@
                                 "emotion",
                                 "accent",
                                 "speechVolume",
-                                "executionPolicyVersion"
+                                "executionPolicyVersion",
+                                "backgroundSoundId",
+                                "backgroundVolume"
                               ],
                               "additionalProperties": false
                             },

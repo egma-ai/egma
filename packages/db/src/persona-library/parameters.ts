@@ -11,6 +11,23 @@ import type { ModelProvider } from "../models/catalog.ts";
 export const PERSONA_EMOTIONS = ["neutral", "happy", "angry", "frustrated", "sad", "anxious"] as const;
 export type PersonaEmotion = (typeof PERSONA_EMOTIONS)[number];
 export const SPEECH_VOLUME_RANGE = { quietest: 0.5, loudest: 1.5 } as const;
+export const BACKGROUND_SOUND_IDS = [
+  "none",
+  "office-v1",
+  "cafe-v1",
+  "street-traffic-v1",
+  "crowd-talking-v1",
+  "inside-car-v1",
+  "home-tv-v1",
+  "wind-v1",
+  "rain-v1",
+] as const;
+export type BackgroundSoundId = (typeof BACKGROUND_SOUND_IDS)[number];
+export const BACKGROUND_VOLUME_DEFAULT = 0.0631;
+export const BACKGROUND_VOLUME_RANGE = {
+  quietest: 0.015848931924611134,
+  loudest: 0.251188643150958,
+} as const;
 export const PERSONA_EXECUTION_POLICY_VERSION = 1 as const;
 const LEGACY_SPEED_RANGE = { slowest: 0.6, fastest: 1.5 } as const;
 
@@ -20,6 +37,8 @@ export type PersonaControls = {
   readonly accent: string;
   readonly speechVolume: number;
   readonly executionPolicyVersion: number;
+  readonly backgroundSoundId: BackgroundSoundId;
+  readonly backgroundVolume: number;
 };
 export type PersonaSettings = PersonaControls & { readonly models: PersonaModels };
 export type PersonaParameterValues = GraderParameterValues;
@@ -62,7 +81,9 @@ export function validPersonaControls(value: unknown): PersonaControls {
   if (accent === "") throw new TypeError("persona accent must be nonempty text");
   if (typeof held.speechVolume !== "number" || !Number.isFinite(held.speechVolume) || held.speechVolume < SPEECH_VOLUME_RANGE.quietest || held.speechVolume > SPEECH_VOLUME_RANGE.loudest) throw new TypeError("persona speech volume must be between 0.5 and 1.5");
   if (typeof held.executionPolicyVersion !== "number" || !Number.isInteger(held.executionPolicyVersion) || held.executionPolicyVersion < 1) throw new TypeError("persona execution policy version must be a positive integer");
-  return { language, emotion: held.emotion as PersonaEmotion, accent, speechVolume: held.speechVolume, executionPolicyVersion: held.executionPolicyVersion };
+  if (!BACKGROUND_SOUND_IDS.includes(held.backgroundSoundId as BackgroundSoundId)) throw new TypeError("persona background sound is not supported");
+  if (typeof held.backgroundVolume !== "number" || !Number.isFinite(held.backgroundVolume) || held.backgroundVolume < BACKGROUND_VOLUME_RANGE.quietest || held.backgroundVolume > BACKGROUND_VOLUME_RANGE.loudest) throw new TypeError("persona background volume must be between -36 dB and -12 dB");
+  return { language, emotion: held.emotion as PersonaEmotion, accent, speechVolume: held.speechVolume, executionPolicyVersion: held.executionPolicyVersion, backgroundSoundId: held.backgroundSoundId as BackgroundSoundId, backgroundVolume: held.backgroundVolume };
 }
 
 export function personaParametersOfSettings(settings: PersonaSettings): PersonaParameterValues {
@@ -72,6 +93,8 @@ export function personaParametersOfSettings(settings: PersonaSettings): PersonaP
     emotion: controls.emotion, accent: controls.accent,
     speech_volume: controls.speechVolume,
     execution_policy_version: controls.executionPolicyVersion,
+    background_sound_id: controls.backgroundSoundId,
+    background_volume: controls.backgroundVolume,
   };
 }
 
@@ -84,6 +107,8 @@ export function personaParametersOfModels(models: PersonaModels): PersonaParamet
     accent: "voice_default",
     speechVolume: 1,
     executionPolicyVersion: PERSONA_EXECUTION_POLICY_VERSION,
+    backgroundSoundId: "none",
+    backgroundVolume: BACKGROUND_VOLUME_DEFAULT,
   });
 }
 
@@ -96,7 +121,7 @@ export function personaModelsOfParameters(values: PersonaParameterValues): Perso
 }
 
 export function personaControlsOfParameters(values: PersonaParameterValues): PersonaControls {
-  return validPersonaControls({ language: values.language, emotion: values.emotion, accent: values.accent, speechVolume: values.speech_volume, executionPolicyVersion: values.execution_policy_version });
+  return validPersonaControls({ language: values.language, emotion: values.emotion, accent: values.accent, speechVolume: values.speech_volume, executionPolicyVersion: values.execution_policy_version, backgroundSoundId: values.background_sound_id, backgroundVolume: values.background_volume });
 }
 
 export function personaSettingsOfParameters(values: PersonaParameterValues): PersonaSettings {
@@ -108,11 +133,11 @@ export function speechProvidersOfParameters(contract: unknown, values: unknown):
   return [...new Set([models.stt.provider, models.tts.provider])];
 }
 
-export function personaParameterContract(
+export function ticket01PersonaParameterContract(
   models: PersonaModels = RECOMMENDED_PERSONA_MODELS,
-  controls: PersonaControls = { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, executionPolicyVersion: PERSONA_EXECUTION_POLICY_VERSION },
+  controls: Omit<PersonaControls, "backgroundSoundId" | "backgroundVolume"> = { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, executionPolicyVersion: PERSONA_EXECUTION_POLICY_VERSION },
 ): readonly GraderParameter[] {
-  const checked = validPersonaControls(controls);
+  const checked = validPersonaControls({ ...controls, backgroundSoundId: "none", backgroundVolume: BACKGROUND_VOLUME_DEFAULT });
   const modelFields = legacyPersonaParameterContract(models).map((field) =>
     field.key === "tts_speed"
       ? { ...field, minimum: 0.25, maximum: 4 }
@@ -128,8 +153,21 @@ export function personaParameterContract(
   ];
 }
 
+export function personaParameterContract(
+  models: PersonaModels = RECOMMENDED_PERSONA_MODELS,
+  controls: PersonaControls = { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, executionPolicyVersion: PERSONA_EXECUTION_POLICY_VERSION, backgroundSoundId: "none", backgroundVolume: BACKGROUND_VOLUME_DEFAULT },
+): readonly GraderParameter[] {
+  const checked = validPersonaControls(controls);
+  return [
+    ...ticket01PersonaParameterContract(models, checked),
+    { key: "background_sound_id", label: "Background sound", valueType: "string", defaultValue: checked.backgroundSoundId, unit: null, minimum: null, maximum: null },
+    { key: "background_volume", label: "Background volume", valueType: "number", defaultValue: checked.backgroundVolume, unit: "linear_gain", minimum: BACKGROUND_VOLUME_RANGE.quietest, maximum: BACKGROUND_VOLUME_RANGE.loudest },
+  ];
+}
+
 export const PERSONA_PARAMETER_CONTRACT = personaParameterContract();
 const LEGACY_PERSONA_PARAMETER_CONTRACT = legacyPersonaParameterContract();
+const TICKET_01_PERSONA_PARAMETER_CONTRACT = ticket01PersonaParameterContract();
 
 export function validatePersonaParameterContract(value: unknown): readonly GraderParameter[] {
   const contract = validateGraderParameterContract(value);
@@ -140,14 +178,16 @@ export function validatePersonaParameterContract(value: unknown): readonly Grade
       (field) => fields.get(field.key)?.valueType === field.valueType,
     );
   const isLegacy = declares(LEGACY_PERSONA_PARAMETER_CONTRACT);
+  const isTicket01 = declares(TICKET_01_PERSONA_PARAMETER_CONTRACT);
   const isCurrent = declares(PERSONA_PARAMETER_CONTRACT);
-  if (!isLegacy && !isCurrent) throw new TypeError("persona parameter contract must declare one complete supported settings version");
+  if (!isLegacy && !isTicket01 && !isCurrent) throw new TypeError("persona parameter contract must declare one complete supported settings version");
   const defaults = defaultGraderParameterValues(contract);
   for (const key of ["llm_provider", "llm_model", "stt_provider", "stt_model", "tts_provider", "tts_model", "tts_voice_id"] as const) {
     if (typeof defaults[key] !== "string" || defaults[key].trim() === "") {
       throw new TypeError(`persona parameter ${key} must default to nonempty text`);
     }
   }
+  if (isTicket01) validPersonaControls({ language: defaults.language, emotion: defaults.emotion, accent: defaults.accent, speechVolume: defaults.speech_volume, executionPolicyVersion: defaults.execution_policy_version, backgroundSoundId: "none", backgroundVolume: BACKGROUND_VOLUME_DEFAULT });
   if (isCurrent) personaControlsOfParameters(defaults);
   return contract;
 }
@@ -160,7 +200,8 @@ export function validatePersonaParameterValues(contract: unknown, values: unknow
       throw new TypeError(`persona parameter ${key} must be nonempty text`);
     }
   }
-  if (checkedContract.some((field) => field.key === "language")) personaControlsOfParameters(checked);
+  if (checkedContract.some((field) => field.key === "background_sound_id")) personaControlsOfParameters(checked);
+  else if (checkedContract.some((field) => field.key === "language")) validPersonaControls({ language: checked.language, emotion: checked.emotion, accent: checked.accent, speechVolume: checked.speech_volume, executionPolicyVersion: checked.execution_policy_version, backgroundSoundId: "none", backgroundVolume: BACKGROUND_VOLUME_DEFAULT });
   return checked;
 }
 

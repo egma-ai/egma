@@ -541,6 +541,8 @@ export async function createPersona(
       accent: "voice_default",
       speechVolume: 1,
       executionPolicyVersion: 1,
+      backgroundSoundId: "none" as const,
+      backgroundVolume: 0.0631,
     };
     const models = settings.models;
     return insertPersona(

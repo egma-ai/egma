@@ -594,6 +594,8 @@ describe("the two schemas, as one contract", () => {
       personaOf(spec).parameters as Record<string, unknown>;
     expect(Object.keys(parametersOf(base)).sort()).toEqual([
       "accent",
+      "background_sound_id",
+      "background_volume",
       "emotion",
       "execution_policy_version",
       "language",
@@ -610,6 +612,21 @@ describe("the two schemas, as one contract", () => {
           params: { missingProperty: required },
         }),
       );
+    }
+    const ticket01 = structuredClone(base);
+    delete parametersOf(ticket01).background_sound_id;
+    delete parametersOf(ticket01).background_volume;
+    expect(
+      validators.spec(ticket01),
+      ajv.errorsText(validators.spec.errors),
+    ).toBe(true);
+    for (const [key, value] of [
+      ["background_sound_id", "unknown-v1"],
+      ["background_volume", 0.3],
+    ] as const) {
+      const spec = structuredClone(base);
+      parametersOf(spec)[key] = value;
+      expect(validators.spec(spec)).toBe(false);
     }
 
     // Closed: the wrapper the block used to have, and the two authored

@@ -103,8 +103,10 @@ const personaControls = {
     accent: { type: "string", minLength: 1 },
     speechVolume: { type: "number", minimum: 0.5, maximum: 1.5 },
     executionPolicyVersion: { type: "integer", minimum: 1, readOnly: true },
+    backgroundSoundId: { type: "string", enum: ["none", "office-v1", "cafe-v1", "street-traffic-v1", "crowd-talking-v1", "inside-car-v1", "home-tv-v1", "wind-v1", "rain-v1"] },
+    backgroundVolume: { type: "number", minimum: 0.015848931924611134, maximum: 0.251188643150958 },
   },
-  required: ["language", "emotion", "accent", "speechVolume", "executionPolicyVersion"],
+  required: ["language", "emotion", "accent", "speechVolume", "executionPolicyVersion", "backgroundSoundId", "backgroundVolume"],
   additionalProperties: false,
 } as const;
 
@@ -115,8 +117,10 @@ const personaControlsInput = {
     emotion: personaControls.properties.emotion,
     accent: personaControls.properties.accent,
     speechVolume: personaControls.properties.speechVolume,
+    backgroundSoundId: personaControls.properties.backgroundSoundId,
+    backgroundVolume: personaControls.properties.backgroundVolume,
   },
-  required: ["language", "emotion", "accent", "speechVolume"],
+  required: ["language", "emotion", "accent", "speechVolume", "backgroundSoundId", "backgroundVolume"],
   additionalProperties: false,
 } as const;
 

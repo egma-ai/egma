@@ -1266,6 +1266,8 @@ export const usePersona = <ThrowOnError extends boolean = false>(parameters: {
         emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
         accent: string;
         speechVolume: number;
+        backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+        backgroundVolume: number;
     };
     voiceAccessProof?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<UsePersonaResponses, UsePersonaErrors, ThrowOnError> => {
@@ -1356,6 +1358,8 @@ export const createPersona = <ThrowOnError extends boolean = false>(parameters: 
         emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
         accent: string;
         speechVolume: number;
+        backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+        backgroundVolume: number;
     };
     voiceAccessProof?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<CreatePersonaResponses, CreatePersonaErrors, ThrowOnError> => {
@@ -1478,6 +1482,8 @@ export const previewPersona = <ThrowOnError extends boolean = false>(parameters:
         emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
         accent: string;
         speechVolume: number;
+        backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+        backgroundVolume: number;
     };
     voiceAccessProof?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<PreviewPersonaResponses, PreviewPersonaErrors, ThrowOnError> => {
@@ -1585,6 +1591,8 @@ export const updatePersona = <ThrowOnError extends boolean = false>(parameters: 
         emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
         accent: string;
         speechVolume: number;
+        backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+        backgroundVolume: number;
     };
     voiceAccessProof?: string;
     expectedVersionId?: string;

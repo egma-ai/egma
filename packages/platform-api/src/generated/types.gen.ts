@@ -3154,6 +3154,8 @@ export type UsePersonaData = {
             emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
             accent: string;
             speechVolume: number;
+            backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+            backgroundVolume: number;
         };
         voiceAccessProof?: string;
     };
@@ -3265,6 +3267,8 @@ export type UsePersonaResponses = {
                 accent: string;
                 speechVolume: number;
                 readonly executionPolicyVersion: number;
+                backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+                backgroundVolume: number;
             };
             createdAt: string;
             updatedAt: string;
@@ -3387,6 +3391,8 @@ export type ListPersonasResponses = {
                     accent: string;
                     speechVolume: number;
                     readonly executionPolicyVersion: number;
+                    backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+                    backgroundVolume: number;
                 };
                 createdAt: string;
                 updatedAt: string;
@@ -3448,6 +3454,8 @@ export type CreatePersonaData = {
             emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
             accent: string;
             speechVolume: number;
+            backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+            backgroundVolume: number;
         };
         voiceAccessProof?: string;
     };
@@ -3557,6 +3565,8 @@ export type CreatePersonaResponses = {
                 accent: string;
                 speechVolume: number;
                 readonly executionPolicyVersion: number;
+                backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+                backgroundVolume: number;
             };
             createdAt: string;
             updatedAt: string;
@@ -3819,6 +3829,8 @@ export type PreviewPersonaData = {
             emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
             accent: string;
             speechVolume: number;
+            backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+            backgroundVolume: number;
         };
         /**
          * A prior short-lived proof for an existing provider voice ID.
@@ -4039,6 +4051,8 @@ export type GetPersonaResponses = {
                 accent: string;
                 speechVolume: number;
                 readonly executionPolicyVersion: number;
+                backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+                backgroundVolume: number;
             };
             createdAt: string;
             updatedAt: string;
@@ -4098,6 +4112,8 @@ export type UpdatePersonaData = {
             emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
             accent: string;
             speechVolume: number;
+            backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+            backgroundVolume: number;
         };
         voiceAccessProof?: string;
         /**
@@ -4213,6 +4229,8 @@ export type UpdatePersonaResponses = {
                 accent: string;
                 speechVolume: number;
                 readonly executionPolicyVersion: number;
+                backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+                backgroundVolume: number;
             };
             createdAt: string;
             updatedAt: string;
@@ -4546,6 +4564,8 @@ export type ForkPersonaResponses = {
                 accent: string;
                 speechVolume: number;
                 readonly executionPolicyVersion: number;
+                backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+                backgroundVolume: number;
             };
             createdAt: string;
             updatedAt: string;

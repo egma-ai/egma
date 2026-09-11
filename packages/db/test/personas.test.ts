@@ -388,7 +388,7 @@ describe("editing a persona's model selection", () => {
       editPersona(actingAsAcme(), created.id, {
         models: {
           ...RECOMMENDED_PERSONA_MODELS,
-          tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed: 2 },
+          tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed: 4.1 },
         },
       }),
     ).rejects.toThrow(/speed/i);
@@ -669,6 +669,11 @@ describe("stored core and project settings validation", () => {
   it("refuses invalid project values written around the module", async () => {
     const created = await createPersona(actingAsAcme(), rita);
     await expect(database.sql(`update project_persona set parameter_values = jsonb_set(parameter_values, '{tts_speed}', '4.1') where persona_definition_id = $1`, [created.id])).rejects.toMatchObject({ code: POSTGRES_ERROR.checkViolation });
+  });
+  it("refuses unknown background assets and out-of-range background gain", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
+    await expect(database.sql(`update project_persona set parameter_values = jsonb_set(parameter_values, '{background_sound_id}', '"unknown-v1"') where persona_definition_id = $1`, [created.id])).rejects.toMatchObject({ code: POSTGRES_ERROR.checkViolation });
+    await expect(database.sql(`update project_persona set parameter_values = jsonb_set(parameter_values, '{background_volume}', '0.3') where persona_definition_id = $1`, [created.id])).rejects.toMatchObject({ code: POSTGRES_ERROR.checkViolation });
   });
 });
 

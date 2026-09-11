@@ -99,12 +99,18 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["language", "emotion", "accent", "speech_volume", "execution_policy_version"],
+          "dependentRequired": {
+            "background_sound_id": ["background_volume"],
+            "background_volume": ["background_sound_id"]
+          },
           "properties": {
             "language": { "type": "string", "minLength": 1, "pattern": "\\S" },
             "emotion": { "type": "string", "enum": ["neutral", "happy", "angry", "frustrated", "sad", "anxious"] },
             "accent": { "type": "string", "minLength": 1, "pattern": "\\S" },
             "speech_volume": { "type": "number", "minimum": 0.5, "maximum": 1.5 },
-            "execution_policy_version": { "type": "integer", "minimum": 1 }
+            "execution_policy_version": { "type": "integer", "minimum": 1 },
+            "background_sound_id": { "type": "string", "enum": ["none", "office-v1", "cafe-v1", "street-traffic-v1", "crowd-talking-v1", "inside-car-v1", "home-tv-v1", "wind-v1", "rain-v1"] },
+            "background_volume": { "type": "number", "minimum": 0.015848931924611134, "maximum": 0.251188643150958 }
           }
         }
       }
