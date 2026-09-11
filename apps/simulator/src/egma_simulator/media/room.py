@@ -17,6 +17,7 @@ from ..mock_tools import MockToolRefusal
 from ..platform_logging import log_event
 from . import (
     MediaBackendError,
+    PlayoutClearAcknowledger,
     PlayoutStamp,
     RemoteParticipantLeftFrame,
     VoiceMedia,
@@ -989,7 +990,11 @@ class JoinedRoom:
 
         return VoiceMedia(
             input=(input_transport, _Arrival()),
-            output=(transport.output(), PlayoutStamp(wait_for_playout=True)),
+            output=(
+                PlayoutClearAcknowledger(),
+                transport.output(),
+                PlayoutStamp(wait_for_playout=True, acknowledged_clears=True),
+            ),
             ended=self.ended,
             failed=self.failed,
             transport_name=f"livekit server at {self._quotable(self._url)}",

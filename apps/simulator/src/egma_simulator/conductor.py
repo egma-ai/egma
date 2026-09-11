@@ -67,8 +67,10 @@ from .conversation import (
     turn_limit_reached,
 )
 from .media import (
+    _TRANSPORT_PLAYOUT_GENERATION,
     TRANSPORT_ARRIVAL,
     TRANSPORT_PLAYOUT,
+    PlayoutClearedFrame,
     RemoteParticipantLeftFrame,
     VoiceMedia,
     transport_time,
@@ -308,6 +310,7 @@ class _EvidenceRecorder(AudioBufferProcessor):
         self._origin_seconds: float | None = None
         self._origin_unix_nano = 0
         self._real_time = real_time
+        self._cleared_playout: dict[int, float] = {}
 
     @staticmethod
     def _source_range(
@@ -348,6 +351,7 @@ class _EvidenceRecorder(AudioBufferProcessor):
             self._persona = _RecordedTrack()
             self._origin_seconds = None
             self._origin_unix_nano = 0
+            self._cleared_playout.clear()
 
     async def _process_recording(self, frame: Frame) -> None:
         """Put one frame on the recording, at the time it happened.
@@ -364,7 +368,7 @@ class _EvidenceRecorder(AudioBufferProcessor):
                 await self._record_agent(frame)
             elif isinstance(frame, OutputAudioRawFrame):
                 await self._record_persona(frame)
-            elif isinstance(frame, InterruptionFrame):
+            elif isinstance(frame, (InterruptionFrame, PlayoutClearedFrame)):
                 self._drop_what_was_never_played(frame)
             else:
                 return
@@ -414,11 +418,28 @@ class _EvidenceRecorder(AudioBufferProcessor):
     async def _record_persona(self, frame: OutputAudioRawFrame) -> None:
         """The persona's audio, where the transport plays it out."""
         played = self._transport_time(frame, TRANSPORT_PLAYOUT, "persona audio")
-        audio = await self._resample_output_audio(frame)
+        source_audio = frame.audio
+        generation = frame.metadata.get(_TRANSPORT_PLAYOUT_GENERATION)
+        cleared = (
+            self._cleared_playout.get(generation)
+            if isinstance(generation, int)
+            else None
+        )
+        through = played + frame.num_frames / frame.sample_rate
+        if cleared is not None:
+            if cleared <= played:
+                return
+            if cleared < through:
+                heard_frames = int((cleared - played) * frame.sample_rate)
+                bytes_per_frame = len(source_audio) // frame.num_frames
+                source_audio = source_audio[: heard_frames * bytes_per_frame]
+                through = played + heard_frames / frame.sample_rate
+        audio = await self._output_resampler.resample(
+            source_audio, frame.sample_rate, self.sample_rate
+        )
         written = len(audio) // 2
         if not written:
             return
-        through = played + frame.num_frames / frame.sample_rate
         self._place(
             self._bot_audio_buffer,
             self._persona,
@@ -432,7 +453,12 @@ class _EvidenceRecorder(AudioBufferProcessor):
         audio that was played.
         """
         cleared = transport_time(frame, TRANSPORT_PLAYOUT)
-        if cleared is None or self._origin_seconds is None:
+        if cleared is None:
+            return
+        generation = frame.metadata.get(_TRANSPORT_PLAYOUT_GENERATION)
+        if isinstance(generation, int):
+            self._cleared_playout[generation] = cleared
+        if self._origin_seconds is None:
             return
         heard_through = self._sample_at(cleared)
         written_through = self._persona.written_through
@@ -1272,7 +1298,7 @@ class _Timeline(FrameProcessor):
             stopped = frame.metadata.get(_INTERRUPTION_STOPPED)
             if isinstance(stopped, asyncio.Event):
                 stopped.set()
-        elif isinstance(frame, InterruptionFrame):
+        elif isinstance(frame, (InterruptionFrame, PlayoutClearedFrame)):
             self._conductor.persona_interrupted(
                 heard_through=self._recorder.bot_position
             )
@@ -1569,8 +1595,11 @@ class VoiceConductor:
         self._segment_waiting_for_interruption_owner = False
         self._interruption_due_at = None
         queued_deliberate_audio = (
-            self._interruption_state == "delivering"
-            and not self._deliberate_playout_has_begun()
+            self._interruption_state == "awaiting_playout"
+            or (
+                self._interruption_state == "delivering"
+                and not self._deliberate_playout_has_begun()
+            )
         )
         if queued_deliberate_audio or self._interruption_state in {
             "scheduled",

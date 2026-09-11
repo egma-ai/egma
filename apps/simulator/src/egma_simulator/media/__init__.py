@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     Frame,
     InterruptionFrame,
     OutputAudioRawFrame,
+    SystemFrame,
     TTSStoppedFrame,
     UninterruptibleFrame,
 )
@@ -89,6 +90,11 @@ class RemoteParticipantLeftFrame(ControlFrame, UninterruptibleFrame):
     completed: asyncio.Event
 
 
+@dataclass
+class PlayoutClearedFrame(SystemFrame, UninterruptibleFrame):
+    """The transport confirms that its outbound audio queue is clear."""
+
+
 TRANSPORT_ARRIVAL = "egma.transport_arrival"
 """When one inbound frame's first sample reached the transport.
 
@@ -105,6 +111,8 @@ The transport paces what it is handed: audio written while earlier audio
 is still playing waits its turn. This is where the frame lands after
 that wait, not when the speech leg made it.
 """
+
+_TRANSPORT_PLAYOUT_GENERATION = "egma.transport_playout_generation"
 
 
 def arrived_at(frame: object, seconds: float) -> None:
@@ -183,29 +191,52 @@ class PlayoutClock:
             await asyncio.wait_for(cleared.wait(), remaining)
 
 
+class PlayoutClearAcknowledger(FrameProcessor):
+    """Emit an ordered acknowledgement after the transport clears its queue."""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        await self.push_frame(frame, direction)
+        if direction == FrameDirection.DOWNSTREAM and isinstance(
+            frame, InterruptionFrame
+        ):
+            await self.push_frame(PlayoutClearedFrame(), direction)
+
+
 class PlayoutStamp(FrameProcessor):
     """Observe audio after the transport output processor and calculate queued playout
     time.
     Report interruptions so the recording discards audio removed before playback.
     """
 
-    def __init__(self, *, wait_for_playout: bool = False) -> None:
+    def __init__(
+        self, *, wait_for_playout: bool = False, acknowledged_clears: bool = False
+    ) -> None:
         super().__init__()
         self._playout = PlayoutClock()
         self._wait_for_playout = wait_for_playout
+        self._generation = 0
+        self._acknowledged_clears = acknowledged_clears
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         if isinstance(frame, OutputAudioRawFrame):
+            frame.metadata[_TRANSPORT_PLAYOUT_GENERATION] = self._generation
             played_out_at(
                 frame,
                 self._playout.place(
                     time.monotonic(), frame.num_frames / frame.sample_rate
                 ),
             )
-        elif isinstance(frame, InterruptionFrame):
+        elif isinstance(frame, PlayoutClearedFrame) or (
+            isinstance(frame, InterruptionFrame) and not self._acknowledged_clears
+        ):
+            frame.metadata[_TRANSPORT_PLAYOUT_GENERATION] = self._generation
             played_out_at(frame, time.monotonic())
             self._playout.cleared()
+            self._generation += 1
+        elif isinstance(frame, InterruptionFrame):
+            return
         elif isinstance(frame, TTSStoppedFrame) and self._wait_for_playout:
             await self._playout.wait_until_played()
         await self.push_frame(frame, direction)

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import math
+import time
 import uuid
 from array import array
 from dataclasses import dataclass, field
@@ -34,12 +35,14 @@ from egma_simulator.background import (
 )
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.conductor import (
+    _INTERRUPTION_AUDIO,
     ConductParameters,
     VoiceConductor,
     _EvidenceRecorder,
 )
 from egma_simulator.conversation import ConversationControls
 from egma_simulator.media import (
+    _TRANSPORT_PLAYOUT_GENERATION,
     TRANSPORT_PLAYOUT,
     PlayoutStamp,
     VoiceMedia,
@@ -98,6 +101,7 @@ class _RemoteCapture:
     room: rtc.Room
     tracks: list[str] = field(default_factory=list)
     frames: list[bytes] = field(default_factory=list)
+    frame_times: list[float] = field(default_factory=list)
     subscribed: asyncio.Event = field(default_factory=asyncio.Event)
     stream: rtc.AudioStream | None = None
     reader: asyncio.Task[None] | None = None
@@ -126,6 +130,7 @@ class _RemoteCapture:
                 )
             )
             if stop_after is not None and stop_after.is_set():
+                self.source.clear_queue()
                 silence = bytes(width)
                 for _ in range(20):
                     await self.source.capture_frame(
@@ -154,18 +159,54 @@ class _AcceptedOutput(FrameProcessor):
         self.first = asyncio.Event()
         self.playout_at: float | None = None
         self.pcm: bytes | None = None
+        self.frame: TTSAudioRawFrame | None = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
-        is_speech = isinstance(frame, OutputAudioRawFrame) and any(
-            abs(int.from_bytes(frame.audio[offset : offset + 2], "little", signed=True))
-            > 100
-            for offset in range(0, len(frame.audio), 2)
+        is_speech = (
+            isinstance(frame, TTSAudioRawFrame)
+            and any(
+                abs(
+                    int.from_bytes(
+                        frame.audio[offset : offset + 2], "little", signed=True
+                    )
+                )
+                > 100
+                for offset in range(0, len(frame.audio), 2)
+            )
         )
         if is_speech and not self.first.is_set():
+            assert isinstance(frame, TTSAudioRawFrame)
             self.playout_at = transport_time(frame, TRANSPORT_PLAYOUT)
             self.pcm = bytes(frame.audio)
+            self.frame = frame
             self.first.set()
+        await self.push_frame(frame, direction)
+
+
+class _QueuedLead(FrameProcessor):
+    """Put quiet ahead of the first speech frame in the real transport queue."""
+
+    def __init__(self, seconds: float) -> None:
+        super().__init__()
+        self._seconds = seconds
+        self._added = False
+        self.deliberate_pcm: bytes | None = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if isinstance(frame, OutputAudioRawFrame) and not self._added:
+            self._added = True
+            frames = round(SAMPLE_RATE * self._seconds)
+            await self.push_frame(
+                OutputAudioRawFrame(bytes(frames * 2), SAMPLE_RATE, 1), direction
+            )
+        if (
+            isinstance(frame, OutputAudioRawFrame)
+            and frame.metadata.get(_INTERRUPTION_AUDIO) is True
+            and self.deliberate_pcm is None
+        ):
+            self.deliberate_pcm = bytes(frame.audio)
         await self.push_frame(frame, direction)
 
 
@@ -178,6 +219,7 @@ class _LiveConductorConnection:
         room_name: str,
         background: BackgroundSound,
         accepted: _AcceptedOutput | None = None,
+        queued_lead_seconds: float = 0,
     ) -> None:
         self._room = JoinedRoom(
             url=server.url,
@@ -186,6 +228,8 @@ class _LiveConductorConnection:
         )
         self._background = background
         self._accepted = accepted
+        self._queued_lead_seconds = queued_lead_seconds
+        self.lead: _QueuedLead | None = None
 
     @property
     def provider_reference(self) -> str:
@@ -201,9 +245,11 @@ class _LiveConductorConnection:
         )
         if self._accepted is None:
             return media
+        lead = _QueuedLead(self._queued_lead_seconds)
+        self.lead = lead
         return VoiceMedia(
             input=media.input,
-            output=(*media.output, self._accepted),
+            output=(lead, *media.output, self._accepted),
             ended=media.ended,
             failed=media.failed,
             transport_name=media.transport_name,
@@ -240,6 +286,7 @@ async def _observer(server, room_name: str) -> _RemoteCapture:
             assert capture.stream is not None
             async for event in capture.stream:
                 capture.frames.append(bytes(event.frame.data))
+                capture.frame_times.append(time.monotonic())
 
         capture.reader = asyncio.create_task(read())
         capture.subscribed.set()
@@ -555,6 +602,7 @@ async def test_agent_stop_clears_deliberate_audio_queued_before_playout(
         room_name,
         BackgroundSound("rain-v1", DEFAULT_BACKGROUND_VOLUME),
         accepted,
+        queued_lead_seconds=0.75,
     )
     spec = spec_for(
         scenario="Try one short interruption while the agent is speaking.",
@@ -575,10 +623,16 @@ async def test_agent_stop_clears_deliberate_audio_queued_before_playout(
     controls = ConversationControls()
     interruptions = []
     canceled = asyncio.Event()
+    canceled_at = None
+    canceled_wall = None
 
     def on_interruption(evidence) -> None:
+        nonlocal canceled_at, canceled_wall
         interruptions.append(evidence)
         if evidence.event == "canceled":
+            assert conductor._recorder is not None
+            canceled_at = conductor._recorder.clock_position
+            canceled_wall = time.monotonic()
             canceled.set()
 
     async def ignore(*_args) -> None:
@@ -609,10 +663,18 @@ async def test_agent_stop_clears_deliberate_audio_queued_before_playout(
     try:
         await asyncio.wait_for(accepted.first.wait(), 10)
         assert accepted.playout_at is not None
+        assert accepted.frame is not None
+        assert conductor._recorder is not None
+        accepted_at = conductor._recorder.playout_position(accepted.frame)
         await asyncio.wait_for(publishing, 3)
         await asyncio.wait_for(canceled.wait(), 3)
-        frames_at_cancel = len(remote.frames)
-        await asyncio.sleep(0.2)
+        assert canceled_at is not None
+        assert canceled_at < accepted_at
+        assert canceled_wall is not None
+        assert canceled_wall < accepted.playout_at
+        accepted_duration = len(accepted.pcm) / 2 / SAMPLE_RATE
+        observed_through = accepted.playout_at + accepted_duration + 0.1
+        await asyncio.sleep(max(0, observed_through - time.monotonic()))
         controls.request_cancel()
         conducted = await asyncio.wait_for(running, 5)
 
@@ -622,8 +684,6 @@ async def test_agent_stop_clears_deliberate_audio_queued_before_playout(
         assert actual.began_unix_nano is None
         assert actual.ended_unix_nano is None
         assert not any(event.event == "delivered" for event in interruptions)
-        assert any(_rms(frame) > 20 for frame in remote.frames[frames_at_cancel:])
-
         assert conductor.audio is not None
         persona, agent, rate = channels_of(
             (tmp_path / conductor.audio.recording).read_bytes()
@@ -634,7 +694,48 @@ async def test_agent_stop_clears_deliberate_audio_queued_before_playout(
             for offset in range(0, len(agent), 2)
         )
         assert accepted.pcm is not None
-        assert accepted.pcm not in persona
+        assert connection.lead is not None
+        assert connection.lead.deliberate_pcm is not None
+        deliberate_pcm = connection.lead.deliberate_pcm
+        accepted_start = round(float(accepted_at) * rate) * 2
+        accepted_end = accepted_start + len(accepted.pcm)
+        scheduled_recording = persona[accepted_start:accepted_end]
+        chunk_bytes = rate // 1_000 * 2
+        accepted_generation = accepted.frame.metadata.get(
+            _TRANSPORT_PLAYOUT_GENERATION
+        )
+        assert isinstance(accepted_generation, int)
+        assert accepted_generation in conductor._recorder._cleared_playout
+        assert (
+            conductor._recorder._cleared_playout[accepted_generation]
+            < accepted.playout_at
+        )
+        leaked_chunks = [
+            offset
+            for offset in range(0, len(deliberate_pcm), chunk_bytes)
+            if _rms(deliberate_pcm[offset : offset + chunk_bytes]) > 4_000
+            and deliberate_pcm[offset : offset + chunk_bytes] in scheduled_recording
+        ]
+        assert not leaked_chunks, leaked_chunks
+        scheduled_remote = [
+            frame
+            for frame, received_at in zip(
+                remote.frames, remote.frame_times, strict=True
+            )
+            if accepted.playout_at <= received_at <= observed_through
+        ]
+        background_remote = [
+            frame
+            for frame, received_at in zip(
+                remote.frames, remote.frame_times, strict=True
+            )
+            if accepted.playout_at - 0.2 <= received_at < accepted.playout_at
+        ]
+        assert background_remote
+        assert scheduled_remote
+        assert any(_rms(frame) > 20 for frame in scheduled_remote)
+        background_peak = max(_rms(frame) for frame in background_remote)
+        assert max(_rms(frame) for frame in scheduled_remote) <= background_peak * 1.5
     finally:
         controls.request_cancel()
         if not running.done():
