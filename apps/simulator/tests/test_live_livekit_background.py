@@ -22,6 +22,7 @@ from pipecat.pipeline.worker import PipelineWorker
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
 from pipecat.workers.runner import WorkerRunner
+from test_voice import spec_for
 
 from egma_simulator.background import (
     DEFAULT_BACKGROUND_VOLUME,
@@ -31,8 +32,24 @@ from egma_simulator.background import (
     asset_catalog,
     soundfile_mixer,
 )
-from egma_simulator.conductor import _EvidenceRecorder
-from egma_simulator.media import PlayoutStamp
+from egma_simulator.blob import FilesystemBlobStore
+from egma_simulator.conductor import (
+    ConductParameters,
+    VoiceConductor,
+    _EvidenceRecorder,
+)
+from egma_simulator.conversation import ConversationControls
+from egma_simulator.media import (
+    TRANSPORT_PLAYOUT,
+    PlayoutStamp,
+    VoiceMedia,
+    transport_time,
+)
+from egma_simulator.media.room import JoinedRoom
+from egma_simulator.model import ScriptedModel
+from egma_simulator.persona import Persona
+from egma_simulator.recording import channels_of
+from egma_simulator.speech import SCRIPTED_PAIR, encode_speech, voice_from_models
 
 SAMPLE_RATE = 24_000
 FRAME_SECONDS = 0.01
@@ -84,6 +101,42 @@ class _RemoteCapture:
     subscribed: asyncio.Event = field(default_factory=asyncio.Event)
     stream: rtc.AudioStream | None = None
     reader: asyncio.Task[None] | None = None
+    source: rtc.AudioSource | None = None
+
+    async def publish(
+        self, pcm: bytes, *, stop_after: asyncio.Event | None = None
+    ) -> None:
+        self.source = rtc.AudioSource(SAMPLE_RATE, 1)
+        track = rtc.LocalAudioTrack.create_audio_track("controlled-agent", self.source)
+        await self.room.local_participant.publish_track(
+            track,
+            rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE),
+        )
+        width = round(SAMPLE_RATE * FRAME_SECONDS) * 2
+        for offset in range(0, len(pcm), width):
+            chunk = pcm[offset : offset + width]
+            if len(chunk) < width:
+                chunk += bytes(width - len(chunk))
+            await self.source.capture_frame(
+                rtc.AudioFrame(
+                    data=chunk,
+                    sample_rate=SAMPLE_RATE,
+                    num_channels=1,
+                    samples_per_channel=len(chunk) // 2,
+                )
+            )
+            if stop_after is not None and stop_after.is_set():
+                silence = bytes(width)
+                for _ in range(20):
+                    await self.source.capture_frame(
+                        rtc.AudioFrame(
+                            data=silence,
+                            sample_rate=SAMPLE_RATE,
+                            num_channels=1,
+                            samples_per_channel=len(silence) // 2,
+                        )
+                    )
+                return
 
     async def close(self) -> None:
         if self.stream is not None:
@@ -93,6 +146,76 @@ class _RemoteCapture:
             with contextlib.suppress(asyncio.CancelledError):
                 await self.reader
         await self.room.disconnect()
+
+
+class _AcceptedOutput(FrameProcessor):
+    def __init__(self) -> None:
+        super().__init__()
+        self.first = asyncio.Event()
+        self.playout_at: float | None = None
+        self.pcm: bytes | None = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        is_speech = isinstance(frame, OutputAudioRawFrame) and any(
+            abs(int.from_bytes(frame.audio[offset : offset + 2], "little", signed=True))
+            > 100
+            for offset in range(0, len(frame.audio), 2)
+        )
+        if is_speech and not self.first.is_set():
+            self.playout_at = transport_time(frame, TRANSPORT_PLAYOUT)
+            self.pcm = bytes(frame.audio)
+            self.first.set()
+        await self.push_frame(frame, direction)
+
+
+class _LiveConductorConnection:
+    """Give the public conductor one stock LiveKit transport and real peer."""
+
+    def __init__(
+        self,
+        server,
+        room_name: str,
+        background: BackgroundSound,
+        accepted: _AcceptedOutput | None = None,
+    ) -> None:
+        self._room = JoinedRoom(
+            url=server.url,
+            token=_token(server.api_key, server.api_secret, room_name, "egma-persona"),
+            room_name=room_name,
+        )
+        self._background = background
+        self._accepted = accepted
+
+    @property
+    def provider_reference(self) -> str:
+        return "controlled-livekit-room"
+
+    @property
+    def far_end_left(self) -> bool:
+        return self._room.ended.is_set()
+
+    async def prepare(self):
+        media = self._room.create_transport(
+            audio_out_mixer=soundfile_mixer(self._background)
+        )
+        if self._accepted is None:
+            return media
+        return VoiceMedia(
+            input=media.input,
+            output=(*media.output, self._accepted),
+            ended=media.ended,
+            failed=media.failed,
+            transport_name=media.transport_name,
+            input_recorded=media.input_recorded,
+            real_time=media.real_time,
+        )
+
+    async def open(self) -> None:
+        await self._room.wait_connected()
+
+    async def close(self) -> None:
+        await self._room.leave()
 
 
 async def _observer(server, room_name: str) -> _RemoteCapture:
@@ -289,3 +412,236 @@ async def test_remote_background_gain_and_recording_follow_submitted_audio(
     finally:
         await quiet_remote.close()
         await loud_remote.close()
+
+
+async def test_real_caller_receives_deliberate_overlap_while_background_continues(
+    live_livekit,
+    tmp_path,
+):
+    """Exercise the conductor, mixer, recorder, and real RTC peer together."""
+    room_name = f"egma-combined-proof-{uuid.uuid4().hex}"
+    remote = await _observer(live_livekit, room_name)
+    connection = _LiveConductorConnection(
+        live_livekit,
+        room_name,
+        BackgroundSound("rain-v1", DEFAULT_BACKGROUND_VOLUME),
+    )
+    spec = spec_for(
+        scenario="Interrupt with one brief relevant sentence.",
+        greeting="",
+        replies=[],
+        max_turns=8,
+        max_duration_seconds=15,
+    )
+    conductor = VoiceConductor(
+        connection=connection,
+        voice=voice_from_models(spec.models),
+        speech=SCRIPTED_PAIR,
+        blobs=FilesystemBlobStore(tmp_path),
+        recording_key="combined.wav",
+        parameters=ConductParameters(interruption_level="frequent"),
+    )
+    conductor._random.uniform = lambda _low, _high: 0.1
+    controls = ConversationControls()
+    interruptions = []
+    delivered = asyncio.Event()
+    received_at_schedule = 0
+    received_at_delivery = 0
+
+    def on_interruption(evidence) -> None:
+        nonlocal received_at_delivery, received_at_schedule
+        interruptions.append(evidence)
+        if evidence.event == "scheduled":
+            received_at_schedule = len(remote.frames)
+        elif evidence.event == "delivered":
+            received_at_delivery = len(remote.frames)
+            delivered.set()
+
+    async def ignore(*_args) -> None:
+        return None
+
+    running = asyncio.create_task(
+        conductor.conduct(
+            persona=Persona(
+                authored=spec.persona,
+                scenario_instructions=spec.scenario_instructions,
+                model=ScriptedModel("Please wait while I clarify that."),
+            ),
+            max_turns=spec.limits.max_turns,
+            max_duration_seconds=spec.limits.max_duration_seconds,
+            controls=controls,
+            name="sim:combined-livekit-proof",
+            on_utterance=ignore,
+            on_measured=ignore,
+            on_interruption=on_interruption,
+        )
+    )
+    publishing = None
+    try:
+        await asyncio.sleep(0.2)
+        assert interruptions == []
+        publishing = asyncio.create_task(
+            remote.publish(
+                encode_speech(
+                    "The agent keeps explaining the issue. " * 30,
+                    SAMPLE_RATE,
+                )
+            )
+        )
+        await asyncio.wait_for(delivered.wait(), 10)
+        await asyncio.sleep(0.2)
+        controls.request_cancel()
+        conducted = await asyncio.wait_for(running, 5)
+        publishing.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await publishing
+
+        assert conducted.status == "canceled"
+        assert len(remote.tracks) == 1
+        assert 0 < received_at_schedule < received_at_delivery
+        assert any(
+            _rms(frame) > 20
+            for frame in remote.frames[received_at_schedule:received_at_delivery]
+        )
+        assert any(_rms(frame) > 20 for frame in remote.frames[received_at_delivery:])
+        assert [event.event for event in interruptions].count("scheduled") == 1
+        assert [event.event for event in interruptions].count("delivered") == 1
+
+        assert conductor.audio is not None
+        persona, agent, rate = channels_of(
+            (tmp_path / conductor.audio.recording).read_bytes()
+        )
+        assert rate == SAMPLE_RATE
+        actual = next(event for event in interruptions if event.event == "delivered")
+        assert actual.began_unix_nano is not None
+        assert actual.ended_unix_nano is not None
+        recording_start = conductor.audio.started_unix_nano
+        overlap_start = max(
+            0, (actual.began_unix_nano - recording_start) * rate // 1_000_000_000
+        )
+        overlap_end = min(
+            len(persona) // 2,
+            (actual.ended_unix_nano - recording_start) * rate // 1_000_000_000,
+        )
+        assert any(
+            abs(int.from_bytes(persona[offset : offset + 2], "little", signed=True))
+            > 100
+            and abs(int.from_bytes(agent[offset : offset + 2], "little", signed=True))
+            > 100
+            for offset in range(overlap_start * 2, overlap_end * 2, 2)
+        )
+    finally:
+        controls.request_cancel()
+        if not running.done():
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(running, 5)
+        if publishing is not None and not publishing.done():
+            publishing.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await publishing
+        await remote.close()
+
+
+async def test_agent_stop_clears_deliberate_audio_queued_before_playout(
+    live_livekit,
+    tmp_path,
+):
+    """Accepted future audio is not evidence until the real caller can hear it."""
+    room_name = f"egma-queued-interruption-{uuid.uuid4().hex}"
+    remote = await _observer(live_livekit, room_name)
+    accepted = _AcceptedOutput()
+    connection = _LiveConductorConnection(
+        live_livekit,
+        room_name,
+        BackgroundSound("rain-v1", DEFAULT_BACKGROUND_VOLUME),
+        accepted,
+    )
+    spec = spec_for(
+        scenario="Try one short interruption while the agent is speaking.",
+        greeting="",
+        replies=[],
+        max_turns=8,
+        max_duration_seconds=15,
+    )
+    conductor = VoiceConductor(
+        connection=connection,
+        voice=voice_from_models(spec.models),
+        speech=SCRIPTED_PAIR,
+        blobs=FilesystemBlobStore(tmp_path),
+        recording_key="queued-before-playout.wav",
+        parameters=ConductParameters(interruption_level="frequent"),
+    )
+    conductor._random.uniform = lambda _low, _high: 0.1
+    controls = ConversationControls()
+    interruptions = []
+    canceled = asyncio.Event()
+
+    def on_interruption(evidence) -> None:
+        interruptions.append(evidence)
+        if evidence.event == "canceled":
+            canceled.set()
+
+    async def ignore(*_args) -> None:
+        return None
+
+    running = asyncio.create_task(
+        conductor.conduct(
+            persona=Persona(
+                authored=spec.persona,
+                scenario_instructions=spec.scenario_instructions,
+                model=ScriptedModel("Let me stop you there."),
+            ),
+            max_turns=spec.limits.max_turns,
+            max_duration_seconds=spec.limits.max_duration_seconds,
+            controls=controls,
+            name="sim:queued-before-playout",
+            on_utterance=ignore,
+            on_measured=ignore,
+            on_interruption=on_interruption,
+        )
+    )
+    publishing = asyncio.create_task(
+        remote.publish(
+            encode_speech("The agent is still explaining. " * 40, SAMPLE_RATE),
+            stop_after=accepted.first,
+        )
+    )
+    try:
+        await asyncio.wait_for(accepted.first.wait(), 10)
+        assert accepted.playout_at is not None
+        await asyncio.wait_for(publishing, 3)
+        await asyncio.wait_for(canceled.wait(), 3)
+        frames_at_cancel = len(remote.frames)
+        await asyncio.sleep(0.2)
+        controls.request_cancel()
+        conducted = await asyncio.wait_for(running, 5)
+
+        assert conducted.status == "canceled"
+        actual = next(event for event in interruptions if event.event == "canceled")
+        assert actual.reason == "agent_stopped_before_playout"
+        assert actual.began_unix_nano is None
+        assert actual.ended_unix_nano is None
+        assert not any(event.event == "delivered" for event in interruptions)
+        assert any(_rms(frame) > 20 for frame in remote.frames[frames_at_cancel:])
+
+        assert conductor.audio is not None
+        persona, agent, rate = channels_of(
+            (tmp_path / conductor.audio.recording).read_bytes()
+        )
+        assert rate == SAMPLE_RATE
+        assert any(
+            abs(int.from_bytes(agent[offset : offset + 2], "little", signed=True)) > 100
+            for offset in range(0, len(agent), 2)
+        )
+        assert accepted.pcm is not None
+        assert accepted.pcm not in persona
+    finally:
+        controls.request_cancel()
+        if not running.done():
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(running, 5)
+        if not publishing.done():
+            publishing.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await publishing
+        await remote.close()
