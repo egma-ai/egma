@@ -64,6 +64,56 @@ const LIVE_MODALITY = process.env["SIMULATION_E2E_MODALITY"] ?? "chat";
 const LIVE_MOCKS = process.env["SIMULATION_E2E_MOCKS"] !== "off";
 const LIVE_ACCESS = process.env["SIMULATION_E2E_ACCESS"] ?? "project_credentials";
 
+type CustomerTurn = {
+  kind: "turn:human" | "turn:agent";
+  text: string;
+};
+
+function turnsInSpeakerOrder(turns: Array<{ kind: string; text: string }>): {
+  human: string[];
+  agent: string[];
+} {
+  const ordered = { human: [] as string[], agent: [] as string[] };
+  for (const turn of turns) {
+    if (turn.kind === "turn:human") ordered.human.push(turn.text);
+    else if (turn.kind === "turn:agent") ordered.agent.push(turn.text);
+    else throw new Error(`unexpected customer turn kind: ${turn.kind}`);
+  }
+  return ordered;
+}
+
+describe("customer turn evidence", () => {
+  const nativeTurns: CustomerTurn[] = [
+    { kind: "turn:human", text: "Thank you for the information." },
+    { kind: "turn:agent", text: "You're" },
+    { kind: "turn:human", text: "Goodbye." },
+    { kind: "turn:agent", text: "Goodbye! Have a great day!" },
+  ];
+  const overlappingPublicTurns: CustomerTurn[] = [
+    { kind: "turn:human", text: "Thank you for the information." },
+    { kind: "turn:agent", text: "You're" },
+    { kind: "turn:agent", text: "Goodbye! Have a great day!" },
+    { kind: "turn:human", text: "Goodbye." },
+  ];
+
+  it("keeps each speaker's sequence when overlapping turns have different total orders", () => {
+    expect(overlappingPublicTurns).not.toEqual(nativeTurns);
+    expect(turnsInSpeakerOrder(overlappingPublicTurns)).toEqual(
+      turnsInSpeakerOrder(nativeTurns),
+    );
+  });
+
+  it("rejects missing duplicate evidence", () => {
+    const nativeWithDuplicate = [
+      ...nativeTurns,
+      { kind: "turn:human" as const, text: "Goodbye." },
+    ];
+    expect(turnsInSpeakerOrder(overlappingPublicTurns)).not.toEqual(
+      turnsInSpeakerOrder(nativeWithDuplicate),
+    );
+  });
+});
+
 describe("quick tunnel output", () => {
   it("does not mistake the Cloudflare API error address for a public tunnel", () => {
     expect(quickTunnelUrl("request to https://api.trycloudflare.com failed")).toBeUndefined();
@@ -1361,6 +1411,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       }> = [];
       let artifact: { file: string; sha256: string; version: string } | undefined;
       let runtime: { name: string; version: string } | undefined;
+      let diagnosticSimulationStatus: string | undefined;
       let diagnosticEvidence: Record<string, unknown> | undefined;
       let diagnosticGrade: {
         result: CurrentGrade["result"];
@@ -1512,6 +1563,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         expect(simulation).toBeDefined();
         const simulationId = simulation!.id;
         const terminalStatus = await waitForTerminal(simulationId, 120_000);
+        diagnosticSimulationStatus = terminalStatus;
         if (terminalStatus !== "completed") {
           const failed = await call("GET", `/v1/simulations/${simulationId}`, { key });
           diagnosticEvidence = failed.body;
@@ -1619,20 +1671,27 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           }));
         expect(publicCustomerTurns).toEqual(storedCustomerTurns);
         const history = await nativeHistory(path.join(providerDirectory, "native-history.json"));
-        const nativeTurns = history.flatMap((item) => {
+        const nativeTurns: CustomerTurn[] = history.flatMap((item) => {
           if (item.type !== "message" || (item.role !== "user" && item.role !== "assistant")) return [];
           const text = historyText(item.content);
           return text === "" ? [] : [{
-            kind: item.role === "user" ? "turn:human" : "turn:agent",
+            kind: item.role === "user" ? "turn:human" as const : "turn:agent" as const,
             text: compactText(text),
           }];
         });
         expect(nativeTurns.some((turn) => turn.kind === "turn:human")).toBe(true);
         expect(nativeTurns.some((turn) => turn.kind === "turn:agent")).toBe(true);
-        expect(publicCustomerTurns.map((turn) => ({
-          kind: turn.kind,
+        const normalizedPublicCustomerTurns = publicCustomerTurns.map((turn) => ({
+          kind: String(turn.kind),
           text: compactText(turn.text ?? ""),
-        }))).toEqual(nativeTurns);
+        }));
+        if (LIVE_MODALITY === "voice") {
+          expect(turnsInSpeakerOrder(normalizedPublicCustomerTurns)).toEqual(
+            turnsInSpeakerOrder(nativeTurns),
+          );
+        } else {
+          expect(normalizedPublicCustomerTurns).toEqual(nativeTurns);
+        }
         const nativeCalls = history.filter((item) => item.type === "function_call");
         const nativeOutputs = history.filter((item) => item.type === "function_call_output");
         const outputsByCall = new Map(nativeOutputs.map((item) => [
@@ -1753,7 +1812,9 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             ...(artifact === undefined ? {} : { artifact }),
             ...(runtime === undefined ? {} : { runtime }),
             outcomes: {
-              simulation: "failed",
+              simulation: typeof diagnosticEvidence?.status === "string"
+                ? diagnosticEvidence.status
+                : diagnosticSimulationStatus ?? "unknown",
               failureType: failure instanceof Error ? failure.name : "unknown",
             },
             ...(diagnosticEvidence === undefined ? {} : {
