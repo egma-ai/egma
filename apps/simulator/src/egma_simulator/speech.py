@@ -10,6 +10,7 @@ Scripted STT decodes samples, so tests verify the audio path and recording chann
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import struct
@@ -71,6 +72,9 @@ CARTESIA_SPEED_RANGE = (0.6, 1.5)
 
 A speed outside this range is refused. The adapter never changes the value
 selected by the pinned TTS model."""
+
+CARTESIA_API_VERSION = "2026-08-14"
+"""The Cartesia API shape used for locale and named accent steering."""
 
 OPENAI_REALTIME_PROXY_OPEN_SECONDS = 30.0
 """How long a proxied OpenAI Realtime socket may take to open."""
@@ -787,6 +791,16 @@ def _cartesia_mouth(
     from pipecat.services.tts_service import TextAggregationMode
 
     class CartesiaTTSService(StockCartesiaTTSService):
+        def _build_msg(self, *args: Any, **kwargs: Any) -> str:
+            message = json.loads(super()._build_msg(*args, **kwargs))
+            if providers.tts_model.startswith("sonic-3.6"):
+                message.pop("language", None)
+                if spoken_with.language:
+                    message["locale"] = spoken_with.language
+                if spoken_with.accent != "voice_default":
+                    message["accent"] = spoken_with.accent
+            return json.dumps(message)
+
         async def _websocket_connect(self, uri: str, **kwargs: Any):
             parsed = urllib.parse.urlsplit(uri)
             query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
@@ -818,6 +832,13 @@ def _cartesia_mouth(
             "the cartesia speaking leg received a speed outside its supported "
             f"range {CARTESIA_SPEED_RANGE[0]}–{CARTESIA_SPEED_RANGE[1]}"
         )
+    if (
+        voice.accent != "voice_default"
+        and not providers.tts_model.startswith("sonic-3.6")
+    ):
+        raise SpeechFault(
+            "named Cartesia accents require sonic-3.6 or a newer compatible model"
+        )
     spoken_with = voice
     settings = CartesiaTTSService.Settings(
         model=providers.tts_model,
@@ -831,6 +852,7 @@ def _cartesia_mouth(
 
     leg = CartesiaTTSService(
         api_key=providers.tts_key,
+        cartesia_version=CARTESIA_API_VERSION,
         encoding="pcm_s16le",
         container="raw",
         settings=settings,

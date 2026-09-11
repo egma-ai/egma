@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import cast
 
@@ -18,6 +19,9 @@ from egma_simulator.spec import (
     SpeechSelection,
 )
 from egma_simulator.speech import (
+    CARTESIA_API_VERSION,
+    PersonaVoice,
+    SpeechFault,
     SpeechProviders,
     _ears,
     _mouth,
@@ -223,6 +227,48 @@ def test_runtime_controls_reach_the_selected_voice_and_delivery():
         "Speak in es-MX. Use a consistently angry emotional delivery. "
         "Use a Spanish accent."
     )
+
+
+def test_cartesia_36_sends_locale_and_named_accent_on_the_pinned_wire():
+    models = selected(tts_model="sonic-3.6")
+    voice = PersonaVoice(
+        voice_id=models.tts.voice_id,
+        provider="cartesia",
+        speed=1.1,
+        language="en-US",
+        emotion="anxious",
+        accent="standard-hindi",
+    )
+    providers = SpeechProviders.from_models(models, vad="silero").checked()
+
+    leg, _spoken_with, _closers = _mouth(providers, voice)
+    message = json.loads(
+        leg._build_msg(text="Please wait.", context_id="context-1")  # type: ignore[attr-defined]
+    )
+
+    assert leg._cartesia_version == CARTESIA_API_VERSION  # type: ignore[attr-defined]
+    assert message["locale"] == "en-US"
+    assert message["accent"] == "standard-hindi"
+    assert "language" not in message
+    assert message["generation_config"] == {
+        "speed": 1.1,
+        "emotion": "anxious",
+    }
+
+
+def test_cartesia_refuses_a_named_accent_that_its_older_wire_cannot_send():
+    models = selected(tts_model="sonic-3.5")
+    providers = SpeechProviders.from_models(models, vad="silero").checked()
+    voice = PersonaVoice(
+        voice_id=models.tts.voice_id,
+        provider="cartesia",
+        speed=1.0,
+        language="en-US",
+        accent="standard-hindi",
+    )
+
+    with pytest.raises(SpeechFault, match="named Cartesia accents require sonic-3.6"):
+        _mouth(providers, voice)
 
 
 def test_speech_gain_is_independent_and_clips_pcm_samples():
