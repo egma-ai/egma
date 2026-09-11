@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from pipecat.frames.frames import TTSAudioRawFrame
 
 from egma_simulator.config import STT_PROVIDERS, TTS_PROVIDERS
 from egma_simulator.model import ModelFailure, OpenAICompatibleModel, build_model_client
@@ -21,6 +22,7 @@ from egma_simulator.speech import (
     _ears,
     _mouth,
     apply_pcm_gain,
+    gained_speech_frame,
     tts_delivery_instructions,
     voice_from_models,
 )
@@ -210,7 +212,7 @@ def test_runtime_controls_reach_the_selected_voice_and_delivery():
         PersonaParameters(
             language="es-MX",
             emotion="angry",
-            accent="mexican",
+            accent="spanish",
             speech_volume=1.25,
         ),
     )
@@ -219,7 +221,7 @@ def test_runtime_controls_reach_the_selected_voice_and_delivery():
     assert voice.speech_volume == 1.25
     assert tts_delivery_instructions(voice) == (
         "Speak in es-MX. Use a consistently angry emotional delivery. "
-        "Use the mexican accent."
+        "Use a Spanish accent."
     )
 
 
@@ -232,3 +234,19 @@ def test_speech_gain_is_independent_and_clips_pcm_samples():
 
     assert int.from_bytes(gained[:2], "little", signed=True) == 15_000
     assert int.from_bytes(gained[2:], "little", signed=True) == 32_767
+
+
+async def test_speech_gain_preserves_frame_identity_and_timing_metadata():
+    source = TTSAudioRawFrame(
+        audio=(10_000).to_bytes(2, "little", signed=True),
+        sample_rate=24_000,
+        num_channels=1,
+        context_id="context-1",
+    )
+    source.pts = 123
+    source.metadata["trace"] = "kept"
+    gained = gained_speech_frame(source, 0.5)
+
+    assert gained.context_id == "context-1"
+    assert gained.pts == 123
+    assert gained.metadata == {"trace": "kept"}

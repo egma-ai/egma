@@ -117,13 +117,35 @@ def voice_from_models(
 
 def tts_delivery_instructions(voice: PersonaVoice) -> str | None:
     """Stable delivery instructions for an instruction-capable TTS model."""
+    emotions = {
+        "neutral": None,
+        "happy": "Use a consistently happy emotional delivery.",
+        "angry": "Use a consistently angry emotional delivery.",
+        "frustrated": "Use a consistently frustrated emotional delivery.",
+        "sad": "Use a consistently sad emotional delivery.",
+        "anxious": "Use a consistently anxious emotional delivery.",
+    }
+    accents = {
+        "voice_default": None,
+        "american": "Use an American accent.",
+        "british": "Use a British accent.",
+        "australian": "Use an Australian accent.",
+        "indian": "Use an Indian accent.",
+        "irish": "Use an Irish accent.",
+        "scottish": "Use a Scottish accent.",
+        "spanish": "Use a Spanish accent.",
+        "french": "Use a French accent.",
+        "german": "Use a German accent.",
+    }
+    if voice.emotion not in emotions or voice.accent not in accents:
+        raise SpeechFault("the resolved TTS delivery controls are not supported")
     parts: list[str] = []
     if voice.language:
         parts.append(f"Speak in {voice.language}.")
-    if voice.emotion != "neutral":
-        parts.append(f"Use a consistently {voice.emotion} emotional delivery.")
-    if voice.accent != "voice_default":
-        parts.append(f"Use the {voice.accent} accent.")
+    if emotions[voice.emotion]:
+        parts.append(emotions[voice.emotion])
+    if accents[voice.accent]:
+        parts.append(accents[voice.accent])
     return " ".join(parts) or None
 
 
@@ -140,6 +162,12 @@ def apply_pcm_gain(pcm: bytes, gain: float) -> bytes:
     return samples.tobytes()
 
 
+def gained_speech_frame(frame: TTSAudioRawFrame, gain: float) -> TTSAudioRawFrame:
+    """Change only a speech frame's samples, preserving timing and context."""
+    frame.audio = apply_pcm_gain(frame.audio, gain)
+    return frame
+
+
 class SpeechGain(FrameProcessor):
     """Apply Egma speech gain after TTS and before transport and recording."""
 
@@ -150,11 +178,7 @@ class SpeechGain(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         if isinstance(frame, TTSAudioRawFrame) and self.gain != 1.0:
-            frame = TTSAudioRawFrame(
-                audio=apply_pcm_gain(frame.audio, self.gain),
-                sample_rate=frame.sample_rate,
-                num_channels=frame.num_channels,
-            )
+            frame = gained_speech_frame(frame, self.gain)
         await self.push_frame(frame, direction)
 
 

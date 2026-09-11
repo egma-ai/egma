@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import hmac
+import io
+import wave
 from dataclasses import asdict
 
 from aiohttp import web
@@ -13,9 +15,9 @@ from pipecat.frames.frames import (
     Frame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    MetricsFrame,
     TextFrame,
     TTSAudioRawFrame,
-    TTSStoppedFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
@@ -28,13 +30,20 @@ from .spec import (
     SelectedModels,
     SpeechSelection,
 )
-from .speech import SpeechGain, SpeechProviders, build_legs, voice_from_models
-from .usage import characters_usage
+from .speech import (
+    ProviderUsageMetricsData,
+    SpeechGain,
+    SpeechProviders,
+    build_legs,
+    voice_from_models,
+)
+from .usage import ProviderUsage, characters_usage
 
 MAX_BODY_BYTES = 16 * 1024
 MAX_TEXT_CHARACTERS = 500
 PREVIEW_SECONDS = 15
 PREVIEW_SAMPLE_RATE = 24_000
+MAX_AUDIO_SECONDS = 10
 
 
 class _AudioCollector(FrameProcessor):
@@ -43,6 +52,7 @@ class _AudioCollector(FrameProcessor):
         self.audio = bytearray()
         self.sample_rate = 0
         self.finished = asyncio.Event()
+        self.usage: ProviderUsage | None = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
@@ -51,7 +61,13 @@ class _AudioCollector(FrameProcessor):
                 raise ValueError("preview TTS changed sample rate during one response")
             self.sample_rate = frame.sample_rate
             self.audio.extend(frame.audio)
-        elif isinstance(frame, TTSStoppedFrame):
+            if len(self.audio) > self.sample_rate * 2 * MAX_AUDIO_SECONDS:
+                raise ValueError("persona preview exceeded 10 seconds of audio")
+        elif isinstance(frame, MetricsFrame):
+            for metric in frame.data:
+                if isinstance(metric, ProviderUsageMetricsData):
+                    self.usage = metric.usage
+        elif isinstance(frame, LLMFullResponseEndFrame):
             self.finished.set()
         await self.push_frame(frame, direction)
 
@@ -108,17 +124,23 @@ async def render_preview(body: dict) -> dict:
             await worker.cancel()
             await running
         await legs.aclose()
-    usage = characters_usage(
-        len(text),
-        provider=selected["provider"],
-        model=selected["model"],
-        operation=selected["adapter"],
-    )
+    usage = collector.usage
+    if usage is None and selected["provider"] in {"cartesia", "scripted"}:
+        usage = characters_usage(
+            len(text),
+            provider=selected["provider"],
+            model=selected["model"],
+            operation=selected["adapter"],
+        )
+    wav = io.BytesIO()
+    with wave.open(wav, "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(collector.sample_rate or PREVIEW_SAMPLE_RATE)
+        output.writeframes(collector.audio)
     return {
-        "audioBase64": base64.b64encode(collector.audio).decode(),
-        "contentType": (
-            f"audio/L16;rate={collector.sample_rate or PREVIEW_SAMPLE_RATE};channels=1"
-        ),
+        "audioBase64": base64.b64encode(wav.getvalue()).decode(),
+        "contentType": "audio/wav",
         "usage": None if usage is None else asdict(usage),
     }
 
@@ -139,8 +161,14 @@ def preview_app(*, service_token: str, concurrency: int = 2) -> web.Application:
             )
         try:
             body = await request.json()
-            async with semaphore:
-                result = await asyncio.wait_for(render_preview(body), PREVIEW_SECONDS)
+            if semaphore.locked():
+                raise web.HTTPServiceUnavailable(text="persona preview is busy")
+
+            async def admitted() -> dict:
+                async with semaphore:
+                    return await render_preview(body)
+
+            result = await asyncio.wait_for(admitted(), PREVIEW_SECONDS)
         except (KeyError, TypeError, ValueError) as fault:
             raise web.HTTPBadRequest(text=str(fault)) from fault
         except TimeoutError as fault:
@@ -153,7 +181,9 @@ def preview_app(*, service_token: str, concurrency: int = 2) -> web.Application:
 
 
 async def start_preview_server(*, service_token: str, port: int) -> web.AppRunner:
-    runner = web.AppRunner(preview_app(service_token=service_token))
+    runner = web.AppRunner(
+        preview_app(service_token=service_token), handler_cancellation=True
+    )
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", port).start()
     return runner

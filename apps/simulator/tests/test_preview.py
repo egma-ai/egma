@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import io
+import wave
 
 import aiohttp
 from aiohttp import web
@@ -36,12 +38,17 @@ def request_body(*, gain: float = 1.0) -> dict:
 async def test_preview_uses_the_runtime_tts_and_gain_path():
     normal = await render_preview(request_body())
     quiet = await render_preview(request_body(gain=0.5))
-    normal_pcm = base64.b64decode(normal["audioBase64"])
-    quiet_pcm = base64.b64decode(quiet["audioBase64"])
+    def pcm(result: dict) -> bytes:
+        with wave.open(io.BytesIO(base64.b64decode(result["audioBase64"]))) as audio:
+            return audio.readframes(audio.getnframes())
+
+    normal_pcm = pcm(normal)
+    quiet_pcm = pcm(quiet)
 
     assert decode_speech(normal_pcm, 24_000) == "Hola"
     assert peak_level(quiet_pcm) == peak_level(normal_pcm) // 2
     assert normal["usage"]["quantities"] == {"characters": 4.0}
+    assert normal["contentType"] == "audio/wav"
 
 
 async def test_preview_endpoint_requires_the_service_token(unused_tcp_port: int):
