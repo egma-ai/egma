@@ -1,4 +1,10 @@
-import type { Simulation, TraceDetail, TraceSpan } from "@egma/db";
+import {
+  defaultPersonaParameterValues,
+  PERSONA_PARAMETER_CONTRACT,
+  type Simulation,
+  type TraceDetail,
+  type TraceSpan,
+} from "@egma/db";
 import { describe, expect, it } from "vitest";
 
 import { conversationOfSimulation, evidenceIsStillArriving } from "../src/conversation.ts";
@@ -10,6 +16,9 @@ const simulation: Simulation = {
   agentId: "agt_01M10000000000000000000004",
   connectionId: "con_01M10000000000000000000005",
   personaId: "persona", personaVersionId: "persona-version",
+  personaParameterValues: defaultPersonaParameterValues(
+    PERSONA_PARAMETER_CONTRACT,
+  ),
   testId: "test", testVersionId: "test-version",
   position: 0, modality: "voice", status: "completed",
   endingReason: "agent_ended", executionFailure: null,
