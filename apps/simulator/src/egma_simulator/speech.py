@@ -791,6 +791,7 @@ def _cartesia_mouth(
         CartesiaTTSService as StockCartesiaTTSService,
     )
     from pipecat.services.cartesia.tts import GenerationConfig
+    from pipecat.services.tts_service import TextAggregationMode
 
     class CartesiaTTSService(StockCartesiaTTSService):
         def _build_msg(self, *args: Any, **kwargs: Any) -> str:
@@ -875,7 +876,6 @@ def _openai_mouth(
 ) -> tuple[FrameProcessor, PersonaVoice, tuple[Callable[[], Awaitable[None]], ...]]:
     """The persona's voice through Pipecat's stock OpenAI service."""
     from pipecat.services.openai import tts as openai_tts
-    from pipecat.services.tts_service import TextAggregationMode
 
     class OpenAITTSService(openai_tts.OpenAITTSService):
         @traced_tts
