@@ -97,7 +97,7 @@ describe("the CLI and API suite contract", () => {
     const fetchImpl = fetchThrough(api.app, calls);
 
     const personas = await listProjectPersonas(signedIn, customer.projectId, fetchImpl);
-    expect(personas).toEqual(expect.arrayContaining([expect.objectContaining({ name: "Everyday caller" })]));
+    expect(personas).toEqual(expect.arrayContaining([expect.objectContaining({ name: "Everyday Caller [Male]" })]));
 
     const suite = await createTestSuite(
       signedIn,
@@ -131,7 +131,7 @@ describe("the CLI and API suite contract", () => {
             // empty id, and the CLI sends the name for the platform to
             // resolve. A test names at least one persona from birth, so a push
             // naming none is refused rather than given the project's default.
-            personas: [{ id: "", name: "Everyday caller" }],
+            personas: [{ id: "", name: "Everyday Caller [Male]" }],
             // The world the test carries. A repository push names both on
             // every test, because the change set is the complete authored
             // state and a silent absence would be a field the push had no
@@ -154,10 +154,10 @@ describe("the CLI and API suite contract", () => {
       version: 1,
     });
 
-    const selectedPersona = personas.find((one) => one.name === "Everyday caller");
+    const selectedPersona = personas.find((one) => one.name === "Everyday Caller [Male]");
     const currentPersona = await request(api.app, "GET", `/v1/personas/${selectedPersona?.id}`, key);
     expect(currentPersona.body.settings).toMatchObject({ id: expect.stringMatching(/^ppr_/u), models: expect.any(Object) });
-    expect(pushed.personas).toEqual([{ id: selectedPersona?.id, name: "Everyday caller" }]);
+    expect(pushed.personas).toEqual([{ id: selectedPersona?.id, name: "Everyday Caller [Male]" }]);
 
     const registered = await request(api.app, "POST", "/v1/agents", key, {
       agentPlatform: "livekit",

@@ -1682,6 +1682,16 @@ describe("one source of execution truth", () => {
       personality: persona.personality,
       language: "en-US",
     });
+    const detail = await ask(
+      api.app,
+      "GET",
+      `/v1/simulations/${simulationId}`,
+      key,
+    );
+    expect(detail.statusCode).toBe(200);
+    expect((detail.body.persona as { language: string }).language).toBe(
+      "en-US",
+    );
     expect(specComplaints(spec)).toEqual([]);
   });
 });

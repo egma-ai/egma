@@ -31,7 +31,7 @@ const TEST_BODY = {
   expectedBehaviors: ["confirms the new time before finishing"],
   // Every test names at least one persona from birth; the project's
   // Egma-provided caller is the one every project already has.
-  personas: ["Everyday caller"],
+  personas: ["Everyday Caller [Male]"],
   // The world this test carries. Both are content, and a repository test names
   // both every time — the change set is the complete authored state, so a
   // silent absence would be a field the push had no opinion about.
@@ -239,7 +239,7 @@ describe("the Test Suites cutover", () => {
     expect(written.statusCode, JSON.stringify(written.body)).toBe(201);
     expect(
       (written.body.personas as { name: string }[]).map((one) => one.name),
-    ).toEqual(["Everyday caller"]);
+    ).toEqual(["Everyday Caller [Male]"]);
 
     const emptied = await request(
       api.app,
@@ -261,7 +261,7 @@ describe("the Test Suites cutover", () => {
       key,
     );
     expect((read.body.personas as { name: string }[]).map((one) => one.name)).toEqual([
-      "Everyday caller",
+      "Everyday Caller [Male]",
     ]);
     expect(read.body.versionId).toBe(written.body.versionId);
   });

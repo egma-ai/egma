@@ -42,15 +42,20 @@ it("refuses a shared contract that cannot use saved project settings and keeps t
   const usedPersona = await api.app.inject({ method: "POST", url: `/v1/personas/${persona.id}/use`, headers, payload: {
     projectId: who.projectId,
     models: { ...RECOMMENDED_PERSONA_MODELS, tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed: 0.85 } },
+    controls: {
+      language: "en-US", emotion: "neutral", accent: "voice_default",
+      speechVolume: 0.85, backgroundSoundId: "none",
+      backgroundVolume: 0.0631, interruptionLevel: "off",
+    },
   } });
   expect(usedPersona.statusCode, usedPersona.body).toBe(200);
   await expect(seedPersonaLibrary([{
     ...persona,
     versions: [...persona.versions, {
       ...version, id: newId("prsv"), version: version.version + 1,
-      parameterContract: version.parameterContract.map((field) => field.key === "tts_speed" ? { ...field, minimum: 1 } : field),
+      parameterContract: version.parameterContract.map((field) => field.key === "speech_volume" ? { ...field, minimum: 0.9 } : field),
     }],
-  }])).rejects.toThrow(/saved.*settings/i);
+  }])).rejects.toThrow("Speech volume must be at least 0.9");
   const currentPersona = await api.app.inject({ method: "GET", url: `/v1/personas/${persona.id}?projectId=${who.projectId}`, headers });
   expect(currentPersona.statusCode, currentPersona.body).toBe(200);
   expect(currentPersona.json()).toMatchObject({ version: version.version, versionId: version.id, settings: { models: { tts: { speed: 0.85 } } } });
@@ -85,5 +90,7 @@ it("refuses changed parameter units without reinterpreting saved grader or perso
   }])).rejects.toThrow(/unit.*unitless.*seconds/i);
   const savedPersona = await api.app.inject({ method: "GET", url: `/v1/personas/${persona.id}?projectId=${who.projectId}`, headers });
   expect(savedPersona.json()).toMatchObject({ version: current.version, versionId: current.id, settings: usedPersona.json().settings });
-  expect((await api.database.sql("select version from persona_definition_version where persona_id=$1 order by version", [persona.id])).rows).toEqual([{ version: 1 }, { version: 2 }]);
+  expect((await api.database.sql("select version from persona_definition_version where persona_id=$1 order by version", [persona.id])).rows).toEqual(
+    persona.versions.map(({ version }) => ({ version })),
+  );
 });

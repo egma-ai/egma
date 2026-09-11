@@ -34,7 +34,7 @@ it.each(["grader", "persona"] as const)("selects a coherent run after waiting fo
   api = await createApi(`concurrent_${kind}_publication`);
   const who = await signUp(api.app, `${kind}-publication@example.test`, "Concurrent publication");
   const headers = { cookie: who.cookie };
-  async function request(method: "POST" | "GET", url: string, payload?: object) {
+  async function request(method: "POST" | "GET" | "PATCH", url: string, payload?: object) {
     const response = await api.app.inject({ method, url: `${url}?projectId=${who.projectId}`, headers, ...(payload === undefined ? {} : { payload }) });
     expect(response.statusCode, response.body).toBeGreaterThanOrEqual(200);
     expect(response.statusCode, response.body).toBeLessThan(300);
@@ -42,6 +42,14 @@ it.each(["grader", "persona"] as const)("selects a coherent run after waiting fo
   }
   const persona = PERSONA_LIBRARY_CATALOG[0]!;
   const personaCore = persona.versions.at(-1)!;
+  await request("PATCH", `/v1/personas/${persona.id}`, {
+    projectId: who.projectId,
+    models: {
+      llm: { provider: "openai", model: "gpt-5.6-terra" },
+      stt: { provider: "openai", model: "gpt-live-transcribe" },
+      tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy", speed: 1 },
+    },
+  });
   const grader = GRADER_DEFINITION_CATALOG.find((one) => one.id === PREDEFINED_GRADERS.expectedBehaviors)!;
   const suite = await request("POST", "/v1/test-suites", { name: "Concurrent release" });
   const test = await request("POST", "/v1/tests", { suiteId: suite.id, name: "Calls", scenario: "Ask for help", expectedBehaviors: ["Agent helps"], personas: [persona.id] });
@@ -78,7 +86,7 @@ it.each(["grader", "persona"] as const)("selects a coherent run after waiting fo
     const simulations = await request("GET", `/v1/runs/${run.id}/simulations`);
     const simulationId = simulations.simulations[0].id as string;
     expect(await getSimulation(auth, simulationId)).toMatchObject({ personaVersionId: kind === "persona" ? updatedPersonaVersionId : personaCore.id });
-    const claim = await api.app.inject({ method: "POST", url: CLAIMS_PATH, headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` }, payload: { contract_versions: [5], claimant: "after-concurrent-publication", capacity: 1, wait_seconds: 0 } });
+    const claim = await api.app.inject({ method: "POST", url: CLAIMS_PATH, headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` }, payload: { contract_versions: [5, 6], claimant: "after-concurrent-publication", capacity: 1, wait_seconds: 0 } });
     expect(claim.statusCode, claim.body).toBe(200);
     expect(claim.json().specs).toMatchObject([{ simulation_id: simulationId, persona: { personality: kind === "persona" ? "Wait for a complete answer." : personaCore.personality }, models: { llm: { model: "gpt-5.6-terra" }, tts: { speed: 1 } } }]);
   } finally {

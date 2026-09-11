@@ -184,6 +184,7 @@ export type Simulation = {
   readonly connectionId: string;
   readonly personaId: string;
   readonly personaVersionId: string;
+  readonly personaParameterValues: PersonaParameterValues;
   readonly testId: string;
   readonly testVersionId: string;
   readonly position: number;
@@ -264,6 +265,7 @@ const SIMULATION_COLUMNS = {
   connectionId: simulation.connectionId,
   personaId: simulation.personaId,
   personaVersionId: simulation.personaVersionId,
+  personaParameterValues: simulation.personaParameterValues,
   testId: simulation.testId,
   testVersionId: simulation.testVersionId,
   position: simulation.position,

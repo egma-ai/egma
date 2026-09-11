@@ -353,7 +353,9 @@ export async function simulationRoutes(
           versionId: simulation.personaVersionId,
           identityName: personaVersion?.identityName ?? null,
           personality: personaVersion?.personality ?? null,
-          language: personaVersion?.language ?? null,
+          language:
+            personaVersion?.language ??
+            simulation.personaParameterValues.language,
         },
         agent:
           agent === undefined

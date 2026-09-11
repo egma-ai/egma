@@ -438,7 +438,7 @@ describe("creating and reading a persona", () => {
       version: 5,
       owner: "egma",
       // Catalog content, and the whole point of it: nobody ever hears
-      // "Hi, I'm Everyday caller."
+      // "Hi, I'm Everyday Caller [Male]."
       identityName: "Alex Morgan",
       personality:
         "Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
