@@ -2065,7 +2065,9 @@ class VoiceConductor:
                 self._record.quiet_since = max(self._record.quiet_since, ended)
         if self._on_answered is not None:
             await self._on_answered()
-        if self._ending is not None:
+        if self._ending is not None or self._controls.cause is not None:
+            self._owes_a_turn = False
+            self.media_advanced()
             return None
         if self._agent_departed:
             self._owes_a_turn = False
