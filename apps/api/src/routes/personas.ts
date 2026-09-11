@@ -123,6 +123,7 @@ async function settingsRefusal(
   models: ReturnType<typeof validPersonaModels>,
   controls: ReturnType<typeof validPersonaControls>,
   voiceAccessProof: unknown,
+  purpose: "save" | "preview" = "save",
 ): Promise<string | undefined> {
   let voices: readonly PersonaVoice[] = [];
   if (models.tts.provider === "cartesia") {
@@ -147,7 +148,7 @@ async function settingsRefusal(
   if (speed.status === "fixed" && models.tts.speed !== speed.value) return `models.tts.speed: ${speed.reason}`;
   if (speed.range !== undefined && (models.tts.speed < speed.range.minimum || models.tts.speed > speed.range.maximum)) return `models.tts.speed: Choose a value from ${speed.range.minimum} through ${speed.range.maximum}.`;
   const standard = capabilities.voices.choices?.some((voice) => voice.source === "standard" && voice.id === models.tts.voiceId) === true;
-  if (models.tts.provider === "openai" && !standard) {
+  if (purpose === "save" && models.tts.provider === "openai" && !standard) {
     const credential = await authoringCredential(options, auth, "openai");
     if (credential === undefined || typeof voiceAccessProof !== "string" || !verifiesVoiceAccessProof(voiceAccessProof, { organizationId: auth.organizationId, provider: "openai", credentialRevision: credential.credentialRef, model: models.tts.model, voiceId: models.tts.voiceId }, options.proofSecret)) {
       return "models.tts.voiceId: Preview this existing OpenAI voice before saving it.";
@@ -478,14 +479,8 @@ export async function personaRoutes(
       const funding = await billing().entitlements.mayPlatformKeyFund({ organizationId: auth.organizationId, providers: platformProviders });
       if (!funding.funded) return sendRefusal(reply, "unprocessable", funding.message);
     }
-    const capabilities = resolvePersonaCapabilities({
-      ttsProvider: models.tts.provider, ttsModel: models.tts.model,
-      sttProvider: models.stt.provider, sttModel: models.stt.model,
-      language: controls.language, voiceId: models.tts.voiceId,
-    });
-    for (const [field, capability] of Object.entries(capabilities)) {
-      if (capability.status === "unsupported") return sendRefusal(reply, "unprocessable", `${field}: ${capability.reason ?? "unsupported"}`);
-    }
+    const incompatible = await settingsRefusal(options, acting.auth, models, controls, undefined, "preview");
+    if (incompatible !== undefined) return sendRefusal(reply, "unprocessable", incompatible);
     let rendered;
     try {
       rendered = await renderPersonaPreview(options.preview, {
