@@ -56,6 +56,7 @@ from egma_simulator.speech import SCRIPTED_PAIR, encode_speech, voice_from_model
 
 SAMPLE_RATE = 24_000
 FRAME_SECONDS = 0.01
+PRE_SPEECH_BACKGROUND_FRAMES = round(0.3 / FRAME_SECONDS)
 
 
 def _token(key: str, secret: str, room: str, identity: str) -> str:
@@ -102,6 +103,8 @@ class _RemoteCapture:
     tracks: list[str] = field(default_factory=list)
     frames: list[bytes] = field(default_factory=list)
     frame_times: list[float] = field(default_factory=list)
+    background_before_speech: list[bytes] = field(default_factory=list)
+    frame_received: asyncio.Event = field(default_factory=asyncio.Event)
     subscribed: asyncio.Event = field(default_factory=asyncio.Event)
     stream: rtc.AudioStream | None = None
     reader: asyncio.Task[None] | None = None
@@ -287,6 +290,7 @@ async def _observer(server, room_name: str) -> _RemoteCapture:
             async for event in capture.stream:
                 capture.frames.append(bytes(event.frame.data))
                 capture.frame_times.append(time.monotonic())
+                capture.frame_received.set()
 
         capture.reader = asyncio.create_task(read())
         capture.subscribed.set()
@@ -338,7 +342,12 @@ async def _received_mix(
     running = asyncio.create_task(runner.run())
     try:
         await asyncio.wait_for(remote.subscribed.wait(), 5)
-        await asyncio.sleep(0.12)
+        async with asyncio.timeout(5):
+            while len(remote.frames) < PRE_SPEECH_BACKGROUND_FRAMES:
+                remote.frame_received.clear()
+                if len(remote.frames) < PRE_SPEECH_BACKGROUND_FRAMES:
+                    await remote.frame_received.wait()
+        remote.background_before_speech = list(remote.frames)
         speech = array("h", [8_000] * int(SAMPLE_RATE * 0.1)).tobytes()
         await worker.queue_frame(
             TTSAudioRawFrame(speech, sample_rate=SAMPLE_RATE, num_channels=1)
@@ -387,8 +396,7 @@ async def test_every_background_choice_reaches_one_real_caller_microphone_track(
         else:
             assert len(background_only) >= 10
             assert _rms(b"".join(background_only)) > 20
-            # The assets fade in for 250 ms, so this window proves presence.
-            assert _rms(b"".join(remote.frames[:8])) > 1
+            assert _rms(b"".join(remote.background_before_speech)) > 20
             assert any(_rms(frame) > 20 for frame in remote.frames[20:])
     finally:
         await remote.close()
@@ -424,8 +432,12 @@ async def test_remote_background_gain_and_recording_follow_submitted_audio(
             for kind, frame, _ in loud.frames
             if issubclass(kind, TTSAudioRawFrame)
         )
-        quiet_received_before_speech = b"".join(quiet_remote.frames[:8])
-        loud_received_before_speech = b"".join(loud_remote.frames[:8])
+        quiet_received_before_speech = b"".join(
+            quiet_remote.background_before_speech[-8:]
+        )
+        loud_received_before_speech = b"".join(
+            loud_remote.background_before_speech[-8:]
+        )
 
         assert _rms(loud_noise) > _rms(quiet_noise) * 8
         assert (
