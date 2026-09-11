@@ -56,7 +56,7 @@ describe("runPersonasCommand", () => {
     controller.abort("interrupt");
 
     await expect(running).resolves.toBe(130);
-    expect(receivedSignal?.aborted).toBe(true);
+    expect((receivedSignal as AbortSignal | null)?.aborted).toBe(true);
     expect(failures).toEqual(["The command was interrupted before it finished."]);
   });
 

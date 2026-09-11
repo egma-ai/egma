@@ -13,18 +13,19 @@ import pytest
 from pipecat.frames.frames import (
     Frame,
     InterruptionFrame,
+    OutputAudioRawFrame,
     StartFrame,
     TextFrame,
+    TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
-    TranscriptionFrame,
-    OutputAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from test_voice import spec_for
 
-from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator import conductor as conductor_module
+from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.conductor import ConductParameters, VoiceConductor
 from egma_simulator.conversation import ConversationControls
 from egma_simulator.media import VoiceMedia
@@ -32,13 +33,21 @@ from egma_simulator.media.scripted_transport import ScriptedTransport
 from egma_simulator.model import ModelClient, PersonaReply, ScriptedModel
 from egma_simulator.persona import Persona
 from egma_simulator.recording import channels_of
-from egma_simulator.speech import SCRIPTED_PAIR, ScriptedSTT, ScriptedTTS, SpeechLegs, voice_from_models
-
-from test_voice import spec_for
+from egma_simulator.speech import (
+    ScriptedSTT,
+    ScriptedTTS,
+    SpeechLegs,
+    voice_from_models,
+)
 
 
 class _Connection:
-    def __init__(self, transport: ScriptedTransport, *output: FrameProcessor, after_output: bool = False) -> None:
+    def __init__(
+        self,
+        transport: ScriptedTransport,
+        *output: FrameProcessor,
+        after_output: bool = False,
+    ) -> None:
         self.transport = transport
         self.output = output
         self.after_output = after_output
@@ -55,7 +64,11 @@ class _Connection:
         media = self.transport.media
         return VoiceMedia(
             input=media.input,
-            output=((*media.output, *self.output) if self.after_output else (*self.output, *media.output)),
+            output=(
+                (*media.output, *self.output)
+                if self.after_output
+                else (*self.output, *media.output)
+            ),
             ended=media.ended,
             input_recorded=media.input_recorded,
             real_time=media.real_time,
@@ -78,7 +91,9 @@ class _ExactSecondTTS(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
-        if direction == FrameDirection.UPSTREAM and isinstance(frame, InterruptionFrame):
+        if direction == FrameDirection.UPSTREAM and isinstance(
+            frame, InterruptionFrame
+        ):
             self.canceled.set()
         if isinstance(frame, StartFrame):
             self.rate = frame.audio_out_sample_rate
@@ -108,7 +123,9 @@ class _CancelAfterAcceptedAudio(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
-        if direction == FrameDirection.DOWNSTREAM and isinstance(frame, OutputAudioRawFrame):
+        if direction == FrameDirection.DOWNSTREAM and isinstance(
+            frame, OutputAudioRawFrame
+        ):
             await self.push_frame(frame, direction)
             self.accepted.set()
             self.controls.request_cancel()
@@ -204,7 +221,7 @@ async def _conduct_with(
     return conducted, spans, conductor.audio, transport, interruptions
 
 
-async def test_exact_three_second_boundary_cancels_unused_audio_and_never_reports_unspoken_text(
+async def test_exact_three_second_boundary_cancels_unused_audio_and_never_reports_unspoken_text(  # noqa: E501
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
     full = "This generated sentence contains a tail that the caller never hears."
@@ -256,7 +273,9 @@ async def test_cancel_while_interruption_generation_is_held_finishes_all_owned_w
             monkeypatch,
             model=model,
             tts=tts,
-            greeting="The agent keeps talking long enough to start an interruption. " * 12,
+            greeting=(
+                "The agent keeps talking long enough to start an interruption. " * 12
+            ),
             replies=[],
             controls=controls,
             max_duration_seconds=60,
@@ -264,7 +283,7 @@ async def test_cancel_while_interruption_generation_is_held_finishes_all_owned_w
     )
 
     async with asyncio.timeout(1):
-        while not model.calls:
+        while not model.calls:  # noqa: ASYNC110
             await asyncio.sleep(0)
     controls.request_cancel()
     conducted, spans, _audio, _transport, interruptions = await asyncio.wait_for(
@@ -334,7 +353,11 @@ async def test_off_never_schedules_or_overlaps(
     assert events == []
     agents = [turn for turn in spans if turn[0] == "agent"]
     people = [turn for turn in spans if turn[0] == "human"]
-    assert all(not (human[2] < agent[3] and agent[2] < human[3]) for human in people for agent in agents)
+    assert all(
+        not (human[2] < agent[3] and agent[2] < human[3])
+        for human in people
+        for agent in agents
+    )
 
 
 async def test_run_cancel_after_first_accepted_interruption_audio_wins_immediately(

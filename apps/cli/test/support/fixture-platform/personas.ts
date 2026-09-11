@@ -1,6 +1,6 @@
 /** The personas a project can name, as `/v1/personas` answers them. */
 
-import { given, NOT_AUTHENTICATED, refuse } from "./reading.ts";
+import { given, NOT_AUTHENTICATED, refuse, text } from "./reading.ts";
 import type { FixtureAnswer, FixtureRequest, RouteGroup } from "./server.ts";
 
 export type SeededPersona = {
@@ -153,7 +153,7 @@ export function personaRoutes(options: {
           path: "/v1/personas/:personaId/use",
           handle: (request) =>
             behind(request, () => {
-              const gate = projectGate(given(request.body?.projectId));
+              const gate = projectGate(given(text(request.body?.projectId)));
               if (gate !== null) return gate;
               settings = {
                 id: "pps_fixture_default",
@@ -170,7 +170,7 @@ export function personaRoutes(options: {
           path: "/v1/personas/:personaId",
           handle: (request) =>
             behind(request, () => {
-              const gate = projectGate(given(request.body?.projectId));
+              const gate = projectGate(given(text(request.body?.projectId)));
               if (gate !== null) return gate;
               settings = {
                 id: "pps_fixture_default",

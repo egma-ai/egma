@@ -34,7 +34,6 @@ from egma_simulator.background import (
 from egma_simulator.conductor import _EvidenceRecorder
 from egma_simulator.media import PlayoutStamp
 
-
 SAMPLE_RATE = 24_000
 FRAME_SECONDS = 0.01
 
@@ -71,7 +70,9 @@ class _SubmittedMix(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         if isinstance(frame, OutputAudioRawFrame):
-            self.frames.append((type(frame), bytes(frame.audio), frame.num_frames / frame.sample_rate))
+            self.frames.append(
+                (type(frame), bytes(frame.audio), frame.num_frames / frame.sample_rate)
+            )
         await self.push_frame(frame, direction)
 
 
@@ -104,7 +105,10 @@ async def _observer(server, room_name: str) -> _RemoteCapture:
         publication: rtc.RemoteTrackPublication,
         participant: rtc.RemoteParticipant,
     ) -> None:
-        if track.kind != rtc.TrackKind.KIND_AUDIO or participant.identity != "egma-persona":
+        if (
+            track.kind != rtc.TrackKind.KIND_AUDIO
+            or participant.identity != "egma-persona"
+        ):
             return
         capture.tracks.append(publication.sid)
         capture.stream = rtc.AudioStream(track, sample_rate=SAMPLE_RATE, num_channels=1)
@@ -149,9 +153,7 @@ async def _received_mix(
     recorded_persona = bytearray()
 
     @evidence.event_handler("on_track_audio_data")
-    async def recorded(
-        _processor, _agent, persona, _sample_rate, _channels
-    ) -> None:
+    async def recorded(_processor, _agent, persona, _sample_rate, _channels) -> None:
         recorded_persona.extend(persona)
 
     worker = PipelineWorker(
@@ -168,7 +170,9 @@ async def _received_mix(
         await asyncio.wait_for(remote.subscribed.wait(), 5)
         await asyncio.sleep(0.12)
         speech = array("h", [8_000] * int(SAMPLE_RATE * 0.1)).tobytes()
-        await worker.queue_frame(TTSAudioRawFrame(speech, sample_rate=SAMPLE_RATE, num_channels=1))
+        await worker.queue_frame(
+            TTSAudioRawFrame(speech, sample_rate=SAMPLE_RATE, num_channels=1)
+        )
         await asyncio.sleep(0.25)
         await worker.queue_frame(EndFrame())
         await asyncio.wait_for(running, 5)
@@ -197,8 +201,16 @@ async def test_every_background_choice_reaches_one_real_caller_microphone_track(
         assert remote.frames
         assert any(_rms(frame) > 100 for frame in remote.frames)
 
-        speech = [frame for kind, frame, _duration in submitted.frames if issubclass(kind, TTSAudioRawFrame)]
-        background_only = [frame for kind, frame, _duration in submitted.frames if not issubclass(kind, TTSAudioRawFrame)]
+        speech = [
+            frame
+            for kind, frame, _duration in submitted.frames
+            if issubclass(kind, TTSAudioRawFrame)
+        ]
+        background_only = [
+            frame
+            for kind, frame, _duration in submitted.frames
+            if not issubclass(kind, TTSAudioRawFrame)
+        ]
         assert speech
         if sound_id == "none":
             assert background_only == []
@@ -211,7 +223,7 @@ async def test_every_background_choice_reaches_one_real_caller_microphone_track(
         await remote.close()
 
 
-async def test_remote_background_gain_is_independent_and_recording_time_follows_submitted_audio(
+async def test_remote_background_gain_and_recording_follow_submitted_audio(
     live_livekit,
 ):
     quiet_remote, quiet, _quiet_recorded = await _received_mix(
@@ -221,15 +233,33 @@ async def test_remote_background_gain_is_independent_and_recording_time_follows_
         live_livekit, "rain-v1", MAX_BACKGROUND_VOLUME
     )
     try:
-        quiet_noise = b"".join(frame for kind, frame, _ in quiet.frames if not issubclass(kind, TTSAudioRawFrame))
-        loud_noise = b"".join(frame for kind, frame, _ in loud.frames if not issubclass(kind, TTSAudioRawFrame))
-        quiet_speech = b"".join(frame for kind, frame, _ in quiet.frames if issubclass(kind, TTSAudioRawFrame))
-        loud_speech = b"".join(frame for kind, frame, _ in loud.frames if issubclass(kind, TTSAudioRawFrame))
+        quiet_noise = b"".join(
+            frame
+            for kind, frame, _ in quiet.frames
+            if not issubclass(kind, TTSAudioRawFrame)
+        )
+        loud_noise = b"".join(
+            frame
+            for kind, frame, _ in loud.frames
+            if not issubclass(kind, TTSAudioRawFrame)
+        )
+        quiet_speech = b"".join(
+            frame
+            for kind, frame, _ in quiet.frames
+            if issubclass(kind, TTSAudioRawFrame)
+        )
+        loud_speech = b"".join(
+            frame
+            for kind, frame, _ in loud.frames
+            if issubclass(kind, TTSAudioRawFrame)
+        )
         quiet_received_before_speech = b"".join(quiet_remote.frames[:8])
         loud_received_before_speech = b"".join(loud_remote.frames[:8])
 
         assert _rms(loud_noise) > _rms(quiet_noise) * 8
-        assert _rms(loud_received_before_speech) > _rms(quiet_received_before_speech) * 6
+        assert (
+            _rms(loud_received_before_speech) > _rms(quiet_received_before_speech) * 6
+        )
         assert 0.8 < _rms(loud_speech) / _rms(quiet_speech) < 1.25
 
         # Background frames are recorded on the same submitted-output clock but
@@ -245,8 +275,17 @@ async def test_remote_background_gain_is_independent_and_recording_time_follows_
         assert submitted_seconds >= 0.3
         assert received_active_seconds >= 0.3
         assert abs(recorded_seconds - submitted_seconds) < FRAME_SECONDS
-        assert any(not issubclass(kind, TTSAudioRawFrame) for kind, _pcm, _duration in loud.frames)
-        assert sum(issubclass(kind, TTSAudioRawFrame) for kind, _pcm, _duration in loud.frames) > 0
+        assert any(
+            not issubclass(kind, TTSAudioRawFrame)
+            for kind, _pcm, _duration in loud.frames
+        )
+        assert (
+            sum(
+                issubclass(kind, TTSAudioRawFrame)
+                for kind, _pcm, _duration in loud.frames
+            )
+            > 0
+        )
     finally:
         await quiet_remote.close()
         await loud_remote.close()
