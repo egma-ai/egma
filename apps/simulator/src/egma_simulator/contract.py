@@ -14,7 +14,11 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 CONTRACT_DIR_ENV = "EGMA_SIMULATION_CONTRACT_DIR"
 
-SPEC_SCHEMA_FILENAME = "simulation-spec.v5.schema.json"
+SPEC_SCHEMA_FILENAME = "simulation-spec.v6.schema.json"
+SPEC_SCHEMA_FILENAMES = {
+    5: "simulation-spec.v5.schema.json",
+    6: SPEC_SCHEMA_FILENAME,
+}
 REPORT_SCHEMA_FILENAME = "simulation-report.v1.schema.json"
 
 # The endings a failed simulation may carry, spelled here because this is
@@ -121,11 +125,25 @@ def spec_validator() -> Draft202012Validator:
     return validator("spec")
 
 
+@cache
+def _spec_validator_for(version: int) -> Draft202012Validator:
+    filename = SPEC_SCHEMA_FILENAMES.get(version)
+    if filename is None:
+        return spec_validator()
+    schema = _load_schema(filename)
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema, format_checker=FormatChecker())
+
+
 def report_validator() -> Draft202012Validator:
     return validator("report")
 
 
-def _complaints(direction: str, document: object) -> list[str]:
+def _complaints(
+    direction: str,
+    document: object,
+    selected: Draft202012Validator | None = None,
+) -> list[str]:
     def flatten(errors) -> list[str]:
         flat: list[str] = []
         for error in errors:
@@ -136,7 +154,7 @@ def _complaints(direction: str, document: object) -> list[str]:
                 flat.append(f"{place}: {error.message}")
         return flat
 
-    return flatten(validator(direction).iter_errors(document))
+    return flatten((selected or validator(direction)).iter_errors(document))
 
 
 def validate(direction: str, document: object) -> None:
@@ -148,7 +166,13 @@ def validate(direction: str, document: object) -> None:
 
 def validate_spec(document: object) -> None:
     """Refuse a claimed spec that does not speak the contract."""
-    validate("spec", document)
+    version = document.get("contract_version") if isinstance(document, dict) else None
+    selected = (
+        _spec_validator_for(version) if isinstance(version, int) else spec_validator()
+    )
+    complaints = _complaints("spec", document, selected)
+    if complaints:
+        raise ContractViolation("spec", complaints)
 
 
 def validate_report(document: object) -> None:
