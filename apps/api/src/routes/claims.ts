@@ -13,6 +13,7 @@ import {
   failSimulation,
   getPersonaVersion,
   personaModelsOfParameters,
+  personaSettingsOfParameters,
   validatePersonaParameterValues,
   getRun,
   getSimulationExecutionEvidence,
@@ -571,6 +572,7 @@ async function assembledSpec(
     : [];
 
   let models: Record<string, unknown>;
+  const personaParameters = validatePersonaParameterValues(personaVersion.parameterContract, claim.personaParameterValues);
   try {
     // The source loads here, once per simulation work order. Persona choices
     // are pinned; credentials are current. A rotated AWS bundle therefore
@@ -578,7 +580,7 @@ async function assembledSpec(
     // restarting either service.
     models = await modelsBlock(
       claim.modality,
-      personaModelsOfParameters(validatePersonaParameterValues(personaVersion.parameterContract, claim.personaParameterValues)),
+      personaModelsOfParameters(personaParameters),
       providerCredentials,
       claim,
       deploymentSecretEnvironment,
@@ -640,6 +642,9 @@ async function assembledSpec(
       name: personaVersion.identityName,
       personality: personaVersion.personality,
       language: personaVersion.language,
+      ...(Object.hasOwn(personaParameters, "execution_policy_version")
+        ? { parameters: personaSettingsOfParameters(personaParameters) }
+        : {}),
     },
     models,
     scenario: { instructions: testVersion.scenario },
