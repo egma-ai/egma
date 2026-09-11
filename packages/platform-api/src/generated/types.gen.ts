@@ -3156,6 +3156,7 @@ export type UsePersonaData = {
             speechVolume: number;
             backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
             backgroundVolume: number;
+            interruptionLevel: 'off' | 'occasional' | 'frequent';
         };
         voiceAccessProof?: string;
     };
@@ -3269,6 +3270,7 @@ export type UsePersonaResponses = {
                 readonly executionPolicyVersion: number;
                 backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
                 backgroundVolume: number;
+                interruptionLevel: 'off' | 'occasional' | 'frequent';
             };
             createdAt: string;
             updatedAt: string;
@@ -3393,6 +3395,7 @@ export type ListPersonasResponses = {
                     readonly executionPolicyVersion: number;
                     backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
                     backgroundVolume: number;
+                    interruptionLevel: 'off' | 'occasional' | 'frequent';
                 };
                 createdAt: string;
                 updatedAt: string;
@@ -3456,6 +3459,7 @@ export type CreatePersonaData = {
             speechVolume: number;
             backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
             backgroundVolume: number;
+            interruptionLevel: 'off' | 'occasional' | 'frequent';
         };
         voiceAccessProof?: string;
     };
@@ -3567,6 +3571,7 @@ export type CreatePersonaResponses = {
                 readonly executionPolicyVersion: number;
                 backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
                 backgroundVolume: number;
+                interruptionLevel: 'off' | 'occasional' | 'frequent';
             };
             createdAt: string;
             updatedAt: string;
@@ -3831,6 +3836,7 @@ export type PreviewPersonaData = {
             speechVolume: number;
             backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
             backgroundVolume: number;
+            interruptionLevel: 'off' | 'occasional' | 'frequent';
         };
         /**
          * A prior short-lived proof for an existing provider voice ID.
@@ -4053,6 +4059,7 @@ export type GetPersonaResponses = {
                 readonly executionPolicyVersion: number;
                 backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
                 backgroundVolume: number;
+                interruptionLevel: 'off' | 'occasional' | 'frequent';
             };
             createdAt: string;
             updatedAt: string;
@@ -4114,6 +4121,7 @@ export type UpdatePersonaData = {
             speechVolume: number;
             backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
             backgroundVolume: number;
+            interruptionLevel: 'off' | 'occasional' | 'frequent';
         };
         voiceAccessProof?: string;
         /**
@@ -4231,6 +4239,7 @@ export type UpdatePersonaResponses = {
                 readonly executionPolicyVersion: number;
                 backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
                 backgroundVolume: number;
+                interruptionLevel: 'off' | 'occasional' | 'frequent';
             };
             createdAt: string;
             updatedAt: string;
@@ -4566,6 +4575,7 @@ export type ForkPersonaResponses = {
                 readonly executionPolicyVersion: number;
                 backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
                 backgroundVolume: number;
+                interruptionLevel: 'off' | 'occasional' | 'frequent';
             };
             createdAt: string;
             updatedAt: string;

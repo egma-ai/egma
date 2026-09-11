@@ -1,4 +1,4 @@
-import { legacyPersonaParameterContract, personaParameterContract, ticket01PersonaParameterContract } from "./parameters.ts";
+import { legacyPersonaParameterContract, personaParameterContract, ticket01PersonaParameterContract, ticket02PersonaParameterContract } from "./parameters.ts";
 import type { GraderParameter } from "../grader-library/parameters.ts";
 import { EGMA_PROVIDED_PERSONAS } from "./ids.ts";
 
@@ -122,8 +122,17 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
         identityName: "Alex Morgan",
         personality: everydayPersonality,
         language: null,
-        parameterContract: personaParameterContract(OPENAI_PERSONA_MODELS),
+        parameterContract: ticket02PersonaParameterContract(OPENAI_PERSONA_MODELS),
         createdAt: new Date("2026-09-11T00:00:00.000Z"),
+      },
+      {
+        id: "prsv_01K4R000000000000000000016",
+        version: 5,
+        identityName: "Alex Morgan",
+        personality: everydayPersonality,
+        language: null,
+        parameterContract: personaParameterContract(OPENAI_PERSONA_MODELS),
+        createdAt: new Date("2026-09-12T00:00:00.000Z"),
       },
     ],
   },
@@ -139,8 +148,13 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
     }, {
       id: "prsv_01K4R000000000000000000013", version: 2,
       identityName: "Alex Morgan", personality: everydayPersonality, language: null,
-      parameterContract: personaParameterContract({ ...OPENAI_PERSONA_MODELS, tts: { ...OPENAI_PERSONA_MODELS.tts, voiceId: "coral" } }),
+      parameterContract: ticket02PersonaParameterContract({ ...OPENAI_PERSONA_MODELS, tts: { ...OPENAI_PERSONA_MODELS.tts, voiceId: "coral" } }),
       createdAt: new Date("2026-09-11T00:00:00.000Z"),
+    }, {
+      id: "prsv_01K4R000000000000000000017", version: 3,
+      identityName: "Alex Morgan", personality: everydayPersonality, language: null,
+      parameterContract: personaParameterContract({ ...OPENAI_PERSONA_MODELS, tts: { ...OPENAI_PERSONA_MODELS.tts, voiceId: "coral" } }),
+      createdAt: new Date("2026-09-12T00:00:00.000Z"),
     }],
   },
   {
@@ -157,8 +171,13 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
     }, {
       id: "prsv_01K4R000000000000000000014", version: 2,
       identityName: "Jordan Lee", personality: "Explains the problem directly and expects the agent to acknowledge the concern and provide a clear resolution.", language: null,
-      parameterContract: personaParameterContract(OPENAI_PERSONA_MODELS, { language: "en-US", emotion: "angry", accent: "voice_default", speechVolume: 1, executionPolicyVersion: 1, backgroundSoundId: "none", backgroundVolume: 0.0631 }),
+      parameterContract: ticket02PersonaParameterContract(OPENAI_PERSONA_MODELS, { language: "en-US", emotion: "angry", accent: "voice_default", speechVolume: 1, executionPolicyVersion: 1, backgroundSoundId: "none", backgroundVolume: 0.0631 }),
       createdAt: new Date("2026-09-11T00:00:00.000Z"),
+    }, {
+      id: "prsv_01K4R000000000000000000018", version: 3,
+      identityName: "Jordan Lee", personality: "Explains the problem directly and expects the agent to acknowledge the concern and provide a clear resolution.", language: null,
+      parameterContract: personaParameterContract(OPENAI_PERSONA_MODELS, { language: "en-US", emotion: "angry", accent: "voice_default", speechVolume: 1, executionPolicyVersion: 1, backgroundSoundId: "none", backgroundVolume: 0.0631, interruptionLevel: "off" }),
+      createdAt: new Date("2026-09-12T00:00:00.000Z"),
     }],
   },
   {
@@ -173,8 +192,27 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
     }, {
       id: "prsv_01K4R000000000000000000015", version: 2,
       identityName: "Mateo García", personality: everydayPersonality, language: null,
-      parameterContract: personaParameterContract(OPENAI_PERSONA_MODELS, { language: "es-ES", emotion: "neutral", accent: "voice_default", speechVolume: 1, executionPolicyVersion: 1, backgroundSoundId: "none", backgroundVolume: 0.0631 }),
+      parameterContract: ticket02PersonaParameterContract(OPENAI_PERSONA_MODELS, { language: "es-ES", emotion: "neutral", accent: "voice_default", speechVolume: 1, executionPolicyVersion: 1, backgroundSoundId: "none", backgroundVolume: 0.0631 }),
       createdAt: new Date("2026-09-11T00:00:00.000Z"),
+    }, {
+      id: "prsv_01K4R000000000000000000019", version: 3,
+      identityName: "Mateo García", personality: everydayPersonality, language: null,
+      parameterContract: personaParameterContract(OPENAI_PERSONA_MODELS, { language: "es-ES", emotion: "neutral", accent: "voice_default", speechVolume: 1, executionPolicyVersion: 1, backgroundSoundId: "none", backgroundVolume: 0.0631, interruptionLevel: "off" }),
+      createdAt: new Date("2026-09-12T00:00:00.000Z"),
+    }],
+  },
+  {
+    id: EGMA_PROVIDED_PERSONAS.interruptiveCaller,
+    name: "Interruptive caller",
+    description: "A direct caller who gives brief, focused responses",
+    versions: [{
+      id: "prsv_01K4R000000000000000000020",
+      version: 1,
+      identityName: "Taylor Brooks",
+      personality: "Keeps responses brief, direct, and relevant to the current topic.",
+      language: null,
+      parameterContract: personaParameterContract(OPENAI_PERSONA_MODELS, { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, executionPolicyVersion: 1, backgroundSoundId: "none", backgroundVolume: 0.0631, interruptionLevel: "frequent" }),
+      createdAt: new Date("2026-09-12T00:00:00.000Z"),
     }],
   },
 ];

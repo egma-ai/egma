@@ -543,6 +543,7 @@ export async function createPersona(
       executionPolicyVersion: 1,
       backgroundSoundId: "none" as const,
       backgroundVolume: 0.0631,
+      interruptionLevel: "off" as const,
     };
     const models = settings.models;
     return insertPersona(

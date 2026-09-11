@@ -756,12 +756,17 @@ describe("project persona storage boundaries", () => {
     const settings = created.settings;
     if (settings === null) throw new Error("creation saved no settings");
     const complete = defaultPersonaParameterValues(PERSONA_PARAMETER_CONTRACT);
+    expect(Object.keys(complete)).toHaveLength(16);
+    expect(complete.interruption_level).toBe("off");
     const { tts_speed: _speed, ...missing } = complete;
     for (const values of [
       missing,
       { ...complete, unrecognized: 1 },
       { ...complete, tts_speed: "1" },
       { ...complete, tts_voice_id: " " },
+      { ...complete, interruption_level: "constant" },
+      { ...complete, interruption_level: 1 },
+      { ...complete, execution_policy_version: 2 },
     ]) {
       await expect(
         database.sql(

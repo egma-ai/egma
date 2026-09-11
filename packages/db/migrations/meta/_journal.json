@@ -29,6 +29,13 @@
       "when": 1789171200000,
       "tag": "0003_persona_background_sound",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789257600000,
+      "tag": "0004_persona_interruptions",
+      "breakpoints": true
     }
   ]
 }

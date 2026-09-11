@@ -4,4 +4,5 @@ export const EGMA_PROVIDED_PERSONAS = {
   everydayFemale: "prs_01K4R000000000000000000002",
   angryCaller: "prs_01K4R000000000000000000004",
   spanishCaller: "prs_01K4R000000000000000000006",
+  interruptiveCaller: "prs_01K4R000000000000000000010",
 } as const;

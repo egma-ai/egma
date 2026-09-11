@@ -10,6 +10,8 @@ import type { ModelProvider } from "../models/catalog.ts";
 
 export const PERSONA_EMOTIONS = ["neutral", "happy", "angry", "frustrated", "sad", "anxious"] as const;
 export type PersonaEmotion = (typeof PERSONA_EMOTIONS)[number];
+export const PERSONA_INTERRUPTION_LEVELS = ["off", "occasional", "frequent"] as const;
+export type PersonaInterruptionLevel = (typeof PERSONA_INTERRUPTION_LEVELS)[number];
 export const SPEECH_VOLUME_RANGE = { quietest: 0.5, loudest: 1.5 } as const;
 export const BACKGROUND_SOUND_IDS = [
   "none",
@@ -39,12 +41,34 @@ export type PersonaControls = {
   readonly executionPolicyVersion: number;
   readonly backgroundSoundId: BackgroundSoundId;
   readonly backgroundVolume: number;
+  readonly interruptionLevel: PersonaInterruptionLevel;
 };
 export type PersonaSettings = PersonaControls & { readonly models: PersonaModels };
 export type PersonaParameterValues = GraderParameterValues;
 
-function modelParameterValues(models: PersonaModels): PersonaParameterValues {
-  const checked = validPersonaModels(models);
+function structuralPersonaModels(value: unknown): PersonaModels {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError("persona models must be an object");
+  const held = value as Record<string, unknown>;
+  const selection = (job: "llm" | "stt") => {
+    const value = held[job];
+    if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError(`persona ${job} selection must be an object`);
+    const fields = value as Record<string, unknown>;
+    if (Object.keys(fields).length !== 2 || typeof fields.provider !== "string" || fields.provider.trim() === "" || typeof fields.model !== "string" || fields.model.trim() === "") throw new TypeError(`persona ${job} selection needs a provider and model`);
+    return { provider: fields.provider.trim() as ModelProvider, model: fields.model.trim() };
+  };
+  const ttsValue = held.tts;
+  if (Object.keys(held).length !== 3 || typeof ttsValue !== "object" || ttsValue === null || Array.isArray(ttsValue)) throw new TypeError("persona tts selection must be an object");
+  const fields = ttsValue as Record<string, unknown>;
+  if (Object.keys(fields).length !== 4 || typeof fields.provider !== "string" || fields.provider.trim() === "" || typeof fields.model !== "string" || fields.model.trim() === "" || typeof fields.voiceId !== "string" || fields.voiceId.trim() === "" || typeof fields.speed !== "number" || !Number.isFinite(fields.speed)) throw new TypeError("persona tts selection needs a provider, model, voice id, and finite speed");
+  return {
+    llm: selection("llm"),
+    stt: selection("stt"),
+    tts: { provider: fields.provider.trim() as ModelProvider, model: fields.model.trim(), voiceId: fields.voiceId.trim(), speed: fields.speed },
+  };
+}
+
+function modelParameterValues(models: PersonaModels, checkCurrentCatalog = true): PersonaParameterValues {
+  const checked = checkCurrentCatalog ? validPersonaModels(models) : structuralPersonaModels(models);
   return {
     llm_provider: checked.llm.provider, llm_model: checked.llm.model,
     stt_provider: checked.stt.provider, stt_model: checked.stt.model,
@@ -55,7 +79,7 @@ function modelParameterValues(models: PersonaModels): PersonaParameterValues {
 
 /** The exact historical eight-field contract. Never add fields here. */
 export function legacyPersonaParameterContract(models: PersonaModels = RECOMMENDED_PERSONA_MODELS): readonly GraderParameter[] {
-  const defaults = modelParameterValues(models);
+  const defaults = modelParameterValues(models, false);
   const labels: Readonly<Record<string, string>> = {
     llm_provider: "Language model provider", llm_model: "Language model",
     stt_provider: "Speech recognition provider", stt_model: "Speech recognition model",
@@ -83,7 +107,8 @@ export function validPersonaControls(value: unknown): PersonaControls {
   if (typeof held.executionPolicyVersion !== "number" || !Number.isInteger(held.executionPolicyVersion) || held.executionPolicyVersion < 1) throw new TypeError("persona execution policy version must be a positive integer");
   if (!BACKGROUND_SOUND_IDS.includes(held.backgroundSoundId as BackgroundSoundId)) throw new TypeError("persona background sound is not supported");
   if (typeof held.backgroundVolume !== "number" || !Number.isFinite(held.backgroundVolume) || held.backgroundVolume < BACKGROUND_VOLUME_RANGE.quietest || held.backgroundVolume > BACKGROUND_VOLUME_RANGE.loudest) throw new TypeError("persona background volume must be between -36 dB and -12 dB");
-  return { language, emotion: held.emotion as PersonaEmotion, accent, speechVolume: held.speechVolume, executionPolicyVersion: held.executionPolicyVersion, backgroundSoundId: held.backgroundSoundId as BackgroundSoundId, backgroundVolume: held.backgroundVolume };
+  if (!PERSONA_INTERRUPTION_LEVELS.includes(held.interruptionLevel as PersonaInterruptionLevel)) throw new TypeError("persona interruption level is not supported");
+  return { language, emotion: held.emotion as PersonaEmotion, accent, speechVolume: held.speechVolume, executionPolicyVersion: held.executionPolicyVersion, backgroundSoundId: held.backgroundSoundId as BackgroundSoundId, backgroundVolume: held.backgroundVolume, interruptionLevel: held.interruptionLevel as PersonaInterruptionLevel };
 }
 
 export function personaParametersOfSettings(settings: PersonaSettings): PersonaParameterValues {
@@ -95,6 +120,7 @@ export function personaParametersOfSettings(settings: PersonaSettings): PersonaP
     execution_policy_version: controls.executionPolicyVersion,
     background_sound_id: controls.backgroundSoundId,
     background_volume: controls.backgroundVolume,
+    interruption_level: controls.interruptionLevel,
   };
 }
 
@@ -109,11 +135,12 @@ export function personaParametersOfModels(models: PersonaModels): PersonaParamet
     executionPolicyVersion: PERSONA_EXECUTION_POLICY_VERSION,
     backgroundSoundId: "none",
     backgroundVolume: BACKGROUND_VOLUME_DEFAULT,
+    interruptionLevel: "off",
   });
 }
 
 export function personaModelsOfParameters(values: PersonaParameterValues): PersonaModels {
-  return validPersonaModels({
+  return structuralPersonaModels({
     llm: { provider: values.llm_provider, model: values.llm_model },
     stt: { provider: values.stt_provider, model: values.stt_model },
     tts: { provider: values.tts_provider, model: values.tts_model, voiceId: values.tts_voice_id, speed: values.tts_speed },
@@ -121,7 +148,7 @@ export function personaModelsOfParameters(values: PersonaParameterValues): Perso
 }
 
 export function personaControlsOfParameters(values: PersonaParameterValues): PersonaControls {
-  return validPersonaControls({ language: values.language, emotion: values.emotion, accent: values.accent, speechVolume: values.speech_volume, executionPolicyVersion: values.execution_policy_version, backgroundSoundId: values.background_sound_id, backgroundVolume: values.background_volume });
+  return validPersonaControls({ language: values.language, emotion: values.emotion, accent: values.accent, speechVolume: values.speech_volume, executionPolicyVersion: values.execution_policy_version, backgroundSoundId: values.background_sound_id, backgroundVolume: values.background_volume, interruptionLevel: values.interruption_level });
 }
 
 export function personaSettingsOfParameters(values: PersonaParameterValues): PersonaSettings {
@@ -135,9 +162,9 @@ export function speechProvidersOfParameters(contract: unknown, values: unknown):
 
 export function ticket01PersonaParameterContract(
   models: PersonaModels = RECOMMENDED_PERSONA_MODELS,
-  controls: Omit<PersonaControls, "backgroundSoundId" | "backgroundVolume"> = { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, executionPolicyVersion: PERSONA_EXECUTION_POLICY_VERSION },
+  controls: Omit<PersonaControls, "backgroundSoundId" | "backgroundVolume" | "interruptionLevel"> = { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, executionPolicyVersion: PERSONA_EXECUTION_POLICY_VERSION },
 ): readonly GraderParameter[] {
-  const checked = validPersonaControls({ ...controls, backgroundSoundId: "none", backgroundVolume: BACKGROUND_VOLUME_DEFAULT });
+  const checked = validPersonaControls({ ...controls, backgroundSoundId: "none", backgroundVolume: BACKGROUND_VOLUME_DEFAULT, interruptionLevel: "off" });
   const modelFields = legacyPersonaParameterContract(models).map((field) =>
     field.key === "tts_speed"
       ? { ...field, minimum: 0.25, maximum: 4 }
@@ -153,11 +180,12 @@ export function ticket01PersonaParameterContract(
   ];
 }
 
-export function personaParameterContract(
+/** The exact ticket 02 fifteen-field contract. Never add fields here. */
+export function ticket02PersonaParameterContract(
   models: PersonaModels = RECOMMENDED_PERSONA_MODELS,
-  controls: PersonaControls = { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, executionPolicyVersion: PERSONA_EXECUTION_POLICY_VERSION, backgroundSoundId: "none", backgroundVolume: BACKGROUND_VOLUME_DEFAULT },
+  controls: Omit<PersonaControls, "interruptionLevel"> = { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, executionPolicyVersion: PERSONA_EXECUTION_POLICY_VERSION, backgroundSoundId: "none", backgroundVolume: BACKGROUND_VOLUME_DEFAULT },
 ): readonly GraderParameter[] {
-  const checked = validPersonaControls(controls);
+  const checked = validPersonaControls({ ...controls, interruptionLevel: "off" });
   return [
     ...ticket01PersonaParameterContract(models, checked),
     { key: "background_sound_id", label: "Background sound", valueType: "string", defaultValue: checked.backgroundSoundId, unit: null, minimum: null, maximum: null },
@@ -165,9 +193,22 @@ export function personaParameterContract(
   ];
 }
 
+export function personaParameterContract(
+  models: PersonaModels = RECOMMENDED_PERSONA_MODELS,
+  controls: PersonaControls = { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, executionPolicyVersion: PERSONA_EXECUTION_POLICY_VERSION, backgroundSoundId: "none", backgroundVolume: BACKGROUND_VOLUME_DEFAULT, interruptionLevel: "off" },
+): readonly GraderParameter[] {
+  const currentModels = validPersonaModels(models);
+  const checked = validPersonaControls(controls);
+  return [
+    ...ticket02PersonaParameterContract(currentModels, checked),
+    { key: "interruption_level", label: "Interruption level", valueType: "string", defaultValue: checked.interruptionLevel, unit: null, minimum: null, maximum: null },
+  ];
+}
+
 export const PERSONA_PARAMETER_CONTRACT = personaParameterContract();
 const LEGACY_PERSONA_PARAMETER_CONTRACT = legacyPersonaParameterContract();
 const TICKET_01_PERSONA_PARAMETER_CONTRACT = ticket01PersonaParameterContract();
+const TICKET_02_PERSONA_PARAMETER_CONTRACT = ticket02PersonaParameterContract();
 
 export function validatePersonaParameterContract(value: unknown): readonly GraderParameter[] {
   const contract = validateGraderParameterContract(value);
@@ -179,15 +220,17 @@ export function validatePersonaParameterContract(value: unknown): readonly Grade
     );
   const isLegacy = declares(LEGACY_PERSONA_PARAMETER_CONTRACT);
   const isTicket01 = declares(TICKET_01_PERSONA_PARAMETER_CONTRACT);
+  const isTicket02 = declares(TICKET_02_PERSONA_PARAMETER_CONTRACT);
   const isCurrent = declares(PERSONA_PARAMETER_CONTRACT);
-  if (!isLegacy && !isTicket01 && !isCurrent) throw new TypeError("persona parameter contract must declare one complete supported settings version");
+  if (!isLegacy && !isTicket01 && !isTicket02 && !isCurrent) throw new TypeError("persona parameter contract must declare one complete supported settings version");
   const defaults = defaultGraderParameterValues(contract);
   for (const key of ["llm_provider", "llm_model", "stt_provider", "stt_model", "tts_provider", "tts_model", "tts_voice_id"] as const) {
     if (typeof defaults[key] !== "string" || defaults[key].trim() === "") {
       throw new TypeError(`persona parameter ${key} must default to nonempty text`);
     }
   }
-  if (isTicket01) validPersonaControls({ language: defaults.language, emotion: defaults.emotion, accent: defaults.accent, speechVolume: defaults.speech_volume, executionPolicyVersion: defaults.execution_policy_version, backgroundSoundId: "none", backgroundVolume: BACKGROUND_VOLUME_DEFAULT });
+  if (isTicket01) validPersonaControls({ language: defaults.language, emotion: defaults.emotion, accent: defaults.accent, speechVolume: defaults.speech_volume, executionPolicyVersion: defaults.execution_policy_version, backgroundSoundId: "none", backgroundVolume: BACKGROUND_VOLUME_DEFAULT, interruptionLevel: "off" });
+  if (isTicket02) validPersonaControls({ language: defaults.language, emotion: defaults.emotion, accent: defaults.accent, speechVolume: defaults.speech_volume, executionPolicyVersion: defaults.execution_policy_version, backgroundSoundId: defaults.background_sound_id, backgroundVolume: defaults.background_volume, interruptionLevel: "off" });
   if (isCurrent) personaControlsOfParameters(defaults);
   return contract;
 }
@@ -200,8 +243,9 @@ export function validatePersonaParameterValues(contract: unknown, values: unknow
       throw new TypeError(`persona parameter ${key} must be nonempty text`);
     }
   }
-  if (checkedContract.some((field) => field.key === "background_sound_id")) personaControlsOfParameters(checked);
-  else if (checkedContract.some((field) => field.key === "language")) validPersonaControls({ language: checked.language, emotion: checked.emotion, accent: checked.accent, speechVolume: checked.speech_volume, executionPolicyVersion: checked.execution_policy_version, backgroundSoundId: "none", backgroundVolume: BACKGROUND_VOLUME_DEFAULT });
+  if (checkedContract.some((field) => field.key === "interruption_level")) personaControlsOfParameters(checked);
+  else if (checkedContract.some((field) => field.key === "background_sound_id")) validPersonaControls({ language: checked.language, emotion: checked.emotion, accent: checked.accent, speechVolume: checked.speech_volume, executionPolicyVersion: checked.execution_policy_version, backgroundSoundId: checked.background_sound_id, backgroundVolume: checked.background_volume, interruptionLevel: "off" });
+  else if (checkedContract.some((field) => field.key === "language")) validPersonaControls({ language: checked.language, emotion: checked.emotion, accent: checked.accent, speechVolume: checked.speech_volume, executionPolicyVersion: checked.execution_policy_version, backgroundSoundId: "none", backgroundVolume: BACKGROUND_VOLUME_DEFAULT, interruptionLevel: "off" });
   return checked;
 }
 

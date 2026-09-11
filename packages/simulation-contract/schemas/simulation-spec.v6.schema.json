@@ -110,7 +110,13 @@
             "speech_volume": { "type": "number", "minimum": 0.5, "maximum": 1.5 },
             "execution_policy_version": { "type": "integer", "minimum": 1 },
             "background_sound_id": { "type": "string", "enum": ["none", "office-v1", "cafe-v1", "street-traffic-v1", "crowd-talking-v1", "inside-car-v1", "home-tv-v1", "wind-v1", "rain-v1"] },
-            "background_volume": { "type": "number", "minimum": 0.015848931924611134, "maximum": 0.251188643150958 }
+            "background_volume": { "type": "number", "minimum": 0.015848931924611134, "maximum": 0.251188643150958 },
+            "interruption_level": {
+              "description": "Timed overlap policy. Existing v6 work orders that omit this field execute as off.",
+              "type": "string",
+              "enum": ["off", "occasional", "frequent"],
+              "default": "off"
+            }
           }
         }
       }

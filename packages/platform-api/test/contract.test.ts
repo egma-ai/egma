@@ -67,6 +67,26 @@ describe("the platform API operation registry", () => {
       .toBe(operations.length);
   });
 
+  it("uses the shared interruption level on persona settings writes and reads", () => {
+    const savedControls = platformOperations.getPersona.responses[200].schema
+      .properties.settings.anyOf[0].properties.controls;
+    const inputControls = platformOperations.updatePersona.request.body.properties
+      .controls;
+    for (const controls of [savedControls, inputControls] as const) {
+      expect(controls.properties.interruptionLevel).toEqual({
+        type: "string",
+        enum: ["off", "occasional", "frequent"],
+      });
+      expect(controls.required).toContain("interruptionLevel");
+      expect(controls.additionalProperties).toBe(false);
+    }
+    expect(savedControls.properties.executionPolicyVersion).toMatchObject({
+      readOnly: true,
+      minimum: 1,
+    });
+    expect(inputControls.properties).not.toHaveProperty("executionPolicyVersion");
+  });
+
   it("lets a LiveKit agent reserve one active worker key inside one project", () => {
     const guarded = platformOperations.createApiKey.request.body.oneOf[1];
     expect(guarded).toMatchObject({

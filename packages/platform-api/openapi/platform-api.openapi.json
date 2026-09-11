@@ -11514,6 +11514,14 @@
                         "type": "number",
                         "minimum": 0.015848931924611134,
                         "maximum": 0.251188643150958
+                      },
+                      "interruptionLevel": {
+                        "type": "string",
+                        "enum": [
+                          "off",
+                          "occasional",
+                          "frequent"
+                        ]
                       }
                     },
                     "required": [
@@ -11522,7 +11530,8 @@
                       "accent",
                       "speechVolume",
                       "backgroundSoundId",
-                      "backgroundVolume"
+                      "backgroundVolume",
+                      "interruptionLevel"
                     ],
                     "additionalProperties": false
                   },
@@ -11799,6 +11808,14 @@
                                   "type": "number",
                                   "minimum": 0.015848931924611134,
                                   "maximum": 0.251188643150958
+                                },
+                                "interruptionLevel": {
+                                  "type": "string",
+                                  "enum": [
+                                    "off",
+                                    "occasional",
+                                    "frequent"
+                                  ]
                                 }
                               },
                               "required": [
@@ -11808,7 +11825,8 @@
                                 "speechVolume",
                                 "executionPolicyVersion",
                                 "backgroundSoundId",
-                                "backgroundVolume"
+                                "backgroundVolume",
+                                "interruptionLevel"
                               ],
                               "additionalProperties": false
                             },
@@ -12279,6 +12297,14 @@
                                         "type": "number",
                                         "minimum": 0.015848931924611134,
                                         "maximum": 0.251188643150958
+                                      },
+                                      "interruptionLevel": {
+                                        "type": "string",
+                                        "enum": [
+                                          "off",
+                                          "occasional",
+                                          "frequent"
+                                        ]
                                       }
                                     },
                                     "required": [
@@ -12288,7 +12314,8 @@
                                       "speechVolume",
                                       "executionPolicyVersion",
                                       "backgroundSoundId",
-                                      "backgroundVolume"
+                                      "backgroundVolume",
+                                      "interruptionLevel"
                                     ],
                                     "additionalProperties": false
                                   },
@@ -12611,6 +12638,14 @@
                         "type": "number",
                         "minimum": 0.015848931924611134,
                         "maximum": 0.251188643150958
+                      },
+                      "interruptionLevel": {
+                        "type": "string",
+                        "enum": [
+                          "off",
+                          "occasional",
+                          "frequent"
+                        ]
                       }
                     },
                     "required": [
@@ -12619,7 +12654,8 @@
                       "accent",
                       "speechVolume",
                       "backgroundSoundId",
-                      "backgroundVolume"
+                      "backgroundVolume",
+                      "interruptionLevel"
                     ],
                     "additionalProperties": false
                   },
@@ -12925,6 +12961,14 @@
                                   "type": "number",
                                   "minimum": 0.015848931924611134,
                                   "maximum": 0.251188643150958
+                                },
+                                "interruptionLevel": {
+                                  "type": "string",
+                                  "enum": [
+                                    "off",
+                                    "occasional",
+                                    "frequent"
+                                  ]
                                 }
                               },
                               "required": [
@@ -12934,7 +12978,8 @@
                                 "speechVolume",
                                 "executionPolicyVersion",
                                 "backgroundSoundId",
-                                "backgroundVolume"
+                                "backgroundVolume",
+                                "interruptionLevel"
                               ],
                               "additionalProperties": false
                             },
@@ -14027,6 +14072,14 @@
                         "type": "number",
                         "minimum": 0.015848931924611134,
                         "maximum": 0.251188643150958
+                      },
+                      "interruptionLevel": {
+                        "type": "string",
+                        "enum": [
+                          "off",
+                          "occasional",
+                          "frequent"
+                        ]
                       }
                     },
                     "required": [
@@ -14035,7 +14088,8 @@
                       "accent",
                       "speechVolume",
                       "backgroundSoundId",
-                      "backgroundVolume"
+                      "backgroundVolume",
+                      "interruptionLevel"
                     ],
                     "additionalProperties": false
                   },
@@ -14478,6 +14532,14 @@
                                   "type": "number",
                                   "minimum": 0.015848931924611134,
                                   "maximum": 0.251188643150958
+                                },
+                                "interruptionLevel": {
+                                  "type": "string",
+                                  "enum": [
+                                    "off",
+                                    "occasional",
+                                    "frequent"
+                                  ]
                                 }
                               },
                               "required": [
@@ -14487,7 +14549,8 @@
                                 "speechVolume",
                                 "executionPolicyVersion",
                                 "backgroundSoundId",
-                                "backgroundVolume"
+                                "backgroundVolume",
+                                "interruptionLevel"
                               ],
                               "additionalProperties": false
                             },
@@ -14809,6 +14872,14 @@
                         "type": "number",
                         "minimum": 0.015848931924611134,
                         "maximum": 0.251188643150958
+                      },
+                      "interruptionLevel": {
+                        "type": "string",
+                        "enum": [
+                          "off",
+                          "occasional",
+                          "frequent"
+                        ]
                       }
                     },
                     "required": [
@@ -14817,7 +14888,8 @@
                       "accent",
                       "speechVolume",
                       "backgroundSoundId",
-                      "backgroundVolume"
+                      "backgroundVolume",
+                      "interruptionLevel"
                     ],
                     "additionalProperties": false
                   },
@@ -15099,6 +15171,14 @@
                                   "type": "number",
                                   "minimum": 0.015848931924611134,
                                   "maximum": 0.251188643150958
+                                },
+                                "interruptionLevel": {
+                                  "type": "string",
+                                  "enum": [
+                                    "off",
+                                    "occasional",
+                                    "frequent"
+                                  ]
                                 }
                               },
                               "required": [
@@ -15108,7 +15188,8 @@
                                 "speechVolume",
                                 "executionPolicyVersion",
                                 "backgroundSoundId",
-                                "backgroundVolume"
+                                "backgroundVolume",
+                                "interruptionLevel"
                               ],
                               "additionalProperties": false
                             },
@@ -16348,6 +16429,14 @@
                                   "type": "number",
                                   "minimum": 0.015848931924611134,
                                   "maximum": 0.251188643150958
+                                },
+                                "interruptionLevel": {
+                                  "type": "string",
+                                  "enum": [
+                                    "off",
+                                    "occasional",
+                                    "frequent"
+                                  ]
                                 }
                               },
                               "required": [
@@ -16357,7 +16446,8 @@
                                 "speechVolume",
                                 "executionPolicyVersion",
                                 "backgroundSoundId",
-                                "backgroundVolume"
+                                "backgroundVolume",
+                                "interruptionLevel"
                               ],
                               "additionalProperties": false
                             },

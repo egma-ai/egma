@@ -620,6 +620,17 @@ describe("the two schemas, as one contract", () => {
       validators.spec(ticket01),
       ajv.errorsText(validators.spec.errors),
     ).toBe(true);
+    for (const interruptionLevel of ["off", "occasional", "frequent"] as const) {
+      const spec = structuredClone(base);
+      parametersOf(spec).interruption_level = interruptionLevel;
+      expect(
+        validators.spec(spec),
+        ajv.errorsText(validators.spec.errors),
+      ).toBe(true);
+    }
+    const unknownInterruption = structuredClone(base);
+    parametersOf(unknownInterruption).interruption_level = "constant";
+    expect(validators.spec(unknownInterruption)).toBe(false);
     for (const [key, value] of [
       ["background_sound_id", "unknown-v1"],
       ["background_volume", 0.3],
