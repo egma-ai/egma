@@ -460,7 +460,7 @@ describe("creating and reading a persona", () => {
     expect(found).toMatchObject({
       name: "Everyday Caller [Male]",
       description: "Regular conversationalist persona",
-      version: 6,
+      version: 5,
       owner: "egma",
       // Catalog content, and the whole point of it: nobody ever hears
       // "Hi, I'm Everyday Caller [Male]."

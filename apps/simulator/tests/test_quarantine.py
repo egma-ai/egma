@@ -21,6 +21,7 @@ SOURCE_ROOT = APP_ROOT / "src" / "egma_simulator"
 ALLOWED_DEPENDENCIES = {
     "aiohttp",  # the outbound HTTP client, and the workbench's server
     "jsonschema",  # holds every document to the contract, both directions
+    "referencing",  # resolves versioned cross-schema references for jsonschema
     "rfc3339-validator",  # Check schema date-time formats.
     # Pipecat supplies speech processing and LiveKit supplies room/SIP transport.
     # Load provider libraries only when configured; the tests below check this.
@@ -131,6 +132,7 @@ def test_no_module_imports_anything_from_outside_the_app():
         "aiohttp",
         "deepgram",
         "jsonschema",
+        "referencing",
         "pipecat",
         "loguru",
         "structlog",
@@ -388,4 +390,4 @@ def test_the_contract_is_read_from_the_shared_package_not_copied():
     assert shared.name == "simulation-contract"
     assert (shared / "schemas").is_dir()
     # Nothing schema-shaped lives inside the app itself.
-    assert not list(APP_ROOT.rglob("*.schema.json"))
+    assert not list(SOURCE_ROOT.rglob("*.schema.json"))

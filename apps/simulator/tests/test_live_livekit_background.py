@@ -538,7 +538,7 @@ async def test_real_caller_receives_deliberate_overlap_while_background_continue
     )
     publishing = None
     try:
-        await asyncio.sleep(0.2)
+        await asyncio.wait_for(remote.frame_received.wait(), 10)
         assert interruptions == []
         publishing = asyncio.create_task(
             remote.publish(
@@ -549,7 +549,8 @@ async def test_real_caller_receives_deliberate_overlap_while_background_continue
             )
         )
         await asyncio.wait_for(delivered.wait(), 10)
-        await asyncio.sleep(0.2)
+        remote.frame_received.clear()
+        await asyncio.wait_for(remote.frame_received.wait(), 10)
         controls.request_cancel()
         conducted = await asyncio.wait_for(running, 5)
         publishing.cancel()

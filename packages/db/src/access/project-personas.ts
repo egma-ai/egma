@@ -4,7 +4,7 @@ import { and, asc, eq } from "drizzle-orm";
 import type { Queryable } from "../client.ts";
 import { validateUnchangedParameterUnits } from "../grader-library/parameters.ts";
 import {
-  defaultPersonaParameterValues,
+  currentPersonaParameterDefaults,
   personaModelsOfParameters,
   personaControlsOfParameters,
   personaParameterContract,
@@ -98,21 +98,29 @@ export async function ensureProjectPersonaOn(
     );
   }
   const [version] = await on
-    .select({ parameterContract: personaVersion.parameterContract })
+    .select({
+      language: personaVersion.language,
+      parameterContract: personaVersion.parameterContract,
+    })
     .from(personaVersion)
     .where(eq(personaVersion.id, definition.currentVersionId))
     .limit(1);
   if (version === undefined) {
     throw new Error("the persona's current version is missing");
   }
+  const currentDefaults = currentPersonaParameterDefaults(version.parameterContract, {
+    ...(version.language === null ? {} : { language: version.language }),
+  });
   const values =
     parameterValues === undefined
-      ? defaultPersonaParameterValues(version.parameterContract)
+      ? currentDefaults.values
       : validatePersonaParameterValues(
-          version.parameterContract,
+          parameterValues.speech_mode === undefined ? version.parameterContract : personaParameterContract(personaModelsOfParameters(parameterValues), personaControlsOfParameters(parameterValues)),
           parameterValues,
         );
-  const settingsContract = parameterValues === undefined || parameterValues.speech_mode === undefined
+  const settingsContract = parameterValues === undefined
+    ? currentDefaults.contract
+    : parameterValues.speech_mode === undefined
     ? version.parameterContract
     : personaParameterContract(personaModelsOfParameters(parameterValues), personaControlsOfParameters(parameterValues));
   await on

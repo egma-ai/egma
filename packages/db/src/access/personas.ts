@@ -33,6 +33,8 @@ import {
 import { project } from "../schema/tenancy.ts";
 import {
   defaultPersonaParameterValues,
+  currentPersonaParameterDefaults,
+  historicalPersonaControls,
   PERSONA_PARAMETER_CONTRACT,
   personaParameterContract,
   personaControlsOfParameters,
@@ -384,14 +386,17 @@ export async function seedPersonaLibraryInternal(
         .where(eq(projectPersona.personaDefinitionId, entry.id))
         .orderBy(projectPersona.id)
         .for("update", { of: projectPersona });
+      const currentDefaults = currentPersonaParameterDefaults(current.parameterContract, {
+        ...(current.language === null ? {} : { language: current.language }),
+      });
       const expandedSettings = savedSettings.map((row) => {
         if (row.parameterContract.some((field) => field.key === "speech_mode")) {
           return { id: row.id, values: validatePersonaParameterValues(row.parameterContract, row.parameterValues), contract: row.parameterContract };
         }
-        const installedContract = installed?.parameterContract ?? current.parameterContract;
+        const installedContract = row.parameterContract;
         const oldValues = validatePersonaParameterValues(installedContract, row.parameterValues);
-        validateUnchangedParameterUnits(installedContract, current.parameterContract);
-        const defaults = defaultPersonaParameterValues(current.parameterContract);
+        validateUnchangedParameterUnits(installedContract, currentDefaults.contract);
+        const defaults = currentDefaults.values;
         const speechSpeed = personaSpeechSpeedOfTarget(Number(oldValues.tts_speed));
         const values = {
           ...defaults,
@@ -399,11 +404,11 @@ export async function seedPersonaLibraryInternal(
           ...(oldValues.language === undefined && installed?.language !== null && installed?.language !== undefined
             ? { language: installed.language }
             : {}),
-          ...(current.parameterContract.some((field) => field.key === "speech_speed") && !installedContract.some((field) => field.key === "speech_speed")
-            ? { speech_speed: speechSpeed, tts_speed: PERSONA_SPEECH_SPEED_TARGETS[speechSpeed], interruption_level: oldValues.interruption_level === "off" ? "none" : oldValues.interruption_level, execution_policy_version: 2 }
+          ...(currentDefaults.contract.some((field) => field.key === "speech_speed") && !installedContract.some((field) => field.key === "speech_speed")
+            ? { speech_speed: speechSpeed, tts_speed: PERSONA_SPEECH_SPEED_TARGETS[speechSpeed], interruption_level: historicalPersonaControls(oldValues).interruptionLevel, execution_policy_version: 2 }
             : {}),
         };
-        return { id: row.id, values: validatePersonaParameterValues(current.parameterContract, values), contract: current.parameterContract };
+        return { id: row.id, values: validatePersonaParameterValues(currentDefaults.contract, values), contract: currentDefaults.contract };
       });
       const versionInsertions = await tx.insert(personaVersion).values(entry.versions.map((version) => ({
         id: version.id,
@@ -456,9 +461,12 @@ export async function seedPersonaLibraryInternal(
       if (saved === undefined) continue;
       if (saved.parameterContract.some((field) => field.key === "speech_speed")) continue;
       const oldValues = validatePersonaParameterValues(saved.parameterContract, saved.parameterValues);
+      const retainedValues = oldValues.language === undefined && definition.language !== null
+        ? { ...oldValues, language: definition.language }
+        : oldValues;
       const speechSpeed = personaSpeechSpeedOfTarget(Number(oldValues.tts_speed));
-      const controls = personaControlsOfParameters(oldValues);
-      const models = personaModelsOfParameters(oldValues);
+      const controls = historicalPersonaControls(retainedValues);
+      const models = personaModelsOfParameters(retainedValues);
       if (models.mode !== "separate") throw new Error("a historical numeric persona must use separate speech models");
       const resolvedModels = { ...models, tts: { ...models.tts, speed: PERSONA_SPEECH_SPEED_TARGETS[speechSpeed] } };
       const nextControls = { ...controls, speechSpeed, executionPolicyVersion: 2 };

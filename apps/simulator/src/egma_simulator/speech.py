@@ -30,7 +30,6 @@ from pipecat.frames.frames import (
     MetricsFrame,
     OutputAudioRawFrame,
     SpeechOutputAudioRawFrame,
-    StartFrame,
     TextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -38,7 +37,11 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.metrics.metrics import MetricsData
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import (
+    FrameDirection,
+    FrameProcessor,
+    FrameProcessorSetup,
+)
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.utils.time import time_now_iso8601
@@ -317,13 +320,15 @@ class ScriptedTTS(FrameProcessor):
         self.voice = voice
         self.sample_rate_hz = 0
 
+    async def setup(self, setup: FrameProcessorSetup) -> None:
+        await super().setup(setup)
+        self.sample_rate_hz = setup.audio_out_sample_rate
+
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         # A transcription is a text frame travelling the other way — the
         # agent's words on their way to the persona, never something to
         # speak. The service base class draws the same line.
-        if isinstance(frame, StartFrame):
-            self.sample_rate_hz = frame.audio_out_sample_rate
         if isinstance(frame, TextFrame) and not isinstance(
             frame, TranscriptionFrame | InterimTranscriptionFrame
         ):

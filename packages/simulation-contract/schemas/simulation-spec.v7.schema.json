@@ -91,11 +91,11 @@
   },
   "allOf": [
     {
-      "if": { "properties": { "modality": { "const": "voice" }, "models": { "properties": { "mode": { "const": "live" } }, "required": ["mode"] } }, "required": ["modality", "models"] },
-      "then": { "properties": { "models": { "properties": { "live": { "required": ["key"] } } } } }
+      "if": { "type": "object", "properties": { "modality": { "const": "voice" }, "models": { "type": "object", "properties": { "mode": { "const": "live" } }, "required": ["mode"] } }, "required": ["modality", "models"] },
+      "then": { "type": "object", "properties": { "models": { "type": "object", "properties": { "live": { "type": "object", "properties": { "key": {} }, "required": ["key"] } } } } }
     },
     {
-      "if": { "properties": { "modality": { "const": "chat" } }, "required": ["modality"] },
+      "if": { "type": "object", "properties": { "modality": { "const": "chat" } }, "required": ["modality"] },
       "then": {
         "type": "object",
         "properties": {

@@ -1056,6 +1056,84 @@ describe("the contract's surface, held to the words the project settled on", () 
 });
 
 describe("the exported spec check, which the control plane sends through", () => {
+  it("compiles and accepts current separate, Live voice, and Live chat specs", async () => {
+    const [captured] = await fixturesUnder("spec", "valid");
+    if (captured === undefined) throw new Error("no valid spec fixture");
+    const currentPersona = {
+      name: "Mara",
+      personality: "Careful and direct.",
+      parameters: {
+        language: "en-US",
+        emotion: "neutral",
+        accent: "voice_default",
+        speech_speed: "normal",
+        tts_speed: 1,
+        speech_volume: 1,
+        background_sound_id: "none",
+        background_volume: 0.0631,
+        interruption_level: "none",
+        execution_policy_version: 2,
+      },
+    };
+    const llm = {
+      provider: "openai",
+      model: "gpt-4o-mini",
+      adapter: "openai_chat_completions",
+      key: "fixture-backend-key",
+    };
+    const separate = {
+      ...captured.document,
+      contract_version: 7,
+      persona: currentPersona,
+      models: {
+        mode: "separate",
+        llm,
+        stt: {
+          provider: "deepgram",
+          model: "nova-3-general",
+          adapter: "deepgram",
+          key: "fixture-stt-key",
+        },
+        tts: {
+          provider: "cartesia",
+          model: "sonic-3.5",
+          adapter: "cartesia",
+          voice_id: "measured-alto-3",
+          speed: 1,
+          key: "fixture-tts-key",
+        },
+      },
+    };
+    const live = {
+      provider: "openai",
+      model: "gpt-live-1",
+      adapter: "openai_live",
+      voice_id: "marin",
+      key: "fixture-live-key",
+    };
+
+    expect(specComplaints(separate)).toEqual([]);
+    expect(specComplaints({
+      ...separate,
+      models: { mode: "live", llm, live },
+    })).toEqual([]);
+    const { key: _liveKey, ...liveWithoutKey } = live;
+    expect(specComplaints({
+      ...separate,
+      modality: "chat",
+      models: { mode: "live", llm, live: liveWithoutKey },
+    })).toEqual([]);
+    expect(specComplaints({
+      ...separate,
+      modality: "chat",
+      models: { mode: "live", llm, live },
+    })).toContain("/models/live: must NOT be valid");
+    expect(specComplaints({
+      ...separate,
+      models: { mode: "live", llm, live: liveWithoutKey },
+    })).toContain("/models/live: must have required property 'key'");
+  });
+
   it("has no complaints about any valid golden fixture", async () => {
     for (const fixture of await fixturesUnder("spec", "valid")) {
       expect(specComplaints(fixture.document), fixture.name).toEqual([]);

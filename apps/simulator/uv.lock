@@ -463,6 +463,7 @@ dependencies = [
     { name = "opentelemetry-exporter-otlp-proto-common" },
     { name = "opentelemetry-sdk" },
     { name = "pipecat-ai", extra = ["deepgram", "livekit", "tracing"] },
+    { name = "referencing" },
     { name = "rfc3339-validator" },
     { name = "structlog" },
 ]
@@ -486,6 +487,7 @@ requires-dist = [
     { name = "opentelemetry-exporter-otlp-proto-common", specifier = "==1.44.0" },
     { name = "opentelemetry-sdk", specifier = "==1.44.0" },
     { name = "pipecat-ai", extras = ["deepgram", "livekit", "openai", "soundfile", "tracing"], specifier = "==1.9.0" },
+    { name = "referencing", specifier = ">=0.37.0" },
     { name = "rfc3339-validator", specifier = ">=0.1.4" },
     { name = "structlog", specifier = ">=26.1.0" },
 ]

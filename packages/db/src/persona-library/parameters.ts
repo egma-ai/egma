@@ -195,8 +195,44 @@ export function personaControlsOfParameters(values: PersonaParameterValues): Per
   return validPersonaControls({ language: values.language, emotion: values.emotion, accent: values.accent, speechVolume: values.speech_volume, executionPolicyVersion: values.execution_policy_version, backgroundSoundId: values.background_sound_id ?? "none", backgroundVolume: values.background_volume ?? BACKGROUND_VOLUME_DEFAULT, interruptionLevel: values.interruption_level === "off" || values.interruption_level === undefined ? "none" : values.interruption_level, speechSpeed: values.speech_speed ?? personaSpeechSpeedOfTarget(Number(values.tts_speed)) });
 }
 
+/** Fill controls that did not exist in an older saved settings contract. */
+export function historicalPersonaControls(
+  values: PersonaParameterValues,
+  fallbacks: Partial<PersonaControls> = {},
+): PersonaControls {
+  return personaControlsOfParameters({
+    ...personaParametersOfModels(personaModelsOfParameters(values)),
+    ...fallbacks,
+    ...values,
+  });
+}
+
 export function personaSettingsOfParameters(values: PersonaParameterValues): PersonaSettings {
   return { models: personaModelsOfParameters(values), ...personaControlsOfParameters(values) };
+}
+
+/** Move version-owned defaults into the current project-settings contract. */
+export function currentPersonaParameterDefaults(
+  contract: unknown,
+  controls: Partial<PersonaControls> = {},
+): {
+  readonly contract: readonly GraderParameter[];
+  readonly values: PersonaParameterValues;
+} {
+  const historical = defaultPersonaParameterValues(contract);
+  const models = personaModelsOfParameters(historical);
+  const currentControls = {
+    ...historicalPersonaControls(historical, controls),
+    executionPolicyVersion: PERSONA_EXECUTION_POLICY_VERSION,
+  };
+  const resolvedModels: PersonaModels = models.mode === "separate"
+    ? { ...models, tts: { ...models.tts, speed: PERSONA_SPEECH_SPEED_TARGETS[currentControls.speechSpeed] } }
+    : models;
+  const currentContract = personaParameterContract(resolvedModels, currentControls);
+  return {
+    contract: currentContract,
+    values: personaParametersOfSettings({ models: resolvedModels, ...currentControls }),
+  };
 }
 
 export function speechProvidersOfParameters(contract: unknown, values: unknown): readonly ModelProvider[] {

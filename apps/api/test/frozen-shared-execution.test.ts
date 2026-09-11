@@ -78,6 +78,7 @@ it("freezes shared grader and persona selections together while later work recei
     const projectGraderId = listed.graders.find((one: { graderDefinitionId: string }) => one.graderDefinitionId === grader.id).id as string;
     await request(projectId, "PATCH", `/v1/graders/${projectGraderId}`, { settings: { llm_provider: "openai", llm_model: model }, passThreshold: index === 0 ? 0.7 : 0.9 });
     const used = await request(projectId, "POST", `/v1/personas/${persona.id}/use`, { projectId, models: {
+      mode: "separate",
       llm: { provider: "openai", model },
       stt: { provider: "deepgram", model: "nova-3-general" },
       tts: { provider: "openai", model: "tts-1", voiceId: voice, speed },
@@ -143,6 +144,7 @@ it("freezes shared grader and persona selections together while later work recei
 
   await request(first.projectId, "PATCH", `/v1/graders/${first.projectGraderId}`, { settings: { llm_provider: "openai", llm_model: "gpt-5.6-terra" }, passThreshold: 0.95 });
   await request(first.projectId, "PATCH", `/v1/personas/${persona.id}`, { projectId: first.projectId, models: {
+    mode: "separate",
     llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "openai", model: "gpt-live-transcribe" },
     tts: { provider: "cartesia", model: "sonic-3.5", voiceId: "later-project-voice", speed: 1.3 },
   } });
