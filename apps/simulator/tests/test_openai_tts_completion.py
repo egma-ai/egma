@@ -8,6 +8,7 @@ import pytest
 from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     TextFrame,
@@ -125,6 +126,53 @@ class _Conductor:
 
     def media_advanced(self) -> None:
         pass
+
+
+class _PendingVoiceTurn(_Conductor):
+    def __init__(self) -> None:
+        super().__init__()
+        self._pending_persona_text = None
+        self._pending_persona_concludes = False
+        self._pending_silence_follow_up = 0
+        self._persona_began = None
+        self._persona_ended = None
+        self._owes_a_turn = True
+        self._record = SimpleNamespace(
+            persona_last_stopped_at=None,
+            quiet_since=0,
+            persona_response_pending=False,
+        )
+        self.turns: list[str] = []
+        self.stop_count = 0
+        self.stop_errors: list[BaseException] = []
+        self.interrupted = asyncio.Event()
+        self.interruption_finished = asyncio.Event()
+        conductor_module.VoiceConductor.persona_will_speak(self, "fixture reply")
+
+    persona_audio = conductor_module.VoiceConductor.persona_audio
+
+    def persona_interrupted(self, *, heard_through) -> None:
+        conductor_module.VoiceConductor.persona_interrupted(
+            self, heard_through=heard_through
+        )
+        self.interruption_finished.set()
+
+    def persona_will_not_finish(self) -> None:
+        conductor_module.VoiceConductor.persona_will_not_finish(self)
+        self.interrupted.set()
+
+    async def persona_stopped(self) -> None:
+        try:
+            await conductor_module.VoiceConductor.persona_stopped(self)
+        except BaseException as fault:
+            self.stop_errors.append(fault)
+            raise
+        finally:
+            self.stop_count += 1
+            self.stopped.set()
+
+    async def _took_a_turn(self, _speaker, text, *_positions, **_kwargs) -> None:
+        self.turns.append(text)
 
 
 class _Media:
@@ -264,6 +312,79 @@ async def test_openai_http_tts_cancellation_reaps_the_held_context() -> None:
     await asyncio.wait_for(running, 5)
 
     assert not tts._audio_contexts
+
+
+@pytest.mark.asyncio
+async def test_openai_interruption_before_audio_has_no_late_completion() -> None:
+    response = _HeldResponse()
+    next_response = _HeldResponse()
+    tts, _create = _openai_tts(response, next_response)
+    output = _AcceptedOutput()
+    recorder = conductor_module._EvidenceRecorder(
+        num_channels=2, auto_start_recording=True
+    )
+    conductor = _PendingVoiceTurn()
+    timeline = conductor_module._Timeline(conductor, _Media(), recorder)
+    replies = conductor_module._PersonaReplyGate(
+        service=SimpleNamespace(), conductor=conductor
+    )
+    worker = PipelineWorker(
+        Pipeline([replies, tts, output, PlayoutStamp(), recorder, timeline]),
+        enable_tracing=False,
+        enable_turn_tracking=False,
+        enable_rtvi=False,
+        idle_timeout_secs=None,
+    )
+    failed = asyncio.Event()
+
+    @worker.event_handler("on_pipeline_error")
+    async def on_error(_worker, _frame: ErrorFrame) -> None:
+        failed.set()
+
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker)
+    running = asyncio.create_task(runner.run())
+    try:
+        await worker.queue_frames(
+            [
+                LLMFullResponseStartFrame(),
+                TextFrame("fixture reply"),
+                LLMFullResponseEndFrame(),
+            ]
+        )
+        await asyncio.wait_for(response.entered.wait(), 1)
+        await worker.queue_frame(InterruptionFrame())
+        await asyncio.wait_for(conductor.interrupted.wait(), 1)
+        assert conductor._pending_persona_text is None
+        await asyncio.wait_for(conductor.stopped.wait(), 1)
+        await asyncio.wait_for(conductor.interruption_finished.wait(), 1)
+        assert conductor.stop_errors == []
+        assert not tts._audio_contexts
+        assert conductor.turns == []
+
+        conductor.stopped.clear()
+        conductor_module.VoiceConductor.persona_will_speak(conductor, "Next reply")
+        await worker.queue_frames(
+            [
+                LLMFullResponseStartFrame(),
+                TextFrame("Next reply"),
+                LLMFullResponseEndFrame(),
+            ]
+        )
+        await asyncio.wait_for(next_response.entered.wait(), 1)
+        next_response.first.set()
+        await asyncio.wait_for(next_response.first_sent.wait(), 1)
+        next_response.middle.set()
+        await asyncio.wait_for(next_response.ended.wait(), 1)
+        await asyncio.wait_for(conductor.stopped.wait(), 1)
+        assert conductor.stop_errors == []
+        assert not failed.is_set()
+        assert conductor.stop_count == 2
+        assert conductor.turns == ["Next reply"]
+    finally:
+        if not running.done():
+            await worker.cancel()
+        await asyncio.wait_for(running, 1)
 
 
 @pytest.mark.asyncio
