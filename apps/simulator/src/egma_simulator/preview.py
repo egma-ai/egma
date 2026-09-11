@@ -8,6 +8,7 @@ import hmac
 import io
 import wave
 from dataclasses import asdict
+from types import SimpleNamespace
 
 from aiohttp import web
 from pipecat.frames.frames import (
@@ -21,9 +22,11 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.workers.runner import WorkerRunner
 
+from .model import build_model_client
 from .spec import (
     ModelSelection,
     PersonaParameters,
@@ -44,6 +47,39 @@ MAX_TEXT_CHARACTERS = 500
 PREVIEW_SECONDS = 15
 PREVIEW_SAMPLE_RATE = 24_000
 MAX_AUDIO_SECONDS = 10
+
+_EMOTIONAL_WORDING = {
+    "neutral": "Use neutral wording.",
+    "happy": "Use happy wording.",
+    "angry": "Use angry wording.",
+    "frustrated": "Use frustrated wording.",
+    "sad": "Use sad wording.",
+    "anxious": "Use anxious wording.",
+}
+
+
+async def _preview_text(
+    models: SelectedModels, parameters: PersonaParameters
+) -> tuple[str, ProviderUsage | None]:
+    """Ask the selected LLM for the short sample the selected voice will speak."""
+    instruction = _EMOTIONAL_WORDING.get(parameters.emotion)
+    if instruction is None:
+        raise ValueError("emotion is not supported")
+    prompt = (
+        "Write exactly one scenario-neutral sentence for a voice preview. "
+        f"Write it in {parameters.language}. {instruction} "
+        "Use 8 to 16 words. Return only that sentence."
+    )
+    model = build_model_client(SimpleNamespace(models=models, runtime=None))
+    try:
+        reply = await model.reply(
+            LLMContext(messages=[{"role": "system", "content": prompt}])
+        )
+    finally:
+        await model.close()
+    if not reply.text or len(reply.text) > MAX_TEXT_CHARACTERS:
+        raise ValueError("the preview model did not return one short sentence")
+    return reply.text, reply.usage
 
 
 class _AudioCollector(FrameProcessor):
@@ -74,10 +110,8 @@ class _AudioCollector(FrameProcessor):
 
 async def render_preview(body: dict) -> dict:
     """Render one bounded sample through the same TTS and speech-gain processors."""
-    text = body["text"]
-    if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT_CHARACTERS:
-        raise ValueError(f"text must contain 1–{MAX_TEXT_CHARACTERS} characters")
     selected = body["models"]["tts"]
+    selected_llm = body["models"]["llm"]
     controls = body["controls"]
     parameters = PersonaParameters(
         language=controls["language"],
@@ -87,7 +121,13 @@ async def render_preview(body: dict) -> dict:
         execution_policy_version=int(controls["executionPolicyVersion"]),
     )
     models = SelectedModels(
-        llm=ModelSelection(provider="preview", model="preview", adapter="preview"),
+        llm=ModelSelection(
+            provider=selected_llm["provider"],
+            model=selected_llm["model"],
+            adapter=selected_llm["adapter"],
+            key=selected_llm["key"],
+            funding_receipt=selected_llm.get("fundingReceipt"),
+        ),
         stt=ModelSelection(provider="scripted", model="scripted", adapter="scripted"),
         tts=SpeechSelection(
             provider=selected["provider"],
@@ -99,6 +139,7 @@ async def render_preview(body: dict) -> dict:
             speed=float(selected["speed"]),
         ),
     )
+    text, llm_usage = await _preview_text(models, parameters)
     providers = SpeechProviders.from_models(models, vad="scripted")
     legs = build_legs(providers, voice=voice_from_models(models, parameters))
     collector = _AudioCollector()
@@ -124,9 +165,9 @@ async def render_preview(body: dict) -> dict:
             await worker.cancel()
             await running
         await legs.aclose()
-    usage = collector.usage
-    if usage is None and selected["provider"] in {"cartesia", "scripted"}:
-        usage = characters_usage(
+    tts_usage = collector.usage
+    if tts_usage is None and selected["provider"] in {"cartesia", "scripted"}:
+        tts_usage = characters_usage(
             len(text),
             provider=selected["provider"],
             model=selected["model"],
@@ -141,7 +182,7 @@ async def render_preview(body: dict) -> dict:
     return {
         "audioBase64": base64.b64encode(wav.getvalue()).decode(),
         "contentType": "audio/wav",
-        "usage": None if usage is None else asdict(usage),
+        "usage": [asdict(item) for item in (llm_usage, tts_usage) if item is not None],
     }
 
 
