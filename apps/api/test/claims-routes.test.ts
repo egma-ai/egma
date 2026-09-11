@@ -4,6 +4,7 @@ import {
   readProviderFundingReceipt,
   editPersona,
   getSimulation,
+  legacyPersonaParameterContract,
   listRunEvents,
   SPEED_RANGE,
   RECOMMENDED_PERSONA_MODELS,
@@ -1583,6 +1584,105 @@ describe("one source of execution truth", () => {
     expect(refused.body.specs).toEqual([]);
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
     expect(row?.status).toBe("queued");
+  });
+
+  it("dispatches a persisted version 5 work order to a worker that also advertises version 6", async () => {
+    const { key, connectionId, testId, versionId, persona } =
+      await aCustomerReadyToRun(
+        "claims_legacy_contract_dispatch",
+        { retellFetch: RETELL_WEB_CALL_FETCH },
+        undefined,
+        {},
+        WEB_CALL,
+      );
+    const legacyValues = {
+      llm_provider: "openai",
+      llm_model: "gpt-5.6-terra",
+      stt_provider: "openai",
+      stt_model: "gpt-live-transcribe",
+      tts_provider: "openai",
+      tts_model: "gpt-4o-mini-tts-2025-12-15",
+      tts_voice_id: "alloy",
+      tts_speed: 1,
+    };
+    const legacyVersionId = "prsv_01K4R000000000000000000099";
+    const legacyContract = legacyPersonaParameterContract({
+      llm: { provider: "openai", model: "gpt-5.6-terra" },
+      stt: { provider: "openai", model: "gpt-live-transcribe" },
+      tts: {
+        provider: "openai",
+        model: "gpt-4o-mini-tts-2025-12-15",
+        voiceId: "alloy",
+        speed: 1,
+      },
+    });
+
+    // Build the exact state a pre-controls deployment could leave behind,
+    // before run creation freezes it. Everything after this setup goes through
+    // the authenticated test/run API and the public worker claim route.
+    await api.database.sql(
+      `insert into persona_definition_version
+         (id, persona_id, version, identity_name, personality, language,
+          parameter_contract, created_by)
+       select $2, persona_id, 2, identity_name, personality, 'en-US', $3::jsonb,
+              created_by
+         from persona_definition_version
+        where id = $1`,
+      [
+        persona.versionId,
+        legacyVersionId,
+        JSON.stringify(legacyContract),
+      ],
+    );
+    await api.database.sql(
+      `update persona_definition set current_version_id = $2 where id = $1`,
+      [persona.id, legacyVersionId],
+    );
+    await api.database.sql(
+      `update project_persona
+          set parameter_values = $2::jsonb
+        where persona_definition_id = $1`,
+      [persona.id, JSON.stringify(legacyValues)],
+    );
+    const repinned = await ask(api.app, "PATCH", `/v1/tests/${testId}`, key, {
+      scenario: `${RESCHEDULING.scenario} The caller needs the change today.`,
+      personas: ["Impatient Rita"],
+      expectedVersionId: versionId,
+    });
+    expect(repinned.statusCode, JSON.stringify(repinned.body)).toBe(200);
+    const { simulationId } = await aQueuedRun(
+      key,
+      connectionId,
+      String(repinned.body.versionId),
+    );
+
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "dual-contract-worker",
+      capacity: 1,
+      wait_seconds: 0,
+      contract_versions: [5, 6],
+    });
+    expect(answered.statusCode).toBe(200);
+    const [spec] = answered.body.specs as Record<string, unknown>[];
+    if (spec === undefined) throw new Error("the legacy work order was not dispatched");
+    expect(spec.contract_version).toBe(5);
+    expect(spec.simulation_id).toBe(simulationId);
+    expect(spec.models).toMatchObject({
+      llm: { provider: "openai", model: "gpt-5.6-terra" },
+      stt: { provider: "openai", model: "gpt-live-transcribe" },
+      tts: {
+        provider: "openai",
+        model: "gpt-4o-mini-tts-2025-12-15",
+        voice_id: "alloy",
+        speed: 1,
+      },
+    });
+    expect(spec.persona).toEqual({
+      name: persona.identityName,
+      personality: persona.personality,
+      language: "en-US",
+    });
+    expect(specComplaints(spec)).toEqual([]);
   });
 });
 
