@@ -14,6 +14,7 @@ import aiohttp
 from aiohttp import web
 from pipecat.frames.frames import (
     EndFrame,
+    ErrorFrame,
     Frame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -109,10 +110,17 @@ class _AudioCollector(FrameProcessor):
         self.capped = False
         self.usage: ProviderUsage | None = None
         self.tts_characters: int | None = None
+        self._pending_usage: ProviderUsage | None = None
+        self._pending_tts_characters: int | None = None
+        self.failure: str | None = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         if isinstance(frame, TTSAudioRawFrame):
+            if self._pending_usage is not None:
+                self.usage = self._pending_usage
+            elif self._pending_tts_characters is not None:
+                self.tts_characters = self._pending_tts_characters
             if self.sample_rate and self.sample_rate != frame.sample_rate:
                 raise ValueError("preview TTS changed sample rate during one response")
             self.sample_rate = frame.sample_rate
@@ -125,9 +133,18 @@ class _AudioCollector(FrameProcessor):
         elif isinstance(frame, MetricsFrame):
             for metric in frame.data:
                 if isinstance(metric, ProviderUsageMetricsData):
-                    self.usage = metric.usage
+                    if self.audio:
+                        self.usage = metric.usage
+                    else:
+                        self._pending_usage = metric.usage
                 elif isinstance(metric, TTSUsageMetricsData):
-                    self.tts_characters = metric.value
+                    if self.audio:
+                        self.tts_characters = metric.value
+                    else:
+                        self._pending_tts_characters = metric.value
+        elif isinstance(frame, ErrorFrame):
+            self.failure = frame.error
+            self.finished.set()
         elif isinstance(frame, LLMFullResponseEndFrame):
             self.finished.set()
         await self.push_frame(frame, direction)
@@ -248,10 +265,19 @@ async def render_preview(body: dict) -> dict:
             model=selected["model"],
             operation=selected["adapter"],
         )
+    elif tts_usage is None and collector.audio:
+        tts_usage = characters_usage(
+            len(text),
+            provider=selected["provider"],
+            model=selected["model"],
+            operation=selected["adapter"],
+        )
     if tts_usage is not None and callable(settle):
         await _settle_shielded(settle, 1, tts_usage)
     if render_failure is not None:
         raise render_failure
+    if collector.failure is not None:
+        raise RuntimeError(collector.failure)
     wav = io.BytesIO()
     with wave.open(wav, "wb") as output:
         output.setnchannels(1)

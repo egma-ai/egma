@@ -82,6 +82,9 @@ OPENAI_REALTIME_PROXY_OPEN_SECONDS = 30.0
 OPENAI_REALTIME_PROXY_READY_SECONDS = 45.0
 """How long proxied OpenAI Realtime may take to become ready."""
 
+OPENAI_INSTRUCTIONLESS_TTS_MODELS = frozenset({"tts-1", "tts-1-hd"})
+"""OpenAI speech models that do not accept delivery instructions."""
+
 LISTENING_READY_SECONDS = 15.0
 """How long a listening leg may take to become able to hear.
 
@@ -887,59 +890,57 @@ def _openai_mouth(
                 voice_id = self._settings.voice
                 if not isinstance(voice_id, str) or not voice_id:
                     yield ErrorFrame(error="OpenAI TTS voice must be specified")
+                    await self.remove_audio_context(context_id)
                     return
-                if voice_id.startswith("voice_"):
-                    create_params: dict[str, Any] = {
-                        "input": text,
-                        "model": self._settings.model,
-                        "voice": {"id": voice_id},
-                        "response_format": "pcm",
-                    }
-                    if self._settings.instructions:
-                        create_params["instructions"] = self._settings.instructions
-                    if self._settings.speed:
-                        create_params["speed"] = self._settings.speed
-                    try:
-                        async with self._client.audio.speech.with_streaming_response.create(
-                            **create_params
-                        ) as response:
-                            if response.status_code != 200:
-                                error = await response.text()
-                                yield ErrorFrame(
-                                    error=(
-                                        "Error getting audio "
-                                        f"(status: {response.status_code}, error: {error})"
-                                    )
+                if not voice_id.startswith("voice_") and voice_id not in VALID_VOICES:
+                    yield ErrorFrame(
+                        error=f"OpenAI TTS voice {voice_id!r} is not supported"
+                    )
+                    await self.remove_audio_context(context_id)
+                    return
+                create_params: dict[str, Any] = {
+                    "input": text,
+                    "model": self._settings.model,
+                    "voice": (
+                        {"id": voice_id}
+                        if voice_id.startswith("voice_")
+                        else VALID_VOICES[voice_id]
+                    ),
+                    "response_format": "pcm",
+                }
+                if self._settings.instructions:
+                    create_params["instructions"] = self._settings.instructions
+                if self._settings.speed:
+                    create_params["speed"] = self._settings.speed
+                try:
+                    async with self._client.audio.speech.with_streaming_response.create(
+                        **create_params
+                    ) as response:
+                        if response.status_code != 200:
+                            error = await response.text()
+                            yield ErrorFrame(
+                                error=(
+                                    "Error getting audio "
+                                    f"(status: {response.status_code}, error: {error})"
                                 )
-                                return
-                            await self.start_tts_usage_metrics(text)
-                            async for chunk in response.iter_bytes(self.chunk_size):
-                                if chunk:
-                                    await self.stop_ttfb_metrics()
-                                    yield TTSAudioRawFrame(
-                                        chunk,
-                                        self.sample_rate,
-                                        1,
-                                        context_id=context_id,
-                                    )
-                                    spoke = True
-                    except BadRequestError as fault:
-                        yield ErrorFrame(error=f"Unknown error occurred: {fault}")
-                        return
-                else:
-                    if voice_id not in VALID_VOICES:
-                        yield ErrorFrame(
-                            error=f"OpenAI TTS voice {voice_id!r} is not supported"
-                        )
-                        return
-                    frames = super().run_tts(text, context_id)
-                    async for frame in frames:
-                        if isinstance(frame, ErrorFrame):
-                            yield frame
+                            )
                             await self.remove_audio_context(context_id)
                             return
-                        spoke = spoke or isinstance(frame, TTSAudioRawFrame)
-                        yield frame
+                        await self.start_tts_usage_metrics(text)
+                        async for chunk in response.iter_bytes(self.chunk_size):
+                            if chunk:
+                                await self.stop_ttfb_metrics()
+                                yield TTSAudioRawFrame(
+                                    chunk,
+                                    self.sample_rate,
+                                    1,
+                                    context_id=context_id,
+                                )
+                                spoke = True
+                except BadRequestError as fault:
+                    yield ErrorFrame(error=f"Unknown error occurred: {fault}")
+                    await self.remove_audio_context(context_id)
+                    return
             except asyncio.CancelledError:
                 await self.remove_audio_context(context_id)
                 raise
@@ -962,6 +963,10 @@ def _openai_mouth(
         raise SpeechFault("the openai speaking leg was chosen without a model")
     if voice.provider != "openai":
         raise SpeechFault("the openai speaking leg received a non-openai voice")
+    if voice.voice_id.startswith("voice_") and not providers.tts_customer_funded:
+        raise SpeechFault(
+            "an OpenAI private voice requires customer-funded credentials"
+        )
     spoken_with = voice
     settings = OpenAITTSService.Settings(
         model=providers.tts_model, voice=spoken_with.voice_id
@@ -969,7 +974,10 @@ def _openai_mouth(
     if spoken_with.speed is not None:
         settings.speed = spoken_with.speed
     instructions = tts_delivery_instructions(spoken_with)
-    if instructions is not None:
+    if (
+        instructions is not None
+        and providers.tts_model not in OPENAI_INSTRUCTIONLESS_TTS_MODELS
+    ):
         settings.instructions = instructions
     leg = OpenAITTSService(
         api_key=providers.tts_key,
@@ -978,7 +986,7 @@ def _openai_mouth(
         # finish; an idle timer can stop it while a response is still in flight.
         stop_frame_timeout_s=None,
     )
-    return leg, spoken_with, ()
+    return leg, spoken_with, (leg._client.close,)
 
 
 def _openai_realtime_ears(

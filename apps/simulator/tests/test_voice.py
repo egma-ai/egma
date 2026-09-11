@@ -1649,8 +1649,9 @@ async def test_customer_speech_auth_failure_keeps_provider_identity(
 
 @pytest.mark.timeout(12)
 @pytest.mark.parametrize("status", [401, 403])
+@pytest.mark.parametrize("voice_id", ["alloy", "voice_private_123"])
 async def test_openai_tts_auth_failure_survives_the_real_pipeline(
-    tmp_path, monkeypatch, status
+    tmp_path, monkeypatch, status, voice_id
 ):
     from aiohttp import web
     from conftest import direct_models
@@ -1688,7 +1689,8 @@ async def test_openai_tts_auth_failure_survives_the_real_pipeline(
         tts_customer_funded=True,
     )
     models = direct_models(
-        modality="voice", voice={"provider": "openai", "voiceId": "alloy", "speed": 1}
+        modality="voice",
+        voice={"provider": "openai", "voiceId": voice_id, "speed": 1},
     )
     try:
         with pytest.raises(ProviderKeyUnavailable) as caught:
@@ -1705,6 +1707,65 @@ async def test_openai_tts_auth_failure_survives_the_real_pipeline(
         assert len(requests) == 1
         assert requests[0][0] == "Bearer test-customer-speech-key"
         assert requests[0][1]["model"] == "tts-1"
-        assert requests[0][1]["voice"] == "alloy"
+        expected_voice = (
+            {"id": voice_id} if voice_id.startswith("voice_") else voice_id
+        )
+        assert requests[0][1]["voice"] == expected_voice
+        assert "language" not in requests[0][1]
+        assert "instructions" not in requests[0][1]
     finally:
         await runner.cleanup()
+
+
+@pytest.mark.timeout(12)
+async def test_openai_private_voice_reaches_the_real_http_speech_leg(
+    tmp_path, monkeypatch
+):
+    from aiohttp import web
+    from conftest import direct_models
+
+    requests = []
+
+    async def speak(request):
+        requests.append((request.headers["Authorization"], await request.json()))
+        return web.Response(body=encode_speech("Noted.", 24_000))
+
+    provider = web.Application()
+    provider.router.add_post("/v1/audio/speech", speak)
+    runner = web.AppRunner(provider)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = runner.addresses[0][1]
+    monkeypatch.setenv("OPENAI_BASE_URL", f"http://127.0.0.1:{port}/v1")
+    speech = SpeechProviders(
+        tts="openai",
+        tts_key="test-customer-speech-key",
+        tts_model="gpt-4o-mini-tts",
+        tts_provider="openai",
+        tts_customer_funded=True,
+    )
+    models = direct_models(
+        modality="voice",
+        voice={"provider": "openai", "voiceId": "voice_private_123", "speed": 1},
+    )
+    try:
+        await voice_simulation(
+            tmp_path,
+            speech=speech,
+            models=models,
+            scenario="One point.",
+            replies=["Noted."],
+        )
+    finally:
+        await runner.cleanup()
+
+    assert requests
+    for authorization, request in requests:
+        assert authorization == "Bearer test-customer-speech-key"
+        assert request["model"] == "gpt-4o-mini-tts"
+        assert request["voice"] == {"id": "voice_private_123"}
+        assert "language" not in request
+        assert request["response_format"] == "pcm"
+        assert request["speed"] == 1.0
+        assert "instructions" not in request

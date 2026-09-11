@@ -9,7 +9,14 @@ from types import SimpleNamespace
 import aiohttp
 import pytest
 from aiohttp import web
-from pipecat.frames.frames import Frame, TextFrame, TTSAudioRawFrame
+from pipecat.frames.frames import (
+    ErrorFrame,
+    Frame,
+    MetricsFrame,
+    TextFrame,
+    TTSAudioRawFrame,
+)
+from pipecat.metrics.metrics import TTSUsageMetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from egma_simulator import preview as preview_module
@@ -234,6 +241,120 @@ async def test_measured_llm_usage_settles_before_a_render_failure(monkeypatch):
     assert [(index, usage.quantities) for index, usage in settled] == [
         (0, {"output_tokens": 2})
     ]
+
+
+@pytest.mark.parametrize("audio_before_failure", [False, True])
+async def test_preview_settles_tts_only_after_provider_audio(
+    monkeypatch, audio_before_failure
+):
+    use_preview_model(monkeypatch)
+    settled: list[tuple[int, ProviderUsage]] = []
+
+    async def settle(index: int, usage: ProviderUsage) -> None:
+        settled.append((index, usage))
+
+    class FailingTTS(FrameProcessor):
+        async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+            await super().process_frame(frame, direction)
+            if isinstance(frame, TextFrame):
+                await self.push_frame(
+                    MetricsFrame(
+                        data=[
+                            TTSUsageMetricsData(
+                                processor="CartesiaTTSService",
+                                model="sonic-3.6",
+                                value=len(frame.text),
+                            )
+                        ]
+                    )
+                )
+                if audio_before_failure:
+                    await self.push_frame(
+                        TTSAudioRawFrame(b"\x01\x00", 24_000, 1)
+                    )
+                await self.push_frame(ErrorFrame(error="provider refused synthesis"))
+                return
+            await self.push_frame(frame, direction)
+
+    async def close() -> None:
+        return None
+
+    monkeypatch.setattr(
+        preview_module,
+        "build_legs",
+        lambda *_args, **_kwargs: SimpleNamespace(tts=FailingTTS(), aclose=close),
+    )
+    body = request_body()
+    body["models"]["tts"].update(
+        {"provider": "cartesia", "adapter": "cartesia", "model": "sonic-3.6"}
+    )
+    body["_settle"] = settle
+
+    with pytest.raises(RuntimeError, match="provider refused synthesis"):
+        await render_preview(body)
+
+    expected = [(0, {"output_tokens": 2})]
+    if audio_before_failure:
+        expected.append((1, {"characters": 4.0}))
+    assert [(index, usage.quantities) for index, usage in settled] == expected
+
+
+@pytest.mark.parametrize("audio_before_cancel", [False, True])
+async def test_preview_cancellation_settles_only_observed_provider_work(
+    monkeypatch, audio_before_cancel
+):
+    use_preview_model(monkeypatch)
+    entered = asyncio.Event()
+    closed = asyncio.Event()
+    settled: list[tuple[int, ProviderUsage]] = []
+
+    async def settle(index: int, usage: ProviderUsage) -> None:
+        settled.append((index, usage))
+
+    class PendingTTS(FrameProcessor):
+        async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+            await super().process_frame(frame, direction)
+            if isinstance(frame, TextFrame):
+                await self.push_frame(
+                    MetricsFrame(
+                        data=[
+                            TTSUsageMetricsData(
+                                processor="CartesiaTTSService",
+                                model="sonic-3.6",
+                                value=len(frame.text),
+                            )
+                        ]
+                    )
+                )
+                if audio_before_cancel:
+                    await self.push_frame(
+                        TTSAudioRawFrame(b"\x01\x00", 24_000, 1)
+                    )
+                entered.set()
+                await asyncio.Event().wait()
+            await self.push_frame(frame, direction)
+
+    async def close() -> None:
+        closed.set()
+
+    monkeypatch.setattr(
+        preview_module,
+        "build_legs",
+        lambda *_args, **_kwargs: SimpleNamespace(tts=PendingTTS(), aclose=close),
+    )
+    body = request_body()
+    body["_settle"] = settle
+    rendering = asyncio.create_task(render_preview(body))
+    await entered.wait()
+    rendering.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await rendering
+
+    expected = [(0, {"output_tokens": 2})]
+    if audio_before_cancel:
+        expected.append((1, {"characters": 4.0}))
+    assert [(index, usage.quantities) for index, usage in settled] == expected
+    assert closed.is_set()
 
 
 async def test_bounded_settlement_survives_client_task_cancellation():

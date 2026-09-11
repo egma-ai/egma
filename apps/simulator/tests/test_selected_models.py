@@ -8,6 +8,7 @@ from typing import cast
 
 import pytest
 from pipecat.frames.frames import TTSAudioRawFrame
+from websockets.protocol import State
 
 from egma_simulator.config import STT_PROVIDERS, TTS_PROVIDERS
 from egma_simulator.model import ModelFailure, OpenAICompatibleModel, build_model_client
@@ -229,7 +230,7 @@ def test_runtime_controls_reach_the_selected_voice_and_delivery():
     )
 
 
-def test_cartesia_36_sends_locale_and_named_accent_on_the_pinned_wire():
+async def test_cartesia_36_sends_locale_and_named_accent_on_the_pinned_wire():
     models = selected(tts_model="sonic-3.6")
     voice = PersonaVoice(
         voice_id=models.tts.voice_id,
@@ -242,11 +243,25 @@ def test_cartesia_36_sends_locale_and_named_accent_on_the_pinned_wire():
     providers = SpeechProviders.from_models(models, vad="silero").checked()
 
     leg, _spoken_with, _closers = _mouth(providers, voice)
-    message = json.loads(
-        leg._build_msg(text="Please wait.", context_id="context-1")  # type: ignore[attr-defined]
-    )
+    sent: list[str] = []
+
+    class Socket:
+        state = State.OPEN
+
+        async def send(self, message: str) -> None:
+            sent.append(message)
+
+    leg._websocket = Socket()  # type: ignore[attr-defined]
+    frames = [
+        frame
+        async for frame in leg.run_tts(  # type: ignore[attr-defined]
+            "Please wait.", "context-1"
+        )
+    ]
+    message = json.loads(sent[0])
 
     assert leg._cartesia_version == CARTESIA_API_VERSION  # type: ignore[attr-defined]
+    assert frames == [None]
     assert message["locale"] == "en-US"
     assert message["accent"] == "standard-hindi"
     assert "language" not in message
@@ -269,6 +284,24 @@ def test_cartesia_refuses_a_named_accent_that_its_older_wire_cannot_send():
 
     with pytest.raises(SpeechFault, match="named Cartesia accents require sonic-3.6"):
         _mouth(providers, voice)
+
+
+def test_openai_private_voice_requires_customer_funded_credentials():
+    with pytest.raises(SpeechFault, match="customer-funded credentials"):
+        _mouth(
+            SpeechProviders(
+                tts="openai",
+                tts_key="deployment-key",
+                tts_model="gpt-4o-mini-tts",
+                tts_provider="openai",
+                tts_customer_funded=False,
+            ),
+            PersonaVoice(
+                voice_id="voice_private_123",
+                provider="openai",
+                speed=1.0,
+            ),
+        )
 
 
 def test_speech_gain_is_independent_and_clips_pcm_samples():
