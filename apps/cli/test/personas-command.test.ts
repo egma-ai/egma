@@ -49,7 +49,7 @@ describe("runPersonasCommand", () => {
       values: { "--stt-provider": "openai", "--stt-model": "gpt-live-transcribe", "--tts-provider": "openai", "--tts-model": "gpt-4o-mini-tts", "--llm-provider": "openai", "--llm-model": "gpt-4o", "--voice": "alloy" },
     });
     expect(code).toBe(0);
-    expect(body).toMatchObject({ controls: { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1 } });
+    expect(body).toMatchObject({ controls: { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, backgroundSoundId: "none", backgroundVolume: 0.0631 } });
   });
 
   it("uses a predefined persona with its built-in defaults", async () => {
@@ -65,7 +65,7 @@ describe("runPersonasCommand", () => {
           parameterContract: [
             ["llm_provider", "openai"], ["llm_model", "gpt-4o"], ["stt_provider", "deepgram"], ["stt_model", "nova-3"],
             ["tts_provider", "openai"], ["tts_model", "gpt-4o-mini-tts"], ["tts_voice_id", "alloy"], ["tts_speed", 1],
-            ["language", "en-US"], ["emotion", "neutral"], ["accent", "voice_default"], ["speech_volume", 1],
+            ["language", "en-US"], ["emotion", "neutral"], ["accent", "voice_default"], ["speech_volume", 1], ["background_sound_id", "none"], ["background_volume", 0.0631],
           ].map(([key, defaultValue]) => ({ key, defaultValue })),
         });
         return new JsonResponse({ id: "prs_default" });
@@ -77,7 +77,7 @@ describe("runPersonasCommand", () => {
     expect(requests[1]?.body).toMatchObject({
       projectId: PROJECT_ID,
       models: { llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "deepgram", model: "nova-3" }, tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy", speed: 1 } },
-      controls: { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1 },
+      controls: { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, backgroundSoundId: "none", backgroundVolume: 0.0631 },
     });
   });
 
@@ -91,7 +91,7 @@ describe("runPersonasCommand", () => {
           id: "prs_saved", parameterContract: [], language: null,
           settings: {
             models: { llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "deepgram", model: "nova-3" }, tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy", speed: 0.9 } },
-            controls: { language: "es-ES", emotion: "happy", accent: "voice_default", speechVolume: 0.8, executionPolicyVersion: 1 },
+            controls: { language: "es-ES", emotion: "happy", accent: "voice_default", speechVolume: 0.8, backgroundSoundId: "cafe-v1", backgroundVolume: 0.1, executionPolicyVersion: 1 },
           },
         });
         bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
@@ -103,9 +103,31 @@ describe("runPersonasCommand", () => {
     expect(bodies).toHaveLength(1);
     expect(bodies[0]).toMatchObject({
       models: { llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "deepgram", model: "nova-3" }, tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy", speed: 0.9 } },
-      controls: { language: "es-ES", emotion: "happy", accent: "voice_default", speechVolume: 1.2 },
+      controls: { language: "es-ES", emotion: "happy", accent: "voice_default", speechVolume: 1.2, backgroundSoundId: "cafe-v1", backgroundVolume: 0.1 },
     });
     expect((bodies[0]?.controls as Record<string, unknown>).executionPolicyVersion).toBeUndefined();
+  });
+
+  it("updates one background control without resetting the saved level", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const code = await runPersonaActionCommand({
+      access: { url: URL, credentialsFile: workspace.credentialsFile }, cwd: workspace.dir,
+      out: () => undefined, fail: () => undefined,
+      fetchImpl: async (_input, init) => {
+        if ((init?.method ?? "GET") === "GET") return new JsonResponse({
+          id: "prs_saved", parameterContract: [], language: null,
+          settings: {
+            models: { llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "deepgram", model: "nova-3" }, tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy", speed: 1 } },
+            controls: { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, backgroundSoundId: "none", backgroundVolume: 0.04, executionPolicyVersion: 1 },
+          },
+        });
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new JsonResponse({ id: "prs_saved" });
+      },
+    }, "update", { positionals: ["prs_saved"], values: { "--background-sound": "office-v1" } });
+
+    expect(code).toBe(0);
+    expect(bodies[0]).toMatchObject({ controls: { backgroundSoundId: "office-v1", backgroundVolume: 0.04, speechVolume: 1 } });
   });
 
   it("lists every valid persona id and name from the bound project", async () => {

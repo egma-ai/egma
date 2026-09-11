@@ -110,7 +110,7 @@ const RECOMMENDED_MODELS: PersonaModels = {
     speed: 1,
   },
 };
-const CONTROLS = { language: "en-US", emotion: "neutral" as const, accent: "voice_default", speechVolume: 1, executionPolicyVersion: 1 };
+const CONTROLS = { language: "en-US", emotion: "neutral" as const, accent: "voice_default", speechVolume: 1, backgroundSoundId: "none" as const, backgroundVolume: 0.0631, executionPolicyVersion: 1 };
 const CAPABILITIES = {
   voices: { status: "supported" as const, choices: [
     { id: RECOMMENDED_MODELS.tts.voiceId, name: "Calm caller", source: "standard" as const, presentation: "unknown" as const, languages: ["en-US"], accents: ["neutral"] },
@@ -591,9 +591,8 @@ describe("authoring a persona", () => {
     expect(within(sheet).queryByText(/multiple of the natural pace/iu)).toBeNull();
     expect(within(sheet).queryByText(/makes a new version/iu)).toBeNull();
 
-    /* Background arrives in the later environment-controls ticket. */
     expect(within(sheet).getByLabelText("Accent*")).toBeTruthy();
-    expect(within(sheet).queryByLabelText(/background noise/iu)).toBeNull();
+    expect(within(sheet).getByLabelText("Background sound*")).toBeTruthy();
   });
 
   it("sends the flat create body, identity name included, and opens what it made", async () => {
@@ -736,10 +735,35 @@ describe("one persona's sheet", () => {
     const sheet = await openRow("Impatient Rita");
     fireEvent.change(within(sheet).getByLabelText("Language model*"), { target: { value: "openai::gpt-4o" } });
     fireEvent.click(within(sheet).getByRole("button", { name: "Save changes" }));
-    await waitFor(() => expect(asked.find(request => request.method === "PATCH")?.body).toEqual({ projectId: "prj_1", models: updatedModels, controls: { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1 } }));
+    await waitFor(() => expect(asked.find(request => request.method === "PATCH")?.body).toEqual({ projectId: "prj_1", models: updatedModels, controls: { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, backgroundSoundId: "none", backgroundVolume: 0.0631 } }));
     await waitFor(() => expect((within(sheet).getByRole("button", { name: "Saved" }) as HTMLButtonElement).disabled).toBe(true));
     expect(within(sheet).getByRole("status").textContent).toBe("Persona saved.");
     expect(within(sheet).getByText("Custom · v3")).toBeTruthy();
+  });
+
+  it("saves every background choice with an independent dB level", async () => {
+    const saved = { ...RITA, settings: { ...RITA.settings!, controls: { ...CONTROLS, backgroundSoundId: "rain-v1" as const, backgroundVolume: 0.12589254117941673 } } };
+    const { asked } = ritaOpen({
+      "GET /v1/personas/prs_1": [{ status: 200, body: RITA }, { status: 200, body: saved }],
+      "PATCH /v1/personas/prs_1": { status: 200, body: saved },
+    });
+    render(<PersonasPage />);
+    const sheet = await openRow("Impatient Rita");
+    const background = within(sheet).getByLabelText("Background sound*") as HTMLSelectElement;
+    expect(within(background).getAllByRole("option").map((option) => option.textContent)).toEqual(["None", "Office", "Café", "Street traffic", "Crowd talking", "Inside a car", "Home with TV", "Wind", "Rain"]);
+    expect(within(sheet).queryByLabelText("Background level*")).toBeNull();
+
+    fireEvent.change(background, { target: { value: "rain-v1" } });
+    const level = within(sheet).getByLabelText("Background level*") as HTMLInputElement;
+    expect(level.value).toBe("-24");
+    fireEvent.change(level, { target: { value: "-18" } });
+    fireEvent.change(background, { target: { value: "none" } });
+    expect(within(sheet).queryByLabelText("Background level*")).toBeNull();
+    fireEvent.change(background, { target: { value: "rain-v1" } });
+    expect((within(sheet).getByLabelText("Background level*") as HTMLInputElement).value).toBe("-18");
+
+    fireEvent.click(within(sheet).getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(asked.find((request) => request.method === "PATCH")?.body).toMatchObject({ controls: { speechVolume: 1, backgroundSoundId: "rain-v1", backgroundVolume: 0.12589254117941673 } }));
   });
 
   it("protects inline settings and resets a discarded draft when reopened", async () => {
@@ -912,7 +936,7 @@ describe("one persona's sheet", () => {
     const sheet = await openRow("Everyday caller");
     fireEvent.change(within(sheet).getByLabelText("Language model*"), { target: { value: "openai::gpt-4o" } });
     fireEvent.click(within(sheet).getByRole("button", { name: "Use persona" }));
-    await waitFor(() => expect(asked.find(request => request.method === "POST")?.body).toEqual({ projectId: "prj_1", models: updatedModels, controls: { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1 } }));
+    await waitFor(() => expect(asked.find(request => request.method === "POST")?.body).toEqual({ projectId: "prj_1", models: updatedModels, controls: { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, backgroundSoundId: "none", backgroundVolume: 0.0631 } }));
     expect(await within(sheet).findByRole("button", { name: "Saved" })).toBeTruthy();
     expect(within(sheet).getByText("Predefined · v1")).toBeTruthy();
   });

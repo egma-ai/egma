@@ -15,6 +15,7 @@ export type PersonaArguments = {
 };
 
 type PersonaModels = NonNullable<GetPersonaResponse["settings"]>["models"];
+type PersonaControls = Omit<NonNullable<GetPersonaResponse["settings"]>["controls"], "executionPolicyVersion">;
 
 function numberValue(args: PersonaArguments, name: string, fallback: number): number {
   const value = args.values[name];
@@ -29,12 +30,14 @@ function models(args: PersonaArguments, fallback?: PersonaModels) {
   };
 }
 
-function controls(args: PersonaArguments, fallback?: { readonly language: string; readonly emotion: "neutral" | "happy" | "angry" | "frustrated" | "sad" | "anxious"; readonly accent: string; readonly speechVolume: number }) {
+function controls(args: PersonaArguments, fallback?: PersonaControls) {
   return {
     language: args.values["--language"] ?? fallback?.language ?? "en-US",
     emotion: (args.values["--emotion"] ?? fallback?.emotion ?? "neutral") as "neutral" | "happy" | "angry" | "frustrated" | "sad" | "anxious",
     accent: args.values["--accent"] ?? fallback?.accent ?? "voice_default",
     speechVolume: numberValue(args, "--speech-volume", fallback?.speechVolume ?? 1),
+    backgroundSoundId: (args.values["--background-sound"] ?? fallback?.backgroundSoundId ?? "none") as NonNullable<GetPersonaResponse["settings"]>["controls"]["backgroundSoundId"],
+    backgroundVolume: numberValue(args, "--background-volume", fallback?.backgroundVolume ?? 0.0631),
   };
 }
 
@@ -52,11 +55,13 @@ function effectiveSettings(persona: GetPersonaResponse) {
       emotion: String(values.emotion ?? "neutral") as "neutral" | "happy" | "angry" | "frustrated" | "sad" | "anxious",
       accent: String(values.accent ?? "voice_default"),
       speechVolume: Number(values.speech_volume ?? 1),
+      backgroundSoundId: (values.background_sound_id ?? "none") as NonNullable<GetPersonaResponse["settings"]>["controls"]["backgroundSoundId"],
+      backgroundVolume: Number(values.background_volume ?? 0.0631),
     },
   };
 }
 
-const SETTING_FLAGS = ["--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice", "--speed", "--language", "--emotion", "--accent", "--speech-volume"] as const;
+const SETTING_FLAGS = ["--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice", "--speed", "--language", "--emotion", "--accent", "--speech-volume", "--background-sound", "--background-volume"] as const;
 
 async function projectContext(options: FolderCommandOptions) {
   const ready = await readyToSync(options);

@@ -10,6 +10,8 @@ import {
   modelPairFrom,
   modelPairKey,
   modelSaid,
+  BACKGROUND_SOUNDS,
+  decibelsToGain,
   type BehaviorDraft,
   type ModelsDraft,
   type PersonaForm,
@@ -316,6 +318,9 @@ export function ModelFields({
     && accepts(capabilities.emotion, draft.emotion, "neutral")
     && accepts(capabilities.speed, Number(draft.speed), 1)
     && accepts(capabilities.speechVolume, Number(draft.speechVolume), 1)
+    && Number.isFinite(Number(draft.backgroundVolumeDb))
+    && Number(draft.backgroundVolumeDb) >= -36
+    && Number(draft.backgroundVolumeDb) <= -12
     && (capabilities.voices.status === "supported"
       ? catalogHasVoice || existingOpenAiVoice
       : capabilities.voices.status === "fixed" && capabilities.voices.value?.id === draft.voiceId);
@@ -421,6 +426,13 @@ export function ModelFields({
 
         <NumberField id={`${prefix}-speech-volume`} label="Speech volume*" value={draft.speechVolume} disabled={disabled || capabilities?.speechVolume.status !== "supported"} required onChange={(speechVolume) => change({ ...draft, speechVolume })} />
         {capabilities === null ? null : stateNote("Speech volume", capabilities.speechVolume)}
+
+        <Field label="Background sound*" htmlFor={`${prefix}-background-sound`}>
+          <Select id={`${prefix}-background-sound`} value={draft.backgroundSoundId} aria-required="true" disabled={disabled} onChange={(event) => change({ ...draft, backgroundSoundId: event.target.value as ModelsDraft["backgroundSoundId"] })}>
+            {BACKGROUND_SOUNDS.map((sound) => <option key={sound.id} value={sound.id}>{sound.label}</option>)}
+          </Select>
+        </Field>
+        {draft.backgroundSoundId === "none" ? null : <NumberField id={`${prefix}-background-volume`} label="Background level*" value={draft.backgroundVolumeDb} disabled={disabled} required min={-36} max={-12} step={1} unit="dB" hint="Independent of speech volume." onChange={(backgroundVolumeDb) => change({ ...draft, backgroundVolumeDb, backgroundVolume: decibelsToGain(backgroundVolumeDb) })} />}
 
         <Field label="Find a voice" htmlFor={`${prefix}-voice-search`}><Input id={`${prefix}-voice-search`} value={voiceSearch} disabled={disabled} placeholder="Search the full voice catalog" onChange={(event) => setVoiceSearch(event.target.value)} /></Field>
         <Field label="Voice type" htmlFor={`${prefix}-voice-type`}><Select id={`${prefix}-voice-type`} value={voiceType} disabled={disabled} onChange={(event) => setVoiceType(event.target.value)}><option value="all">All</option><option value="male">Male</option><option value="female">Female</option></Select></Field>

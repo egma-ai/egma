@@ -79,7 +79,32 @@ export type ModelsDraft = {
   readonly emotion: PersonaControls["emotion"];
   readonly accent: string;
   readonly speechVolume: string;
+  readonly backgroundSoundId: PersonaControls["backgroundSoundId"];
+  /** The exact stored gain, kept separate from its dB editor value. */
+  readonly backgroundVolume: string;
+  readonly backgroundVolumeDb: string;
 };
+
+export const BACKGROUND_SOUNDS: ReadonlyArray<{ readonly id: PersonaControls["backgroundSoundId"]; readonly label: string }> = [
+  { id: "none", label: "None" },
+  { id: "office-v1", label: "Office" },
+  { id: "cafe-v1", label: "Café" },
+  { id: "street-traffic-v1", label: "Street traffic" },
+  { id: "crowd-talking-v1", label: "Crowd talking" },
+  { id: "inside-car-v1", label: "Inside a car" },
+  { id: "home-tv-v1", label: "Home with TV" },
+  { id: "wind-v1", label: "Wind" },
+  { id: "rain-v1", label: "Rain" },
+];
+
+export function gainToDecibels(gain: number): string {
+  return String(Math.round(20 * Math.log10(gain) * 10) / 10);
+}
+
+export function decibelsToGain(decibels: string): string {
+  const value = Number(decibels);
+  return Number.isFinite(value) ? String(10 ** (value / 20)) : decibels;
+}
 
 export function modelsDraftOf(models: PersonaModels, controls?: PersonaControls): ModelsDraft {
   return {
@@ -95,6 +120,9 @@ export function modelsDraftOf(models: PersonaModels, controls?: PersonaControls)
     emotion: controls?.emotion ?? "neutral",
     accent: controls?.accent ?? "voice_default",
     speechVolume: String(controls?.speechVolume ?? 1),
+    backgroundSoundId: controls?.backgroundSoundId ?? "none",
+    backgroundVolume: String(controls?.backgroundVolume ?? 0.0631),
+    backgroundVolumeDb: gainToDecibels(controls?.backgroundVolume ?? 0.0631),
   };
 }
 
@@ -104,6 +132,8 @@ export function controlsFrom(draft: ModelsDraft): Omit<PersonaControls, "executi
     emotion: draft.emotion,
     accent: draft.accent,
     speechVolume: Number(draft.speechVolume),
+    backgroundSoundId: draft.backgroundSoundId,
+    backgroundVolume: Number(draft.backgroundVolume),
   };
 }
 
@@ -212,5 +242,7 @@ export function controlsOfPersona(persona: Persona): Omit<PersonaControls, "exec
     emotion: String(values.emotion ?? "neutral") as PersonaControls["emotion"],
     accent: String(values.accent ?? "voice_default"),
     speechVolume: Number(values.speech_volume ?? 1),
+    backgroundSoundId: (values.background_sound_id ?? "none") as PersonaControls["backgroundSoundId"],
+    backgroundVolume: Number(values.background_volume ?? 0.0631),
   };
 }
