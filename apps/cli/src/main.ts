@@ -17,7 +17,7 @@ import type { FolderCommandOptions } from "./commands/folder-verbs.ts";
 import { runInitCommand } from "./commands/init.ts";
 import { runLoginCommand } from "./commands/login.ts";
 import { runLogoutCommand } from "./commands/logout.ts";
-import { runPersonasCommand } from "./commands/personas.ts";
+import { runPersonaActionCommand, runPersonasCommand } from "./commands/personas.ts";
 import { runProjectApiKeyCreateCommand } from "./commands/project-api-key.ts";
 import { runPullCommand } from "./commands/pull.ts";
 import { runPushCommand } from "./commands/push.ts";
@@ -68,6 +68,13 @@ export const COMMANDS = [
   "agent monitoring stop",
   "project api-key create",
   "persona list",
+  "persona settings",
+  "persona capabilities",
+  "persona use",
+  "persona create",
+  "persona clone",
+  "persona update",
+  "persona preview",
   "suite create",
   "suite delete",
   "test delete",
@@ -173,6 +180,13 @@ const SCHEMAS: Readonly<Record<Command, OptionSchema>> = {
     positionals: 0,
   },
   "persona list": { values: [REPOSITORY_OPTION], positionals: 0 },
+  "persona settings": { values: [REPOSITORY_OPTION], positionals: 1 },
+  "persona clone": { values: [REPOSITORY_OPTION], positionals: 1 },
+  "persona capabilities": { values: ["--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--voice", "--language", REPOSITORY_OPTION], positionals: 0 },
+  "persona use": { values: ["--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice", "--speed", "--language", "--emotion", "--accent", "--speech-volume", "--voice-access-proof", REPOSITORY_OPTION], positionals: 1 },
+  "persona create": { values: ["--name", "--description", "--identity-name", "--personality", "--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice", "--speed", "--language", "--emotion", "--accent", "--speech-volume", "--voice-access-proof", REPOSITORY_OPTION], positionals: 0 },
+  "persona update": { values: ["--name", "--description", "--identity-name", "--personality", "--expected-version", "--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice", "--speed", "--language", "--emotion", "--accent", "--speech-volume", "--voice-access-proof", REPOSITORY_OPTION], positionals: 1 },
+  "persona preview": { values: ["--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice", "--speed", "--language", "--emotion", "--accent", "--speech-volume", "--voice-access-proof", REPOSITORY_OPTION], positionals: 0 },
   "suite create": {
     values: ["--name", REPOSITORY_OPTION],
     positionals: 1,
@@ -399,7 +413,7 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
     "",
     "The secret is printed once. The CLI does not save it.",
   ],
-  persona: ["Usage:", "  egma persona list [--cwd <path>]"],
+  persona: ["Usage:", "  egma persona <list|settings|capabilities|use|create|clone|update|preview>", "", "All persona commands are promptless. Run a command with --help for its exact inputs."],
   suite: [
     "Usage:",
     "  egma suite create <directory> --name <name> [--cwd <path>]",
@@ -541,6 +555,13 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
     "The secret is printed once and is not stored by the CLI.",
   ],
   "persona list": ["Usage:", "  egma persona list [--cwd <path>]", "", "List persona definitions available in the bound Project.", "Model and voice settings are shared by that Project's tests and edited in Personas."],
+  "persona settings": ["Usage:", "  egma persona settings <Persona ID> [--cwd <path>]", "", "Print the persona and this Project's saved settings as JSON."],
+  "persona capabilities": ["Usage:", "  egma persona capabilities --stt-provider <id> --stt-model <id> --tts-provider <id> --tts-model <id> [--language <tag>] [--voice <id>]", "", "Print the supported voice, language, accent, emotion, rate, and volume choices as JSON."],
+  "persona use": ["Usage:", "  egma persona use <Persona ID> <model and control options>", "", "Save this Project's first settings for a predefined persona."],
+  "persona create": ["Usage:", "  egma persona create --name <name> --identity-name <name> --personality <text> <model and control options>", "", "Create an independent custom persona. Use capabilities first to choose valid settings."],
+  "persona clone": ["Usage:", "  egma persona clone <Persona ID> [--cwd <path>]", "", "Clone effective behavior and settings into an independent custom persona."],
+  "persona update": ["Usage:", "  egma persona update <Persona ID> <changed fields and complete model/control options>", "", "Update project settings. Behavior changes also need --expected-version."],
+  "persona preview": ["Usage:", "  egma persona preview <model and control options>", "", "Print a short base64 audio preview response. Interruptions require a full simulation."],
   "suite create": [
     "Usage:",
     "  egma suite create <directory> --name <name> [--cwd <path>]",
@@ -619,6 +640,14 @@ function requiredArguments(
     case "project api-key create":
     case "suite create":
       return required(invocation, ["--name"]);
+    case "persona capabilities":
+      return required(invocation, ["--stt-provider", "--stt-model", "--tts-provider", "--tts-model"]);
+    case "persona create":
+      return required(invocation, ["--name", "--identity-name", "--personality", "--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice"]);
+    case "persona use":
+    case "persona update":
+    case "persona preview":
+      return required(invocation, ["--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice"]);
     case "run create":
       return required(invocation, ["--agent", "--connection"]);
     default:
@@ -722,6 +751,14 @@ async function dispatch(
       );
     case "persona list":
       return runPersonasCommand(options);
+    case "persona settings":
+    case "persona capabilities":
+    case "persona use":
+    case "persona create":
+    case "persona clone":
+    case "persona update":
+    case "persona preview":
+      return runPersonaActionCommand(options, invocation.command.slice("persona ".length) as "settings" | "capabilities" | "use" | "create" | "clone" | "update" | "preview", args);
     case "suite create":
       return withCommandSignal(async (signal) =>
         runSuiteCreateCommand({
