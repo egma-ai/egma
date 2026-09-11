@@ -1033,13 +1033,12 @@ class _PersonaBrain(FrameProcessor):
                 while self._replies.busy or self._conductor.deliberate_response_owned:
                     await self._replies.wait_idle()
                     await self._conductor.wait_until_interruption_idle()
-                if not self._conductor.is_ending:
-                    await self._answer(
-                        frame.heard_a_turn,
-                        frame.silence_follow_up,
-                        frame.silence_wait_seconds,
-                        said=said,
-                    )
+                await self._answer(
+                    frame.heard_a_turn,
+                    frame.silence_follow_up,
+                    frame.silence_wait_seconds,
+                    said=said,
+                )
         except Exception as fault:
             self._conductor.the_brain_failed(fault)
 
@@ -1105,8 +1104,14 @@ class _InterruptionScheduler(FrameProcessor):
             self._attempt = None
 
     def _cancel_attempt(self) -> None:
+        self.cancel_owned_work()
+
+    def cancel_owned_work(self) -> None:
+        """Cancel generation directly when no pipeline frame can pass it."""
+        self._replies.cancel_pending()
         if self._attempt is not None and not self._attempt.done():
-            self._replies.cancel_pending()
+            if self._attempt is not asyncio.current_task():
+                self._attempt.cancel()
 
     async def cleanup(self) -> None:
         self._replies.cancel_pending()
@@ -1383,6 +1388,7 @@ class VoiceConductor:
         self._ignored_pipeline_faults = 0
         self._interruption_model_fault_observed = False
         self._control_tasks: set[asyncio.Task[None]] = set()
+        self._interruptions: _InterruptionScheduler | None = None
         self._discard_deliberate_audio = False
         self._random = random.Random()
         self._agent_speech_began: MediaPosition | None = None
@@ -1583,6 +1589,8 @@ class VoiceConductor:
         self._pending_persona_text = None
         if was_delivering or was_awaiting_playout:
             self._discard_deliberate_audio = True
+        if self._interruptions is not None:
+            self._interruptions.cancel_owned_work()
         if force and self._worker is not None:
             flush = asyncio.create_task(self._worker.queue_frame(InterruptionFrame()))
             self._control_tasks.add(flush)
@@ -1752,6 +1760,7 @@ class VoiceConductor:
         interruptions = _InterruptionScheduler(
             persona=self._persona, conductor=self, replies=replies
         )
+        self._interruptions = interruptions
         interruption_limit = _InterruptionAudioLimit(self)
         interruption_playout = _InterruptionPlayout(self)
         media = self._media
