@@ -837,6 +837,10 @@ class _PersonaReplyGate(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
+        if direction == FrameDirection.DOWNSTREAM and isinstance(
+            frame, InterruptionFrame
+        ):
+            self._conductor.persona_will_not_finish()
         if direction != FrameDirection.DOWNSTREAM or self._waiting is None:
             await self.push_frame(frame, direction)
             return
@@ -1636,14 +1640,13 @@ class VoiceConductor:
         where the speech leg had already run to.
         """
         ended = self._persona_ended
-        if ended is None:
-            return
         began = self._persona_began
-        ended = min(ended, heard_through)
-        if began is not None and ended < began:
-            ended = began
-        self._record.persona_last_stopped_at = ended
-        self._record.quiet_since = max(self._record.quiet_since, ended)
+        if ended is not None:
+            ended = min(ended, heard_through)
+            if began is not None and ended < began:
+                ended = began
+            self._record.persona_last_stopped_at = ended
+            self._record.quiet_since = max(self._record.quiet_since, ended)
         self._pending_persona_text = None
         self._pending_persona_concludes = False
         self._pending_silence_follow_up = 0
@@ -1651,6 +1654,12 @@ class VoiceConductor:
         self._persona_ended = None
         self._owes_a_turn = False
         self.media_advanced()
+
+    def persona_will_not_finish(self) -> None:
+        """Forget transcript state before TTS completes an interrupted context."""
+        self._pending_persona_text = None
+        self._pending_persona_concludes = False
+        self._pending_silence_follow_up = 0
 
     async def persona_stopped(self) -> None:
         text, self._pending_persona_text = self._pending_persona_text, None
