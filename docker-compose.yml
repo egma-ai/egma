@@ -67,7 +67,7 @@ services:
   # storage. The pinned MinIO image supplies the bundled store; managed
   # deployments configure external endpoints instead.
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     command: ["server", "/data"]
     environment:
       # Require a deployment-specific MinIO root credential. The bundled simulator
@@ -97,7 +97,7 @@ services:
   # gets object access and prefix-limited listing for pending ingestion data.
   # The bundled simulator writes using the store root credential.
   minio-bucket:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     environment:
       EGMA_S3_ACCESS_KEY_ID: ${EGMA_S3_ACCESS_KEY_ID:?no default — egma self-host up generates the bundled store credential in .egma-platform/platform.env}
       EGMA_S3_SECRET_ACCESS_KEY: ${EGMA_S3_SECRET_ACCESS_KEY:?no default — egma self-host up generates the bundled store credential in .egma-platform/platform.env}
