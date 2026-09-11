@@ -1,4 +1,3 @@
-import { newId } from "@egma/ids";
 import {
   getGradingPlan,
   getSimulation,
@@ -30,7 +29,7 @@ async function blockedBy(pid: number): Promise<number> {
   throw new Error("the concurrent operation did not reach the held publication");
 }
 
-it.each(["grader", "persona"] as const)("selects a coherent run after waiting for a %s publication", async (kind) => {
+it.sequential.each(["grader", "persona"] as const)("selects a coherent run after waiting for a %s publication", async (kind) => {
   api = await createApi(`concurrent_${kind}_publication`);
   const who = await signUp(api.app, `${kind}-publication@example.test`, "Concurrent publication");
   const headers = { cookie: who.cookie };
@@ -58,7 +57,7 @@ it.each(["grader", "persona"] as const)("selects a coherent run after waiting fo
     agentPlatform: "livekit", connectionType: "livekit_room", accessVariant: "livekit_room.project_credentials", modality: "voice",
     config: { url: "wss://example.livekit.cloud", agentName: "support" }, credentials: { apiKey: "livekit-key-A1B2C3D4WXYZ", apiSecret: "livekit-secret-E5F6G7H8QRST" },
   } });
-  const updatedPersonaVersionId = newId("prsv");
+  const updatedPersonaVersionId = "prsv_01M2B0K7W8N9Q3R4T5V6X7Y8Z9";
   const gate = await openSingleConnection(api.database.url);
   await gate.sql("begin");
   const { rows } = await gate.sql<{ pid: number }>("select pg_backend_pid() as pid");

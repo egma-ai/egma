@@ -156,7 +156,7 @@ it("freezes shared grader and persona selections together while later work recei
   await request(first.projectId, "PATCH", `/v1/personas/${persona.id}`, { projectId: first.projectId, models: {
     mode: "separate",
     llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "openai", model: "gpt-live-transcribe" },
-    tts: { provider: "cartesia", model: "sonic-3.5", voiceId: "later-project-voice", speed: 1.3 },
+    tts: { provider: "cartesia", model: "sonic-3.5", voiceId: "later-project-voice" },
   } });
   await expect(api.database.sql(
     `update simulation
@@ -206,7 +206,7 @@ it("freezes shared grader and persona selections together while later work recei
   expect(await getSimulation(firstAuth, later.simulationId)).toMatchObject({ personaVersionId: releasedPersona.id });
   const laterClaim = await api.app.inject({ method: "POST", url: CLAIMS_PATH, headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` }, payload: { contract_versions: [5, 6, 7], claimant: "later-release", capacity: 1, wait_seconds: 0 } });
   expect(laterClaim.statusCode, laterClaim.body).toBe(200);
-  expect(laterClaim.json().specs).toMatchObject([{ simulation_id: later.simulationId, persona: { personality: releasedPersona.personality }, models: { llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "openai", model: "gpt-live-transcribe" }, tts: { provider: "cartesia", model: "sonic-3.5", voice_id: "later-project-voice", speed: 1.3 } } }]);
+  expect(laterClaim.json().specs).toMatchObject([{ simulation_id: later.simulationId, persona: { personality: releasedPersona.personality }, models: { llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "openai", model: "gpt-live-transcribe" }, tts: { provider: "cartesia", model: "sonic-3.5", voice_id: "later-project-voice", speed: first.resolvedSpeed } } }]);
   const detail = await request(first.projectId, "GET", `/v1/simulations/${oldRuns[0]!.simulationId}`);
   expect(detail.gradingPlan).not.toHaveProperty("state");
   expect(detail.grades).toEqual(expect.arrayContaining([expect.objectContaining({ projectGraderId: first.projectGraderId, parameterValues: { llm_provider: "openai", llm_model: first.model } })]));
