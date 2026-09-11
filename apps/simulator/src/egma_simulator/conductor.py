@@ -98,6 +98,7 @@ MediaPosition = Fraction
 _INPUT_SOURCE_RANGE = "egma.input_source_range"
 _INTERRUPTION_AUDIO = "egma.interruption_audio"
 _INTERRUPTION_CAP_END = "egma.interruption_cap_end"
+_INTERRUPTION_STOPPED = "egma.interruption_stopped"
 
 
 @dataclass(frozen=True)
@@ -581,6 +582,13 @@ class _EvidenceRecorder(AudioBufferProcessor):
         if not self.sample_rate or self._persona.written_through is None:
             return Fraction(0)
         return Fraction(self._persona.written_through, self.sample_rate)
+
+    def playout_position(self, frame: OutputAudioRawFrame) -> MediaPosition:
+        """Map an accepted transport frame onto the recording clock."""
+        played = self._transport_time(frame, TRANSPORT_PLAYOUT, "persona audio")
+        if not self.sample_rate:
+            return Fraction(0)
+        return Fraction(self._sample_at(played), self.sample_rate)
 
     @property
     def position(self) -> MediaPosition:
@@ -1164,8 +1172,19 @@ class _InterruptionAudioLimit(FrameProcessor):
                 self._conductor.interruption_audio_queued()
             frame.metadata[_INTERRUPTION_AUDIO] = True
             limit = frame.sample_rate * 3
-            remaining = max(0, limit - self._frames)
+            remaining = min(
+                max(0, limit - self._frames),
+                self._conductor.interruption_playout_frames_remaining(
+                    frame.sample_rate
+                ),
+            )
             if remaining == 0:
+                if not self._conductor.deliberate_audio_capped:
+                    self._conductor.interruption_audio_exhausted()
+                    await self.push_frame(
+                        InterruptionFrame(), FrameDirection.UPSTREAM
+                    )
+                    await self.push_frame(TTSStoppedFrame())
                 return
             if frame.num_frames > remaining:
                 bytes_per_frame = len(frame.audio) // frame.num_frames
@@ -1200,7 +1219,7 @@ class _InterruptionPlayout(FrameProcessor):
         if interruption_audio:
             # Reaching this processor means every transport output processor
             # accepted the frame. Recording happens downstream on the same frame.
-            self._conductor.interruption_playout_started()
+            self._conductor.interruption_playout_started(frame)
         await self.push_frame(frame, direction)
         if direction != FrameDirection.DOWNSTREAM or not isinstance(
             frame, OutputAudioRawFrame
@@ -1241,6 +1260,9 @@ class _Timeline(FrameProcessor):
             )
         elif isinstance(frame, TTSStoppedFrame):
             await self._conductor.persona_stopped()
+            stopped = frame.metadata.get(_INTERRUPTION_STOPPED)
+            if isinstance(stopped, asyncio.Event):
+                stopped.set()
         elif isinstance(frame, InterruptionFrame):
             self._conductor.persona_interrupted(
                 heard_through=self._recorder.bot_position
@@ -1399,6 +1421,8 @@ class VoiceConductor:
         self._interruptions: _InterruptionScheduler | None = None
         self._discard_deliberate_audio = False
         self._cancel_after_accepted_audio: str | None = None
+        self._interruption_playout_began: MediaPosition | None = None
+        self._agent_to_playout_offset: MediaPosition | None = None
         self._random = random.Random()
         self._agent_speech_began: MediaPosition | None = None
         self._agent_speech_ended: MediaPosition | None = None
@@ -1557,10 +1581,19 @@ class VoiceConductor:
     def interruption_audio_queued(self) -> None:
         self._interruption_state = "awaiting_playout"
         self._deliberate_capped = False
+        self._interruption_playout_began = None
+        self._agent_to_playout_offset = None
 
-    def interruption_playout_started(self) -> None:
+    def interruption_playout_started(self, frame: OutputAudioRawFrame) -> None:
         if self._interruption_state == "awaiting_playout":
             self._interruption_state = "delivering"
+            recorder = self._recorder
+            if recorder is not None:
+                self._interruption_playout_began = recorder.playout_position(frame)
+                ear_position = Fraction(0) if self._ear is None else self._ear.position
+                self._agent_to_playout_offset = (
+                    self._interruption_playout_began - ear_position
+                )
 
     def interruption_playout_may_continue(self) -> bool:
         media = self._media
@@ -1590,6 +1623,54 @@ class VoiceConductor:
     def interruption_audio_capped(self) -> None:
         self._deliberate_capped = True
 
+    def interruption_playout_frames_remaining(self, sample_rate: int) -> int:
+        """Return PCM that still fits before the accepted-audio deadline."""
+        began = self._interruption_playout_began
+        if began is None:
+            began = self._persona_began
+        if began is None:
+            return sample_rate * 3
+        accepted_through = max(
+            self._playout_clock_position(), self._persona_ended or began
+        )
+        remaining = began + _seconds(3.0) - accepted_through
+        if remaining <= 0:
+            return 0
+        return remaining.numerator * sample_rate // remaining.denominator
+
+    def interruption_audio_exhausted(self) -> None:
+        self._deliberate_capped = True
+        self._discard_deliberate_audio = True
+
+    async def _finish_interruption_at_deadline(self) -> None:
+        if (
+            not self.deliberate_delivering
+            or self._deliberate_capped
+            or self._interruption_playout_began is None
+        ):
+            return
+        if self._playout_clock_position() < (
+            self._interruption_playout_began + _seconds(3.0)
+        ):
+            return
+        self.interruption_audio_exhausted()
+        if self._interruptions is not None:
+            self._interruptions.cancel_owned_work()
+        if self._worker is not None:
+            stopped = asyncio.Event()
+            frame = TTSStoppedFrame()
+            frame.metadata[_INTERRUPTION_STOPPED] = stopped
+            await self._worker.queue_frame(frame)
+            await stopped.wait()
+
+    def _playout_clock_position(self) -> MediaPosition:
+        recorder = self._recorder
+        ear = self._ear
+        offset = self._agent_to_playout_offset
+        if recorder is None or ear is None or offset is None:
+            return self._position
+        return max(self._position, ear.position + offset)
+
     def interruption_canceled(self, reason: str, *, force: bool = False) -> None:
         cancelable = {"scheduled", "preparing", "ready", "awaiting_playout"}
         if force:
@@ -1603,6 +1684,8 @@ class VoiceConductor:
         self._interruption_state = "listening"
         self._interruption_idle.set()
         self._cancel_after_accepted_audio = None
+        self._interruption_playout_began = None
+        self._agent_to_playout_offset = None
         self._interruption_due_at = None
         generated_text = self._pending_persona_text
         self._pending_persona_text = None
@@ -1991,6 +2074,7 @@ class VoiceConductor:
         media = self._media
         if media is not None and media.failed.is_set():
             raise self._transport_lost()
+        await self._finish_interruption_at_deadline()
         ear = self._ear
         if ear is None:
             return
@@ -2229,6 +2313,8 @@ class VoiceConductor:
             self._last_interruption_end = ended
             self._interruption_state = "listening"
             self._interruption_idle.set()
+            self._interruption_playout_began = None
+            self._agent_to_playout_offset = None
             self._deliberate_capped = False
             log_event(
                 logger,
