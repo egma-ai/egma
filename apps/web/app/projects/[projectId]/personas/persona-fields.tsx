@@ -280,7 +280,7 @@ export function ModelFields({
     });
   }, [capabilities, voiceSearch, voiceType]);
   const states = capabilities === null ? [] : [capabilities.language, capabilities.accent, capabilities.emotion, capabilities.speed, capabilities.speechVolume, capabilities.voices];
-  const valid = capabilities !== null && states.every((state) => state.status !== "unsupported" && state.status !== "unknown");
+  const valid = capabilities !== null && states.every((state) => state.status !== "unknown");
   useEffect(() => {
     if (capabilities !== null || capabilityError !== null) onValidityChange?.(valid);
   }, [valid, capabilities, capabilityError, onValidityChange]);
