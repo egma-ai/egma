@@ -179,6 +179,10 @@ class ConductorProbe:
     def is_ending(self) -> bool:
         return bool(self.concluded)
 
+    @property
+    def deliberate_response_owned(self) -> bool:
+        return False
+
     async def the_agent_finished(
         self, said: str, heard_a_turn: bool
     ) -> Fraction | None:

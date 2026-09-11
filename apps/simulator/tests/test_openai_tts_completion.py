@@ -114,6 +114,10 @@ class _Conductor:
         self.positions_at_stop = []
         self.stopped = asyncio.Event()
 
+    @property
+    def deliberate_response_owned(self) -> bool:
+        return False
+
     def persona_audio(self, _frame, *, recorded_until) -> None:
         self.positions.append(recorded_until)
 
