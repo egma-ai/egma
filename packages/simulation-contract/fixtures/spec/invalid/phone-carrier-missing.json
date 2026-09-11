@@ -1,5 +1,5 @@
 {
-  "contract_version": 5,
+  "contract_version": 6,
   "simulation_id": "sim_fixture_phone_carrier_missing",
   "modality": "voice",
   "connection": {
@@ -14,7 +14,13 @@
   "persona": {
     "name": "Dev",
     "personality": "Dev, 34, calling from a train platform. In a hurry, talks over slow answers, background noise comes and goes.",
-    "language": "en-US"
+    "parameters": {
+      "language": "en-US",
+      "emotion": "neutral",
+      "accent": "voice_default",
+      "speech_volume": 1,
+      "execution_policy_version": 1
+    }
   },
   "scenario": {
     "instructions": "Your card was charged twice for the same order this morning. You want the duplicate charge reversed and a confirmation number before you hang up. If asked to stay on hold for more than a moment, push back once, then accept."

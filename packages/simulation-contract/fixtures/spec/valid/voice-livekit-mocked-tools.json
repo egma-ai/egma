@@ -1,5 +1,5 @@
 {
-  "contract_version": 5,
+  "contract_version": 6,
   "simulation_id": "sim_01K4RE2V6B8N0PZQTM5CHXW7JD",
   "modality": "voice",
   "connection": {
@@ -18,7 +18,13 @@
   "persona": {
     "name": "Eleanor",
     "personality": "Retired teacher, 68, calling from a quiet kitchen. Polite, thorough, repeats details back to be sure she has them right.",
-    "language": "en-US"
+    "parameters": {
+      "language": "en-US",
+      "emotion": "neutral",
+      "accent": "voice_default",
+      "speech_volume": 1,
+      "execution_policy_version": 1
+    }
   },
   "scenario": {
     "instructions": "Your six-month check-up is on Tuesday and you now have to be somewhere else that morning. You want it moved to any Thursday in the next month. Find out what the practice offers you when the diary turns out to be full."
@@ -52,15 +58,23 @@
   "mock_tools": [
     {
       "tool_name": "check_calendar",
-      "answer": { "answer": { "slots": [] } }
+      "answer": {
+        "answer": {
+          "slots": []
+        }
+      }
     },
     {
       "tool_name": "book_appointment",
-      "answer": { "error": "the booking service is not accepting requests" }
+      "answer": {
+        "error": "the booking service is not accepting requests"
+      }
     },
     {
       "tool_name": "send_confirmation_sms",
-      "answer": { "answer": null }
+      "answer": {
+        "answer": null
+      }
     }
   ]
 }

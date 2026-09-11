@@ -1,5 +1,5 @@
 {
-  "contract_version": 5,
+  "contract_version": 6,
   "simulation_id": "sim_fixture_persona_traits_wrapper",
   "modality": "chat",
   "connection": {
@@ -15,10 +15,22 @@
       "language": "en-US",
       "accent": "Neutral American English.",
       "backgroundNoise": "A quiet waiting room."
+    },
+    "parameters": {
+      "language": "en-US",
+      "emotion": "neutral",
+      "accent": "voice_default",
+      "speech_volume": 1,
+      "execution_policy_version": 1
     }
   },
-  "scenario": { "instructions": "Ask for an appointment." },
-  "limits": { "max_duration_seconds": 300, "max_turns": 20 },
+  "scenario": {
+    "instructions": "Ask for an appointment."
+  },
+  "limits": {
+    "max_duration_seconds": 300,
+    "max_turns": 20
+  },
   "models": {
     "llm": {
       "provider": "openai",
@@ -26,7 +38,11 @@
       "adapter": "openai_chat_completions",
       "key": "fixture-not-a-real-secret-llm"
     },
-    "stt": { "provider": "deepgram", "model": "nova-3-general", "adapter": "deepgram" },
+    "stt": {
+      "provider": "deepgram",
+      "model": "nova-3-general",
+      "adapter": "deepgram"
+    },
     "tts": {
       "provider": "cartesia",
       "model": "sonic-3.5",

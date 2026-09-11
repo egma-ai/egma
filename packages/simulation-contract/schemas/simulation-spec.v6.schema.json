@@ -1,0 +1,426 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:egma:simulation-contract:spec:v6",
+  "title": "Simulation spec (v6)",
+  "description": "The simulation work-order contract. Persona controls are frozen when the work order is created, while provider credentials are resolved for the claim.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "simulation_id",
+    "modality",
+    "connection",
+    "persona",
+    "scenario",
+    "limits",
+    "models"
+  ],
+  "properties": {
+    "contract_version": {
+      "description": "The one spec version this simulator implements.",
+      "type": "integer",
+      "const": 6
+    },
+    "simulation_id": {
+      "description": "The simulation this spec conducts. Opaque to the simulator.",
+      "type": "string",
+      "minLength": 1
+    },
+    "modality": {
+      "description": "Chat exercises the agent harness. Voice adds the speech stack.",
+      "type": "string",
+      "enum": ["chat", "voice"]
+    },
+    "connection": {
+      "description": "How the simulator reaches the agent under test. Connection type selects the adapter, access variant selects the authority and configuration inside it, and agent platform records what runs the target without selecting code.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent_platform",
+        "connection_type",
+        "access_variant",
+        "config",
+        "credentials"
+      ],
+      "properties": {
+        "agent_platform": {
+          "description": "The product or framework that runs or exposes the agent, or null when unknown. It records provenance and never selects simulator code.",
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "connection_type": {
+          "description": "The direct path the simulator selects. It is an open vocabulary so a simulator without the named adapter can refuse it clearly at runtime.",
+          "type": "string",
+          "minLength": 1
+        },
+        "access_variant": {
+          "description": "The configuration and authority used inside the selected connection type. It is explicit and is never inferred from config keys.",
+          "type": "string",
+          "minLength": 1
+        },
+        "config": {
+          "description": "The non-secret reach configuration, exactly as stored on the connection. Its keys belong to the selected access variant; this schema does not know them.",
+          "type": "object"
+        },
+        "credentials": {
+          "description": "The resolved secret material for this connection, unsealed by the control plane for exactly this hand-off, or null where the access variant takes no customer secret. The simulator holds it in memory, hands it only to the adapter, and never logs, persists, or reports it.",
+          "oneOf": [{ "type": "object" }, { "type": "null" }]
+        }
+      }
+    },
+    "persona": {
+      "description": "Who talks on the human side of the transcript, with the project controls frozen for this simulation.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "personality", "parameters"],
+      "properties": {
+        "name": {
+          "description": "The human name this person gives the agent. It is authored on the pinned persona version and stated in the prompt, never improvised by the model and never the team's own label for the library row — which is what makes the same test hear the same person on every run.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "personality": {
+          "description": "Who they are and how they behave, in the author's own words.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "language": {
+          "description": "Legacy core language. New work uses parameters.language.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "parameters": {
+          "description": "The non-model persona controls frozen when this simulation was created.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["language", "emotion", "accent", "speech_volume", "execution_policy_version"],
+          "properties": {
+            "language": { "type": "string", "minLength": 1, "pattern": "\\S" },
+            "emotion": { "type": "string", "enum": ["neutral", "happy", "angry", "frustrated", "sad", "anxious"] },
+            "accent": { "type": "string", "minLength": 1, "pattern": "\\S" },
+            "speech_volume": { "type": "number", "minimum": 0.5, "maximum": 1.5 },
+            "execution_policy_version": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "scenario": {
+      "description": "What the persona wants in this test.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instructions"],
+      "properties": {
+        "instructions": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "limits": {
+      "description": "The walls around one simulation.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_duration_seconds", "max_turns"],
+      "properties": {
+        "max_duration_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_turns": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "agent_version": {
+      "description": "Which version of the agent under test this simulation is conducted against, exactly as the platform names its versions: a number where a platform numbers them, a name where it names them. Absent is the ordinary case and means the platform's own default. The simulator never invents a version and never reinterprets one — what is written here is what the platform is asked for — and a connection that cannot be conducted over a named version takes it and drops it. A name has only to say something, so surrounding space is accepted here and dropped on the way to the platform: it is spacing, never part of a version.",
+      "oneOf": [
+        { "type": "integer", "minimum": 0 },
+        { "type": "string", "minLength": 1, "pattern": "\\S" }
+      ]
+    },
+    "dynamic_variables": {
+      "description": "The variables this one simulation is conducted with, resolved by the control plane and rendered by the agent's own platform. Values are strings because a rendered variable is a string; a name carrying an empty one is a variable set to nothing, which is not the same as a variable nobody set. Absent is the ordinary case. The simulator passes them through byte for byte and reads none of them — Egma's own attribution variable included, which is how a tool call the platform makes finds its way back to this simulation.",
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "propertyNames": { "minLength": 1, "pattern": "\\S" }
+    },
+    "job_dispatch_metadata": {
+      "description": "The metadata this one simulation's agent dispatch carries, exactly as the test wrote it. It is the LiveKit agent's own channel — what `json.loads(ctx.job.metadata)` reads on the far side — so the simulator passes it to the worker byte for byte and reads none of it: a value the simulator tidied would be a value the agent under test never saw. LiveKit Project credentials carry it on Egma's dispatch. A LiveKit token endpoint carries it in the room configuration that the endpoint copies into the token. Absent is the ordinary case.",
+      "type": "object"
+    },
+    "mock_tools": {
+      "description": "Resolved mock-tool answers for this simulation.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/mock_tool" }
+    },
+    "platform": {
+      "description": "Deployment carrier data. It contains the SIP trunk only. The media backend remains deployment configuration.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["carrier"],
+      "properties": {
+        "carrier": { "$ref": "#/$defs/platform_carrier" }
+      }
+    },
+    "runtime": {
+      "description": "Per-claim hosted runtime authority. It is absent for standing and self-hosted simulators and contains only the temporary media and recording access for this simulation.",
+      "$ref": "#/$defs/daytona_voice_runtime"
+    },
+    "models": {
+      "$ref": "#/$defs/models"
+    }
+  },
+  "$defs": {
+    "daytona_voice_runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "media", "storage"],
+      "properties": {
+        "kind": { "const": "daytona_voice" },
+        "media": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["backend", "livekit_url", "livekit_room_name", "livekit_room_token", "livekit_api_token"],
+          "properties": {
+            "backend": { "const": "livekit" },
+            "livekit_url": { "type": "string", "pattern": "^wss?://", "minLength": 1 },
+            "livekit_room_name": { "type": "string", "minLength": 1 },
+            "livekit_room_token": { "type": "string", "minLength": 1 },
+            "livekit_api_token": { "type": "string", "minLength": 1 }
+          }
+        },
+        "storage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["backend", "endpoint", "bucket", "region", "access_key_id", "secret_access_key", "session_token"],
+          "properties": {
+            "backend": { "const": "s3" },
+            "endpoint": { "type": "string", "pattern": "^https?://", "minLength": 1 },
+            "bucket": { "type": "string", "minLength": 3 },
+            "region": { "type": "string", "minLength": 1 },
+            "access_key_id": { "type": "string", "minLength": 1 },
+            "secret_access_key": { "type": "string", "minLength": 1 },
+            "session_token": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "platform_carrier": {
+      "description": "The complete credential-authenticated carrier route used for a phone simulation.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trunk_address",
+        "trunk_number",
+        "trunk_username",
+        "trunk_password"
+      ],
+      "properties": {
+        "trunk_address": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trunk_number": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trunk_username": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trunk_password": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "models": {
+      "description": "The complete model selection from the pinned persona version, with direct credentials resolved for this claim.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["llm", "stt", "tts"],
+      "properties": {
+        "llm": { "$ref": "#/$defs/llm_selection" },
+        "stt": { "$ref": "#/$defs/stt_selection" },
+        "tts": { "$ref": "#/$defs/tts_selection" }
+      }
+    },
+    "llm_selection": {
+      "description": "The persona brain. Provider and model identify the catalog entry; adapter is the catalog-owned runtime dispatch key.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "adapter", "key"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "adapter": { "type": "string", "minLength": 1 },
+        "reasoning_effort": {
+          "type": "string",
+          "minLength": 1
+        },
+        "key": { "type": "string", "minLength": 1 },
+        "funding_receipt": { "type": "string", "minLength": 1 }
+      }
+    },
+    "stt_selection": {
+      "description": "The persona ears. Provider and model identify the catalog entry; adapter is the catalog-owned runtime dispatch key.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "adapter"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "adapter": { "type": "string", "minLength": 1 },
+        "key": { "type": "string", "minLength": 1 },
+        "funding_receipt": { "type": "string", "minLength": 1 }
+      }
+    },
+    "tts_selection": {
+      "description": "The persona mouth. Voice and speed live with the provider and model that interpret them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "adapter", "voice_id", "speed"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "adapter": { "type": "string", "minLength": 1 },
+        "voice_id": { "type": "string", "minLength": 1 },
+        "speed": { "type": "number", "minimum": 0.6, "maximum": 1.5 },
+        "key": { "type": "string", "minLength": 1 },
+        "funding_receipt": { "type": "string", "minLength": 1 }
+      }
+    },
+    "mock_tool": {
+      "description": "One mock tool name and its resolved answer.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool_name", "answer"],
+      "properties": {
+        "tool_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "answer": { "$ref": "#/$defs/mock_tool_answer" }
+      }
+    },
+    "mock_tool_answer": {
+      "description": "A returned value or a failure, never both.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["answer"],
+          "properties": {
+            "answer": {}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["error"],
+          "properties": {
+            "error": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "properties": { "runtime": {} },
+        "required": ["runtime"]
+      },
+      "then": {
+        "type": "object",
+        "properties": { "modality": { "const": "voice" } }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "connection": {
+            "type": "object",
+            "properties": {
+              "connection_type": { "const": "phone_number" }
+            },
+            "required": ["connection_type"]
+          }
+        },
+        "required": ["connection"]
+      },
+      "then": {
+        "type": "object",
+        "properties": { "platform": {} },
+        "required": ["platform"]
+      },
+      "else": {
+        "type": "object",
+        "not": {
+          "type": "object",
+          "properties": { "platform": {} },
+          "required": ["platform"]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "modality": { "const": "voice" } },
+        "required": ["modality"]
+      },
+      "then": {
+        "properties": {
+          "models": {
+            "type": "object",
+            "properties": {
+              "stt": {
+                "type": "object",
+                "properties": { "key": {} },
+                "required": ["key"]
+              },
+              "tts": {
+                "type": "object",
+                "properties": { "key": {} },
+                "required": ["key"]
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "models": {
+            "type": "object",
+            "properties": {
+              "stt": {
+                "type": "object",
+                "not": {
+                  "properties": { "key": {} },
+                  "required": ["key"]
+                }
+              },
+              "tts": {
+                "type": "object",
+                "not": {
+                  "properties": { "key": {} },
+                  "required": ["key"]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

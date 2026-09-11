@@ -1,5 +1,5 @@
 {
-  "contract_version": 5,
+  "contract_version": 6,
   "simulation_id": "sim_01K5T38H2WD4E5RYP7VM3QKB6N",
   "modality": "chat",
   "connection": {
@@ -17,7 +17,13 @@
   "persona": {
     "name": "Margaret",
     "personality": "Margaret, 68, retired schoolteacher. Polite but easily flustered.",
-    "language": "en-US"
+    "parameters": {
+      "language": "en-US",
+      "emotion": "neutral",
+      "accent": "voice_default",
+      "speech_volume": 1,
+      "execution_policy_version": 1
+    }
   },
   "scenario": {
     "instructions": "Move next Tuesday's cleaning to Thursday the same week."

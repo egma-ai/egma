@@ -1,5 +1,5 @@
 {
-  "contract_version": 5,
+  "contract_version": 6,
   "simulation_id": "sim_01K5T4P2QW7H3NDXB8ZM6VYJRE",
   "modality": "chat",
   "connection": {
@@ -22,7 +22,13 @@
   "persona": {
     "name": "Eleanor",
     "personality": "Retired teacher, 68, typing carefully. Polite, thorough, repeats details back to be sure she has them right.",
-    "language": "en-US"
+    "parameters": {
+      "language": "en-US",
+      "emotion": "neutral",
+      "accent": "voice_default",
+      "speech_volume": 1,
+      "execution_policy_version": 1
+    }
   },
   "scenario": {
     "instructions": "Your six-month check-up is on Tuesday and you now have to be somewhere else that morning. You want it moved to any Thursday in the next month, and you want the new date read back to you before the exchange ends."
@@ -54,11 +60,19 @@
   "mock_tools": [
     {
       "tool_name": "get_availability",
-      "answer": { "answer": { "slots": ["2026-09-03T14:30:00Z"] } }
+      "answer": {
+        "answer": {
+          "slots": [
+            "2026-09-03T14:30:00Z"
+          ]
+        }
+      }
     },
     {
       "tool_name": "book_appointment",
-      "answer": { "error": "the booking service is unavailable" }
+      "answer": {
+        "error": "the booking service is unavailable"
+      }
     }
   ]
 }

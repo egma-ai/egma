@@ -55,7 +55,7 @@ async function fixturesUnder(
 const ajv = new Ajv2020({ strict: true, allErrors: true });
 addFormats(ajv);
 
-const specSchema = await readJson("schemas", "simulation-spec.v5.schema.json");
+const specSchema = await readJson("schemas", "simulation-spec.v6.schema.json");
 const reportSchema = await readJson(
   "schemas",
   "simulation-report.v1.schema.json",
@@ -173,7 +173,7 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     property: "name",
   },
   "spec/persona-missing-language.json": {
-    at: "/persona",
+    at: "/persona/parameters",
     keyword: "required",
     property: "language",
   },
@@ -259,12 +259,12 @@ describe("the two schemas, as one contract", () => {
         (schema.properties as Record<string, Record<string, unknown>>)
           .contract_version as Record<string, unknown>
       ).const;
-    expect(versionOf(specSchema)).toBe(5);
+    expect(versionOf(specSchema)).toBe(6);
     expect(versionOf(reportSchema)).toBe(1);
   });
 
   it("each carry an identity a $ref or an error message can name", () => {
-    expect(specSchema.$id).toBe("urn:egma:simulation-contract:spec:v5");
+    expect(specSchema.$id).toBe("urn:egma:simulation-contract:spec:v6");
     expect(reportSchema.$id).toBe("urn:egma:simulation-contract:report:v1");
   });
 
@@ -526,11 +526,9 @@ describe("the two schemas, as one contract", () => {
       return persona;
     };
 
-    // Flat: the three authored values sit on the block itself, so there is
-    // one place to read who this is.
     expect(Object.keys(personaOf(base)).sort()).toEqual([
-      "language",
       "name",
+      "parameters",
       "personality",
     ]);
     expect(validators.spec(base), ajv.errorsText(validators.spec.errors)).toBe(
@@ -544,7 +542,7 @@ describe("the two schemas, as one contract", () => {
     // reading "Your name is  ." into the prompt. Absent, empty and blank are
     // one rule with three diagnostics, and it is the rule the persona
     // version's own columns keep: non-empty after trim.
-    for (const required of ["name", "personality", "language"] as const) {
+    for (const required of ["name", "personality"] as const) {
       const spec = structuredClone(base);
       delete personaOf(spec)[required];
       expect(validators.spec(spec)).toBe(false);
@@ -590,6 +588,28 @@ describe("the two schemas, as one contract", () => {
         validators.spec(padded),
         ajv.errorsText(validators.spec.errors),
       ).toBe(true);
+    }
+
+    const parametersOf = (spec: Record<string, unknown>) =>
+      personaOf(spec).parameters as Record<string, unknown>;
+    expect(Object.keys(parametersOf(base)).sort()).toEqual([
+      "accent",
+      "emotion",
+      "execution_policy_version",
+      "language",
+      "speech_volume",
+    ]);
+    for (const required of ["language", "emotion", "accent", "speech_volume", "execution_policy_version"] as const) {
+      const spec = structuredClone(base);
+      delete parametersOf(spec)[required];
+      expect(validators.spec(spec)).toBe(false);
+      expect(validators.spec.errors).toContainEqual(
+        expect.objectContaining({
+          instancePath: "/persona/parameters",
+          keyword: "required",
+          params: { missingProperty: required },
+        }),
+      );
     }
 
     // Closed: the wrapper the block used to have, and the two authored

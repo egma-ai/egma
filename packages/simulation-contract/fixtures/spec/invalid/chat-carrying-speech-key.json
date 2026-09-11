@@ -1,17 +1,34 @@
 {
-  "contract_version": 5,
+  "contract_version": 6,
   "simulation_id": "sim_fixture_chat_carrying_speech_key",
   "modality": "chat",
   "connection": {
     "agent_platform": "retell",
     "connection_type": "retell_text_mode",
     "access_variant": "retell_text_mode.api_key",
-    "config": { "retellAgentId": "agent_fixture" },
+    "config": {
+      "retellAgentId": "agent_fixture"
+    },
     "credentials": null
   },
-  "persona": { "name": "Alex", "personality": "Patient and direct.", "language": "en-US" },
-  "scenario": { "instructions": "Ask for an appointment." },
-  "limits": { "max_duration_seconds": 300, "max_turns": 20 },
+  "persona": {
+    "name": "Alex",
+    "personality": "Patient and direct.",
+    "parameters": {
+      "language": "en-US",
+      "emotion": "neutral",
+      "accent": "voice_default",
+      "speech_volume": 1,
+      "execution_policy_version": 1
+    }
+  },
+  "scenario": {
+    "instructions": "Ask for an appointment."
+  },
+  "limits": {
+    "max_duration_seconds": 300,
+    "max_turns": 20
+  },
   "models": {
     "llm": {
       "provider": "openai",

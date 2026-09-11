@@ -1,5 +1,5 @@
 {
-  "contract_version": 5,
+  "contract_version": 6,
   "simulation_id": "sim_01K7MZ4T8P6QA3XDBW9NHF2SVK",
   "modality": "chat",
   "connection": {
@@ -18,7 +18,13 @@
   "persona": {
     "name": "Eleanor",
     "personality": "Retired teacher, 68. Polite and thorough, and types the way she speaks: full sentences, and she repeats details back to be sure she has them right.",
-    "language": "en-US"
+    "parameters": {
+      "language": "en-US",
+      "emotion": "neutral",
+      "accent": "voice_default",
+      "speech_volume": 1,
+      "execution_policy_version": 1
+    }
   },
   "scenario": {
     "instructions": "Your six-month check-up is on Tuesday and you now have to be somewhere else that morning. You want it moved to any Thursday in the next month, and you want the new date read back to you before you finish."
