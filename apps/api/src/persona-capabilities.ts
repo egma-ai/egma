@@ -56,7 +56,7 @@ export function personaCapabilityRefusal(
 ): string | undefined {
   for (const [field, capability] of Object.entries(capabilities)) {
     if (capability.status === "unsupported") return `${field}: ${capability.reason ?? "unsupported"}`;
-    if (capability.status === "unknown" && !(field === "accent" && selected.accent === "voice_default"))
+    if (capability.status === "unknown")
       return `${field}: ${capability.reason ?? "support could not be verified"}`;
   }
   if (capabilities.emotion.status === "fixed" && selected.emotion !== capabilities.emotion.value)
@@ -195,6 +195,7 @@ export function resolvePersonaCapabilities(
       ? CARTESIA_SONIC_36_LANGUAGES.filter((language) => language !== "or" && language !== "ur")
       : CARTESIA_SONIC_36_LANGUAGES;
     const accents = selectedVoice?.accents ?? [];
+    const acceptsAccentSteering = selection.ttsModel === "sonic-3.6" || selection.ttsModel === "sonic-3.6-2026-08-27";
     const languageMatches = selection.language === undefined || languages.some((language) => language === selection.language!.toLowerCase().split("-")[0]);
     const professional = selectedVoice?.isProfessional === true;
     const supportsModel = selectedVoice?.modelIds === undefined || selectedVoice.modelIds.includes(selection.ttsModel);
@@ -212,11 +213,13 @@ export function resolvePersonaCapabilities(
       language: !languageMatches
         ? unsupported(`Cartesia ${selection.ttsModel} does not support ${selection.language}.`)
         : { status: "supported", choices: languages },
-      accent: selectedVoice === undefined
+      accent: !acceptsAccentSteering
+        ? { status: "fixed", value: "voice_default", reason: `Cartesia ${selection.ttsModel} does not support named accent steering.` }
+        : selectedVoice === undefined
         ? unknown("Choose a Cartesia voice to resolve its accent metadata.")
         : accents.length > 0
         ? { status: "supported", choices: ["voice_default", ...accents] }
-        : unknown("Cartesia did not return accent metadata for the selected voice."),
+        : { status: "fixed", value: "voice_default", reason: "Cartesia did not return accent metadata, so named accent steering is unverified." },
       emotion: selection.language?.toLowerCase().startsWith("en")
         ? { status: "supported", choices: PERSONA_EMOTIONS }
         : { status: "fixed", value: "neutral", reason: "Cartesia emotion tags are supported only for English." },
@@ -250,13 +253,19 @@ export async function discoverCartesiaVoices(
 ): Promise<readonly PersonaVoice[]> {
   const voices: PersonaVoice[] = [];
   let cursor: string | undefined;
+  const seenCursors = new Set<string>();
+  const overallSignal = signal === undefined
+    ? AbortSignal.timeout(30_000)
+    : AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
+  let pages = 0;
   do {
+    if (++pages > 100) throw new Error("Cartesia voice discovery exceeded 100 pages.");
     const url = new URL("https://api.cartesia.ai/voices");
     url.searchParams.set("limit", "100");
     url.searchParams.append("expand[]", "preview_file_url");
     if (cursor !== undefined) url.searchParams.set("starting_after", cursor);
     const response = await fetcher(url, {
-      ...(signal === undefined ? {} : { signal }),
+      signal: overallSignal,
       headers: { Authorization: `Bearer ${apiKey}`, "Cartesia-Version": "2026-08-14" },
     });
     if (!response.ok) throw new Error(`Cartesia voice discovery failed with status ${response.status}.`);
@@ -283,8 +292,14 @@ export async function discoverCartesiaVoices(
         ...(raw.access === "public" && raw.visibility === "all" ? { publiclyAccessible: true } : {}),
       });
     }
-    cursor = page.has_more === true ? voices.at(-1)?.id : undefined;
-    if (page.has_more === true && cursor === undefined) throw new Error("Cartesia returned another page without a cursor.");
+    const pageVoices = page.data ?? [];
+    const lastPageVoice = pageVoices.findLast((one) => typeof one.id === "string");
+    const nextCursor = typeof lastPageVoice?.id === "string" ? lastPageVoice.id : undefined;
+    cursor = page.has_more === true ? nextCursor : undefined;
+    if (page.has_more === true && (cursor === undefined || seenCursors.has(cursor))) {
+      throw new Error("Cartesia returned another page without a new cursor.");
+    }
+    if (cursor !== undefined) seenCursors.add(cursor);
   } while (cursor !== undefined);
   return voices;
 }

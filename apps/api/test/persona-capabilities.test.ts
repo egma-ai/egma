@@ -56,6 +56,30 @@ describe("persona capability resolution", () => {
     expect(result.accent).toEqual({ status: "supported", choices: ["voice_default", "GB"] });
     expect(result.speed).toMatchObject({ status: "supported" });
   });
+
+  it("uses voice default when Cartesia omits accent metadata", () => {
+    const result = resolvePersonaCapabilities(
+      { ...selection, ttsProvider: "cartesia", ttsModel: "sonic-3.6", voiceId: "voice-a", language: "en-US" },
+      [{ id: "voice-a", name: "A", source: "standard", presentation: "unknown", languages: [], accents: [] }],
+    );
+    expect(result.accent).toEqual({
+      status: "fixed",
+      value: "voice_default",
+      reason: "Cartesia did not return accent metadata, so named accent steering is unverified.",
+    });
+  });
+
+  it("does not offer named accent steering on Cartesia models that cannot execute it", () => {
+    const result = resolvePersonaCapabilities(
+      { ...selection, ttsProvider: "cartesia", ttsModel: "sonic-3.5", voiceId: "voice-a", language: "en-US" },
+      [{ id: "voice-a", name: "A", source: "standard", presentation: "unknown", languages: [], accents: ["general-american"] }],
+    );
+    expect(result.accent).toEqual({
+      status: "fixed",
+      value: "voice_default",
+      reason: "Cartesia sonic-3.5 does not support named accent steering.",
+    });
+  });
 });
 
 describe("Cartesia discovery", () => {
@@ -77,5 +101,17 @@ describe("Cartesia discovery", () => {
       { id: "public", name: "Public", source: "standard", presentation: "male", languages: ["en-US", "hi-IN"], accents: ["general-american", "hindi"], publiclyAccessible: true },
       { id: "private", name: "Private", source: "account", presentation: "female", languages: ["es-ES"], accents: [] },
     ]);
+  });
+
+  it("stops when a later page cannot advance its cursor", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        data: [{ id: "public", name: "Public", access: "public", visibility: "all" }],
+        has_more: true,
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], has_more: true })));
+
+    await expect(discoverCartesiaVoices("fixture-key", fetcher)).rejects.toThrow("without a new cursor");
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 });

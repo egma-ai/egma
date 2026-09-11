@@ -10,6 +10,7 @@ import {
   listPersonas,
   NotPermittedError,
   EGMA_PROVIDED_PERSONAS,
+  RECOMMENDED_PERSONA_MODELS,
   type AuthContext,
   type NewPersona,
   type Persona,
@@ -42,6 +43,20 @@ const acme = {
 };
 const globex = { organization: newId("org"), project: newId("prj") };
 const ada = newId("usr");
+const PREDEFINED_IDS = [
+  EGMA_PROVIDED_PERSONAS.defaultPersona,
+  EGMA_PROVIDED_PERSONAS.interruptiveCaller,
+  EGMA_PROVIDED_PERSONAS.spanishCaller,
+  EGMA_PROVIDED_PERSONAS.angryCaller,
+  EGMA_PROVIDED_PERSONAS.everydayFemale,
+] as const;
+const PREDEFINED_NAMES = [
+  "Everyday Caller [Male]",
+  "Interruptive caller",
+  "Spanish caller",
+  "Angry caller",
+  "Everyday Caller [Female]",
+] as const;
 
 function actingIn(
   projectId: string | undefined,
@@ -126,7 +141,7 @@ describe("listing personas", () => {
     expect(page.items.map((item) => item.id)).toEqual(
       [
         ...created.map((item) => item.id).reverse(),
-        EGMA_PROVIDED_PERSONAS.defaultPersona,
+        ...PREDEFINED_IDS,
       ],
     );
     expect(page.items.map((item) => item.name)).toEqual([
@@ -135,7 +150,7 @@ describe("listing personas", () => {
       "Three",
       "Two",
       "One",
-      "Everyday caller",
+      ...PREDEFINED_NAMES,
     ]);
     expect(page.nextCursor).toBeUndefined();
   });
@@ -160,18 +175,17 @@ describe("listing personas", () => {
     expect(second.items).toHaveLength(2);
     expect(second.nextCursor).toBe(second.items[1]?.id);
 
-    const third = await listPersonas(actingIn(acme.listing), {
-      limit: 2,
-      cursor: second.nextCursor,
-    });
-    expect(third.items).toHaveLength(2);
-    expect(third.nextCursor).toBeUndefined();
-
-    const walked = [...first.items, ...second.items, ...third.items];
+    const walked = [...first.items, ...second.items];
+    let cursor = second.nextCursor;
+    while (cursor !== undefined) {
+      const page = await listPersonas(actingIn(acme.listing), { limit: 2, cursor });
+      walked.push(...page.items);
+      cursor = page.nextCursor;
+    }
     expect(walked.map((item) => item.id)).toEqual(
       [
         ...created.map((item) => item.id).reverse(),
-        EGMA_PROVIDED_PERSONAS.defaultPersona,
+        ...PREDEFINED_IDS,
       ],
     );
   });
@@ -192,7 +206,7 @@ describe("listing personas", () => {
     const page = await listPersonas(actingIn(undefined));
 
     const ids = page.items.map((item) => item.id);
-    expect(ids).toHaveLength(7);
+    expect(ids).toHaveLength(11);
     expect(ids).toContain(neighbour.id);
     expect(ids).toContain(EGMA_PROVIDED_PERSONAS.defaultPersona);
     expect(ids).not.toContain(stranger.id);
@@ -210,7 +224,7 @@ describe("listing personas", () => {
     const page = await listPersonas(actingAsGlobex());
     expect(page.items.map((item) => item.id)).toEqual([
       stranger.id,
-      EGMA_PROVIDED_PERSONAS.defaultPersona,
+      ...PREDEFINED_IDS,
     ]);
   });
 
@@ -226,7 +240,7 @@ describe("listing personas", () => {
       "Four",
       "Two",
       "One",
-      "Everyday caller",
+      ...PREDEFINED_NAMES,
     ]);
   });
 });
@@ -266,6 +280,32 @@ describe("forking a persona", () => {
     expect(forkVersions[0]).not.toBe(sourceVersions[0]);
   });
 
+  it("copies every saved project setting instead of restoring contract defaults", async () => {
+    const models = {
+      ...RECOMMENDED_PERSONA_MODELS,
+      tts: { ...RECOMMENDED_PERSONA_MODELS.tts, voiceId: "alloy", speed: 1.25 },
+    };
+    const configured = await createPersona(actingIn(acme.forking), {
+      ...personaNamed("Configured"),
+      settings: {
+        models,
+        language: "en-GB",
+        emotion: "happy",
+        accent: "british",
+        speechVolume: 1.2,
+        backgroundSoundId: "rain-v1",
+        backgroundVolume: 0.04,
+        interruptionLevel: "occasional",
+        executionPolicyVersion: 1,
+      },
+    });
+
+    const fork = await forkPersona(actingIn(acme.forking), configured.id);
+
+    expect(fork?.settings?.parameterValues).toEqual(configured.settings?.parameterValues);
+    expect(fork?.settings?.models.tts).toMatchObject({ voiceId: "alloy", speed: 1.25 });
+  });
+
   it("returns nothing for a persona the caller could not have fetched", async () => {
     expect(
       await forkPersona(actingAsGlobex(), source.id),
@@ -279,11 +319,11 @@ describe("forking a persona", () => {
     const globexPage = await listPersonas(actingAsGlobex());
     expect(globexPage.items.map((item) => item.name)).toEqual([
       "Stranger",
-      "Everyday caller",
+      ...PREDEFINED_NAMES,
     ]);
     const archivingPage = await listPersonas(actingIn(acme.deleting));
     expect(archivingPage.items.map((item) => item.name)).toEqual([
-      "Everyday caller",
+      ...PREDEFINED_NAMES,
     ]);
   });
 
@@ -386,6 +426,6 @@ describe("deleting a persona", () => {
     ).rejects.toThrow(/is Predefined/);
 
     const listed = await listPersonas(actingIn(acme.deleting));
-    expect(listed.items.map((item) => item.name)).toContain("Everyday caller");
+    expect(listed.items.map((item) => item.name)).toContain("Everyday Caller [Male]");
   });
 });

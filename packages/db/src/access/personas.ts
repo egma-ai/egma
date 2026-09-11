@@ -468,8 +468,8 @@ async function insertPersona(
   projectId: string,
   input: Pick<NewPersona, "name" | "description">,
   behavior: PersonaBehavior,
-  models: PersonaModels,
   parameterContract: readonly GraderParameter[] = PERSONA_PARAMETER_CONTRACT,
+  parameterValues = defaultPersonaParameterValues(parameterContract),
 ): Promise<Persona> {
   const id = newId("prs");
   const versionId = newId("prsv");
@@ -499,7 +499,7 @@ async function insertPersona(
     auth,
     projectId,
     id,
-    defaultPersonaParameterValues(parameterContract),
+    parameterValues,
   );
 
   // Read through the ordinary seam while both rows and the project lock are
@@ -545,15 +545,14 @@ export async function createPersona(
       backgroundVolume: 0.0631,
       interruptionLevel: "off" as const,
     };
-    const models = settings.models;
     return insertPersona(
       tx,
       auth,
       projectId,
       input,
       behavior,
-      models,
-      personaParameterContract(models, settings),
+      personaParameterContract(settings.models, settings),
+      personaParametersOfSettings(settings),
     );
   });
 }
@@ -1079,6 +1078,7 @@ export async function forkPersona(
       throw new Error("the persona's current version is missing");
     }
 
+    const sourceSettings = await ensureProjectPersonaOn(tx, auth, projectId, id, undefined, true);
     return insertPersona(
       tx,
       auth,
@@ -1088,8 +1088,8 @@ export async function forkPersona(
         description: source.description ?? undefined,
       },
       normalizedBehavior(current),
-      (await ensureProjectPersonaOn(tx, auth, projectId, id, undefined, true)).models,
       current.parameterContract,
+      sourceSettings.parameterValues,
     );
   });
 }
