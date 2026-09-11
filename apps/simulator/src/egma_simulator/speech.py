@@ -40,7 +40,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.tracing.service_decorators import traced_stt, traced_tts
 
 from .config import STT_PROVIDERS, TTS_PROVIDERS, VAD_PROVIDERS
 from .provider_keys import ProviderKeyUnavailable, authentication_rejected
@@ -791,7 +791,6 @@ def _cartesia_mouth(
         CartesiaTTSService as StockCartesiaTTSService,
     )
     from pipecat.services.cartesia.tts import GenerationConfig
-    from pipecat.services.tts_service import TextAggregationMode
 
     class CartesiaTTSService(StockCartesiaTTSService):
         def _build_msg(self, *args: Any, **kwargs: Any) -> str:
@@ -879,6 +878,7 @@ def _openai_mouth(
     from pipecat.services.tts_service import TextAggregationMode
 
     class OpenAITTSService(openai_tts.OpenAITTSService):
+        @traced_tts
         async def run_tts(
             self, text: str, context_id: str
         ) -> AsyncGenerator[Frame, None]:
@@ -984,9 +984,6 @@ def _openai_mouth(
     leg = OpenAITTSService(
         api_key=providers.tts_key,
         settings=settings,
-        # One persona turn is one provider request. Sentence aggregation uses an
-        # external tokenizer corpus and adds a boundary wait to every sentence.
-        text_aggregation_mode=TextAggregationMode.TOKEN,
         # OpenAI returns finite HTTP streams. Pipecat closes the turn after they
         # finish; an idle timer can stop it while a response is still in flight.
         stop_frame_timeout_s=None,
