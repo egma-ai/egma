@@ -241,7 +241,7 @@ describe("forking a persona", () => {
     expect(rows[0]).toEqual({
       identity_name: source.identityName,
       personality: source.personality,
-      language: source.language,
+      language: null,
     });
 
     const edited = await editPersona(acme.auth, fork.id, {
@@ -277,7 +277,7 @@ describe("forking a persona", () => {
       if (blockerPid === undefined) throw new Error("the holder has no pid");
 
       await holder.sql(
-        `insert into persona_definition_version (id, persona_id, version, identity_name, personality, language, parameter_contract, created_by) values ($1,$2,2,$3,$4,'en-US',$5,$6)`,
+        `insert into persona_definition_version (id, persona_id, version, identity_name, personality, language, parameter_contract, created_by) values ($1,$2,2,$3,$4,null,$5,$6)`,
         [nextVersionId, source.id, source.identityName, nextPersonality, JSON.stringify(source.parameterContract), acme.auth.userId],
       );
       await holder.sql(

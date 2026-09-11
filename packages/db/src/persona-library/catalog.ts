@@ -1,6 +1,3 @@
-import {
-  RECOMMENDED_PERSONA_MODELS,
-} from "../models/selections.ts";
 import { legacyPersonaParameterContract, personaParameterContract } from "./parameters.ts";
 import type { GraderParameter } from "../grader-library/parameters.ts";
 import { EGMA_PROVIDED_PERSONAS } from "./ids.ts";
@@ -37,11 +34,11 @@ export type EgmaProvidedPersona = {
 };
 
 const EVERYDAY_CALLER_V1_CONTRACT = legacyPersonaParameterContract({
-  ...RECOMMENDED_PERSONA_MODELS,
   llm: {
     provider: "openai",
     model: "gpt-5.6-terra",
   },
+  stt: { provider: "openai", model: "gpt-live-transcribe" },
   tts: {
     provider: "cartesia",
     model: "sonic-3.5",
@@ -51,10 +48,16 @@ const EVERYDAY_CALLER_V1_CONTRACT = legacyPersonaParameterContract({
 });
 
 const EVERYDAY_CALLER_V2_CONTRACT = legacyPersonaParameterContract({
-  ...RECOMMENDED_PERSONA_MODELS,
   llm: {
     provider: "openai",
     model: "gpt-5.6-terra",
+  },
+  stt: { provider: "openai", model: "gpt-live-transcribe" },
+  tts: {
+    provider: "openai",
+    model: "gpt-4o-mini-tts-2025-12-15",
+    voiceId: "alloy",
+    speed: 1,
   },
 });
 
@@ -121,7 +124,7 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
     description: "Regular conversationalist persona",
     versions: [{
       id: "prsv_01K4R000000000000000000003", version: 1,
-      identityName: "Jamie Morgan", personality: everydayPersonality, language: null,
+      identityName: "Alex Morgan", personality: everydayPersonality, language: null,
       parameterContract: personaParameterContract({ ...OPENAI_PERSONA_MODELS, tts: { ...OPENAI_PERSONA_MODELS.tts, voiceId: "coral" } }),
       createdAt: new Date("2026-09-10T00:00:00.000Z"),
     }],
@@ -133,7 +136,7 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
     versions: [{
       id: "prsv_01K4R000000000000000000005", version: 1,
       identityName: "Jordan Lee",
-      personality: "Starts upset about the problem, explains it directly, and expects the agent to acknowledge the concern and provide a clear resolution.",
+      personality: "Explains the problem directly and expects the agent to acknowledge the concern and provide a clear resolution.",
       language: null,
       parameterContract: personaParameterContract(OPENAI_PERSONA_MODELS, { language: "en-US", emotion: "angry", accent: "voice_default", speechVolume: 1, executionPolicyVersion: 1 }),
       createdAt: new Date("2026-09-10T00:00:00.000Z"),

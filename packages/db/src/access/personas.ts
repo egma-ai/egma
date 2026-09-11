@@ -35,8 +35,10 @@ import {
   PERSONA_PARAMETER_CONTRACT,
   personaParameterContract,
   personaParametersOfModels,
+  personaParametersOfSettings,
   validatePersonaParameterContract,
   validatePersonaParameterValues,
+  type PersonaSettings,
 } from "../persona-library/parameters.ts";
 import type { GraderParameter } from "../grader-library/parameters.ts";
 import { validateUnchangedParameterUnits } from "../grader-library/parameters.ts";
@@ -103,6 +105,7 @@ export type NewPersona = {
   readonly language: string;
   /** Absent means the release's complete recommended selection. */
   readonly models?: PersonaModels | undefined;
+  readonly settings?: PersonaSettings | undefined;
 };
 
 export type PersonaOwner = "egma" | "organization";
@@ -140,6 +143,7 @@ export type PersonaChanges = {
   readonly personality?: string;
   readonly language?: string;
   readonly models?: PersonaModels;
+  readonly settings?: PersonaSettings;
   readonly expectedVersionId?: string;
 };
 
@@ -212,6 +216,7 @@ const CREATE_FIELDS = [
   "personality",
   "language",
   "models",
+  "settings",
 ] as const;
 const EDIT_FIELDS = [...CREATE_FIELDS, "expectedVersionId"] as const;
 
@@ -266,6 +271,10 @@ function validateNewPersona(input: NewPersona): void {
   validateName(input.name);
   validateBehaviorText(input);
   if (input.models !== undefined) validPersonaModels(input.models);
+  if (input.settings !== undefined) personaParametersOfSettings(input.settings);
+  if (input.models !== undefined && input.settings !== undefined) {
+    throw new UnprocessableInputError("choose persona settings once");
+  }
 }
 
 /**
@@ -525,7 +534,15 @@ export async function createPersona(
 
   return db().transaction(async (tx) => {
     await lockPersonaProject(tx, auth, projectId);
-    const models = validPersonaModels(input.models ?? RECOMMENDED_PERSONA_MODELS);
+    const settings = input.settings ?? {
+      models: validPersonaModels(input.models ?? RECOMMENDED_PERSONA_MODELS),
+      language: input.language,
+      emotion: "neutral" as const,
+      accent: "voice_default",
+      speechVolume: 1,
+      executionPolicyVersion: 1,
+    };
+    const models = settings.models;
     return insertPersona(
       tx,
       auth,
@@ -533,13 +550,7 @@ export async function createPersona(
       input,
       behavior,
       models,
-      personaParameterContract(models, {
-        language: input.language,
-        emotion: "neutral",
-        accent: "voice_default",
-        speechVolume: 1,
-        executionPolicyVersion: 1,
-      }),
+      personaParameterContract(models, settings),
     );
   });
 }
@@ -589,6 +600,9 @@ async function personaFrom(
       row.language ??
       (typeof settings?.parameterValues.language === "string"
         ? settings.parameterValues.language
+        : typeof defaultPersonaParameterValues(row.parameterContract).language ===
+            "string"
+        ? defaultPersonaParameterValues(row.parameterContract).language as string
         : null),
     settings: settings ?? null,
   };
@@ -655,6 +669,12 @@ export async function editPersona(
     changes.models === undefined
       ? undefined
       : validPersonaModels(changes.models);
+  const askedSettings = changes.settings === undefined
+    ? undefined
+    : personaParametersOfSettings(changes.settings);
+  if (askedModels !== undefined && askedSettings !== undefined) {
+    throw new UnprocessableInputError("choose persona settings once");
+  }
   return writing(() =>
     db().transaction(async (tx) => {
       const [locked] = await tx
@@ -698,27 +718,40 @@ export async function editPersona(
       const asked = normalizedBehavior({
         identityName: changes.identityName ?? current.identityName,
         personality: changes.personality ?? current.personality,
-        language: changes.language ?? current.language,
+        language: current.parameterContract.some(
+          (field) => field.key === "language",
+        )
+          ? null
+          : changes.language ?? current.language,
       });
       const coreChanged = !sameBehavior(current, asked);
-      if (askedModels !== undefined) {
+      if (askedModels !== undefined || askedSettings !== undefined) {
         const projectId = auth.projectId ?? locked.projectId;
         if (projectId === null || projectId === undefined) {
           throw new UnprocessableInputError(
             "persona settings belong to a project; choose a project before editing",
           );
         }
-        const values = validatePersonaParameterValues(
-          current.parameterContract,
-          personaParametersOfModels(askedModels),
-        );
         const settings = await ensureProjectPersonaOn(
           tx,
           auth,
           projectId,
           id,
-          values,
+          undefined,
           true,
+        );
+        const values = validatePersonaParameterValues(
+          current.parameterContract,
+          askedSettings ?? {
+            ...settings.parameterValues,
+            ...personaParametersOfModels(askedModels!),
+            language: settings.parameterValues.language,
+            emotion: settings.parameterValues.emotion,
+            accent: settings.parameterValues.accent,
+            speech_volume: settings.parameterValues.speech_volume,
+            execution_policy_version:
+              settings.parameterValues.execution_policy_version,
+          },
         );
         if (
           JSON.stringify(settings.parameterValues) !== JSON.stringify(values)
@@ -782,14 +815,17 @@ export class PersonaVersionConflictError extends Error {
 export async function usePersona(
   auth: AuthContext,
   id: string,
-  models?: PersonaModels,
+  selection?: PersonaModels | PersonaSettings,
 ): Promise<Persona | undefined> {
   authorize(auth, "author_definitions", here(auth));
   if (auth.projectId === undefined) {
     throw new UnprocessableInputError("using a persona requires a project");
   }
-  const values =
-    models === undefined ? undefined : personaParametersOfModels(models);
+  const values = selection === undefined
+    ? undefined
+    : "models" in selection
+    ? personaParametersOfSettings(selection)
+    : personaParametersOfModels(selection);
   const projectId = auth.projectId;
   return writing(() =>
     db().transaction(async (tx) => {
