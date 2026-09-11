@@ -291,7 +291,7 @@
         "model": { "type": "string", "minLength": 1 },
         "adapter": { "type": "string", "minLength": 1 },
         "voice_id": { "type": "string", "minLength": 1 },
-        "speed": { "type": "number", "minimum": 0.6, "maximum": 1.5 },
+        "speed": { "type": "number", "minimum": 0.25, "maximum": 4 },
         "key": { "type": "string", "minLength": 1 },
         "funding_receipt": { "type": "string", "minLength": 1 }
       }
