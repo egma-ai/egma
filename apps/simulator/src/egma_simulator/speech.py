@@ -875,15 +875,14 @@ def _openai_mouth(
     providers: SpeechProviders, voice: PersonaVoice
 ) -> tuple[FrameProcessor, PersonaVoice, tuple[Callable[[], Awaitable[None]], ...]]:
     """The persona's voice through Pipecat's stock OpenAI service."""
-    from pipecat.services.openai.tts import OpenAITTSService as StockOpenAITTSService
+    from pipecat.services.openai import tts as openai_tts
+    from pipecat.services.tts_service import TextAggregationMode
 
-    class OpenAITTSService(StockOpenAITTSService):
+    class OpenAITTSService(openai_tts.OpenAITTSService):
         async def run_tts(
             self, text: str, context_id: str
         ) -> AsyncGenerator[Frame, None]:
-            from openai import BadRequestError
             from pipecat.frames.frames import ErrorFrame
-            from pipecat.services.openai.tts import VALID_VOICES
 
             spoke = False
             try:
@@ -892,7 +891,10 @@ def _openai_mouth(
                     yield ErrorFrame(error="OpenAI TTS voice must be specified")
                     await self.remove_audio_context(context_id)
                     return
-                if not voice_id.startswith("voice_") and voice_id not in VALID_VOICES:
+                if (
+                    not voice_id.startswith("voice_")
+                    and voice_id not in openai_tts.VALID_VOICES
+                ):
                     yield ErrorFrame(
                         error=f"OpenAI TTS voice {voice_id!r} is not supported"
                     )
@@ -904,7 +906,7 @@ def _openai_mouth(
                     "voice": (
                         {"id": voice_id}
                         if voice_id.startswith("voice_")
-                        else VALID_VOICES[voice_id]
+                        else openai_tts.VALID_VOICES[voice_id]
                     ),
                     "response_format": "pcm",
                 }
@@ -937,7 +939,7 @@ def _openai_mouth(
                                     context_id=context_id,
                                 )
                                 spoke = True
-                except BadRequestError as fault:
+                except openai_tts.BadRequestError as fault:
                     yield ErrorFrame(error=f"Unknown error occurred: {fault}")
                     await self.remove_audio_context(context_id)
                     return
@@ -982,6 +984,9 @@ def _openai_mouth(
     leg = OpenAITTSService(
         api_key=providers.tts_key,
         settings=settings,
+        # One persona turn is one provider request. Sentence aggregation uses an
+        # external tokenizer corpus and adds a boundary wait to every sentence.
+        text_aggregation_mode=TextAggregationMode.TOKEN,
         # OpenAI returns finite HTTP streams. Pipecat closes the turn after they
         # finish; an idle timer can stop it while a response is still in flight.
         stop_frame_timeout_s=None,
