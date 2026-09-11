@@ -520,11 +520,30 @@ describe("every timestamp", () => {
  */
 describe("persona core and settings ownership", () => {
   it("requires immutable core behavior and its parameter contract", () => {
-    for (const name of ["identity_name", "personality", "language", "parameter_contract"]) {
-      expect(columns.find((column) => column.table_name === "persona_definition_version" && column.column_name === name)).toMatchObject({ not_null: true, has_default: false });
+    for (const name of ["identity_name", "personality", "parameter_contract"]) {
+      expect(
+        columns.find(
+          (column) =>
+            column.table_name === "persona_definition_version" &&
+            column.column_name === name,
+        ),
+      ).toMatchObject({ not_null: true, has_default: false });
     }
-    const versionColumns = columns.filter((column) => column.table_name === "persona_definition_version").map((column) => column.column_name);
-    expect(versionColumns).not.toEqual(expect.arrayContaining(["llm_provider", "tts_speed"]));
+    expect(
+      columns.find(
+        (column) =>
+          column.table_name === "persona_definition_version" &&
+          column.column_name === "language",
+      ),
+    ).toMatchObject({ not_null: false, has_default: false });
+    const versionColumns = columns
+      .filter(
+        (column) => column.table_name === "persona_definition_version",
+      )
+      .map((column) => column.column_name);
+    expect(versionColumns).not.toEqual(
+      expect.arrayContaining(["llm_provider", "tts_speed"]),
+    );
   });
   it("keeps required complete settings on the project and simulation", () => {
     expect(columns.find((column) => column.table_name === "project_persona" && column.column_name === "parameter_values")).toMatchObject({ not_null: true, type_name: "jsonb", has_default: false });

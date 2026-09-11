@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createProject,
+  EGMA_PROVIDED_PERSONAS,
   IdentityConflictError,
   listProjectGraders,
   listPersonas,
@@ -75,8 +76,13 @@ describe("creating a project", () => {
 
     // Egma's shelf, and nothing of the project's own: creating a project
     // reaches the persona catalog for nothing at all, and pins nobody.
-    expect(personas.items).toHaveLength(1);
-    expect(personas.items[0]?.owner).toBe("egma");
+    expect(personas.items).toHaveLength(5);
+    expect(personas.items.every((persona) => persona.owner === "egma")).toBe(
+      true,
+    );
+    expect(personas.items.map((persona) => persona.id)).toContain(
+      EGMA_PROVIDED_PERSONAS.defaultPersona,
+    );
     const graders = await listProjectGraders(inside);
     expect(graders).toHaveLength(1);
     expect(graders[0]?.graderDefinitionId).toBe(

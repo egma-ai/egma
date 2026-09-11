@@ -592,7 +592,7 @@ async function seedManyPersonas(count: number): Promise<readonly string[]> {
       `insert into persona_definition_version
          (id, persona_id, version, identity_name, personality, language, parameter_contract)
        select seeded.version_id, seeded.persona_id, 1,
-         'Paged Caller', 'Patient', 'en-US', $1::jsonb
+         'Paged Caller', 'Patient', null, $1::jsonb
        from unnest($2::text[], $3::text[])
          as seeded(version_id, persona_id)`,
       [
