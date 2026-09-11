@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { getPersonaCapabilities, previewPersona, type GetPersonaCapabilitiesResponse } from "@egma/platform-api/client";
+import { getPersonaCapabilities, type GetPersonaCapabilitiesResponse } from "@egma/platform-api/client";
 
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -16,8 +16,6 @@ import {
   type ModelsDraft,
   type PersonaForm,
   type PersonaModelCatalogEntry,
-  controlsFrom,
-  modelsFrom,
 } from "../../../../lib/personas.ts";
 import { platformAnswer, platformClient } from "../../../../lib/platform-client.ts";
 import { Button } from "@/components/ui/button";
@@ -247,10 +245,6 @@ export function ModelFields({
   onChange,
   projectId,
   onValidityChange,
-  onVoiceAccessProof,
-  voiceAccessProofReset = 0,
-  onPreviewAvailabilityChange,
-  onPreviewActionChange,
 }: {
   readonly prefix: FieldPrefix;
   readonly draft: ModelsDraft;
@@ -259,42 +253,14 @@ export function ModelFields({
   readonly onChange: (draft: ModelsDraft) => void;
   readonly projectId: string;
   readonly onValidityChange?: (valid: boolean) => void;
-  readonly onVoiceAccessProof?: (proof: string | null) => void;
-  readonly voiceAccessProofReset?: number;
-  readonly onPreviewAvailabilityChange?: (available: boolean) => void;
-  readonly onPreviewActionChange?: (action: (() => void) | null) => void;
 }) {
   const [capabilities, setCapabilities] = useState<GetPersonaCapabilitiesResponse | null>(null);
   const [capabilityError, setCapabilityError] = useState<string | null>(null);
   const [voiceSearch, setVoiceSearch] = useState("");
   const [voiceType, setVoiceType] = useState("all");
-  const [previewing, setPreviewing] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewedDraft, setPreviewedDraft] = useState<string | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [voiceAccessProof, setVoiceAccessProof] = useState<string | null>(null);
   const request = useRef(0);
-  const previewRequest = useRef<AbortController | null>(null);
-  const previewUrlRef = useRef<string | null>(null);
-  const proofExpiry = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const draftKey = JSON.stringify(draft);
-
-  useEffect(() => {
-    if (voiceAccessProofReset === 0) return;
-    setVoiceAccessProof(null);
-    if (proofExpiry.current !== null) clearTimeout(proofExpiry.current);
-  }, [voiceAccessProofReset]);
 
   function change(next: ModelsDraft): void {
-    previewRequest.current?.abort();
-    setPreviewing(false);
-    const proofBindingChanged = next.ttsProvider !== draft.ttsProvider
-      || next.ttsModel !== draft.ttsModel
-      || next.voiceId !== draft.voiceId;
-    if (proofBindingChanged) {
-      setVoiceAccessProof(null);
-      onVoiceAccessProof?.(null);
-    }
     if (next.ttsProvider !== draft.ttsProvider || next.ttsModel !== draft.ttsModel || next.sttProvider !== draft.sttProvider || next.sttModel !== draft.sttModel || next.language !== draft.language || next.voiceId !== draft.voiceId) {
       setCapabilities(null);
     }
@@ -345,11 +311,7 @@ export function ModelFields({
   }
   const catalogHasVoice = capabilities?.voices.status === "supported"
     && (capabilities.voices.choices ?? []).some((voice) => voice.id === draft.voiceId);
-  const existingOpenAiVoice = capabilities?.voices.status === "supported"
-    && draft.ttsProvider === "openai"
-    && draft.voiceId.trim() !== ""
-    && !catalogHasVoice;
-  const previewValid = capabilities !== null
+  const valid = capabilities !== null
     && acceptsLanguage(capabilities.language, draft.language)
     && accepts(capabilities.accent, draft.accent, "voice_default")
     && accepts(capabilities.emotion, draft.emotion, "neutral")
@@ -359,62 +321,11 @@ export function ModelFields({
     && Number(draft.backgroundVolumeDb) >= -36
     && Number(draft.backgroundVolumeDb) <= -12
     && (capabilities.voices.status === "supported"
-      ? catalogHasVoice || existingOpenAiVoice
+      ? catalogHasVoice
       : capabilities.voices.status === "fixed" && capabilities.voices.value?.id === draft.voiceId);
-  const valid = previewValid && (!existingOpenAiVoice || voiceAccessProof !== null);
   useEffect(() => {
     if (capabilities !== null || capabilityError !== null) onValidityChange?.(valid);
   }, [valid, capabilities, capabilityError, onValidityChange]);
-
-  async function preview(): Promise<void> {
-    if (!previewValid || previewing) return;
-    const controller = new AbortController();
-    previewRequest.current?.abort();
-    previewRequest.current = controller;
-    setPreviewing(true); setPreviewError(null);
-    const answer = await platformAnswer(previewPersona({ projectId, models: modelsFrom(draft), controls: controlsFrom(draft) } as Parameters<typeof previewPersona>[0], { client: platformClient, signal: controller.signal }));
-    if (controller.signal.aborted) return;
-    setPreviewing(false);
-    if (answer.status !== "ready") { if (answer.status !== "signed-out") setPreviewError(answer.refusal.message); return; }
-    if (previewUrl !== null) URL.revokeObjectURL(previewUrl);
-    const bytes = Uint8Array.from(atob(answer.value.audioBase64), (character) => character.charCodeAt(0));
-    setPreviewUrl(URL.createObjectURL(new Blob([bytes], { type: answer.value.contentType })));
-    setPreviewedDraft(draftKey);
-    const proof = answer.value.voiceAccessProof ?? null;
-    setVoiceAccessProof(proof);
-    onVoiceAccessProof?.(proof);
-    if (proofExpiry.current !== null) clearTimeout(proofExpiry.current);
-    if (proof !== null && answer.value.expiresAt !== null) {
-      const delay = Math.max(0, Date.parse(answer.value.expiresAt) - Date.now());
-      if (delay <= 2_147_483_647) {
-        proofExpiry.current = setTimeout(() => {
-          setVoiceAccessProof(null);
-          onVoiceAccessProof?.(null);
-        }, delay);
-      }
-    }
-  }
-
-  useEffect(() => {
-    onPreviewAvailabilityChange?.(previewValid && !previewing && !disabled);
-  }, [disabled, onPreviewAvailabilityChange, previewValid, previewing]);
-
-  useEffect(() => {
-    const run = () => void preview();
-    onPreviewActionChange?.(run);
-    return () => onPreviewActionChange?.(null);
-  });
-
-  useEffect(() => {
-    previewUrlRef.current = previewUrl;
-  }, [previewUrl]);
-
-  useEffect(() => () => {
-    previewRequest.current?.abort();
-    if (proofExpiry.current !== null) clearTimeout(proofExpiry.current);
-    if (previewUrlRef.current !== null) URL.revokeObjectURL(previewUrlRef.current);
-  }, []);
-
 
   const stateNote = (label: string, state: { status: string; reason?: string }) => state.status === "supported" ? null : <Note>{label}: {state.status}. {state.reason ?? "The provider did not explain this capability."}</Note>;
   return (
@@ -464,8 +375,6 @@ export function ModelFields({
         <Field label="Voice type" htmlFor={`${prefix}-voice-type`}><Select id={`${prefix}-voice-type`} value={voiceType} disabled={disabled} onChange={(event) => setVoiceType(event.target.value)}><option value="all">All</option><option value="male">Male</option><option value="female">Female</option></Select></Field>
         <Field label="Voice*" htmlFor={`${prefix}-tts-voice`}><Select id={`${prefix}-tts-voice`} value={draft.voiceId} aria-required="true" disabled={disabled || capabilities?.voices.status !== "supported"} onChange={(event) => change({ ...draft, voiceId: event.target.value })}>{voices.some((voice) => voice.id === draft.voiceId) ? null : <option value={draft.voiceId}>{draft.voiceId}</option>}{voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name} · {voice.presentation === "unknown" ? "Type unknown" : voice.presentation}</option>)}</Select></Field>
         {capabilities === null ? null : stateNote("Voice", capabilities.voices)}
-        {draft.ttsProvider === "openai" ? <Field label="Existing voice ID [optional]" htmlFor={`${prefix}-existing-voice-id`} hint="Preview an existing OpenAI voice ID before you save it."><Input id={`${prefix}-existing-voice-id`} value={draft.voiceId} disabled={disabled} autoComplete="off" spellCheck={false} onChange={(event) => change({ ...draft, voiceId: event.target.value })} /></Field> : null}
-        {existingOpenAiVoice && voiceAccessProof === null ? <Note>Preview this existing voice ID successfully before you save it.</Note> : null}
         <Field label="Accent*" htmlFor={`${prefix}-accent`}>
           <Select id={`${prefix}-accent`} value={draft.accent} aria-required="true" disabled={disabled || capabilities?.accent.status !== "supported"} onChange={(event) => change({ ...draft, accent: event.target.value })}>
             {(capabilities?.accent.choices ?? [draft.accent]).map((value) => <option key={value} value={value}>{accentLabel(value)}</option>)}
@@ -515,9 +424,6 @@ export function ModelFields({
         </Field>
         {draft.backgroundSoundId === "none" ? null : <NumberField id={`${prefix}-background-volume`} label="Background level*" value={draft.backgroundVolumeDb} disabled={disabled} required min={-36} max={-12} step={1} unit="dB" hint="Independent of speech volume." onChange={(backgroundVolumeDb) => change({ ...draft, backgroundVolumeDb, backgroundVolume: decibelsToGain(backgroundVolumeDb) })} />}
 
-        {previewError === null ? null : <p role="alert" className="m-0 text-sm text-failure">{previewError}</p>}
-        {previewUrl === null ? null : <><audio controls src={previewUrl} className="w-full" />{previewedDraft !== draftKey ? <Note>This preview is out of date. Select Preview voice to replace it.</Note> : null}</>}
-        <Note>Preview is a short voice sample. Test interruptions in a full simulation.</Note>
       </div>
     </SheetSection>
   );

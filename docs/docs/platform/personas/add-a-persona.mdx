@@ -35,8 +35,8 @@ Start with **Everyday Caller [Male]**, or create a custom persona when you need 
     from `egma persona list` to select the one you mean.
 
     You can also configure personas without a browser. Run `egma persona
-    capabilities --help`, then use `egma persona use`, `create`, `clone`,
-    `update`, or `preview`. `egma persona settings <Persona ID>` prints the
+    capabilities --help`, then use `egma persona use`, `create`, `clone`, or
+    `update`. `egma persona settings <Persona ID>` prints the
     current project settings as JSON.
 
     Selecting a persona for the first time saves its model, voice, language,
@@ -62,8 +62,9 @@ Start with **Everyday Caller [Male]**, or create a custom persona when you need 
     4. Choose speech-to-text, text-to-speech, and language models. Then choose
        the language, voice, accent, emotion, interruption level, speech rate,
        speech volume, and background sound that the selected providers support.
-       Preview is a short voice sample. Test interruption timing in a full
-       simulation.
+       New selections use standard OpenAI voices or Cartesia account voices
+       that Egma discovers. Run a full simulation to check how the persona
+       sounds and interrupts.
     5. Select **Create persona**, run `egma persona list`, and add the persona to
        your test.
 

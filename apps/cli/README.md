@@ -59,7 +59,6 @@ egma persona use
 egma persona create
 egma persona clone
 egma persona update
-egma persona preview
 egma suite create
 egma suite delete
 egma test delete

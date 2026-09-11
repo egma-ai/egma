@@ -99,8 +99,7 @@
 - [List personas](https://docs.egma.ai/api-reference/list-personas.md)
 - [Create a persona](https://docs.egma.ai/api-reference/create-persona.md): Create a project-owned persona with its first behavior version and complete model settings. Omit models to use the declared defaults. Add its ID or unambiguous name to a test to use it.
 - [Get persona authoring choices](https://docs.egma.ai/api-reference/get-persona-form.md): Use this response to choose supported models, a recommended voice, and a valid speech rate before creating or updating a persona.
-- [Resolve persona capabilities](https://docs.egma.ai/api-reference/get-persona-capabilities.md): Resolve the selected provider, model, voice, and language combination. Status and reason values are authoritative for authoring, Preview, and voice execution.
-- [Preview persona audio](https://docs.egma.ai/api-reference/preview-persona.md): Generate one short sample with the same capability and speech-rendering path used by voice simulations. This does not create a test or run.
+- [Resolve persona capabilities](https://docs.egma.ai/api-reference/get-persona-capabilities.md): Resolve the selected provider, model, voice, and language combination. Status and reason values are authoritative for authoring and voice execution.
 - [Get a persona](https://docs.egma.ai/api-reference/get-persona.md)
 - [Update a persona](https://docs.egma.ai/api-reference/update-persona.md): Change project model settings or the current custom behavior. Behavior edits require expectedVersionId and create a version when changed. Model settings and display labels create no version. Egma-owned behavior is read-only; its project settings are editable.
 - [Permanently delete a persona from authoring](https://docs.egma.ai/api-reference/delete-persona.md): The persona leaves every authoring list and picker permanently. Existing run evidence stays readable.

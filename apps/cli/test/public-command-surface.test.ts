@@ -95,10 +95,9 @@ const APPROVED_FLAGS = [
   { words: ["persona", "settings"], flags: ["--cwd"] },
   { words: ["persona", "clone"], flags: ["--cwd"] },
   { words: ["persona", "capabilities"], flags: ["--cwd", "--language", "--stt-model", "--stt-provider", "--tts-model", "--tts-provider", "--voice"] },
-  { words: ["persona", "use"], flags: ["--accent", "--background-sound", "--background-volume", "--cwd", "--emotion", "--interruption-level", "--language", "--llm-model", "--llm-provider", "--speech-volume", "--speed", "--stt-model", "--stt-provider", "--tts-model", "--tts-provider", "--voice", "--voice-access-proof"] },
-  { words: ["persona", "create"], flags: ["--accent", "--background-sound", "--background-volume", "--cwd", "--description", "--emotion", "--identity-name", "--interruption-level", "--language", "--llm-model", "--llm-provider", "--name", "--personality", "--speech-volume", "--speed", "--stt-model", "--stt-provider", "--tts-model", "--tts-provider", "--voice", "--voice-access-proof"] },
-  { words: ["persona", "update"], flags: ["--accent", "--background-sound", "--background-volume", "--cwd", "--description", "--emotion", "--expected-version", "--identity-name", "--interruption-level", "--language", "--llm-model", "--llm-provider", "--name", "--personality", "--speech-volume", "--speed", "--stt-model", "--stt-provider", "--tts-model", "--tts-provider", "--voice", "--voice-access-proof"] },
-  { words: ["persona", "preview"], flags: ["--accent", "--background-sound", "--background-volume", "--cwd", "--emotion", "--interruption-level", "--language", "--llm-model", "--llm-provider", "--speech-volume", "--speed", "--stt-model", "--stt-provider", "--tts-model", "--tts-provider", "--voice", "--voice-access-proof"] },
+  { words: ["persona", "use"], flags: ["--accent", "--background-sound", "--background-volume", "--cwd", "--emotion", "--interruption-level", "--language", "--llm-model", "--llm-provider", "--speech-volume", "--speed", "--stt-model", "--stt-provider", "--tts-model", "--tts-provider", "--voice"] },
+  { words: ["persona", "create"], flags: ["--accent", "--background-sound", "--background-volume", "--cwd", "--description", "--emotion", "--identity-name", "--interruption-level", "--language", "--llm-model", "--llm-provider", "--name", "--personality", "--speech-volume", "--speed", "--stt-model", "--stt-provider", "--tts-model", "--tts-provider", "--voice"] },
+  { words: ["persona", "update"], flags: ["--accent", "--background-sound", "--background-volume", "--cwd", "--description", "--emotion", "--expected-version", "--identity-name", "--interruption-level", "--language", "--llm-model", "--llm-provider", "--name", "--personality", "--speech-volume", "--speed", "--stt-model", "--stt-provider", "--tts-model", "--tts-provider", "--voice"] },
   { words: ["suite", "create"], flags: ["--cwd", "--name"] },
   { words: ["suite", "delete"], flags: ["--cwd"] },
   { words: ["test", "delete"], flags: ["--cwd"] },
@@ -157,6 +156,21 @@ describe("the skills-first public command surface", () => {
 
       expect(result, words.join(" ")).toMatchObject({ code: 0, stderr: "" });
       expect(flagsIn(result.stdout), words.join(" ")).toEqual([...flags].sort());
+    },
+  );
+
+  it("refuses the removed persona preview command", async () => {
+    const result = await egma(["persona", "preview"]);
+
+    expect(result.code).not.toBe(0);
+  });
+
+  it.each(["use", "create", "update"])(
+    "refuses --voice-access-proof for persona %s",
+    async (command) => {
+      const result = await egma(["persona", command, "--voice-access-proof", "proof"]);
+
+      expect(result.code).not.toBe(0);
     },
   );
 

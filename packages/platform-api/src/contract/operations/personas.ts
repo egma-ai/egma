@@ -263,21 +263,6 @@ const personaCapabilities = {
   }, required: ["voices", "language", "accent", "emotion", "speed", "speechVolume"], additionalProperties: false,
 } as const;
 
-const previewBody = {
-  type: "object", properties: {
-    projectId: stringIdSchema, models: personaModels, controls: personaControlsInput,
-    voiceAccessProof: { type: "string", description: "A prior short-lived proof for an existing provider voice ID." },
-  }, required: ["models", "controls"], additionalProperties: false,
-} as const;
-
-const personaPreview = {
-  type: "object", properties: {
-    audioBase64: { type: "string", contentEncoding: "base64" }, contentType: { type: "string" },
-    voiceAccessProof: { type: "string" }, expiresAt: nullable(dateTimeSchema),
-    interruptionNotice: { type: "string" },
-  }, required: ["audioBase64", "contentType", "expiresAt", "interruptionNotice"], additionalProperties: false,
-} as const;
-
 const namedTest = {
   type: "object",
   properties: {
@@ -308,7 +293,6 @@ const createPersonaBody = {
     personality: behavior.personality,
     models: personaModels,
     controls: personaControlsInput,
-    voiceAccessProof: { type: "string" },
   },
   required: ["name", "identityName", "personality"],
   additionalProperties: false,
@@ -368,7 +352,7 @@ export const personaOperations = {
   usePersona: defineOperation({
     operationId: "usePersona", method: "POST", path: "/v1/personas/{personaId}/use", summary: "Use a persona", tag: "Personas", security: "credentialed",
     description: "Save this project's first model settings for the persona. Omit models to use its declared defaults. Repeated use returns the existing settings; use Update a persona to change them.",
-    request: { params: personaParams, body: { type: "object", properties: { projectId: stringIdSchema, models: personaModels, controls: personaControlsInput, voiceAccessProof: { type: "string" } }, additionalProperties: false }, bodyRequired: false },
+    request: { params: personaParams, body: { type: "object", properties: { projectId: stringIdSchema, models: personaModels, controls: personaControlsInput }, additionalProperties: false }, bodyRequired: false },
     responses: { 200: { description: "The persona with its saved project settings.", schema: persona }, ...writeRefusals },
   }),
   listPersonas: defineOperation({
@@ -404,17 +388,9 @@ export const personaOperations = {
   getPersonaCapabilities: defineOperation({
     operationId: "getPersonaCapabilities", method: "GET", path: "/v1/persona-capabilities",
     summary: "Resolve persona capabilities", tag: "Personas", security: "credentialed",
-    description: "Resolve the selected provider, model, voice, and language combination. Status and reason values are authoritative for authoring, Preview, and voice execution.",
+    description: "Resolve the selected provider, model, voice, and language combination. Status and reason values are authoritative for authoring and voice execution.",
     request: { query: capabilityQuery },
     responses: { 200: { description: "Capabilities for the selected combination.", schema: personaCapabilities }, ...readRefusals },
-  }),
-
-  previewPersona: defineOperation({
-    operationId: "previewPersona", method: "POST", path: "/v1/persona-preview",
-    summary: "Preview persona audio", tag: "Personas", security: "credentialed",
-    description: "Generate one short sample with the same capability and speech-rendering path used by voice simulations. This does not create a test or run.",
-    request: { body: previewBody },
-    responses: { 200: { description: "Generated Preview audio and any new voice-access proof.", schema: personaPreview }, ...writeRefusals },
   }),
 
   getPersona: defineOperation({

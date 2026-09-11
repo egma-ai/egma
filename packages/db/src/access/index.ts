@@ -540,7 +540,6 @@ export {
   priceUsageSpans,
   readUsageThisPeriod,
   recordProviderUsage,
-  recordPersonaPreviewUsage,
   type NewUsageRecord,
   type RecordedProviderUsage,
   type OrganizationUsage,

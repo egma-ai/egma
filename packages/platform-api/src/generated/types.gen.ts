@@ -3158,7 +3158,6 @@ export type UsePersonaData = {
             backgroundVolume: number;
             interruptionLevel: 'off' | 'occasional' | 'frequent';
         };
-        voiceAccessProof?: string;
     };
     path: {
         personaId: string;
@@ -3461,7 +3460,6 @@ export type CreatePersonaData = {
             backgroundVolume: number;
             interruptionLevel: 'off' | 'occasional' | 'frequent';
         };
-        voiceAccessProof?: string;
     };
     path?: never;
     query?: never;
@@ -3801,101 +3799,6 @@ export type GetPersonaCapabilitiesResponses = {
 
 export type GetPersonaCapabilitiesResponse = GetPersonaCapabilitiesResponses[keyof GetPersonaCapabilitiesResponses];
 
-export type PreviewPersonaData = {
-    body: {
-        projectId?: string;
-        /**
-         * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
-         */
-        models: {
-            llm: {
-                provider: string;
-                model: string;
-            };
-            stt: {
-                provider: string;
-                model: string;
-            };
-            tts: {
-                provider: string;
-                model: string;
-                /**
-                 * A voice identifier supported by the selected text-to-speech provider.
-                 */
-                voiceId: string;
-                /**
-                 * Provider-supported speech rate. Read the selected combination's capability range.
-                 */
-                speed: number;
-            };
-        };
-        controls: {
-            language: string;
-            emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
-            accent: string;
-            speechVolume: number;
-            backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
-            backgroundVolume: number;
-            interruptionLevel: 'off' | 'occasional' | 'frequent';
-        };
-        /**
-         * A prior short-lived proof for an existing provider voice ID.
-         */
-        voiceAccessProof?: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/v1/persona-preview';
-};
-
-export type PreviewPersonaErrors = {
-    /**
-     * The request was refused.
-     */
-    400: Refusal;
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    404: Refusal;
-    /**
-     * The request was refused.
-     */
-    409: Refusal;
-    /**
-     * The request was refused.
-     */
-    422: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type PreviewPersonaError = PreviewPersonaErrors[keyof PreviewPersonaErrors];
-
-export type PreviewPersonaResponses = {
-    /**
-     * Generated Preview audio and any new voice-access proof.
-     */
-    200: {
-        audioBase64: string;
-        contentType: string;
-        voiceAccessProof?: string;
-        expiresAt: string | null;
-        interruptionNotice: string;
-    };
-};
-
-export type PreviewPersonaResponse = PreviewPersonaResponses[keyof PreviewPersonaResponses];
-
 export type DeletePersonaData = {
     body?: never;
     path: {
@@ -4123,7 +4026,6 @@ export type UpdatePersonaData = {
             backgroundVolume: number;
             interruptionLevel: 'off' | 'occasional' | 'frequent';
         };
-        voiceAccessProof?: string;
         /**
          * The current versionId from Get a persona. Required when editing identityName or personality. A stale value returns 409 version_conflict.
          */

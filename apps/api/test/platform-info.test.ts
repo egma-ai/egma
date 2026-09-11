@@ -58,11 +58,10 @@ it("registers every contract operation only at its v1 Fastify route", async () =
 
   const operations = Object.values(platformOperations);
   // The same count `packages/platform-api/test/contract.test.ts` pins, including
-  // the provider-key, persona capability, and Preview operations.
-  expect(operations).toHaveLength(81);
+  // the provider-key and persona capability operations.
+  expect(operations).toHaveLength(80);
   expect(platformOperations).toMatchObject({
     getPersonaCapabilities: { path: "/v1/persona-capabilities" },
-    previewPersona: { path: "/v1/persona-preview" },
   });
 
   for (const operation of operations) {

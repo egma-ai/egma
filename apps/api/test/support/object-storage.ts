@@ -13,7 +13,7 @@ import {
  * a fake; required-storage runs fail through the helper below.
  */
 
-export const MINIO_IMAGE = "minio/minio:RELEASE.2025-09-07T16-13-09Z";
+export const MINIO_IMAGE = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z";
 
 /**
  * The store's root credential, which is also what the simulator writes with.

@@ -258,7 +258,7 @@ async function modelsBlock(
     if (models.tts.provider === "openai" &&
         !OPENAI_STANDARD_VOICES.some((voice) => voice.id === models.tts.voiceId) &&
         customer.openai === undefined)
-      throw new PersonaCapabilityError("the pinned existing OpenAI voice requires the organization credential that proved access");
+      throw new PersonaCapabilityError("the pinned existing OpenAI voice requires the organization's OpenAI credential");
     const capabilities = resolvePersonaCapabilities({
       ttsProvider: models.tts.provider, ttsModel: models.tts.model,
       sttProvider: models.stt.provider, sttModel: models.stt.model,

@@ -36,9 +36,6 @@ DOCUMENTED_ELSEWHERE = {
     "EGMA_SIMULATOR_LIVEKIT_API_TOKEN",
     "EGMA_SIMULATOR_LIVEKIT_ROOM_NAME",
     "EGMA_SIMULATOR_LIVEKIT_ROOM_TOKEN",
-    # The control plane reads this address to reach the simulator's optional
-    # internal Preview endpoint. The simulator reads the paired port instead.
-    "EGMA_SIMULATOR_PREVIEW_URL",
     "EGMA_SIMULATOR_RUNTIME",
     "EGMA_SIMULATOR_S3_SESSION_TOKEN",
 }
