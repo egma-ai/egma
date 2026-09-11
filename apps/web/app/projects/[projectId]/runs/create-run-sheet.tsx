@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { XIcon } from "lucide-react";
+import { ChevronRightIcon, XIcon } from "lucide-react";
 import {
   createRun,
   getAgent,
@@ -13,6 +13,7 @@ import {
 } from "@egma/platform-api/client";
 
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import {
@@ -44,7 +45,7 @@ import {
   type TestSuitePage,
 } from "../../../../lib/test-suites.ts";
 import type { TestPage } from "../../../../lib/tests.ts";
-import { Field, Refused } from "../../../../ui/form.tsx";
+import { Field, Problem, Refused } from "../../../../ui/form.tsx";
 import { WorkRefusalActions } from "../../../../ui/work-refusal-actions.tsx";
 import { RunNote, type RunNoteTest } from "../../../../ui/run-note.tsx";
 import { Empty, Failure, Loading } from "../../../../ui/page-state.tsx";
@@ -90,6 +91,8 @@ export function CreateRunSheet({
   const [agentId, setAgentId] = useState("");
   const [connectionId, setConnectionId] = useState("");
   const [name, setName] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [concurrency, setConcurrency] = useState("");
   const [moreSuites, setMoreSuites] = useState<readonly TestSuite[]>([]);
   const [suiteCursor, setSuiteCursor] = useState<string | null>(null);
   const [moreAgents, setMoreAgents] = useState<
@@ -141,6 +144,8 @@ export function CreateRunSheet({
     setAgentId(selected);
     setConnectionId("");
     setName("");
+    setConcurrency("");
+    setAdvancedOpen(false);
     setMoreSuites([]);
     setSuiteCursor(null);
     setMoreAgents([]);
@@ -240,7 +245,7 @@ export function CreateRunSheet({
   }, [suiteTests, suiteId, projectId]);
 
   useUnsavedChanges(
-    suiteId !== "" || agentId !== "" || connectionId !== "" || name !== "",
+    suiteId !== "" || agentId !== "" || connectionId !== "" || name !== "" || concurrency !== "",
     starting,
   );
 
@@ -318,11 +323,14 @@ export function CreateRunSheet({
     suiteTests?.status === "ready" &&
     (suiteTests.value.tests.length > 0 ||
       suiteTests.value.nextPageToken !== null);
+  const validConcurrency = concurrency === "" ||
+    (/^\d+$/u.test(concurrency) && Number(concurrency) >= 1 && Number(concurrency) <= 2147483647);
   const ready =
     suiteId !== "" &&
     suiteHasTests &&
     agentId !== "" &&
-    connectionId !== "";
+    connectionId !== "" &&
+    validConcurrency;
   /** The connection this run will be conducted over, once one is chosen. */
   const chosenConnection = connections.find((one) => one.id === connectionId);
   const whyNot = !mayStart
@@ -346,6 +354,7 @@ export function CreateRunSheet({
           agentId,
           connectionId,
           ...(trimmedName === "" ? {} : { name: trimmedName }),
+          ...(concurrency === "" ? {} : { concurrency: Number(concurrency) }),
         },
         { client: platformClient },
       ),
@@ -565,6 +574,42 @@ export function CreateRunSheet({
               />
             </Field>
           </div>
+        )}
+
+        {chosenConnection === undefined ? null : (
+          <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+            <CollapsibleTrigger asChild>
+              <Button type="button" variant="ghost" className="justify-start px-0 text-muted-foreground" disabled={starting}>
+                <ChevronRightIcon aria-hidden="true" />
+                Advanced Settings
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="pt-3">
+              <Field
+                label="Concurrency [optional]"
+                htmlFor="run-concurrency"
+                hint={`Leave blank to use ${chosenConnection.modality === "chat" ? 10 : 4} simultaneous simulations.`}
+              >
+                <Input
+                  id="run-concurrency"
+                  inputMode="numeric"
+                  value={concurrency}
+                  placeholder={chosenConnection.modality === "chat" ? "10" : "4"}
+                  autoComplete="off"
+                  disabled={starting}
+                  aria-invalid={!validConcurrency}
+                  aria-describedby={validConcurrency ? undefined : "run-concurrency-error"}
+                  onChange={(event) => {
+                    setRefused(null);
+                    setConcurrency(event.target.value);
+                  }}
+                />
+              </Field>
+            </CollapsibleContent>
+            {validConcurrency ? null : (
+              <Problem id="run-concurrency-error">Concurrency must be a whole number between 1 and 2147483647.</Problem>
+            )}
+          </Collapsible>
         )}
 
         {moreRefused === null ? null : (

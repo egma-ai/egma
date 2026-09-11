@@ -114,6 +114,7 @@ export type NewRun = {
   readonly agentId: string;
   readonly connectionId: string;
   readonly name?: string | undefined;
+  readonly concurrency?: number | undefined;
   readonly expectedTestVersions?: readonly ExpectedTestVersion[] | undefined;
   /**
    * Agent platform version resolved before the run transaction. Required for
@@ -161,6 +162,7 @@ export type Run = {
   readonly tempMockAgentVersionCleanup: boolean | null;
   /** The put-it-back note, or null when nothing was put onto the account. */
   readonly mockMetadata: MockMetadata | null;
+  readonly concurrency: number;
   readonly expectedSimulationCount: number;
   readonly completedCount: number | null;
   readonly failedCount: number | null;
@@ -244,6 +246,7 @@ const RUN_COLUMNS = {
   tempMockAgentVersion: run.tempMockAgentVersion,
   tempMockAgentVersionCleanup: run.tempMockAgentVersionCleanup,
   mockMetadata: run.mockMetadata,
+  concurrency: run.concurrency,
   expectedSimulationCount: run.expectedSimulationCount,
   completedCount: run.completedCount,
   failedCount: run.failedCount,
@@ -296,6 +299,7 @@ type RunRow = {
   readonly tempMockAgentVersion: number | null;
   readonly tempMockAgentVersionCleanup: boolean | null;
   readonly mockMetadata: unknown;
+  readonly concurrency: number;
   readonly expectedSimulationCount: number;
   readonly completedCount: number | null;
   readonly failedCount: number | null;
@@ -528,6 +532,10 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
   if (!isId("ste", input.suiteId)) refuseRun("not_admitted", `"${input.suiteId}" is not a test suite id`);
   if (!isId("agt", input.agentId)) refuseRun("connection_not_on_agent", `"${input.agentId}" is not an agent id`);
   if (!isId("con", input.connectionId)) refuseRun("no_such_connection", `"${input.connectionId}" is not a connection id`);
+  const concurrency = input.concurrency;
+  if (concurrency !== undefined && (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 2147483647)) {
+    refuseRun("not_admitted", "concurrency must be a whole number between 1 and 2147483647");
+  }
   const expected = validateExpectedVersions(input.expectedTestVersions);
   const expectedInOrder = expected === undefined
     ? undefined
@@ -734,6 +742,7 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
       ...(input.agentVersion === undefined
         ? {}
         : { agentVersion: input.agentVersion }),
+      concurrency: concurrency ?? (reached.modality === "chat" ? 10 : 4),
       expectedSimulationCount,
       gradingPlan,
       createdAt: at,
@@ -1790,6 +1799,8 @@ function checkedModalities(
 }
 
 type CapCandidate = {
+  readonly runId: string;
+  readonly concurrency: number;
   readonly id: string;
   readonly modality: Modality;
   readonly parameterValues: PersonaParameterValues;
@@ -1797,6 +1808,7 @@ type CapCandidate = {
 };
 
 type CapUsage = {
+  readonly runs: Map<string, number>;
   voice: number;
   chat: number;
   readonly speechProviders: Map<string, number>;
@@ -1810,8 +1822,9 @@ function speechProvidersOf(candidate: CapCandidate): readonly ModelProvider[] {
 }
 
 function usageOf(active: readonly CapCandidate[]): CapUsage {
-  const usage: CapUsage = { voice: 0, chat: 0, speechProviders: new Map() };
+  const usage: CapUsage = { voice: 0, chat: 0, speechProviders: new Map(), runs: new Map() };
   for (const candidate of active) {
+    usage.runs.set(candidate.runId, (usage.runs.get(candidate.runId) ?? 0) + 1);
     usage[candidate.modality] += 1;
     if (candidate.modality === "chat") continue;
     let providers: readonly ModelProvider[];
@@ -1833,6 +1846,18 @@ function usageOf(active: readonly CapCandidate[]): CapUsage {
 }
 
 function admitWithinCaps(
+  candidate: CapCandidate,
+  caps: SimulationConcurrencyCaps,
+  usage: CapUsage,
+): boolean {
+  const active = usage.runs.get(candidate.runId) ?? 0;
+  if (active >= candidate.concurrency) return false;
+  if (!admitWithinDeploymentCaps(candidate, caps, usage)) return false;
+  usage.runs.set(candidate.runId, active + 1);
+  return true;
+}
+
+function admitWithinDeploymentCaps(
   candidate: CapCandidate,
   caps: SimulationConcurrencyCaps,
   usage: CapUsage,
@@ -1889,11 +1914,14 @@ async function activeSimulationCandidates(
   return (await on
     .select({
       id: simulation.id,
+      runId: simulation.runId,
+      concurrency: run.concurrency,
       modality: simulation.modality,
       parameterValues: simulation.personaParameterValues,
       parameterContract: personaVersion.parameterContract,
     })
     .from(simulation)
+    .innerJoin(run, eq(run.id, simulation.runId))
     .innerJoin(personaVersion, eq(personaVersion.id, simulation.personaVersionId))
     .where(
       and(
@@ -1918,11 +1946,14 @@ export async function estimateVoiceSimulationDemand(
       const queued = (await tx
         .select({
           id: simulation.id,
+          runId: simulation.runId,
+          concurrency: run.concurrency,
           modality: simulation.modality,
           parameterValues: simulation.personaParameterValues,
           parameterContract: personaVersion.parameterContract,
         })
         .from(simulation)
+        .innerJoin(run, eq(run.id, simulation.runId))
         .innerJoin(personaVersion, eq(personaVersion.id, simulation.personaVersionId))
         .where(
           and(
@@ -1971,22 +2002,9 @@ export async function claimSimulations(
   const now = new Date();
 
   const claimed = await db().transaction(async (tx) => {
-    const capsApply = caps.voice !== undefined || caps.chat !== undefined ||
-      Object.keys(caps.speechProviders ?? {}).length > 0;
-    const canClaimVoice = modalities === undefined || modalities.includes("voice");
-    const voiceCapsApply = caps.voice !== undefined ||
-      Object.keys(caps.speechProviders ?? {}).length > 0;
-    const cappedModalities: readonly Modality[] = [
-      ...(voiceCapsApply && canClaimVoice ? ["voice" as const] : []),
-      ...(caps.chat !== undefined &&
-          (modalities === undefined || modalities.includes("chat"))
-        ? ["chat" as const]
-        : []),
-    ];
-    const active = capsApply && cappedModalities.length > 0 ? await (async () => {
-      await lockCapAdmission(tx);
-      return activeSimulationCandidates(tx, cappedModalities);
-    })() : [];
+    // Serialize admission so separate workers share each run's active count.
+    await lockCapAdmission(tx);
+    const active = await activeSimulationCandidates(tx, modalities ?? ["voice", "chat"]);
     const usage = usageOf(active);
     const admitted: CapCandidate[] = [];
     let after: string | undefined;
@@ -1994,11 +2012,14 @@ export async function claimSimulations(
       const candidates = (await tx
         .select({
           id: simulation.id,
+          runId: simulation.runId,
+          concurrency: run.concurrency,
           modality: simulation.modality,
           parameterValues: simulation.personaParameterValues,
           parameterContract: personaVersion.parameterContract,
         })
         .from(simulation)
+        .innerJoin(run, eq(run.id, simulation.runId))
         .innerJoin(personaVersion, eq(personaVersion.id, simulation.personaVersionId))
         // Queued, **and** its run is ready to be conducted. For every run that
         // mocks nothing the second condition is true by construction; for a run
@@ -2016,11 +2037,7 @@ export async function claimSimulations(
           ),
         )
         .orderBy(asc(simulation.id))
-        .limit(
-          capsApply && cappedModalities.length > 0
-            ? SIMULATION_CLAIM_SCAN_WINDOW
-            : capacity - admitted.length,
-        )
+        .limit(SIMULATION_CLAIM_SCAN_WINDOW)
         .for("update", { of: simulation, skipLocked: true })) as readonly CapCandidate[];
       for (const candidate of candidates) {
         if (admitWithinCaps(candidate, caps, usage)) admitted.push(candidate);
@@ -2028,10 +2045,7 @@ export async function claimSimulations(
       }
       if (
         admitted.length >= capacity ||
-        candidates.length <
-          (capsApply && cappedModalities.length > 0
-            ? SIMULATION_CLAIM_SCAN_WINDOW
-            : capacity - admitted.length)
+        candidates.length < SIMULATION_CLAIM_SCAN_WINDOW
       ) {
         break;
       }

@@ -4,6 +4,7 @@ import {
   startSimulation,
 } from "@egma/db";
 import { newId } from "@egma/ids";
+import { fetchRunDetails } from "../../cli/src/platform/runs.ts";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -278,5 +279,43 @@ describe("run authorization", () => {
       );
       expect(answer.statusCode, `${method} ${path}`).toBe(404);
     }
+  });
+});
+
+describe("run concurrency contract", () => {
+  it("defaults chat to ten, persists an override, and rejects invalid requests", async () => {
+    const ready = await readyToRun("run_concurrency");
+    const standard = await start(ready);
+    expect(standard.statusCode).toBe(201);
+    expect(standard.body.concurrency).toBe(10);
+    const body = { suiteId: ready.suiteId, agentId: ready.agentId, connectionId: ready.connectionId };
+    const custom = await request(api.app, "POST", "/v1/runs", ready.key, { ...body, concurrency: 100 });
+    expect(custom.statusCode).toBe(201);
+    expect(custom.body.concurrency).toBe(100);
+    const read = await request(api.app, "GET", `/v1/runs/${String(custom.body.id)}`, ready.key);
+    expect(read.body.concurrency).toBe(100);
+    const details = await fetchRunDetails(
+      { url: "https://egma.example", key: ready.key },
+      { runId: String(custom.body.id), projectId: ready.customer.projectId },
+      async (input, init) => {
+        const url = new URL(String(input));
+        const response = await api.app.inject({
+          method: "GET", url: `${url.pathname}${url.search}`,
+          headers: Object.fromEntries(new Headers(init?.headers)),
+        });
+        return new Response(response.body, { status: response.statusCode, headers: { "content-type": "application/json" } });
+      },
+    );
+    expect(details.run.concurrency).toBe(100);
+    expect(details.simulations).toHaveLength(Number(custom.body.expectedSimulationCount));
+    expect(details.simulations[0]?.test.scenario).toBe("Move Thursday's booking to next week.");
+    expect(details.simulations[0]).toHaveProperty("gradeHistory");
+    expect(details.simulations[0]).toHaveProperty("transcript");
+    for (const concurrency of [0, -1, 1.5, "4", null, 2147483648]) {
+      const refused = await request(api.app, "POST", "/v1/runs", ready.key, { ...body, concurrency });
+      expect(refused.statusCode, JSON.stringify(refused.body)).toBe(422);
+    }
+    const listed = await request(api.app, "GET", "/v1/runs", ready.key);
+    expect(listed.body.runs).toHaveLength(2);
   });
 });

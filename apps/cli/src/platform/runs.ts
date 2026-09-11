@@ -1,13 +1,18 @@
 /**
- * Create complete-suite runs with an optional current-set precondition, or cancel by ID.
- * The web app shows progress. Return run-start refusals as values and preserve
- * the platform's explanation.
+ * Create, inspect, and cancel complete-suite runs through the public API.
+ * Preserve the platform's explanations and simulation evidence.
  */
 
 import {
+  getRun,
+  getSimulation,
+  listRunEvents,
   cancelRun as cancelRunRequest,
   createRun as createRunRequest,
   listRunSimulations as listRunSimulationsRequest,
+  type GetRunResponse,
+  type GetSimulationResponse,
+  type ListRunEventsResponse,
   type CancelRunResponse,
   type CreateRunResponse,
   type ListRunSimulationsResponse,
@@ -121,6 +126,8 @@ export type NewRun = {
     readonly testId: string;
     readonly versionId: string;
   }[];
+  /** Maximum active simulations in this run. Omission uses the modality default. */
+  readonly concurrency?: number;
   /** Optional run display name. */
   readonly name?: string;
 };
@@ -270,6 +277,7 @@ export async function startRun(
         versionId: version.versionId,
       })),
       ...(input.name === undefined ? {} : { name: input.name }),
+      ...(input.concurrency === undefined ? {} : { concurrency: input.concurrency }),
     },
     {
       client: platformClient(signedIn, fetchImpl),
@@ -359,4 +367,78 @@ export async function cancelRun(
   }
 
   return { kind: "canceled", run: runFrom(answer.data) };
+}
+
+/** A fresh collection of the public run resources, read over a stated interval. */
+export type RunDetails = {
+  readonly readStartedAt: string;
+  readonly fetchedAt: string;
+  readonly run: GetRunResponse;
+  readonly simulations: readonly GetSimulationResponse[];
+  readonly events: ListRunEventsResponse["events"];
+  readonly warnings: readonly string[];
+};
+
+/** Follow every page and retain simulation evidence without the summary projection. */
+export async function fetchRunDetails(
+  signedIn: SignedIn,
+  input: { readonly runId: string; readonly projectId: string },
+  fetchImpl?: Fetch,
+  signal?: AbortSignal,
+): Promise<RunDetails> {
+  const readStartedAt = new Date().toISOString();
+  const options = {
+    client: platformClient(signedIn, fetchImpl),
+    ...(signal === undefined ? {} : { signal }),
+  };
+  function dataOf<T>(answer: { data?: T; error?: unknown; response?: Response }): NonNullable<T> {
+    const response = platformResponse(answer, signedIn.url);
+    if (!response.ok || answer.data === undefined || answer.data === null) {
+      throw new PlatformRefusedError(response.status, platformRefusalMessage(answer.error, response.status));
+    }
+    return answer.data;
+  }
+  // Establish access before walking the child resources.
+  dataOf(await getRun(input, options));
+  const simulations: GetSimulationResponse[] = [];
+  let pageToken: string | undefined;
+  const seen = new Set<string>();
+  for (;;) {
+    const page = dataOf(await listRunSimulationsRequest({
+      ...input, pageSize: 200,
+      ...(pageToken === undefined ? {} : { pageToken }),
+    }, options));
+    for (const simulation of page.simulations) {
+      simulations.push(dataOf(await getSimulation({
+        simulationId: simulation.id, projectId: input.projectId,
+      }, options)));
+    }
+    if (page.nextPageToken === null) break;
+    if (seen.has(page.nextPageToken)) {
+      throw new PlatformRefusedError(502, "Egma repeated a simulation page token. Run details could not be fetched completely.");
+    }
+    pageToken = page.nextPageToken;
+    seen.add(pageToken);
+  }
+  const events: ListRunEventsResponse["events"] = [];
+  let after = 0;
+  for (;;) {
+    const page = dataOf(await listRunEvents({ ...input, after }, options));
+    events.push(...page.events);
+    if (page.caughtUp) break;
+    if (page.next <= after) {
+      throw new PlatformRefusedError(502, "Egma did not advance the run event cursor. Run details could not be fetched completely.");
+    }
+    after = page.next;
+  }
+  const run = dataOf(await getRun(input, options));
+  return {
+    readStartedAt,
+    fetchedAt: new Date().toISOString(),
+    run,
+    simulations,
+    events,
+    warnings: simulations.filter((simulation) => simulation.transcript?.spansTruncated)
+      .map((simulation) => `Simulation ${simulation.id}: the API truncated transcript spans; aggregate counts still cover the full trace.`),
+  };
 }

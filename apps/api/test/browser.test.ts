@@ -5565,3 +5565,98 @@ it(
   },
   SETTLE * 2,
 );
+
+describe("run advanced settings", () => {
+  it("keeps concurrency optional and collapsed, and sends only a custom limit", async () => {
+    const key = await anotherCustomer("run-advanced@browser.example", "Run settings");
+    const walk = await signedInBrowser("run-advanced@browser.example");
+    const projectId = projectIn(walk);
+    async function create<T = unknown>(resource: string, body: unknown) {
+      const response = await fetch(`${origin}/v1/${resource}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      expect(response.status, await response.clone().text()).toBe(201);
+      return await response.json() as T;
+    }
+    try {
+      const suite = await create<{ id: string }>("test-suites", { name: "Appointment checks" });
+      await create("tests", {
+        suiteId: suite.id, name: "Book an appointment", scenario: "Ask for an appointment.",
+        expectedBehaviors: ["Confirms the time"], personas: ["Everyday caller"],
+      });
+      const targets = new Map<string, { agent: { id: string }; connection: { id: string } }>();
+      for (const modality of ["voice", "chat"]) {
+        targets.set(modality, await create<{ agent: { id: string }; connection: { id: string } }>("agents", {
+          name: `${modality === "voice" ? "Voice" : "Chat"} receptionist`, agentPlatform: "livekit",
+          connection: {
+            agentPlatform: "livekit", connectionType: "livekit_room",
+            accessVariant: "livekit_room.project_credentials", modality,
+            config: { url: "wss://example.livekit.cloud", agentName: `${modality}-receptionist` },
+            credentials: { apiKey: "local-test-key", apiSecret: "local-test-secret" },
+          },
+        }));
+      }
+      async function choose(modality: string) {
+        await walk.goto(`${origin}/projects/${projectId}/runs/new`);
+        await walk.selectOption("#run-suite", suite.id);
+        await walk.selectOption("#run-agent", targets.get(modality)!.agent.id);
+        await walk.selectOption("#run-connection", targets.get(modality)!.connection.id);
+        await expect.poll(() => walk.getByRole("button", { name: "Start run", exact: true }).isEnabled()).toBe(true);
+      }
+      async function submit(expected: number, custom: boolean) {
+        const response = walk.waitForResponse((one) => one.request().method() === "POST" && new URL(one.url()).pathname === "/v1/runs");
+        await walk.getByRole("button", { name: "Start run", exact: true }).click();
+        const written = await response;
+        expect(written.status(), await written.text()).toBe(201);
+        const payload = written.request().postDataJSON();
+        if (custom) expect(payload.concurrency).toBe(expected);
+        else expect(payload).not.toHaveProperty("concurrency");
+        const run = await written.json();
+        expect(run.concurrency).toBe(expected);
+        await walk.waitForURL(`**/runs/${run.id}`);
+      }
+      await walk.setViewportSize({ width: 1280, height: 900 });
+      await choose("voice");
+      const advanced = walk.getByRole("button", { name: "Advanced Settings", exact: true });
+      expect(await advanced.getAttribute("aria-expanded")).toBe("false");
+      expect(await walk.locator("#run-concurrency").count()).toBe(0);
+      await walk.screenshot({ animations: "disabled", path: "/tmp/egma-run-advanced-collapsed-desktop.png" });
+      await advanced.focus();
+      await walk.keyboard.press("Enter");
+      await walk.locator("#run-concurrency").waitFor();
+      expect(await walk.locator("#run-concurrency").getAttribute("placeholder")).toBe("4");
+      expect(await walk.locator("#run-concurrency").inputValue()).toBe("");
+      await walk.screenshot({ animations: "disabled", path: "/tmp/egma-run-advanced-open-desktop.png" });
+      await submit(4, false);
+
+      await choose("chat");
+      expect(await advanced.getAttribute("aria-expanded")).toBe("false");
+      await advanced.click();
+      expect(await walk.locator("#run-concurrency").getAttribute("placeholder")).toBe("10");
+      await walk.fill("#run-concurrency", "0");
+      expect(await walk.getByRole("button", { name: "Start run", exact: true }).isDisabled()).toBe(true);
+      await walk.getByRole("alert").waitFor();
+      await walk.fill("#run-concurrency", "2");
+      await walk.setViewportSize({ width: 390, height: 844 });
+      await walk.emulateMedia({ reducedMotion: "reduce" });
+      await walk.evaluate('document.documentElement.dataset.theme = "dark"');
+      await walk.locator("#run-concurrency").focus();
+      expect(await walk.evaluate("document.documentElement.scrollWidth <= window.innerWidth")).toBe(true);
+      await walk.screenshot({ animations: "disabled", path: "/tmp/egma-run-advanced-open-mobile-dark.png" });
+      await advanced.click();
+      await advanced.click();
+      expect(await walk.locator("#run-concurrency").inputValue()).toBe("2");
+      await submit(2, true);
+
+      await choose("chat");
+      await advanced.click();
+      await walk.fill("#run-concurrency", "3");
+      await walk.fill("#run-concurrency", "");
+      await submit(10, false);
+    } finally {
+      await walk.context().close();
+    }
+  }, SETTLE * 2);
+});

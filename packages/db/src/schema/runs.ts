@@ -162,6 +162,8 @@ export const run = pgTable(
     mockMetadata: jsonb("mock_metadata"),
     /** Immutable grader selection captured before the initial run insert. */
     gradingPlan: jsonb("grading_plan").$type<FrozenRunGradingPlan>().notNull(),
+    /** Maximum claimed and running simulations across all workers. */
+    concurrency: integer("concurrency").notNull().default(4),
     /** Set at start; the denominator a progress page divides by. */
     expectedSimulationCount: integer("expected_simulation_count").notNull(),
     /**
@@ -178,6 +180,7 @@ export const run = pgTable(
   },
   (table) => [
     prefixCheck("run_id_prefix", table.id, "run"),
+    check("run_concurrency_positive", sql`${table.concurrency} > 0`),
     oneOf("run_status_allowed", table.status, [...RUN_STATUSES]),
     oneOf("run_triggered_via_allowed", table.triggeredVia, [...RUN_TRIGGERS]),
     check(

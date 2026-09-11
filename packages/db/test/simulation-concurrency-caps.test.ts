@@ -65,10 +65,11 @@ let chatConnectionId: string;
 let personaId: string;
 let suiteId: string;
 
-async function queued(modality: "voice" | "chat", models = OPENAI): Promise<string> {
+async function queued(modality: "voice" | "chat", models = OPENAI, concurrency?: number): Promise<string> {
   await editPersona(auth, personaId, { models });
   const started = await startRun(auth, {
     suiteId,
+    ...(concurrency === undefined ? {} : { concurrency }),
     agentId: modality === "voice" ? voiceAgentId : chatAgentId,
     connectionId: modality === "voice" ? voiceConnectionId : chatConnectionId,
   });
@@ -157,8 +158,8 @@ describe("fleet claim selection", () => {
         [sourceId, ids, ids.map((_, index) => index + 2)],
       );
     };
-    await expand(await queued("voice"));
-    await expand(await queued("chat"));
+    await expand(await queued("voice", OPENAI, 110));
+    await expand(await queued("chat", OPENAI, 110));
     const caps = { voice: 100, chat: 100 } as const;
 
     const filled = await Promise.all([
@@ -358,5 +359,69 @@ describe("fleet claim selection", () => {
 
     expect(demand).toEqual({ active: 1, admissibleQueued: 1 });
     expect(claimed.map((claim) => claim.id)).toEqual([openai]);
+  });
+});
+
+async function queuedRun(modality: "voice" | "chat", concurrency?: number, count = 7) {
+  const suite = await createTestSuite(auth, { name: "Concurrency tests" });
+  for (let index = 0; index < count; index += 1) {
+    await createTest(auth, {
+      suiteId: suite.id, name: `Test ${index}`,
+      scenario: "Book an appointment.", expectedBehaviors: ["Confirms the time"],
+      personaIds: [personaId],
+    });
+  }
+  return startRun(auth, {
+    suiteId: suite.id,
+    agentId: modality === "voice" ? voiceAgentId : chatAgentId,
+    connectionId: modality === "voice" ? voiceConnectionId : chatConnectionId,
+    ...(concurrency === undefined ? {} : { concurrency }),
+  });
+}
+
+describe("per-run concurrency", () => {
+  it.each(["voice", "chat"] as const)("applies the %s default across simultaneous workers and refills freed slots", async (modality) => {
+    const expected = modality === "voice" ? 4 : 10;
+    const run = await queuedRun(modality, undefined, expected + 3);
+    expect(run.concurrency).toBe(expected);
+    if (modality === "voice") {
+      expect(await estimateVoiceSimulationDemand()).toEqual({ active: 0, admissibleQueued: 4 });
+    }
+    const claims = (await Promise.all([
+      claimSimulations({ claimant: "first", capacity: 10 }),
+      claimSimulations({ claimant: "second", capacity: 10 }),
+    ])).flat();
+    expect(claims).toHaveLength(expected);
+    expect(new Set(claims.map((claim) => claim.id)).size).toBe(expected);
+    const claim = claims[0]!;
+    await startSimulation(claim.auth, claim.id, claim.claimedBy);
+    expect(await claimSimulations({ claimant: "blocked", capacity: 10 })).toHaveLength(0);
+    await completeSimulation(claim.auth, claim.id, claim.claimedBy, { endingReason: "persona_concluded" });
+    expect(await claimSimulations({ claimant: "refill", capacity: 10 })).toHaveLength(1);
+  });
+
+  it.each(["voice", "chat"] as const)("admits all seven %s simulations with concurrency 100", async (modality) => {
+    const run = await queuedRun(modality, 100);
+    expect(run.concurrency).toBe(100);
+    expect(run.expectedSimulationCount).toBe(7);
+    expect(await claimSimulations({ claimant: "all-seven", capacity: 50 })).toHaveLength(7);
+  });
+
+  it("keeps run limits independent while respecting deployment caps", async () => {
+    const first = await queuedRun("voice", 1);
+    const second = await queuedRun("voice", 3);
+    const claims = await claimSimulations({ claimant: "shared", capacity: 20, caps: { voice: 3 } });
+    expect(claims).toHaveLength(3);
+    expect(claims.filter((claim) => claim.runId === first.id)).toHaveLength(1);
+    expect(claims.filter((claim) => claim.runId === second.id)).toHaveLength(2);
+    expect(await estimateVoiceSimulationDemand({ caps: { voice: 3 } })).toEqual({ active: 3, admissibleQueued: 0 });
+  });
+
+  it("rejects invalid limits and freezes the chosen limit", async () => {
+    for (const concurrency of [0, -1, 1.5, NaN, Infinity, 2147483648]) {
+      await expect(startRun(auth, { suiteId, agentId: voiceAgentId, connectionId: voiceConnectionId, concurrency })).rejects.toThrow("concurrency");
+    }
+    const run = await queuedRun("voice", 2);
+    await expect(database.sql("update run set concurrency = 3 where id = $1", [run.id])).rejects.toThrow("concurrency");
   });
 });

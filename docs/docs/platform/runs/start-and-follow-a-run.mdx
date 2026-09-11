@@ -17,6 +17,7 @@ to models, voices, or grading policy apply to future runs.
     1. Open **Runs** and select **Create a run**.
     2. Choose your test suite.
     3. Choose the agent and one of its connections. Review the run settings.
+       To change concurrency, open **Advanced Settings**.
     4. Select **Start run**.
     5. Open the run to follow its simulations. Starting successfully does not mean the tests passed.
 
@@ -40,8 +41,21 @@ to models, voices, or grading policy apply to future runs.
     ID and results URL, and returns. A zero exit code means the run started. It does not
     mean that simulation execution or grading passed.
 
+    Voice runs use concurrency 4 by default. Chat runs use 10. Add
+    `--concurrency <number>` when this run needs a different limit. Deployment
+    and provider limits still apply.
+
     If the pre-run push is refused, no run starts. Resolve the reported test change
     or invalid content first.
+
+    To read the full run as JSON:
+
+    ```bash
+    egma run get "$EGMA_RUN_ID" > run.json
+    ```
+
+    The result includes every simulation and run event. Run the command again to
+    refresh an active run. Recording files are not downloaded.
   </Tab>
 </Tabs>
 

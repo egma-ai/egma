@@ -18,7 +18,10 @@ import {
 } from "./support/database.ts";
 
 const BASELINE = "0000_baseline.sql";
-const CURRENT_MIGRATIONS = [BASELINE];
+const RUN_CONCURRENCY = "0001_run_concurrency.sql";
+const SHIPPED_BASELINE_HASH =
+  "ea57d012e674f136f4ef74930865a8ccfeafaebcf92d7f628ce53e8deddc084a";
+const CURRENT_MIGRATIONS = [BASELINE, RUN_CONCURRENCY];
 let database: EmptyDatabase;
 let store: SingleConnection;
 let directory: string;
@@ -34,10 +37,12 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 
-describe("the fresh Postgres baseline", () => {
-  it("installs one baseline and keeps organization data on repeated boot", async () => {
-    expect((await readMigrations()).map((migration) => migration.name)).toEqual(
-      CURRENT_MIGRATIONS,
+describe("the Postgres migration chain", () => {
+  it("keeps the shipped baseline and preserves organization data on repeated boot", async () => {
+    const migrations = await readMigrations();
+    expect(migrations.map((migration) => migration.name)).toEqual(CURRENT_MIGRATIONS);
+    expect(migrations.find((migration) => migration.name === BASELINE)?.hash).toBe(
+      SHIPPED_BASELINE_HASH,
     );
     expect(await runMigrations(database.url)).toEqual({
       applied: CURRENT_MIGRATIONS,
@@ -90,7 +95,7 @@ describe("the fresh Postgres baseline", () => {
 
     expect(await runMigrations(database.url)).toEqual({
       applied: [],
-      alreadyApplied: [BASELINE],
+      alreadyApplied: CURRENT_MIGRATIONS,
     });
     expect((await store.sql(
       "select organization_id, provider, credentials, hint, revision from provider_key",
@@ -107,6 +112,76 @@ describe("the fresh Postgres baseline", () => {
     expect((await store.sql(
       "select is_nullable from information_schema.columns where table_name = 'cloud_billing_account' and column_name = 'stripe_cancel_at'",
     )).rows).toEqual([{ is_nullable: "YES" }]);
+  });
+
+  it("upgrades a database that already has the production baseline", async () => {
+    const baseline = await readFile(
+      path.join(MIGRATIONS_DIRECTORY, BASELINE),
+      "utf8",
+    );
+    await writeFile(path.join(directory, BASELINE), baseline);
+    expect(await runMigrations(database.url, directory)).toEqual({
+      applied: [BASELINE],
+      alreadyApplied: [],
+    });
+    const organizationId = newId("org");
+    await store.sql(
+      "insert into organization (id, name, slug) values ($1, 'Before migration', 'before-migration')",
+      [organizationId],
+    );
+    const runIds = [newId("run"), newId("run")];
+    await store.sql("set session_replication_role = replica");
+    try {
+      for (const [index, modality] of ["voice", "chat"].entries()) {
+        await store.sql(
+          `insert into run
+            (id, organization_id, project_id, suite_id, agent_id, connection_id,
+             status, triggered_via, connection_snapshot, expected_simulation_count,
+             completed_count, failed_count, canceled_count, started_at, finished_at,
+             grading_plan)
+           values ($1, $2, $3, $4, $5, $6, 'completed', 'manual', $7, 1,
+                   1, 0, 0, now(), now(), $8)`,
+          [
+            runIds[index],
+            organizationId,
+            newId("prj"),
+            newId("ste"),
+            newId("agt"),
+            newId("con"),
+            { modality },
+            { capturedAt: "2026-09-10T00:00:00.000Z", groups: [] },
+          ],
+        );
+      }
+    } finally {
+      await store.sql("set session_replication_role = origin");
+    }
+
+    expect(await runMigrations(database.url)).toEqual({
+      applied: [RUN_CONCURRENCY],
+      alreadyApplied: [BASELINE],
+    });
+    expect((await store.sql("select id from organization where id = $1", [organizationId])).rows)
+      .toEqual([{ id: organizationId }]);
+    expect(
+      (
+        await store.sql(`select connection_snapshot->>'modality' as modality, concurrency
+          from run where id = any($1::text[]) order by modality`, [runIds])
+      ).rows,
+    ).toEqual([
+      { modality: "chat", concurrency: 10 },
+      { modality: "voice", concurrency: 4 },
+    ]);
+    expect(
+      (
+        await store.sql(`select column_default, is_nullable
+          from information_schema.columns
+          where table_schema = 'public' and table_name = 'run' and column_name = 'concurrency'`)
+      ).rows,
+    ).toEqual([{ column_default: "4", is_nullable: "NO" }]);
+    expect(
+      (await store.sql("select name from egma_meta.migration order by name")).rows,
+    ).toEqual(CURRENT_MIGRATIONS.map((name) => ({ name })));
   });
 
   it("applies once when API instances boot concurrently", async () => {

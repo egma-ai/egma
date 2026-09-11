@@ -140,6 +140,12 @@ const runHeaderSchema = {
     productLabel: stringSchema,
     environment: nullable(stringSchema),
     agentVersion: nullable(integerSchema),
+    concurrency: {
+      type: "integer",
+      minimum: 1,
+      maximum: 2147483647,
+      description: "Maximum active simulations in this run, fixed when the run starts.",
+    },
     expectedSimulationCount: {
       ...integerSchema,
       description: "Number of test-and-persona combinations captured when the run started.",
@@ -186,6 +192,7 @@ const runHeaderSchema = {
     "productLabel",
     "environment",
     "agentVersion",
+    "concurrency",
     "expectedSimulationCount",
     "completedCount",
     "failedCount",
@@ -441,6 +448,10 @@ export const runOperations = {
           expectedTestVersions: {
             ...arrayOf(expectedTestVersionSchema),
             description: "Optional exact list of the suite's test IDs and current version IDs. Each test and version must appear once. The request is refused if the suite membership or any version changed. Omit this field to use the current suite.",
+          },
+          concurrency: {
+            type: "integer", minimum: 1, maximum: 2147483647,
+            description: "Maximum active simulations in this run. Defaults to 4 for voice and 10 for chat. Worker and provider limits still apply.",
           },
         },
         required: ["suiteId", "agentId", "connectionId"],

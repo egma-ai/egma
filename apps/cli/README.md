@@ -57,6 +57,7 @@ egma suite create
 egma suite delete
 egma test delete
 egma run create
+egma run get
 egma run cancel
 egma self-host up
 ```
@@ -327,7 +328,7 @@ file only after the platform confirms deletion. A refused remote deletion keeps
 all local bytes. An unpushed local Test has no remote identity, so remove that
 draft directly instead of using `egma test delete`.
 
-## Create and cancel Runs
+## Create, read, and cancel Runs
 
 The first argument to `run create` is a local suite directory, not a Suite ID.
 The Egma Agent and Connection IDs are explicit:
@@ -341,7 +342,28 @@ egma run create receptionist-core \
 
 The command pushes the complete repository first. A failed push creates no Run.
 After a successful start it prints the Run ID and the web results URL, then
-returns. Follow progress on that web page.
+returns. Follow progress on that web page or fetch it with `egma run get`.
+
+Use `--concurrency 8` to allow up to eight active simulations in this Run.
+The default is 4 for voice and 10 for chat. The value must be a positive whole number.
+A limit of 100 with seven simulations allows all seven to run together, subject
+to worker capacity and deployment or provider limits. Each test and persona
+combination creates one simulation.
+
+Read the current Run and all of its simulation details as JSON:
+
+```bash
+egma run get run_... > run.json
+```
+
+The command follows every simulation and event page. It includes transcripts,
+tool calls, metrics, test and persona details, grades, grade history, and failure
+reasons. `readStartedAt` and `fetchedAt` mark the collection interval; an active
+Run can change during these reads. Run the command again to refresh the data.
+Recording availability is included; audio files are not downloaded. The API
+limits each transcript to 20,000 spans. Any truncation is preserved in
+`spansTruncated` and reported in `warnings`. A failed request exits nonzero
+without printing partial JSON.
 
 Before a real phone Run, the coding agent must state the Suite, target, and
 expected simulation count, warn that calls can cost money, and obtain fresh

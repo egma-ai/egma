@@ -249,6 +249,7 @@ function describedHeader(
           mockMetadata: mockMetadataAsPublished(run.mockMetadata),
         }
       : {}),
+    concurrency: run.concurrency,
     expectedSimulationCount: run.expectedSimulationCount,
     completedCount: run.completedCount,
     failedCount: run.failedCount,
@@ -424,6 +425,7 @@ export async function runRoutes(
           "connectionId",
           "name",
           "expectedTestVersions",
+          "concurrency",
         ],
         "a run",
       );
@@ -452,10 +454,16 @@ export async function runRoutes(
       if ("name" in body && typeof body.name !== "string") {
         return unprocessable(reply, "name must be text");
       }
+      if (body.concurrency !== undefined &&
+          (typeof body.concurrency !== "number" || !Number.isInteger(body.concurrency) ||
+           body.concurrency < 1 || body.concurrency > 2147483647)) {
+        return unprocessable(reply, "concurrency must be a whole number between 1 and 2147483647");
+      }
       const expected = expectedVersions(body.expectedTestVersions);
       if (typeof expected === "string") return unprocessable(reply, expected);
 
       const input: NewRun = {
+        ...(body.concurrency === undefined ? {} : { concurrency: body.concurrency as number }),
         suiteId,
         agentId,
         connectionId,
