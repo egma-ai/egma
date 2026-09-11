@@ -31,7 +31,7 @@ describe("persona capability resolution", () => {
     expect(result.emotion).toMatchObject({ status: "fixed", value: "neutral" });
     expect(result.accent).toMatchObject({ status: "fixed", value: "voice_default" });
     expect(result.speed.range).toEqual({ minimum: 0.25, maximum: 4, step: 0.05 });
-    expect(result.voices.choices?.map((voice) => voice.id)).toEqual(["alloy", "echo", "fable", "onyx", "nova", "shimmer"]);
+    expect(result.voices.choices?.map((voice) => voice.id)).toEqual(["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]);
   });
 
   it("distinguishes unknown catalog metadata from unsupported models", () => {
@@ -41,7 +41,7 @@ describe("persona capability resolution", () => {
 
   it("returns Cartesia voice language and accent without locale inference", () => {
     const result = resolvePersonaCapabilities(
-      { ...selection, ttsProvider: "cartesia", ttsModel: "sonic-preview", voiceId: "voice-a", language: "en-GB" },
+      { ...selection, ttsProvider: "cartesia", ttsModel: "sonic-3.6", voiceId: "voice-a", language: "en-GB" },
       [{ id: "voice-a", name: "A", source: "account", presentation: "female", languages: ["en-GB"], accents: ["GB"] }],
     );
     expect(result.language).toEqual({ status: "supported", choices: ["en-GB"] });
@@ -54,7 +54,7 @@ describe("Cartesia discovery", () => {
   it("reads all pages and retains owned voices", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        data: [{ id: "public", name: "Public", is_owner: false, gender: "masculine", language: "en", country: "US" }],
+        data: [{ id: "public", name: "Public", is_owner: false, gender: "masculine", language: "en", country: "US", accents: [{ accent: "general-american", locale: "en-US", is_native: true }, { accent: "hindi", locale: "hi-IN", is_native: false }] }],
         has_more: true, next_page: "deprecated-cursor",
       })))
       .mockResolvedValueOnce(new Response(JSON.stringify({
@@ -66,7 +66,7 @@ describe("Cartesia discovery", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(String(fetcher.mock.calls[1]![0])).toContain("starting_after=public");
     expect(voices).toEqual([
-      { id: "public", name: "Public", source: "standard", presentation: "male", languages: ["en-US"], accents: ["US"] },
+      { id: "public", name: "Public", source: "standard", presentation: "male", languages: ["en-US", "hi-IN"], accents: ["general-american", "hindi"] },
       { id: "private", name: "Private", source: "account", presentation: "female", languages: ["es-ES"], accents: [] },
     ]);
   });

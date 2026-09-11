@@ -60,7 +60,7 @@ export const OPENAI_STANDARD_VOICES: readonly PersonaVoice[] = [
   accents: [],
 }));
 
-const OPENAI_LEGACY_VOICE_IDS = new Set(["alloy", "echo", "fable", "onyx", "nova", "shimmer"]);
+const OPENAI_LEGACY_VOICE_IDS = new Set(["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]);
 
 const OPENAI_TTS_MODELS = new Set([
   "gpt-4o-mini-tts",
@@ -84,7 +84,7 @@ const OPENAI_STT_MODELS = new Set([
   "gpt-4o-mini-transcribe",
 ]);
 
-const CARTESIA_TTS_MODELS = new Set(["sonic-preview"]);
+const CARTESIA_TTS_MODELS = new Set(["sonic-3.6", "sonic-3.6-2026-08-27", "sonic-preview"]);
 const CARTESIA_STT_MODELS = new Set(["ink-2"]);
 
 function unsupported<T>(reason: string): Capability<T> {
@@ -207,7 +207,7 @@ export async function discoverCartesiaVoices(
     if (cursor !== undefined) url.searchParams.set("starting_after", cursor);
     const response = await fetcher(url, {
       ...(signal === undefined ? {} : { signal }),
-      headers: { Authorization: `Bearer ${apiKey}`, "Cartesia-Version": "2026-03-01" },
+      headers: { Authorization: `Bearer ${apiKey}`, "Cartesia-Version": "2026-08-14" },
     });
     if (!response.ok) throw new Error(`Cartesia voice discovery failed with status ${response.status}.`);
     const page = await response.json() as CartesiaVoicePage;
@@ -216,7 +216,9 @@ export async function discoverCartesiaVoices(
       const language = typeof raw.language === "string" ? raw.language.replaceAll("_", "-") : undefined;
       const country = typeof raw.country === "string" ? raw.country.toUpperCase() : undefined;
       const presentation = raw.gender === "masculine" ? "male" : raw.gender === "feminine" ? "female" : raw.gender === "gender_neutral" ? "neutral" : "unknown";
-      const accents = Array.isArray(raw.accents) ? raw.accents.filter((one): one is string => typeof one === "string") : country === undefined ? [] : [country];
+      const accentMetadata = Array.isArray(raw.accents) ? raw.accents : [];
+      const accents = accentMetadata.flatMap((one) => typeof one === "object" && one !== null && "accent" in one && typeof one.accent === "string" ? [one.accent] : []);
+      const locales = accentMetadata.flatMap((one) => typeof one === "object" && one !== null && "locale" in one && typeof one.locale === "string" ? [one.locale] : []);
       const fineTunes = Array.isArray(raw.fine_tunes) ? raw.fine_tunes : [];
       const modelIds = fineTunes.flatMap((one) => typeof one === "object" && one !== null && "public_model_id" in one && typeof one.public_model_id === "string" ? [one.public_model_id] : []);
       voices.push({
@@ -224,7 +226,7 @@ export async function discoverCartesiaVoices(
         name: raw.name,
         source: raw.is_owner === true ? "account" : "standard",
         presentation,
-        languages: language === undefined ? [] : [country === undefined || language.includes("-") ? language : `${language}-${country}`],
+        languages: locales.length > 0 ? locales : language === undefined ? [] : [language],
         accents,
         ...(raw.is_pro === true ? { isProfessional: true } : {}),
         ...(modelIds.length === 0 ? {} : { modelIds }),
