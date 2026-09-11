@@ -437,16 +437,17 @@ export async function personaRoutes(
     let voices: readonly PersonaVoice[] = [];
     if (selection.ttsProvider === "cartesia") {
       const customer = await resolveProviderKeyForAuthoring(acting.auth, "cartesia");
-      if (customer === undefined) {
-        const unresolved = resolvePersonaCapabilities(selection);
-        return reply.send({ ...unresolved, voices: { status: "unknown", reason: "Add an organization Cartesia key to discover account voices. Deployment-account private voices are never shown." } });
-      }
-      const cacheKey = `${auth.organizationId}:cartesia:${customer.credentialRef}`;
+      const credential = customer === undefined
+        ? await authoringCredential(options, acting.auth, "cartesia")
+        : { ...customer, paymentSource: "customer" as const };
+      if (credential === undefined) return reply.send(resolvePersonaCapabilities(selection));
+      const cacheKey = `${auth.organizationId}:cartesia:${credential.credentialRef}`;
       const cached = query.refresh === true ? undefined : voiceCache.get(cacheKey);
       if (cached !== undefined && cached.expires > Date.now()) voices = cached.voices;
       else {
         try {
-          voices = await discoverCartesiaVoices(customer.key, fetch, requestSignal(request));
+          const discovered = await discoverCartesiaVoices(credential.key, fetch, requestSignal(request));
+          voices = customer === undefined ? discovered.filter((voice) => voice.source === "standard") : discovered;
         } catch {
           const unresolved = resolvePersonaCapabilities(selection);
           return reply.send({ ...unresolved, voices: { status: "unknown", reason: "Cartesia voice discovery could not be loaded. Try refresh again." } });
