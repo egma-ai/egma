@@ -49,6 +49,7 @@ import { invalid, notTheService } from "../http/refusals.ts";
 import { mockToolBase } from "./mock-endpoint.ts";
 import { platformEvent, safeExceptionType } from "../platform-log.ts";
 import { DaytonaAssignmentUncertainError } from "../voice-fleet-daytona.ts";
+import { discoverCartesiaVoices, personaCapabilityRefusal, resolvePersonaCapabilities } from "../persona-capabilities.ts";
 
 /**
  * Internal simulation claims require the deployment service token and bypass
@@ -92,6 +93,8 @@ export type ClaimRoutesOptions = {
   /** Optional deployment caps enforced in the claim transaction. */
   readonly caps?: SimulationConcurrencyCaps | undefined;
 };
+
+class PersonaCapabilityError extends Error {}
 
 export const CLAIMS_PATH = "/v1/claims";
 
@@ -151,7 +154,8 @@ const SIMULATION_LIMITS = {
 } as const;
 
 /** The one clean-cut contract this control plane and simulator speak. */
-const CONTRACT_VERSION = 5;
+const LEGACY_CONTRACT_VERSION = 5;
+const CURRENT_CONTRACT_VERSION = 6;
 
 type Body = Record<string, unknown>;
 
@@ -186,6 +190,7 @@ async function modelsBlock(
   models: PersonaModels,
   source: ProviderCredentialSource,
   claim: SimulationClaim,
+  controls?: { readonly language: string; readonly emotion: string; readonly accent: string },
   deploymentSecretEnvironment?: Readonly<Record<string, string>>,
 ): Promise<Record<string, unknown>> {
   const entryFor = <Job extends "llm" | "stt" | "tts">(
@@ -244,6 +249,18 @@ async function modelsBlock(
     const variable = deploymentSecretEnvironment?.[provider];
     return variable === undefined ? credentialFor(credentials, provider) : `env:${variable}`;
   };
+  if (modality === "voice" && controls !== undefined) {
+    const voices = models.tts.provider === "cartesia"
+      ? await discoverCartesiaVoices(credentialFor(credentials, "cartesia"))
+      : [];
+    const capabilities = resolvePersonaCapabilities({
+      ttsProvider: models.tts.provider, ttsModel: models.tts.model,
+      sttProvider: models.stt.provider, sttModel: models.stt.model,
+      language: controls.language, voiceId: models.tts.voiceId,
+    }, voices);
+    const refusal = personaCapabilityRefusal(capabilities, { ...controls, speed: models.tts.speed });
+    if (refusal !== undefined) throw new PersonaCapabilityError(`the pinned persona is incompatible: ${refusal}`);
+  }
   const speechKey = (
     provider: PersonaModels["llm"]["provider"],
   ): Record<string, string> =>
@@ -377,6 +394,7 @@ type ClaimAsk = {
   readonly holdSeconds: number;
   readonly modalities?: readonly ("voice" | "chat")[] | undefined;
   readonly runtime?: "daytona" | undefined;
+  readonly contractVersions: readonly number[];
 };
 
 /**
@@ -435,13 +453,13 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
     return {
       refusal:
         "contract_versions is the simulation-contract versions this worker " +
-        `implements. Send a non-empty list that includes ${CONTRACT_VERSION}.`,
+        `implements. Send a non-empty list that includes ${LEGACY_CONTRACT_VERSION} or ${CURRENT_CONTRACT_VERSION}.`,
     };
   }
-  if (!contractVersions.includes(CONTRACT_VERSION)) {
+  if (!contractVersions.some((version) => version === LEGACY_CONTRACT_VERSION || version === CURRENT_CONTRACT_VERSION)) {
     return {
       refusal:
-        `this control plane sends simulation contract version ${CONTRACT_VERSION}, ` +
+        `this control plane sends simulation contract versions ${LEGACY_CONTRACT_VERSION} and ${CURRENT_CONTRACT_VERSION}, ` +
         "and this worker does not say it can read it. Deploy the matching " +
         "simulator before it claims work.",
     };
@@ -480,6 +498,7 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
 
   return {
     claimant: claimant.trim(),
+    contractVersions,
     capacity: Math.min(capacity, LARGEST_CLAIM_CAPACITY),
     holdSeconds: Math.min(
       wait === undefined ? DEFAULT_HOLD_SECONDS : wait,
@@ -515,6 +534,7 @@ async function assembledSpec(
   baseUrl: string,
   responseDeadline = Date.now() + CLAIM_RESPONSE_MILLISECONDS,
   deploymentSecretEnvironment?: Readonly<Record<string, string>>,
+  workerContractVersions: readonly number[] = [CURRENT_CONTRACT_VERSION],
 ): Promise<
   | Record<string, unknown>
   | { readonly unbuildable: string; readonly providerKeyUnavailable?: boolean }
@@ -573,6 +593,12 @@ async function assembledSpec(
 
   let models: Record<string, unknown>;
   const personaParameters = validatePersonaParameterValues(personaVersion.parameterContract, claim.personaParameterValues);
+  const personaSettings = Object.hasOwn(personaParameters, "execution_policy_version")
+    ? personaSettingsOfParameters(personaParameters)
+    : undefined;
+  const contractVersion = personaSettings === undefined ? LEGACY_CONTRACT_VERSION : CURRENT_CONTRACT_VERSION;
+  if (!workerContractVersions.includes(contractVersion))
+    return { retryable: `the worker does not support simulation contract version ${contractVersion}`, deferredBy: "runtime" };
   try {
     // The source loads here, once per simulation work order. Persona choices
     // are pinned; credentials are current. A rotated AWS bundle therefore
@@ -583,9 +609,11 @@ async function assembledSpec(
       personaModelsOfParameters(personaParameters),
       providerCredentials,
       claim,
+      personaSettings,
       deploymentSecretEnvironment,
     );
   } catch (fault) {
+    if (fault instanceof PersonaCapabilityError) return { unbuildable: fault.message };
     if (fault instanceof ProviderKeyUnavailableError)
       return { unbuildable: fault.message, providerKeyUnavailable: true };
     if (fault instanceof ProviderCredentialSourceUnavailableError) {
@@ -622,7 +650,7 @@ async function assembledSpec(
       : undefined;
 
   const spec = {
-    contract_version: CONTRACT_VERSION,
+    contract_version: contractVersion,
     simulation_id: claim.id,
     modality: claim.modality,
     connection: {
@@ -642,8 +670,8 @@ async function assembledSpec(
       name: personaVersion.identityName,
       personality: personaVersion.personality,
       language: personaVersion.language,
-      ...(Object.hasOwn(personaParameters, "execution_policy_version")
-        ? { parameters: personaSettingsOfParameters(personaParameters) }
+      ...(personaSettings !== undefined
+        ? { parameters: personaSettings }
         : {}),
     },
     models,
@@ -840,6 +868,7 @@ export async function claimRoutes(
                 ask.runtime === "daytona"
                   ? options.daytonaProviderSecretEnvironment
                   : undefined,
+                ask.contractVersions,
               ).catch(
                 (_fault: unknown): { readonly unbuildable: string } => ({
                   // This broad catch can hold dependency or credential errors.

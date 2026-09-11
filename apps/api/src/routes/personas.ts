@@ -44,7 +44,7 @@ import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
 import { registerPlatformOperation } from "../http/platform-operation.ts";
 import { sendRefusal } from "../http/refusals.ts";
-import { discoverCartesiaVoices, resolvePersonaCapabilities, type PersonaVoice } from "../persona-capabilities.ts";
+import { discoverCartesiaVoices, personaCapabilityRefusal, resolvePersonaCapabilities, type PersonaVoice } from "../persona-capabilities.ts";
 import { renderPersonaPreview, type PreviewReach } from "../persona-preview.ts";
 import { createVoiceAccessProof, verifiesVoiceAccessProof } from "../persona-voice-proof.ts";
 
@@ -138,18 +138,15 @@ async function settingsRefusal(
     sttProvider: models.stt.provider, sttModel: models.stt.model,
     language: controls.language, voiceId: models.tts.voiceId,
   }, voices);
-  for (const [field, capability] of Object.entries(capabilities)) {
-    if (capability.status === "unsupported") return `${field}: ${capability.reason ?? "unsupported"}`;
-  }
-  if (capabilities.emotion.status === "fixed" && controls.emotion !== capabilities.emotion.value) return `emotion: ${capabilities.emotion.reason}`;
-  if (capabilities.accent.status === "fixed" && controls.accent !== capabilities.accent.value) return `accent: ${capabilities.accent.reason}`;
-  if (capabilities.accent.choices !== undefined && !capabilities.accent.choices.includes(controls.accent)) return "accent: Choose one of the supported accents.";
-  const speed = capabilities.speed;
-  if (speed.status === "fixed" && models.tts.speed !== speed.value) return `models.tts.speed: ${speed.reason}`;
-  if (speed.range !== undefined && (models.tts.speed < speed.range.minimum || models.tts.speed > speed.range.maximum)) return `models.tts.speed: Choose a value from ${speed.range.minimum} through ${speed.range.maximum}.`;
+  const incompatible = personaCapabilityRefusal(capabilities, { ...controls, speed: models.tts.speed });
+  if (incompatible !== undefined) return incompatible;
   const standard = capabilities.voices.choices?.some((voice) => voice.source === "standard" && voice.id === models.tts.voiceId) === true;
+  if (purpose === "preview" && models.tts.provider === "openai" && !standard &&
+      await resolveProviderKeyForAuthoring(auth, "openai") === undefined) {
+    return "models.tts.voiceId: Add an organization OpenAI key before previewing an existing voice ID.";
+  }
   if (purpose === "save" && models.tts.provider === "openai" && !standard) {
-    const credential = await authoringCredential(options, auth, "openai");
+    const credential = await resolveProviderKeyForAuthoring(auth, "openai");
     if (credential === undefined || typeof voiceAccessProof !== "string" || !verifiesVoiceAccessProof(voiceAccessProof, { organizationId: auth.organizationId, provider: "openai", credentialRevision: credential.credentialRef, model: models.tts.model, voiceId: models.tts.voiceId }, options.proofSecret)) {
       return "models.tts.voiceId: Preview this existing OpenAI voice before saving it.";
     }
@@ -447,7 +444,7 @@ export async function personaRoutes(
       else {
         try {
           const discovered = await discoverCartesiaVoices(credential.key, fetch, requestSignal(request));
-          voices = customer === undefined ? discovered.filter((voice) => voice.source === "standard") : discovered;
+          voices = customer === undefined ? discovered.filter((voice) => voice.publiclyAccessible === true) : discovered;
         } catch {
           const unresolved = resolvePersonaCapabilities(selection);
           return reply.send({ ...unresolved, voices: { status: "unknown", reason: "Cartesia voice discovery could not be loaded. Try refresh again." } });

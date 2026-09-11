@@ -21,6 +21,7 @@ export type PersonaVoice = {
   readonly accents: readonly string[];
   readonly isProfessional?: boolean;
   readonly modelIds?: readonly string[];
+  readonly publiclyAccessible?: boolean;
 };
 
 export type Capability<T> = {
@@ -48,6 +49,29 @@ export type PersonaCapabilities = {
   readonly speed: Capability<number>;
   readonly speechVolume: Capability<number>;
 };
+
+export function personaCapabilityRefusal(
+  capabilities: PersonaCapabilities,
+  selected: { readonly emotion: string; readonly accent: string; readonly speed: number },
+): string | undefined {
+  for (const [field, capability] of Object.entries(capabilities)) {
+    if (capability.status === "unsupported") return `${field}: ${capability.reason ?? "unsupported"}`;
+    if (capability.status === "unknown" && !(field === "accent" && selected.accent === "voice_default"))
+      return `${field}: ${capability.reason ?? "support could not be verified"}`;
+  }
+  if (capabilities.emotion.status === "fixed" && selected.emotion !== capabilities.emotion.value)
+    return `emotion: ${capabilities.emotion.reason}`;
+  if (capabilities.accent.status === "fixed" && selected.accent !== capabilities.accent.value)
+    return `accent: ${capabilities.accent.reason}`;
+  if (capabilities.accent.choices !== undefined && !capabilities.accent.choices.includes(selected.accent))
+    return "accent: Choose one of the supported accents.";
+  if (capabilities.speed.status === "fixed" && selected.speed !== capabilities.speed.value)
+    return `models.tts.speed: ${capabilities.speed.reason}`;
+  if (capabilities.speed.range !== undefined &&
+      (selected.speed < capabilities.speed.range.minimum || selected.speed > capabilities.speed.range.maximum))
+    return `models.tts.speed: Choose a value from ${capabilities.speed.range.minimum} through ${capabilities.speed.range.maximum}.`;
+  return undefined;
+}
 
 export const OPENAI_STANDARD_VOICES: readonly PersonaVoice[] = [
   "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse", "marin", "cedar",
@@ -84,8 +108,18 @@ const OPENAI_STT_MODELS = new Set([
   "gpt-4o-mini-transcribe",
 ]);
 
-const CARTESIA_TTS_MODELS = new Set(["sonic-3.6", "sonic-3.6-2026-08-27", "sonic-preview"]);
+const CARTESIA_TTS_MODELS = new Set(["sonic-3.5", "sonic-3.6", "sonic-3.6-2026-08-27", "sonic-preview"]);
+const CARTESIA_SONIC_36_LANGUAGES = [
+  "en", "fr", "de", "es", "pt", "zh", "ja", "hi", "it", "ko", "nl", "pl", "ru", "sv", "tr", "tl", "bg", "ro", "ar", "cs", "el", "fi", "hr", "ms", "sk", "da", "ta", "uk", "hu", "no", "vi", "bn", "th", "he", "ka", "id", "te", "gu", "kn", "ml", "mr", "pa", "or", "ur",
+] as const;
 const CARTESIA_STT_MODELS = new Set(["ink-2"]);
+
+const DEEPGRAM_NOVA3_LANGUAGES = new Set([
+  "ar", "be", "bn", "bs", "bg", "ca", "zh", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "de", "el", "gu", "he", "hi", "hu", "id", "it", "ja", "kn", "ko", "lv", "lt", "mk", "ms", "mr", "no", "fa", "pl", "pt", "ro", "ru", "sr", "sk", "sl", "es", "sv", "tl", "ta", "te", "th", "tr", "uk", "ur", "vi",
+]);
+const CARTESIA_STT_LANGUAGES = new Set([
+  "en", "zh", "de", "es", "ru", "ko", "fr", "ja", "pt", "tr", "pl", "ca", "nl", "ar", "sv", "it", "id", "hi", "fi", "vi", "he", "uk", "el", "ms", "cs", "ro", "da", "hu", "ta", "no", "th", "ur", "hr", "bg", "lt", "la", "mi", "ml", "cy", "sk", "te", "fa", "lv", "bn", "sr", "az", "sl", "kn", "et", "mk", "br", "eu", "is", "hy", "ne", "mn", "bs", "kk", "sq", "sw", "gl", "mr", "pa", "si", "km", "sn", "yo", "so", "af", "oc", "ka", "be", "tg", "sd", "gu", "am", "yi", "lo", "uz", "fo", "ht", "ps", "tk", "nn", "mt", "sa", "lb", "my", "bo", "tl", "mg", "as", "tt", "haw", "ln", "ha", "ba", "jw", "su", "yue",
+]);
 
 function unsupported<T>(reason: string): Capability<T> {
   return { status: "unsupported", reason };
@@ -103,6 +137,15 @@ function sttSupports(selection: PersonaCapabilitySelection): boolean {
       : selection.sttProvider === "deepgram" && selection.sttModel === "nova-3-general";
 }
 
+function sttSupportsLanguage(selection: PersonaCapabilitySelection): boolean {
+  if (selection.language === undefined) return true;
+  const base = selection.language.toLowerCase().split("-")[0]!;
+  if (selection.sttProvider === "openai") return OPENAI_TTS_LANGUAGES.includes(base as (typeof OPENAI_TTS_LANGUAGES)[number]);
+  if (selection.sttProvider === "deepgram") return DEEPGRAM_NOVA3_LANGUAGES.has(base);
+  if (selection.sttProvider === "cartesia") return CARTESIA_STT_LANGUAGES.has(base);
+  return false;
+}
+
 /** Resolve the complete selected combination. No caller may relax this result. */
 export function resolvePersonaCapabilities(
   selection: PersonaCapabilitySelection,
@@ -110,6 +153,13 @@ export function resolvePersonaCapabilities(
 ): PersonaCapabilities {
   if (!sttSupports(selection)) {
     const reason = `Speech recognition ${selection.sttProvider}/${selection.sttModel} is not available in this release.`;
+    return {
+      voices: unsupported(reason), language: unsupported(reason), accent: unsupported(reason),
+      emotion: unsupported(reason), speed: unsupported(reason), speechVolume: unsupported(reason),
+    };
+  }
+  if (!sttSupportsLanguage(selection)) {
+    const reason = `Speech recognition ${selection.sttProvider}/${selection.sttModel} does not support ${selection.language}.`;
     return {
       voices: unsupported(reason), language: unsupported(reason), accent: unsupported(reason),
       emotion: unsupported(reason), speed: unsupported(reason), speechVolume: unsupported(reason),
@@ -141,9 +191,11 @@ export function resolvePersonaCapabilities(
 
   if (selection.ttsProvider === "cartesia" && CARTESIA_TTS_MODELS.has(selection.ttsModel)) {
     const selectedVoice = accountVoices.find((voice) => voice.id === selection.voiceId);
-    const languages = selectedVoice?.languages ?? [];
+    const languages = selection.ttsModel === "sonic-3.5"
+      ? CARTESIA_SONIC_36_LANGUAGES.filter((language) => language !== "or" && language !== "ur")
+      : CARTESIA_SONIC_36_LANGUAGES;
     const accents = selectedVoice?.accents ?? [];
-    const languageMatches = selection.language === undefined || languages.length === 0 || languages.some((language) => language.toLowerCase() === selection.language!.toLowerCase() || language.split("-")[0] === selection.language!.split("-")[0]);
+    const languageMatches = selection.language === undefined || languages.some((language) => language === selection.language!.toLowerCase().split("-")[0]);
     const professional = selectedVoice?.isProfessional === true;
     const supportsModel = selectedVoice?.modelIds === undefined || selectedVoice.modelIds.includes(selection.ttsModel);
     if (!supportsModel || (professional && selection.ttsModel === "sonic-preview")) {
@@ -158,10 +210,8 @@ export function resolvePersonaCapabilities(
     return {
       voices: { status: "supported", choices: accountVoices },
       language: !languageMatches
-        ? unsupported(`The selected Cartesia voice does not support ${selection.language}.`)
-        : languages.length > 0
-        ? { status: "supported", choices: languages }
-        : unknown("Cartesia did not return language metadata for the selected voice."),
+        ? unsupported(`Cartesia ${selection.ttsModel} does not support ${selection.language}.`)
+        : { status: "supported", choices: languages },
       accent: selectedVoice === undefined
         ? unknown("Choose a Cartesia voice to resolve its accent metadata.")
         : accents.length > 0
@@ -230,6 +280,7 @@ export async function discoverCartesiaVoices(
         accents,
         ...(raw.is_pro === true ? { isProfessional: true } : {}),
         ...(modelIds.length === 0 ? {} : { modelIds }),
+        ...(raw.is_public === true ? { publiclyAccessible: true } : {}),
       });
     }
     cursor = page.has_more === true ? voices.at(-1)?.id : undefined;
