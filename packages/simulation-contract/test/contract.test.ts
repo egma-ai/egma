@@ -1051,6 +1051,18 @@ describe("the exported spec check, which the control plane sends through", () =>
     }
   });
 
+  it("keeps validating captured version 5 work with the version 5 schema", async () => {
+    const [current] = await fixturesUnder("spec", "valid");
+    if (current === undefined) throw new Error("no valid spec fixture");
+    const persona = current.document.persona as Record<string, unknown>;
+    const legacy = {
+      ...current.document,
+      contract_version: 5,
+      persona: { name: persona.name, personality: persona.personality, language: "en-US" },
+    };
+    expect(specComplaints(legacy)).toEqual([]);
+  });
+
   it("complains about every deliberately invalid fixture", async () => {
     for (const fixture of await fixturesUnder("spec", "invalid")) {
       expect(

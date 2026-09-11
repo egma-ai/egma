@@ -683,6 +683,8 @@ async function assembledSpec(
             accent: personaControls.accent,
             speech_volume: personaControls.speechVolume,
             execution_policy_version: personaControls.executionPolicyVersion,
+            background_sound_id: personaControls.backgroundSoundId,
+            background_volume: personaControls.backgroundVolume,
           } }
         : {}),
     },

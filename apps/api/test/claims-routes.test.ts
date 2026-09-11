@@ -471,7 +471,15 @@ describe("claiming work", () => {
     expect(spec.persona).toEqual({
       name: NEUTRAL_PERSON.identityName,
       personality: NEUTRAL_PERSON.personality,
-      parameters: { language: NEUTRAL_PERSON.language, emotion: "neutral", accent: "voice_default", speech_volume: 1, execution_policy_version: 1 },
+      parameters: {
+        language: NEUTRAL_PERSON.language,
+        emotion: "neutral",
+        accent: "voice_default",
+        speech_volume: 1,
+        execution_policy_version: 1,
+        background_sound_id: "none",
+        background_volume: 0.0631,
+      },
     });
     expect(spec.models).toEqual({
       llm: {
@@ -552,7 +560,15 @@ describe("claiming work", () => {
     expect(spec.persona).toEqual({
       name: NEUTRAL_PERSON.identityName,
       personality: NEUTRAL_PERSON.personality,
-      language: NEUTRAL_PERSON.language,
+      parameters: {
+        language: NEUTRAL_PERSON.language,
+        emotion: "neutral",
+        accent: "voice_default",
+        speech_volume: 1,
+        execution_policy_version: 1,
+        background_sound_id: "none",
+        background_volume: 0.0631,
+      },
     });
     // And it is still a document the contract accepts, so this cannot be
     // passing on a spec that is merely stale in the same shape.
@@ -1527,7 +1543,7 @@ describe("one source of execution truth", () => {
     expect(row?.endingReason).toBe("dispatch_failed");
   });
 
-  it("does not claim work for a worker that cannot read contract version 5", async () => {
+  it("keeps version 6 work queued for a worker that only reads version 5", async () => {
     const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
       "claims_contract_cutover",
     );
@@ -1537,10 +1553,10 @@ describe("one source of execution truth", () => {
       claimant: "old-simulator",
       capacity: 1,
       wait_seconds: 0,
-      contract_versions: [1],
+      contract_versions: [5],
     });
-    expect(refused.statusCode).toBe(400);
-    expect(String(refused.body.message)).toContain("version 5");
+    expect(refused.statusCode).toBe(200);
+    expect(refused.body.specs).toEqual([]);
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
     expect(row?.status).toBe("queued");
   });
@@ -1558,7 +1574,7 @@ describe("persona settings frozen before dispatch", () => {
     const editedModels: PersonaModels = {
       llm: { provider: "openai", model: "gpt-4o" },
       stt: { provider: "deepgram", model: "nova-3-general" },
-      tts: { provider: "openai", model: "tts-1", voiceId: "custom-voice-id", speed: 1.3 },
+      tts: { provider: "openai", model: "tts-1", voiceId: "alloy", speed: 1.3 },
     };
     const moved = await ask(api.app, "PATCH", `/v1/personas/${persona.id}`, key, { expectedVersionId: persona.versionId, personality: "Has one clear question.", models: editedModels });
     expect(moved.statusCode, JSON.stringify(moved.body)).toBe(200);
@@ -1567,7 +1583,7 @@ describe("persona settings frozen before dispatch", () => {
     expect(deferred.body.specs).toEqual([]);
     const retried = await claim(api.config.simulatorServiceToken, { claimant: "frozen-settings", capacity: 1, wait_seconds: 0 });
     const [original] = retried.body.specs as Record<string, unknown>[];
-    expect(original?.persona).toEqual({ name: NEUTRAL_PERSON.identityName, personality: NEUTRAL_PERSON.personality, language: NEUTRAL_PERSON.language });
+    expect(original?.persona).toEqual({ name: NEUTRAL_PERSON.identityName, personality: NEUTRAL_PERSON.personality, parameters: { language: NEUTRAL_PERSON.language, emotion: "neutral", accent: "voice_default", speech_volume: 1, execution_policy_version: 1, background_sound_id: "none", background_volume: 0.0631 } });
     expect(original?.models).toMatchObject({
       llm: RECOMMENDED_PERSONA_MODELS.llm, stt: RECOMMENDED_PERSONA_MODELS.stt,
       tts: { provider: RECOMMENDED_PERSONA_MODELS.tts.provider, model: RECOMMENDED_PERSONA_MODELS.tts.model, voice_id: RECOMMENDED_PERSONA_MODELS.tts.voiceId, speed: RECOMMENDED_PERSONA_MODELS.tts.speed },
@@ -1577,7 +1593,7 @@ describe("persona settings frozen before dispatch", () => {
     const later = await claim(api.config.simulatorServiceToken, { claimant: "later-settings", capacity: 1, wait_seconds: 0 });
     const [next] = later.body.specs as Record<string, unknown>[];
     expect(next?.persona).toMatchObject({ personality: "Has one clear question." });
-    expect(next?.models).toMatchObject({ llm: editedModels.llm, stt: editedModels.stt, tts: { provider: "openai", model: "tts-1", voice_id: "custom-voice-id", speed: 1.3 } });
+    expect(next?.models).toMatchObject({ llm: editedModels.llm, stt: editedModels.stt, tts: { provider: "openai", model: "tts-1", voice_id: "alloy", speed: 1.3 } });
     expect(specComplaints(next)).toEqual([]);
   });
 });
