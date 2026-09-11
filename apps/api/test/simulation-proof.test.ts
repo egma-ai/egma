@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { spawn } from "node:child_process";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   assertPublicEvidence,
   assertValidGrade,
   namedTunnelSettings,
+  startPublicTunnel,
+  stopChild,
 } from "./support/simulation-proof.ts";
 
 function grade(result: "passed" | "failed" | "errored", score: number | null) {
@@ -91,5 +94,88 @@ describe("named simulation tunnel settings", () => {
       SIMULATION_E2E_TUNNEL_URL: "https://user:password@retell-local.example.com",
       SIMULATION_E2E_TUNNEL_CREDENTIALS_FILE: "/private/tunnel.json",
     })).toThrow(/must be an HTTPS origin/u);
+  });
+});
+
+describe("public tunnel startup", () => {
+  it("starts a fresh quick tunnel after two allocation timeouts", async () => {
+    let attempts = 0;
+    const launch = vi.fn(() => {
+      attempts += 1;
+      const script = attempts < 3
+        ? 'process.stderr.write(\'failed to request quick Tunnel: Post "https://api.trycloudflare.com/tunnel": context deadline exceeded (Client.Timeout exceeded while awaiting headers)\\n\'); process.on("exit", () => process.stderr.write("late diagnostic before stdio close\\n")); process.exitCode = 1'
+        : 'process.stderr.write("Your quick Tunnel has been created!\\nhttps://fixture-third.trycloudflare.com\\n"); setInterval(() => {}, 1_000)';
+      return spawn(process.execPath, ["-e", script], {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    });
+    const tunnel = await startPublicTunnel("http://127.0.0.1:3100", {
+      env: {},
+      launch,
+      pause: async () => new Promise((resolve) => setTimeout(resolve, 5)),
+    });
+    try {
+      expect(tunnel.url).toBe("https://fixture-third.trycloudflare.com");
+      expect(launch).toHaveBeenCalledTimes(3);
+      expect(tunnel.output()).toContain("quick tunnel attempt 1 exited with 1");
+      expect(tunnel.output()).toContain("Client.Timeout exceeded while awaiting headers");
+      expect(tunnel.output().match(/late diagnostic before stdio close/gu)).toHaveLength(2);
+    } finally {
+      await stopChild(tunnel.process);
+    }
+  });
+
+  it("does not launch another quick tunnel after the shared deadline", async () => {
+    let now = 0;
+    let childClosed = false;
+    const launch = vi.fn(() => {
+      const child = spawn(process.execPath, ["-e", "process.exit(1)"], {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      child.once("close", () => {
+        childClosed = true;
+        now = 59_900;
+      });
+      return child;
+    });
+    const pauses: number[] = [];
+
+    await expect(startPublicTunnel("http://127.0.0.1:3100", {
+      env: {},
+      launch,
+      now: () => now,
+      pause: async (milliseconds) => {
+        pauses.push(milliseconds);
+        if (childClosed) {
+          now += milliseconds;
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+      },
+    })).rejects.toThrow(/did not publish a URL within 60s/u);
+
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(pauses.at(-1)).toBe(100);
+    expect(now).toBe(60_000);
+  });
+
+  it("does not retry a named tunnel that exits", async () => {
+    const child = spawn(process.execPath, ["-e", "process.exit(1)"], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const launch = vi.fn(() => child);
+    const tunnel = await startPublicTunnel("http://127.0.0.1:3100", {
+      env: {
+        SIMULATION_E2E_TUNNEL_ID: "tunnel-id",
+        SIMULATION_E2E_TUNNEL_URL: "https://retell-local.example.com",
+        SIMULATION_E2E_TUNNEL_CREDENTIALS_FILE: "/private/tunnel.json",
+      },
+      launch,
+    });
+    if (child.exitCode === null) {
+      await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    }
+    expect(tunnel.process.exitCode).toBe(1);
+    expect(launch).toHaveBeenCalledTimes(1);
   });
 });
