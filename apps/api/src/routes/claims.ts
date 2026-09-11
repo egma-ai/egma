@@ -685,6 +685,7 @@ async function assembledSpec(
             execution_policy_version: personaControls.executionPolicyVersion,
             background_sound_id: personaControls.backgroundSoundId,
             background_volume: personaControls.backgroundVolume,
+            interruption_level: personaControls.interruptionLevel,
           } }
         : {}),
     },

@@ -77,6 +77,27 @@ type Query = {
   readonly language?: string; readonly voiceId?: string; readonly refresh?: boolean;
 };
 
+const PERSONA_CONTROL_FIELDS = [
+  "language", "emotion", "accent", "speechVolume", "backgroundSoundId",
+  "backgroundVolume", "interruptionLevel",
+] as const;
+
+function parsedControls(value: unknown): ReturnType<typeof validPersonaControls> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new UnprocessableInputError("controls: Send the complete persona controls as an object.");
+  }
+  const unknown = Object.keys(value).find((key) => !PERSONA_CONTROL_FIELDS.includes(key as (typeof PERSONA_CONTROL_FIELDS)[number]));
+  if (unknown !== undefined) {
+    throw new UnprocessableInputError(`controls.${unknown}: This control is not accepted. The server owns policy versions.`);
+  }
+  try {
+    return validPersonaControls({ ...value, executionPolicyVersion: 1 });
+  } catch (cause) {
+    if (cause instanceof TypeError) throw new UnprocessableInputError(`controls: ${cause.message}`);
+    throw cause;
+  }
+}
+
 const voiceCache = new Map<string, { expires: number; voices: readonly PersonaVoice[] }>();
 
 export function requestSignal(
@@ -453,7 +474,7 @@ export async function personaRoutes(
     const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
     const models = validPersonaModels(body.models);
-    const controls = validPersonaControls({ ...(body.controls as object), executionPolicyVersion: 1 });
+    const controls = parsedControls(body.controls);
     const credential = await authoringCredential(options, acting.auth, models.tts.provider);
     if (credential === undefined) return sendRefusal(reply, "unprocessable", "The selected text-to-speech provider is not available.");
     const tts = catalogEntry("tts", models.tts.provider, models.tts.model);
@@ -622,7 +643,7 @@ export async function personaRoutes(
     }
 
     const models = "models" in body ? validPersonaModels(body.models) : undefined;
-    const controls = "controls" in body ? validPersonaControls({ ...(body.controls as object), executionPolicyVersion: 1 }) : undefined;
+    const controls = "controls" in body ? parsedControls(body.controls) : undefined;
 
     const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
@@ -670,7 +691,7 @@ export async function personaRoutes(
     }
 
     const models = "models" in body ? validPersonaModels(body.models) : undefined;
-    const controls = "controls" in body ? validPersonaControls({ ...(body.controls as object), executionPolicyVersion: 1 }) : undefined;
+    const controls = "controls" in body ? parsedControls(body.controls) : undefined;
 
     const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
@@ -713,7 +734,7 @@ export async function personaRoutes(
     const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
     const models = "models" in body ? validPersonaModels(body.models) : undefined;
-    const controls = "controls" in body ? validPersonaControls({ ...(body.controls as object), executionPolicyVersion: 1 }) : undefined;
+    const controls = "controls" in body ? parsedControls(body.controls) : undefined;
     if (controls !== undefined && models === undefined) return sendRefusal(reply, "unprocessable", "models: Send the complete model selection with persona controls.");
     if (models !== undefined) {
       const current = await getPersona(acting.auth, personaId);

@@ -34,7 +34,7 @@ import {
   defaultPersonaParameterValues,
   PERSONA_PARAMETER_CONTRACT,
   personaParameterContract,
-  personaParametersOfModels,
+  personaModelParameterValues,
   personaParametersOfSettings,
   validatePersonaParameterContract,
   validatePersonaParameterValues,
@@ -746,13 +746,7 @@ export async function editPersona(
           current.parameterContract,
           askedSettings ?? {
             ...settings.parameterValues,
-            ...personaParametersOfModels(askedModels!),
-            language: settings.parameterValues.language,
-            emotion: settings.parameterValues.emotion,
-            accent: settings.parameterValues.accent,
-            speech_volume: settings.parameterValues.speech_volume,
-            execution_policy_version:
-              settings.parameterValues.execution_policy_version,
+            ...personaModelParameterValues(askedModels!),
           },
         );
         if (
@@ -823,21 +817,26 @@ export async function usePersona(
   if (auth.projectId === undefined) {
     throw new UnprocessableInputError("using a persona requires a project");
   }
-  const values = selection === undefined
-    ? undefined
-    : "models" in selection
-    ? personaParametersOfSettings(selection)
-    : personaParametersOfModels(selection);
   const projectId = auth.projectId;
   return writing(() =>
     db().transaction(async (tx) => {
       await lockPersonaProject(tx, auth, projectId);
       const [found] = await tx
-        .select({ id: persona.id })
+        .select({ id: persona.id, parameterContract: personaVersion.parameterContract })
         .from(persona)
+        .innerJoin(personaVersion, eq(personaVersion.id, persona.currentVersionId))
         .where(thePersona(auth, id))
         .limit(1);
       if (found === undefined) return undefined;
+      const current = await readProjectPersonaSettingsOn(tx, auth, projectId, id, found.parameterContract, true);
+      const values = selection === undefined || current !== undefined
+        ? undefined
+        : "models" in selection
+          ? personaParametersOfSettings(selection)
+          : validatePersonaParameterValues(found.parameterContract, {
+              ...defaultPersonaParameterValues(found.parameterContract),
+              ...personaModelParameterValues(selection),
+            });
       await ensureProjectPersonaOn(tx, auth, projectId, id, values);
       return readPersonaOn(tx, auth, id);
     }),

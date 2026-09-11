@@ -77,6 +77,11 @@ function modelParameterValues(models: PersonaModels, checkCurrentCatalog = true)
   };
 }
 
+/** The eight model fields, for merging a model-only edit without resetting controls. */
+export function personaModelParameterValues(models: PersonaModels): PersonaParameterValues {
+  return modelParameterValues(models);
+}
+
 /** The exact historical eight-field contract. Never add fields here. */
 export function legacyPersonaParameterContract(models: PersonaModels = RECOMMENDED_PERSONA_MODELS): readonly GraderParameter[] {
   const defaults = modelParameterValues(models, false);

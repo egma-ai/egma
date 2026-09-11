@@ -875,6 +875,21 @@ describe("forking a persona", () => {
     expect(privateVoice.statusCode).toBe(422);
     expect(privateVoice.body.message).toBe("models.tts.voiceId: Preview this existing OpenAI voice before saving it.");
 
+    const retained = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId, name: "Retained controls", ...BEHAVIOR,
+      models: RECOMMENDED_PERSONA_MODELS, controls: CONTROLS,
+    });
+    expect(retained.statusCode, JSON.stringify(retained.body)).toBe(201);
+    const changedModels = { ...RECOMMENDED_PERSONA_MODELS, llm: { provider: "openai", model: "gpt-5.6-terra" } };
+    const changed = await browse("PATCH", `/v1/personas/${personaIn(retained).id}`, ada, {
+      projectId: ada.projectId, models: changedModels,
+    });
+    expect(changed.statusCode, JSON.stringify(changed.body)).toBe(200);
+    expect(personaIn(changed).settings).toMatchObject({
+      models: changedModels,
+      controls: { ...CONTROLS, executionPolicyVersion: 1 },
+    });
+
     const configured = await browse("POST", "/v1/personas", ada, {
       projectId: ada.projectId,
       name: "Expressive caller",
@@ -892,6 +907,38 @@ describe("forking a persona", () => {
     });
     expect(incompatible.statusCode).toBe(422);
     expect(incompatible.body.message).toContain("emotion:");
+  });
+
+  it("returns 422 for invalid controls and leaves saved settings unchanged", async () => {
+    api = await createApi("personas_invalid_controls");
+    const ada = await signUp(api.app, "invalid-controls@acme.example", "Acme");
+    const invalidCreate = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId, name: "Invalid", ...BEHAVIOR,
+      models: RECOMMENDED_PERSONA_MODELS,
+      controls: { ...CONTROLS, speechVolume: 99 },
+    });
+    expect(invalidCreate.statusCode).toBe(422);
+    expect(invalidCreate.body.message).toContain("speech volume");
+
+    const created = await createPersonaThrough(ada, "Stable settings");
+    const before = created.settings;
+    const invalidUpdate = await browse("PATCH", `/v1/personas/${created.id}`, ada, {
+      projectId: ada.projectId,
+      models: RECOMMENDED_PERSONA_MODELS,
+      controls: { ...CONTROLS, executionPolicyVersion: 9 },
+    });
+    expect(invalidUpdate.statusCode).toBe(422);
+    expect(invalidUpdate.body.message).toContain("server owns policy versions");
+    const after = await browse("GET", `/v1/personas/${created.id}?projectId=${ada.projectId}`, ada);
+    expect(personaIn(after).settings).toEqual(before);
+
+    const invalidPreview = await browse("POST", "/v1/persona-preview", ada, {
+      projectId: ada.projectId,
+      models: RECOMMENDED_PERSONA_MODELS,
+      controls: { ...CONTROLS, emotion: "surprised" },
+    });
+    expect(invalidPreview.statusCode).toBe(422);
+    expect(invalidPreview.body.message).toContain("emotion");
   });
 });
 

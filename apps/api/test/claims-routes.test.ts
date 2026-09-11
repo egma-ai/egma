@@ -12,7 +12,7 @@ import {
 } from "@egma/db";
 import { specComplaints } from "@egma/simulation-contract";
 import { ProviderCredentialSourceUnavailableError } from "@egma/provider-credentials";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   acceptsServiceToken,
@@ -46,9 +46,31 @@ import {
 
 let api: TestApi;
 
+beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn(async (input: string | URL) => {
+    if (String(input).startsWith("https://api.cartesia.ai/voices")) {
+      return new Response(JSON.stringify({
+        data: [{
+          id: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
+          name: "Customer support",
+          access: "public",
+          visibility: "all",
+          gender: "masculine",
+          accents: [],
+          fine_tunes: [{ public_model_id: "sonic-3.5" }],
+        }],
+        has_more: false,
+        next_page: null,
+      }), { status: 200 });
+    }
+    throw new Error(`unexpected provider request: ${String(input)}`);
+  }));
+});
+
 afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   await api?.close();
 });
 
@@ -479,6 +501,7 @@ describe("claiming work", () => {
         execution_policy_version: 1,
         background_sound_id: "none",
         background_volume: 0.0631,
+        interruption_level: "off",
       },
     });
     expect(spec.models).toEqual({
@@ -568,6 +591,7 @@ describe("claiming work", () => {
         execution_policy_version: 1,
         background_sound_id: "none",
         background_volume: 0.0631,
+        interruption_level: "off",
       },
     });
     // And it is still a document the contract accepts, so this cannot be
@@ -1081,12 +1105,12 @@ describe("one source of execution truth", () => {
       tts.speed = speed;
       return changed;
     };
-    expect(specComplaints(withSpeed(SPEED_RANGE.fastest))).toEqual([]);
+    expect(specComplaints(withSpeed(4))).toEqual([]);
     expect(
-      specComplaints(withSpeed(SPEED_RANGE.slowest - 0.0001)),
+      specComplaints(withSpeed(0.2499)),
     ).not.toEqual([]);
     expect(
-      specComplaints(withSpeed(SPEED_RANGE.fastest + 0.0001)),
+      specComplaints(withSpeed(4.0001)),
     ).not.toEqual([]);
   });
 
@@ -1583,7 +1607,7 @@ describe("persona settings frozen before dispatch", () => {
     expect(deferred.body.specs).toEqual([]);
     const retried = await claim(api.config.simulatorServiceToken, { claimant: "frozen-settings", capacity: 1, wait_seconds: 0 });
     const [original] = retried.body.specs as Record<string, unknown>[];
-    expect(original?.persona).toEqual({ name: NEUTRAL_PERSON.identityName, personality: NEUTRAL_PERSON.personality, parameters: { language: NEUTRAL_PERSON.language, emotion: "neutral", accent: "voice_default", speech_volume: 1, execution_policy_version: 1, background_sound_id: "none", background_volume: 0.0631 } });
+    expect(original?.persona).toEqual({ name: NEUTRAL_PERSON.identityName, personality: NEUTRAL_PERSON.personality, parameters: { language: NEUTRAL_PERSON.language, emotion: "neutral", accent: "voice_default", speech_volume: 1, execution_policy_version: 1, background_sound_id: "none", background_volume: 0.0631, interruption_level: "off" } });
     expect(original?.models).toMatchObject({
       llm: RECOMMENDED_PERSONA_MODELS.llm, stt: RECOMMENDED_PERSONA_MODELS.stt,
       tts: { provider: RECOMMENDED_PERSONA_MODELS.tts.provider, model: RECOMMENDED_PERSONA_MODELS.tts.model, voice_id: RECOMMENDED_PERSONA_MODELS.tts.voiceId, speed: RECOMMENDED_PERSONA_MODELS.tts.speed },

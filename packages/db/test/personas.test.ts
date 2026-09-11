@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   createPersona,
   editPersona,
+  usePersona,
   getPersona,
   getPersonaVersion,
   NotPermittedError,
@@ -338,7 +339,20 @@ describe("editing a persona's identity name", () => {
 
 describe("editing a persona's model selection", () => {
   it("updates project settings without creating a core version", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
+    const created = await createPersona(actingAsAcme(), {
+      ...rita,
+      settings: {
+        models: RECOMMENDED_PERSONA_MODELS,
+        language: "es-ES",
+        emotion: "angry",
+        accent: "spanish",
+        speechVolume: 1.3,
+        backgroundSoundId: "cafe-v1",
+        backgroundVolume: 0.08,
+        interruptionLevel: "frequent",
+        executionPolicyVersion: 1,
+      },
+    });
     const nextModels = {
       ...RECOMMENDED_PERSONA_MODELS,
       stt: { provider: "deepgram", model: "nova-3-general" },
@@ -351,7 +365,24 @@ describe("editing a persona's model selection", () => {
 
     expect(edited?.version).toBe(1);
     expect(edited?.settings?.models).toEqual(nextModels);
+    expect(edited?.settings?.parameterValues).toMatchObject({
+      language: "es-ES", emotion: "angry", accent: "spanish", speech_volume: 1.3,
+      background_sound_id: "cafe-v1", background_volume: 0.08, interruption_level: "frequent",
+    });
     expect(await getPersonaVersion(actingAsAcme(), created.versionId)).not.toHaveProperty("models");
+  });
+
+  it("applies model overrides on first use without replacing preset controls", async () => {
+    const models = {
+      ...RECOMMENDED_PERSONA_MODELS,
+      llm: { provider: "openai", model: "gpt-5.6-terra" },
+    } as const;
+    const used = await usePersona(actingAsAcme(), EGMA_PROVIDED_PERSONAS.spanishCaller, models);
+
+    expect(used?.settings?.models).toEqual(models);
+    expect(used?.settings?.parameterValues).toMatchObject({
+      language: "es-ES", emotion: "neutral", background_sound_id: "none", interruption_level: "off",
+    });
   });
 
   it("updates speaking speed without creating a core version", async () => {
