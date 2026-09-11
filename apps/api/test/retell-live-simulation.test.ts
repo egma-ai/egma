@@ -717,7 +717,10 @@ it.skipIf(!ENABLED || storage?.available !== true)(
         const page = await context.newPage();
         let pageStatus: number | null = null;
         try {
-          const response = await page.goto(`${tunnel.url}/projects/${identity.project.id}/runs/${runId}`);
+          const response = await page.goto(
+            `${tunnel.url}/projects/${identity.project.id}/runs/${runId}`,
+            { waitUntil: "commit" },
+          );
           pageStatus = response?.status() ?? null;
           await assertEvidencePage(page, {
             humanIncludes: "tuesday",

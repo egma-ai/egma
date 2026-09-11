@@ -4,7 +4,6 @@ import {
   usePersona,
   legacyPersonaParameterContract,
   personaParameterContract,
-  preCategoricalPersonaParameterContract,
   personaModelsOfParameters,
   personaParametersOfModels,
   defaultPersonaParameterValues,
@@ -25,6 +24,7 @@ import {
 } from "@egma/db";
 import {
   currentPersonaParameterDefaults,
+  preCategoricalPersonaParameterContract,
   ticket01PersonaParameterContract,
   ticket02PersonaParameterContract,
 } from "../src/persona-library/parameters.ts";

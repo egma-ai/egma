@@ -179,6 +179,12 @@ async function seedRun(
   const runId = newId("run");
   const simulationId = newId("sim");
   const { organizationId, projectId } = contextFor(ready.ada, "member");
+  const { rows: personaSettings } = await api.database.sql<{ parameter_contract: unknown }>(
+    "select parameter_contract from project_persona where project_id = $1 and persona_definition_id = $2",
+    [projectId, ready.personaId],
+  );
+  const personaParameterContract = personaSettings[0]?.parameter_contract;
+  if (personaParameterContract === undefined) throw new Error("the sweep fixture has no persona settings contract");
   await api.database.sql(
     `insert into run
        (id, organization_id, project_id, suite_id, agent_id, connection_id,
@@ -233,8 +239,8 @@ async function seedRun(
     `insert into simulation
        (id, run_id, organization_id, project_id, agent_id, connection_id,
         persona_id, persona_version_id, test_id, test_version_id,
-        position, modality, connection_type, status, persona_parameter_values)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,'voice','retell_web_call','queued',$11::jsonb)`,
+        position, modality, connection_type, status, persona_parameter_values, persona_parameter_contract)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,'voice','retell_web_call','queued',$11::jsonb,$12::jsonb)`,
     [
       simulationId,
       runId,
@@ -247,6 +253,7 @@ async function seedRun(
       ready.testId,
       ready.testVersionId,
       JSON.stringify(defaultPersonaParameterValues(PERSONA_PARAMETER_CONTRACT)),
+      JSON.stringify(personaParameterContract),
     ],
   );
   return { runId, simulationId };

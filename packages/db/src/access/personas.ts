@@ -52,7 +52,6 @@ import type { GraderParameter } from "../grader-library/parameters.ts";
 import { validateUnchangedParameterUnits } from "../grader-library/parameters.ts";
 import {
   ensureProjectPersonaOn,
-  assertPersonaSettingsCompatibleOn,
   readProjectPersonaSettingsOn,
   type ProjectPersonaSettings,
 } from "./project-personas.ts";
@@ -846,12 +845,6 @@ export async function editPersona(
       }
       let versionId = current.id;
       if (coreChanged || legacyUpgrade) {
-        await assertPersonaSettingsCompatibleOn(
-          tx,
-          id,
-          current.parameterContract,
-          current.parameterContract,
-        );
         versionId = newId("prsv");
         await tx
           .insert(personaVersion)

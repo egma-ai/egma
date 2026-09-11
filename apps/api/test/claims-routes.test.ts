@@ -5,7 +5,7 @@ import {
   editPersona,
   getSimulation,
   legacyPersonaParameterContract,
-  preCategoricalPersonaParameterContract,
+  ticket02PersonaParameterContract,
   listRunEvents,
   SPEED_RANGE,
   RECOMMENDED_PERSONA_MODELS,
@@ -1772,7 +1772,7 @@ describe("one source of execution truth", () => {
         speed: 1.3,
       },
     };
-    const historicalContract = preCategoricalPersonaParameterContract(
+    const historicalBase = ticket02PersonaParameterContract(
       historicalModels,
       {
         language: "en-US",
@@ -1782,9 +1782,12 @@ describe("one source of execution truth", () => {
         executionPolicyVersion: 1,
         backgroundSoundId: "none",
         backgroundVolume: 0.0631,
-        interruptionLevel: "off",
       },
     );
+    const historicalContract = [...historicalBase, {
+      key: "interruption_level", label: "Interruption level", valueType: "string" as const,
+      defaultValue: "off", unit: null, minimum: null, maximum: null,
+    }];
     const historicalValues = Object.fromEntries(
       historicalContract.map((field) => [field.key, field.defaultValue]),
     );

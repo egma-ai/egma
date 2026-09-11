@@ -283,7 +283,6 @@ export {
   SPEECH_VOLUME_RANGE,
   personaControlsOfParameters,
   personaParameterContract,
-  preCategoricalPersonaParameterContract,
   personaSpeechSpeedOfTarget,
   personaParametersOfModels,
   personaParametersOfSettings,

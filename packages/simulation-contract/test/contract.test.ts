@@ -1131,6 +1131,7 @@ describe("the exported spec check, which the control plane sends through", () =>
     })).toContain("/models/live: must NOT be valid");
     expect(specComplaints({
       ...separate,
+      modality: "voice",
       models: { mode: "live", llm, live: liveWithoutKey },
     })).toContain("/models/live: must have required property 'key'");
   });
