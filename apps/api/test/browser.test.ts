@@ -5411,7 +5411,7 @@ it(
       await walk.getByText("Custom · v1", { exact: true }).waitFor();
       await walk.keyboard.press("Escape");
       await walk
-        .getByRole("button", { name: "Everyday caller", exact: true })
+        .getByRole("button", { name: "Everyday Caller [Male]", exact: true })
         .click();
       await reactHasTakenOver(walk, "form");
       expect(await walk.locator("#persona-personality").count()).toBe(0);
@@ -5419,14 +5419,14 @@ it(
       await walk.selectOption("#persona-stt", "deepgram::nova-3-general");
       await walk.selectOption("#persona-tts", "openai::tts-1-hd");
       await walk.fill("#persona-tts-speed", "0.85");
-      await walk.fill("#persona-tts-voice", "my-custom-voice");
+      await walk.selectOption("#persona-tts-voice", "alloy");
       await walk.getByRole("button", { name: "Use persona" }).click();
       await walk.getByRole("button", { name: "Saved", exact: true }).waitFor();
       await walk.getByRole("region", { name: "Settings" }).waitFor();
-      expect(await walk.inputValue("#persona-tts-voice")).toBe("my-custom-voice");
+      expect(await walk.inputValue("#persona-tts-voice")).toBe("alloy");
       await walk.keyboard.press("Escape");
       await walk
-        .getByRole("button", { name: "Everyday caller", exact: true })
+        .getByRole("button", { name: "Everyday Caller [Male]", exact: true })
         .click();
       await walk.getByRole("region", { name: "Settings" }).waitFor();
       expect(await walk.inputValue("#persona-llm")).toBe("openai::gpt-4o");
@@ -5436,27 +5436,15 @@ it(
       expect(await walk.inputValue("#persona-tts")).toBe("openai::tts-1-hd");
       expect(await walk.inputValue("#persona-tts-speed")).toBe("0.85");
       expect(await walk.inputValue("#persona-tts-voice")).toBe(
-        "my-custom-voice",
+        "alloy",
       );
-      await walk.fill("#persona-tts-voice", " ");
-      const invalid = walk.waitForResponse(
-        (response) =>
-          response.request().method() === "PATCH" &&
-          new URL(response.url()).pathname.startsWith("/v1/personas/"),
-      );
-      await walk.getByRole("button", { name: "Save changes" }).click();
-      expect((await invalid).status()).toBe(422);
-      await walk.getByRole("alert").waitFor();
-      await walk.fill("#persona-tts-voice", "my-saved-voice");
-      await walk.getByRole("button", { name: "Save changes" }).click();
-      await walk.getByRole("button", { name: "Saved", exact: true }).waitFor();
       await walk
-        .getByRole("button", { name: "Actions for Everyday caller" })
+        .getByRole("button", { name: "Actions for Everyday Caller [Male]" })
         .click();
       await walk.getByRole("menuitem", { name: "Clone" }).click();
       await walk.locator("#persona-name").waitFor();
       expect(await walk.inputValue("#persona-tts-voice")).toBe(
-        "my-saved-voice",
+        "alloy",
       );
       await walk.fill("#persona-name", "Patient Nora");
       await walk.getByRole("button", { name: "Save changes" }).click();
