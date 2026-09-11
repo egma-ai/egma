@@ -42,7 +42,7 @@ import { registerPlatformOperation } from "../http/platform-operation.ts";
 import { sendRefusal } from "../http/refusals.ts";
 import { discoverCartesiaVoices, resolvePersonaCapabilities, type PersonaVoice } from "../persona-capabilities.ts";
 import { renderPersonaPreview, type PreviewReach } from "../persona-preview.ts";
-import { createVoiceAccessProof } from "../persona-voice-proof.ts";
+import { createVoiceAccessProof, verifiesVoiceAccessProof } from "../persona-voice-proof.ts";
 
 /**
  * Project persona routes expose Egma-provided and Custom definitions.
@@ -97,6 +97,45 @@ async function authoringCredential(options: PersonaRoutesOptions, auth: AuthCont
   if (customer !== undefined) return customer;
   const key = credentialFor(await options.providerCredentials.load(), provider);
   return { key, credentialRef: "deployment" };
+}
+
+async function settingsRefusal(
+  options: PersonaRoutesOptions,
+  auth: AuthContext,
+  models: ReturnType<typeof validPersonaModels>,
+  controls: ReturnType<typeof validPersonaControls>,
+  voiceAccessProof: unknown,
+): Promise<string | undefined> {
+  let voices: readonly PersonaVoice[] = [];
+  if (models.tts.provider === "cartesia") {
+    const customer = await resolveProviderKeyForAuthoring(auth, "cartesia");
+    if (customer === undefined) return "models.tts.voiceId: Add an organization Cartesia key to validate account voice access.";
+    try { voices = await discoverCartesiaVoices(customer.key); }
+    catch { return "models.tts.voiceId: Cartesia voice access could not be checked. Try again."; }
+    if (!voices.some((voice) => voice.id === models.tts.voiceId)) return "models.tts.voiceId: The selected Cartesia voice is deleted or inaccessible.";
+  }
+  const capabilities = resolvePersonaCapabilities({
+    ttsProvider: models.tts.provider, ttsModel: models.tts.model,
+    sttProvider: models.stt.provider, sttModel: models.stt.model,
+    language: controls.language, voiceId: models.tts.voiceId,
+  }, voices);
+  for (const [field, capability] of Object.entries(capabilities)) {
+    if (capability.status === "unsupported") return `${field}: ${capability.reason ?? "unsupported"}`;
+  }
+  if (capabilities.emotion.status === "fixed" && controls.emotion !== capabilities.emotion.value) return `emotion: ${capabilities.emotion.reason}`;
+  if (capabilities.accent.status === "fixed" && controls.accent !== capabilities.accent.value) return `accent: ${capabilities.accent.reason}`;
+  if (capabilities.accent.choices !== undefined && !capabilities.accent.choices.includes(controls.accent)) return "accent: Choose one of the supported accents.";
+  const speed = capabilities.speed;
+  if (speed.status === "fixed" && models.tts.speed !== speed.value) return `models.tts.speed: ${speed.reason}`;
+  if (speed.range !== undefined && (models.tts.speed < speed.range.minimum || models.tts.speed > speed.range.maximum)) return `models.tts.speed: Choose a value from ${speed.range.minimum} through ${speed.range.maximum}.`;
+  const standard = capabilities.voices.choices?.some((voice) => voice.source === "standard" && voice.id === models.tts.voiceId) === true;
+  if (models.tts.provider === "openai" && !standard) {
+    const credential = await authoringCredential(options, auth, "openai");
+    if (credential === undefined || typeof voiceAccessProof !== "string" || !verifiesVoiceAccessProof(voiceAccessProof, { organizationId: auth.organizationId, provider: "openai", credentialRevision: credential.credentialRef, model: models.tts.model, voiceId: models.tts.voiceId }, options.proofSecret)) {
+      return "models.tts.voiceId: Preview this existing OpenAI voice before saving it.";
+    }
+  }
+  return undefined;
 }
 
 /* ---------------------------------------------------------------- refusals */
@@ -189,8 +228,9 @@ const PERSONA_BODY_FIELDS = [
   "description",
   "identityName",
   "personality",
-  "language",
   "models",
+  "controls",
+  "voiceAccessProof",
 ] as const;
 
 function unknownBody(body: Body, allowed: readonly string[]): string | undefined {
@@ -537,7 +577,7 @@ export async function personaRoutes(
    * A new persona, at version 1 and live.
    *
    * The body is flat: the team's `name`, the `identityName` the agent will
-   * hear, a `personality`, a `language`, and one complete `models` selection,
+   * hear, a `personality`, and one complete settings selection,
    * with `description` the only optional field. Every one of those is required
    * because a simulator handed an absent one would be deciding who the agent
    * heard.
@@ -555,9 +595,15 @@ export async function personaRoutes(
     }
 
     const models = "models" in body ? validPersonaModels(body.models) : undefined;
+    const controls = "controls" in body ? validPersonaControls({ ...(body.controls as object), executionPolicyVersion: 1 }) : undefined;
 
     const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
+    if (controls !== undefined && models === undefined) return sendRefusal(reply, "unprocessable", "models: Send the complete model selection with persona controls.");
+    if (controls !== undefined && models !== undefined) {
+      const reason = await settingsRefusal(options, acting.auth, models, controls, body.voiceAccessProof);
+      if (reason !== undefined) return sendRefusal(reply, "unprocessable", reason);
+    }
 
     const created = await createPersona(acting.auth, {
       name: text(body.name),
@@ -566,8 +612,9 @@ export async function personaRoutes(
         : { description: text(body.description) }),
       identityName: text(body.identityName),
       personality: text(body.personality),
-      language: text(body.language),
+      language: controls?.language ?? "en-US",
       ...(models === undefined ? {} : { models }),
+      ...(models === undefined || controls === undefined ? {} : { settings: { models, ...controls } }),
     });
 
     return reply.code(201).send(describedPersona(created));
@@ -591,9 +638,15 @@ export async function personaRoutes(
     }
 
     const models = "models" in body ? validPersonaModels(body.models) : undefined;
+    const controls = "controls" in body ? validPersonaControls({ ...(body.controls as object), executionPolicyVersion: 1 }) : undefined;
 
     const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
+    if (controls !== undefined && models === undefined) return sendRefusal(reply, "unprocessable", "models: Send the complete model selection with persona controls.");
+    if (controls !== undefined && models !== undefined) {
+      const reason = await settingsRefusal(options, acting.auth, models, controls, body.voiceAccessProof);
+      if (reason !== undefined) return sendRefusal(reply, "unprocessable", reason);
+    }
 
     const edited = await editPersona(acting.auth, personaId, {
       ...("name" in body ? { name: text(body.name) } : {}),
@@ -606,8 +659,8 @@ export async function personaRoutes(
       ...("personality" in body
         ? { personality: text(body.personality) }
         : {}),
-      ...("language" in body ? { language: text(body.language) } : {}),
       ...(models === undefined ? {} : { models }),
+      ...(models === undefined || controls === undefined ? {} : { settings: { models, ...controls } }),
       ...("expectedVersionId" in body ? { expectedVersionId: text(body.expectedVersionId) } : {}),
     });
 
@@ -621,11 +674,18 @@ export async function personaRoutes(
     const body = (request.body ?? {}) as Body;
     const refused = mayAuthor(reply, auth, "use personas");
     if (refused !== undefined) return refused;
-    const unexpected = unknownBody(body, ["projectId", "models"]);
+    const unexpected = unknownBody(body, ["projectId", "models", "controls", "voiceAccessProof"]);
     if (unexpected !== undefined) return sendRefusal(reply, "unprocessable", unexpected);
     const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
-    const one = await usePersona(acting.auth, personaId, "models" in body ? validPersonaModels(body.models) : undefined);
+    const models = "models" in body ? validPersonaModels(body.models) : undefined;
+    const controls = "controls" in body ? validPersonaControls({ ...(body.controls as object), executionPolicyVersion: 1 }) : undefined;
+    if (controls !== undefined && models === undefined) return sendRefusal(reply, "unprocessable", "models: Send the complete model selection with persona controls.");
+    if (controls !== undefined && models !== undefined) {
+      const reason = await settingsRefusal(options, acting.auth, models, controls, body.voiceAccessProof);
+      if (reason !== undefined) return sendRefusal(reply, "unprocessable", reason);
+    }
+    const one = await usePersona(acting.auth, personaId, models === undefined ? undefined : controls === undefined ? models : { models, ...controls });
     if (one === undefined) return noSuchPersona(reply, personaId);
     return reply.send(describedPersona(one));
   });
