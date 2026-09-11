@@ -876,6 +876,82 @@ describe("one persona's sheet", () => {
     expect(written).not.toHaveProperty("models");
   });
 
+  it("allows a behavior edit while preserving an unlisted saved voice", async () => {
+    const historical = {
+      ...RITA,
+      settings: {
+        ...RITA.settings!,
+        models: {
+          ...RITA.settings!.models,
+          tts: {
+            ...RITA.settings!.models.tts,
+            provider: "openai",
+            model: "gpt-4o-mini-tts",
+            voiceId: "voice_private_123",
+          },
+        },
+      },
+    };
+    const saved = { ...historical, version: 4, versionId: "prsv_4", identityName: "Margaret" };
+    const { asked } = ritaOpen({
+      "GET /v1/personas/prs_1": { status: 200, body: historical },
+      "PATCH /v1/personas/prs_1": { status: 200, body: saved },
+    });
+    render(<PersonasPage />);
+    await openRow("Impatient Rita");
+    await openSheetMenu("Impatient Rita");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Edit" }));
+    const sheet = await screen.findByRole("dialog", { name: "Impatient Rita" });
+
+    fireEvent.change(within(sheet).getByLabelText("Identity name*"), {
+      target: { value: "Margaret" },
+    });
+    const save = within(sheet).getByRole("button", { name: "Save changes" }) as HTMLButtonElement;
+    await waitFor(() => expect(save.disabled).toBe(false));
+    fireEvent.click(save);
+
+    await waitFor(() => expect(asked.some((request) => request.method === "PATCH")).toBe(true));
+    const written = asked.find((request) => request.method === "PATCH")?.body;
+    expect(written).toMatchObject({ identityName: "Margaret" });
+    expect(written).not.toHaveProperty("models");
+    expect(written).not.toHaveProperty("controls");
+  });
+
+  it("blocks settings changes that carry an unlisted saved voice to another provider", async () => {
+    const historical = {
+      ...RITA,
+      settings: {
+        ...RITA.settings!,
+        models: {
+          ...RITA.settings!.models,
+          tts: {
+            ...RITA.settings!.models.tts,
+            provider: "openai",
+            model: "gpt-4o-mini-tts",
+            voiceId: "voice_private_123",
+          },
+        },
+      },
+    };
+    const { asked } = ritaOpen({
+      "GET /v1/personas/prs_1": { status: 200, body: historical },
+    });
+    render(<PersonasPage />);
+    await openRow("Impatient Rita");
+    await openSheetMenu("Impatient Rita");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Edit" }));
+    const sheet = await screen.findByRole("dialog", { name: "Impatient Rita" });
+
+    fireEvent.change(within(sheet).getByLabelText("Text-to-speech*"), {
+      target: { value: "cartesia::sonic-3.5" },
+    });
+    const save = within(sheet).getByRole("button", { name: "Save changes" }) as HTMLButtonElement;
+    await waitFor(() => expect(asked.some((request) => request.path.includes("ttsProvider=cartesia"))).toBe(true));
+    expect(save.disabled).toBe(true);
+    fireEvent.click(save);
+    expect(asked.some((request) => request.method === "PATCH")).toBe(false);
+  });
+
   it("keeps a conflicted draft until cancel, then edits the current core", async () => {
     const current = { ...RITA, version: 4, versionId: "prsv_4", personality: "The saved newer behavior." };
     const { asked } = ritaOpen({

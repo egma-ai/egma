@@ -599,6 +599,12 @@ export function PersonaSheet({
   }, [focusName, editing, filled]);
 
   const persona = answer?.status === "ready" ? answer.value : null;
+  const modelsChanged = held !== null
+    && persona !== null
+    && !sameModelsDraft(
+      held.models,
+      modelsDraftOf(modelsOfPersona(persona), persona.settings?.controls),
+    );
   const changed =
     held !== null &&
     persona !== null &&
@@ -606,7 +612,7 @@ export function PersonaSheet({
     (held.name !== persona.name ||
       held.description !== (persona.description ?? "") ||
       !sameBehaviorDraft(held.behavior, behaviorDraftOf(persona)) ||
-      !sameModelsDraft(held.models, modelsDraftOf(modelsOfPersona(persona), persona.settings?.controls)));
+      modelsChanged);
   useUnsavedChanges(open && changed && !saving, saving);
 
   /**
@@ -675,10 +681,6 @@ export function PersonaSheet({
     const descriptionChanged =
       persona.owner === "organization" && held.description !== (persona.description ?? "");
     const behaviorChanged = persona.owner === "organization" && !sameBehaviorDraft(held.behavior, stored);
-    const modelsChanged = !sameModelsDraft(
-      held.models,
-      modelsDraftOf(modelsOfPersona(persona), persona.settings?.controls),
-    );
     if (
       !nameChanged &&
       !descriptionChanged &&
@@ -844,7 +846,7 @@ export function PersonaSheet({
             type="submit"
             size="lg"
             busy={saving}
-            disabled={!mayAuthor || !settingsValid || (!changed && one.settings !== null) || saving || busy}
+            disabled={!mayAuthor || (!settingsValid && (one.settings === null || modelsChanged)) || (!changed && one.settings !== null) || saving || busy}
             {...why}
           >
             {saving ? "Saving…" : saved && !changed ? "Saved" : one.settings === null ? "Use persona" : "Save changes"}
