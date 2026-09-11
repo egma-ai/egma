@@ -87,7 +87,7 @@ it.each(["grader", "persona"] as const)("selects a coherent run after waiting fo
     const simulations = await request("GET", `/v1/runs/${run.id}/simulations`);
     const simulationId = simulations.simulations[0].id as string;
     expect(await getSimulation(auth, simulationId)).toMatchObject({ personaVersionId: kind === "persona" ? updatedPersonaVersionId : personaCore.id });
-    const claim = await api.app.inject({ method: "POST", url: CLAIMS_PATH, headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` }, payload: { contract_versions: [5, 6], claimant: "after-concurrent-publication", capacity: 1, wait_seconds: 0 } });
+    const claim = await api.app.inject({ method: "POST", url: CLAIMS_PATH, headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` }, payload: { contract_versions: [5, 6, 7], claimant: "after-concurrent-publication", capacity: 1, wait_seconds: 0 } });
     expect(claim.statusCode, claim.body).toBe(200);
     expect(claim.json().specs).toMatchObject([{ simulation_id: simulationId, persona: { personality: kind === "persona" ? "Wait for a complete answer." : personaCore.personality }, models: { llm: { model: "gpt-5.6-terra" }, tts: { speed: 1 } } }]);
   } finally {

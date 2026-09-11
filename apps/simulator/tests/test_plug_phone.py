@@ -26,7 +26,7 @@ from egma_simulator.media import (
     backend_for,
     sip_refusal,
 )
-from egma_simulator.media.livekit import LiveKitBackend
+from egma_simulator.media.livekit import LiveKitBackend, _private_phone_reference
 from egma_simulator.media.scripted import REFUSALS, ScriptedBackend
 from egma_simulator.model import GOODBYE, ScriptedModel
 from egma_simulator.persona import Persona
@@ -520,6 +520,13 @@ def test_the_livekit_driver_is_built_without_reaching_anything():
         caller_id=None,
     )
     assert other.room_name != backend.room_name
+
+
+def test_the_livekit_provider_reference_keeps_the_private_destination_out():
+    number = "+15551234567"
+    assert _private_phone_reference(f"sip_{number}_call", number) == (
+        f"sip_{REDACTED}_call"
+    )
 
 
 async def test_the_livekit_driver_builds_voice_media_without_a_fixed_rate(

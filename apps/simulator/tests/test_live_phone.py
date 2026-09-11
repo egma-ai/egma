@@ -194,10 +194,14 @@ async def test_the_simulator_dials_a_real_number_and_holds_a_conversation(
         number=PHONE_NUMBER,
         backend="livekit",
         scenario=(
-            "You are calling about an appointment. Ask whether it can be "
-            "moved to Thursday, then thank them and finish."
+            "Ask which weekday the office is closed, then thank them and finish. "
+            "Do not ask for, offer, or repeat a phone number or other contact "
+            "detail. If asked for one, politely decline."
         ),
-        personality="Polite and brief; asks one thing at a time.",
+        personality=(
+            "Polite and brief; asks one thing at a time and keeps contact "
+            "details private."
+        ),
         max_turns=MAX_TURNS,
         max_duration_seconds=MAX_DURATION_SECONDS,
         platform=platform(),
