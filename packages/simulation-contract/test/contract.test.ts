@@ -1115,6 +1115,7 @@ describe("the exported spec check, which the control plane sends through", () =>
     expect(specComplaints(separate)).toEqual([]);
     expect(specComplaints({
       ...separate,
+      modality: "voice",
       models: { mode: "live", llm, live },
     })).toEqual([]);
     const { key: _liveKey, ...liveWithoutKey } = live;

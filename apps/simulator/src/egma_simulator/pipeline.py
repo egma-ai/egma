@@ -157,6 +157,7 @@ def assemble(
                     interruption_level=(
                         "off"
                         if persona_parameters is None
+                        or persona_parameters.interruption_level == "none"
                         else persona_parameters.interruption_level
                     ),
                 )

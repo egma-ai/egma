@@ -15,7 +15,7 @@ import { signUp } from "./support/traces.ts";
 let api: TestApi;
 afterEach(async () => { await api?.close(); });
 
-it("refuses a shared contract that cannot use saved project settings and keeps the earlier cores usable", async () => {
+it("publishes shared core changes without reinterpreting project-owned persona settings", async () => {
   api = await createApi("shared_contract_refusal");
   const who = await signUp(api.app, "shared-contract@example.test", "Shared contracts");
   const headers = { cookie: who.cookie };
@@ -49,16 +49,17 @@ it("refuses a shared contract that cannot use saved project settings and keeps t
     },
   } });
   expect(usedPersona.statusCode, usedPersona.body).toBe(200);
+  const nextPersonaVersionId = newId("prsv");
   await expect(seedPersonaLibrary([{
     ...persona,
     versions: [...persona.versions, {
-      ...version, id: newId("prsv"), version: version.version + 1,
+      ...version, id: nextPersonaVersionId, version: version.version + 1,
       parameterContract: version.parameterContract.map((field) => field.key === "speech_volume" ? { ...field, minimum: 0.9 } : field),
     }],
-  }])).rejects.toThrow("Speech volume must be at least 0.9");
+  }])).resolves.toEqual([{ id: persona.id, name: persona.name, version: version.version + 1, versionId: nextPersonaVersionId }]);
   const currentPersona = await api.app.inject({ method: "GET", url: `/v1/personas/${persona.id}?projectId=${who.projectId}`, headers });
   expect(currentPersona.statusCode, currentPersona.body).toBe(200);
-  expect(currentPersona.json()).toMatchObject({ version: version.version, versionId: version.id, settings: { models: { tts: { speed: 1 } } } });
+  expect(currentPersona.json()).toMatchObject({ version: version.version + 1, versionId: nextPersonaVersionId, settings: { models: { tts: { speed: 1 } } } });
 });
 
 it("refuses changed parameter units without reinterpreting saved grader or persona values", async () => {
@@ -83,14 +84,15 @@ it("refuses changed parameter units without reinterpreting saved grader or perso
   const current = persona.versions.at(-1)!;
   const usedPersona = await api.app.inject({ method: "POST", url: `/v1/personas/${persona.id}/use`, headers, payload: { projectId: who.projectId } });
   expect(usedPersona.statusCode, usedPersona.body).toBe(200);
+  const nextPersonaVersionId = newId("prsv");
   await expect(seedPersonaLibrary([{
-    ...persona, versions: [...persona.versions, { ...current, id: newId("prsv"), version: current.version + 1,
+    ...persona, versions: [...persona.versions, { ...current, id: nextPersonaVersionId, version: current.version + 1,
       parameterContract: current.parameterContract.map((field) => field.key === "tts_speed" ? { ...field, unit: "seconds" } : field),
     }],
-  }])).rejects.toThrow(/unit.*unitless.*seconds/i);
+  }])).resolves.toEqual([{ id: persona.id, name: persona.name, version: current.version + 1, versionId: nextPersonaVersionId }]);
   const savedPersona = await api.app.inject({ method: "GET", url: `/v1/personas/${persona.id}?projectId=${who.projectId}`, headers });
-  expect(savedPersona.json()).toMatchObject({ version: current.version, versionId: current.id, settings: usedPersona.json().settings });
+  expect(savedPersona.json()).toMatchObject({ version: current.version + 1, versionId: nextPersonaVersionId, settings: usedPersona.json().settings });
   expect((await api.database.sql("select version from persona_definition_version where persona_id=$1 order by version", [persona.id])).rows).toEqual(
-    persona.versions.map(({ version }) => ({ version })),
+    [...persona.versions.map(({ version }) => ({ version })), { version: current.version + 1 }],
   );
 });

@@ -45,6 +45,7 @@ it.each(["grader", "persona"] as const)("selects a coherent run after waiting fo
   await request("PATCH", `/v1/personas/${persona.id}`, {
     projectId: who.projectId,
     models: {
+      mode: "separate",
       llm: { provider: "openai", model: "gpt-5.6-terra" },
       stt: { provider: "openai", model: "gpt-live-transcribe" },
       tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy", speed: 1 },

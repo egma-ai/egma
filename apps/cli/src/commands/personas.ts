@@ -27,18 +27,35 @@ function numberValue(args: PersonaArguments, name: string, fallback: number): nu
   return value === undefined ? fallback : Number(value);
 }
 
+class InvalidPersonaArgumentsError extends Error {}
+
+const SEPARATE_SPEECH_FLAGS = ["--stt-provider", "--stt-model", "--tts-provider", "--tts-model"] as const;
+
+function requireText(value: string, flag: string): string {
+  if (value.trim() === "") throw new InvalidPersonaArgumentsError(`${flag} is required for this speech mode.`);
+  return value;
+}
+
 function models(args: PersonaArguments, fallback?: PersonaModels) {
   const mode = args.values["--speech-mode"] ?? fallback?.mode ?? "separate";
-  const llm = { provider: args.values["--llm-provider"] ?? fallback?.llm.provider ?? "", model: args.values["--llm-model"] ?? fallback?.llm.model ?? "" };
-  if (mode === "live") return {
+  const llm = {
+    provider: requireText(args.values["--llm-provider"] ?? fallback?.llm.provider ?? "", "--llm-provider"),
+    model: requireText(args.values["--llm-model"] ?? fallback?.llm.model ?? "", "--llm-model"),
+  };
+  if (mode === "live") {
+    if (SEPARATE_SPEECH_FLAGS.some((flag) => args.values[flag] !== undefined)) {
+      throw new InvalidPersonaArgumentsError("STT and TTS flags cannot be used with --speech-mode live.");
+    }
+    return {
     mode: "live" as const,
     llm,
-    live: { provider: "openai" as const, model: "gpt-live-1" as const, adapter: "openai_live" as const, voiceId: args.values["--voice"] ?? (fallback?.mode === "live" ? fallback.live.voiceId : "alloy") },
-  };
+    live: { provider: "openai" as const, model: "gpt-live-1" as const, adapter: "openai_live" as const, voiceId: requireText(args.values["--voice"] ?? (fallback?.mode === "live" ? fallback.live.voiceId : "alloy"), "--voice") },
+    };
+  }
   return {
     mode: "separate" as const,
-    stt: { provider: args.values["--stt-provider"] ?? (fallback !== undefined && fallback.mode !== "live" ? fallback.stt.provider : ""), model: args.values["--stt-model"] ?? (fallback !== undefined && fallback.mode !== "live" ? fallback.stt.model : "") },
-    tts: { provider: args.values["--tts-provider"] ?? (fallback !== undefined && fallback.mode !== "live" ? fallback.tts.provider : ""), model: args.values["--tts-model"] ?? (fallback !== undefined && fallback.mode !== "live" ? fallback.tts.model : ""), voiceId: args.values["--voice"] ?? (fallback !== undefined && fallback.mode !== "live" ? fallback.tts.voiceId : "") },
+    stt: { provider: requireText(args.values["--stt-provider"] ?? (fallback !== undefined && fallback.mode !== "live" ? fallback.stt.provider : ""), "--stt-provider"), model: requireText(args.values["--stt-model"] ?? (fallback !== undefined && fallback.mode !== "live" ? fallback.stt.model : ""), "--stt-model") },
+    tts: { provider: requireText(args.values["--tts-provider"] ?? (fallback !== undefined && fallback.mode !== "live" ? fallback.tts.provider : ""), "--tts-provider"), model: requireText(args.values["--tts-model"] ?? (fallback !== undefined && fallback.mode !== "live" ? fallback.tts.model : ""), "--tts-model"), voiceId: requireText(args.values["--voice"] ?? (fallback !== undefined && fallback.mode !== "live" ? fallback.tts.voiceId : ""), "--voice") },
     llm,
   };
 }
@@ -126,6 +143,7 @@ export async function runPersonaActionCommand(options: FolderCommandOptions, act
       return FOLDER_EXIT.interrupted;
     }
     if (cause instanceof PlatformUnreachableError || cause instanceof PlatformRefusedError) { options.fail(cause.message); return FOLDER_EXIT.unreachable; }
+    if (cause instanceof InvalidPersonaArgumentsError) { options.fail(cause.message); return FOLDER_EXIT.nothing; }
     throw cause;
   }
 }

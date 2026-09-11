@@ -6,6 +6,8 @@ WHERE saved.persona_definition_id = definition.id AND version.id = definition.cu
 
 ALTER TABLE public.project_persona ALTER COLUMN parameter_contract SET NOT NULL;
 
+ALTER TABLE public.simulation ADD COLUMN IF NOT EXISTS persona_parameter_contract jsonb;
+
 CREATE OR REPLACE FUNCTION public.persona_parameters_valid(parameters jsonb, contract jsonb) RETURNS boolean
     LANGUAGE plpgsql IMMUTABLE
     AS $$
@@ -94,3 +96,39 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION public.guard_simulation_persona_parameters() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE core_contract jsonb; settings_found boolean;
+BEGIN
+  IF TG_OP = 'UPDATE' AND (NEW.persona_id IS DISTINCT FROM OLD.persona_id
+     OR NEW.persona_version_id IS DISTINCT FROM OLD.persona_version_id
+     OR NEW.persona_parameter_values IS DISTINCT FROM OLD.persona_parameter_values
+     OR NEW.persona_parameter_contract IS DISTINCT FROM OLD.persona_parameter_contract) THEN
+    RAISE check_violation USING MESSAGE = 'a simulation persona selection is immutable';
+  END IF;
+  SELECT parameter_contract INTO core_contract FROM persona_definition_version
+    WHERE id = NEW.persona_version_id AND persona_id = NEW.persona_id;
+  IF NOT FOUND THEN RAISE foreign_key_violation USING MESSAGE = 'simulation persona version does not belong to the selected persona'; END IF;
+  IF TG_OP = 'INSERT' AND NEW.persona_parameter_contract IS NOT NULL THEN
+    SELECT true INTO settings_found FROM project_persona
+      WHERE organization_id = NEW.organization_id AND project_id = NEW.project_id
+        AND persona_definition_id = NEW.persona_id
+        AND parameter_values = NEW.persona_parameter_values
+        AND parameter_contract = NEW.persona_parameter_contract;
+    IF NOT COALESCE(settings_found, false) THEN
+      RAISE check_violation USING MESSAGE = 'simulation persona settings do not match the selected project settings';
+    END IF;
+  END IF;
+  IF NOT persona_parameters_valid(NEW.persona_parameter_values, COALESCE(NEW.persona_parameter_contract, core_contract)) THEN
+    RAISE check_violation USING MESSAGE = 'simulation persona settings are invalid';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS simulation_persona_parameters_guard ON public.simulation;
+CREATE TRIGGER simulation_persona_parameters_guard
+BEFORE INSERT OR UPDATE OF persona_id, persona_version_id, persona_parameter_values, persona_parameter_contract
+ON public.simulation FOR EACH ROW EXECUTE FUNCTION public.guard_simulation_persona_parameters();

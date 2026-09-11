@@ -2,7 +2,7 @@ import { newId } from "@egma/ids";
 import { and, asc, eq } from "drizzle-orm";
 
 import type { Queryable } from "../client.ts";
-import { validateUnchangedParameterUnits } from "../grader-library/parameters.ts";
+import { validateUnchangedParameterUnits, type GraderParameter } from "../grader-library/parameters.ts";
 import {
   currentPersonaParameterDefaults,
   personaModelsOfParameters,
@@ -20,6 +20,7 @@ import { within } from "./within.ts";
 export type ProjectPersonaSettings = {
   readonly id: string;
   readonly parameterValues: PersonaParameterValues;
+  readonly parameterContract: readonly GraderParameter[];
   readonly models: ReturnType<typeof personaModelsOfParameters>;
   readonly createdAt: Date;
   readonly updatedAt: Date;
@@ -64,6 +65,7 @@ export async function readProjectPersonaSettingsOn(
   );
   return {
     ...row,
+    parameterContract: row.parameterContract,
     parameterValues,
     models: personaModelsOfParameters(parameterValues),
   };

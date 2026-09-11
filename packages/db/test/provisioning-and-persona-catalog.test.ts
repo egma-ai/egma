@@ -308,7 +308,7 @@ describe("forking a persona", () => {
     expect(edited?.settings?.models).toEqual(source.settings!.models);
     expect(
       (await getPersona(acme.auth, EGMA_PROVIDED_PERSONAS.defaultPersona))?.version,
-    ).toBe(6);
+    ).toBe(5);
   });
 
   it("copies the source version that wins the source-row lock", async () => {
@@ -493,6 +493,7 @@ describe("catalog integrity", () => {
     const chosen = {
       ...before.settings.parameterValues,
       tts_speed: 0.8,
+      speech_speed: "slow",
       emotion: "happy",
       speech_volume: 1.2,
     };
@@ -518,7 +519,7 @@ describe("catalog integrity", () => {
       ...chosen,
       language: "en-US",
       accent: "voice_default",
-      execution_policy_version: 1,
+      execution_policy_version: 2,
       background_sound_id: "none",
       background_volume: 0.0631,
     });
@@ -546,6 +547,7 @@ describe("catalog integrity", () => {
     const chosen = {
       ...before.settings.parameterValues,
       tts_speed: 0.8,
+      speech_speed: "slow",
       emotion: "happy",
       speech_volume: 1.2,
       background_sound_id: "rain-v1",
@@ -565,7 +567,7 @@ describe("catalog integrity", () => {
 
     expect((await getPersona(acme.auth, prior.id))?.settings?.parameterValues).toEqual({
       ...chosen,
-      interruption_level: "off",
+      interruption_level: "none",
     });
   });
 

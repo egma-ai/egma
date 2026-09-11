@@ -633,7 +633,7 @@ async function assembledSpec(
     : [];
 
   let models: Record<string, unknown>;
-  const personaParameters = validatePersonaParameterValues(personaVersion.parameterContract, claim.personaParameterValues);
+  const personaParameters = validatePersonaParameterValues(claim.personaParameterContract ?? personaVersion.parameterContract, claim.personaParameterValues);
   const personaControls = Object.hasOwn(personaParameters, "execution_policy_version")
     ? personaControlsOfParameters(personaParameters)
     : undefined;

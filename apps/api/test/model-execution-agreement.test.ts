@@ -120,7 +120,18 @@ function modelsUsing(entry: ProviderCatalogEntry): PersonaModels {
 function contractSpecUsing(entry: ProviderCatalogEntry): Record<string, unknown> {
   const candidate = structuredClone(validVoiceSpec);
   if (entry.job === "live") {
+    candidate.contract_version = 7;
+    candidate.modality = "voice";
+    const persona = candidate.persona as { parameters: Record<string, unknown> };
+    persona.parameters = {
+      ...persona.parameters,
+      speech_speed: "normal",
+      tts_speed: 1,
+      interruption_level: "none",
+      execution_policy_version: 2,
+    };
     candidate.models = {
+      mode: "live",
       llm: (candidate.models as Record<string, unknown>).llm,
       live: { provider: entry.provider, model: entry.model, adapter: entry.adapter, voice_id: entry.recommendedVoiceId ?? "alloy", key: "env:EGMA_OPENAI_API_KEY" },
     };
