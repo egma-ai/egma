@@ -31,12 +31,20 @@ import {
 } from "../schema/personas.ts";
 import { project } from "../schema/tenancy.ts";
 import {
+  defaultPersonaParameterValues,
   PERSONA_PARAMETER_CONTRACT,
-  personaParametersOfModels,
+  personaParameterContract,
+  personaControlsOfParameters,
+  personaModelParameterValues,
+  personaModelsOfParameters,
+  personaParametersOfSettings,
   validatePersonaParameterContract,
   validatePersonaParameterValues,
+  type PersonaParameterValues,
+  type PersonaSettings,
 } from "../persona-library/parameters.ts";
 import type { GraderParameter } from "../grader-library/parameters.ts";
+import { validateUnchangedParameterUnits } from "../grader-library/parameters.ts";
 import {
   ensureProjectPersonaOn,
   assertPersonaSettingsCompatibleOn,
@@ -80,7 +88,7 @@ export type PersonaBehavior = {
   /** The human name this persona gives the agent, spoken on every call. */
   readonly identityName: string;
   readonly personality: string;
-  readonly language: string;
+  readonly language: string | null;
 };
 
 /** Trimmed exactly the way a stored version is, so a save can be compared. */
@@ -88,7 +96,7 @@ function normalizedBehavior(behavior: PersonaBehavior): PersonaBehavior {
   return {
     identityName: behavior.identityName.trim(),
     personality: behavior.personality.trim(),
-    language: behavior.language.trim(),
+    language: behavior.language === null ? null : behavior.language.trim(),
   };
 }
 
@@ -100,6 +108,7 @@ export type NewPersona = {
   readonly language: string;
   /** Absent means the release's complete recommended selection. */
   readonly models?: PersonaModels | undefined;
+  readonly settings?: PersonaSettings | undefined;
 };
 
 export type PersonaOwner = "egma" | "organization";
@@ -116,7 +125,7 @@ export type Persona = {
   readonly versionId: string;
   readonly identityName: string;
   readonly personality: string;
-  readonly language: string;
+  readonly language: string | null;
   readonly parameterContract: readonly GraderParameter[];
   readonly settings: ProjectPersonaSettings | null;
   /** When they were deleted, or null while they are in use. */
@@ -137,6 +146,7 @@ export type PersonaChanges = {
   readonly personality?: string;
   readonly language?: string;
   readonly models?: PersonaModels;
+  readonly settings?: PersonaSettings;
   readonly expectedVersionId?: string;
 };
 
@@ -147,7 +157,7 @@ export type PersonaVersion = {
   readonly version: number;
   readonly identityName: string;
   readonly personality: string;
-  readonly language: string;
+  readonly language: string | null;
   readonly parameterContract: readonly GraderParameter[];
   readonly createdAt: Date;
 };
@@ -209,6 +219,7 @@ const CREATE_FIELDS = [
   "personality",
   "language",
   "models",
+  "settings",
 ] as const;
 const EDIT_FIELDS = [...CREATE_FIELDS, "expectedVersionId"] as const;
 
@@ -244,10 +255,18 @@ function validateBehaviorText(input: {
   readonly identityName: unknown;
   readonly personality: unknown;
   readonly language: unknown;
+  readonly parameterContract?: unknown;
 }): void {
   stated(input.identityName, NEEDS_AN_IDENTITY_NAME);
   stated(input.personality, "a persona needs a personality");
-  stated(input.language, "a persona needs a language");
+  if (input.language === null) {
+    const contract = validatePersonaParameterContract(input.parameterContract);
+    if (!contract.some((field) => field.key === "language")) {
+      throw new UnprocessableInputError("a legacy persona needs a core language");
+    }
+  } else {
+    stated(input.language, "a persona needs a language");
+  }
 }
 
 function validateNewPersona(input: NewPersona): void {
@@ -255,6 +274,10 @@ function validateNewPersona(input: NewPersona): void {
   validateName(input.name);
   validateBehaviorText(input);
   if (input.models !== undefined) validPersonaModels(input.models);
+  if (input.settings !== undefined) personaParametersOfSettings(input.settings);
+  if (input.models !== undefined && input.settings !== undefined) {
+    throw new UnprocessableInputError("choose persona settings once");
+  }
 }
 
 /**
@@ -309,7 +332,7 @@ function currentCatalogVersion(entry: EgmaProvidedPersona) {
         `Egma-provided persona ${entry.id} version ${version.id} must be number ${index + 1}`,
       );
     }
-    validateBehaviorText(version);
+    validateBehaviorText({ ...version, parameterContract: version.parameterContract });
     validatePersonaParameterContract(version.parameterContract);
   });
   return current;
@@ -347,12 +370,31 @@ export async function seedPersonaLibraryInternal(
       if (storedIdentity === undefined || storedIdentity.organizationId !== null || storedIdentity.projectId !== null) {
         throw new Error(`fixed Egma-provided persona id ${entry.id} already holds a different identity`);
       }
-      const [installed] = await tx.select({ version: personaVersion.version, parameterContract: personaVersion.parameterContract }).from(personaVersion)
+      const [installed] = await tx.select({ version: personaVersion.version, language: personaVersion.language, parameterContract: personaVersion.parameterContract }).from(personaVersion)
         .where(eq(personaVersion.id, storedIdentity.currentVersionId));
       if (installed !== undefined && current.version < installed.version) {
         throw new Error(`persona ${entry.id} cannot publish an earlier core version`);
       }
-      await assertPersonaSettingsCompatibleOn(tx, entry.id, current.parameterContract, installed?.parameterContract ?? current.parameterContract);
+      const savedSettings = await tx
+        .select({ id: projectPersona.id, parameterValues: projectPersona.parameterValues })
+        .from(projectPersona)
+        .where(eq(projectPersona.personaDefinitionId, entry.id))
+        .orderBy(projectPersona.id)
+        .for("update", { of: projectPersona });
+      const expandedSettings = savedSettings.map((row) => {
+        const installedContract = installed?.parameterContract ?? current.parameterContract;
+        const oldValues = validatePersonaParameterValues(installedContract, row.parameterValues);
+        validateUnchangedParameterUnits(installedContract, current.parameterContract);
+        const defaults = defaultPersonaParameterValues(current.parameterContract);
+        const values = {
+          ...defaults,
+          ...oldValues,
+          ...(oldValues.language === undefined && installed?.language !== null && installed?.language !== undefined
+            ? { language: installed.language }
+            : {}),
+        };
+        return { id: row.id, values: validatePersonaParameterValues(current.parameterContract, values) };
+      });
       const versionInsertions = await tx.insert(personaVersion).values(entry.versions.map((version) => ({
         id: version.id,
         personaId: entry.id,
@@ -375,6 +417,14 @@ export async function seedPersonaLibraryInternal(
       if (identityChanged) {
         await tx.update(persona).set({ name: entry.name, description: entry.description, currentVersionId: current.id, updatedAt: new Date() })
           .where(eq(persona.id, entry.id));
+      }
+      for (const settings of expandedSettings) {
+        const previous = savedSettings.find((row) => row.id === settings.id);
+        if (!isDeepStrictEqual(previous?.parameterValues, settings.values)) {
+          await tx.update(projectPersona)
+            .set({ parameterValues: settings.values, updatedAt: new Date() })
+            .where(eq(projectPersona.id, settings.id));
+        }
       }
       if (identityInsertions.length > 0 || identityChanged || versionInsertions.length > 0) {
         seeded.push({ id: entry.id, name: entry.name, version: current.version, versionId: current.id });
@@ -421,8 +471,8 @@ async function insertPersona(
   projectId: string,
   input: Pick<NewPersona, "name" | "description">,
   behavior: PersonaBehavior,
-  models: PersonaModels,
   parameterContract: readonly GraderParameter[] = PERSONA_PARAMETER_CONTRACT,
+  parameterValues = defaultPersonaParameterValues(parameterContract),
 ): Promise<Persona> {
   const id = newId("prs");
   const versionId = newId("prsv");
@@ -440,11 +490,20 @@ async function insertPersona(
     personaId: id,
     version: 1,
     ...behaviorColumns(behavior),
+    language: parameterContract.some((field) => field.key === "language")
+      ? null
+      : behavior.language,
     parameterContract,
     createdBy: auth.userId,
   });
 
-  await ensureProjectPersonaOn(tx, auth, projectId, id, personaParametersOfModels(models));
+  await ensureProjectPersonaOn(
+    tx,
+    auth,
+    projectId,
+    id,
+    parameterValues,
+  );
 
   // Read through the ordinary seam while both rows and the project lock are
   // still on this transaction. This is the authoritative answer; no hand-built
@@ -478,7 +537,26 @@ export async function createPersona(
 
   return db().transaction(async (tx) => {
     await lockPersonaProject(tx, auth, projectId);
-    return insertPersona(tx, auth, projectId, input, behavior, validPersonaModels(input.models ?? RECOMMENDED_PERSONA_MODELS));
+    const settings = input.settings ?? {
+      models: validPersonaModels(input.models ?? RECOMMENDED_PERSONA_MODELS),
+      language: input.language,
+      emotion: "neutral" as const,
+      accent: "voice_default",
+      speechVolume: 1,
+      executionPolicyVersion: 1,
+      backgroundSoundId: "none" as const,
+      backgroundVolume: 0.0631,
+      interruptionLevel: "off" as const,
+    };
+    return insertPersona(
+      tx,
+      auth,
+      projectId,
+      input,
+      behavior,
+      personaParameterContract(settings.models, settings),
+      personaParametersOfSettings(settings),
+    );
   });
 }
 
@@ -523,6 +601,14 @@ async function personaFrom(
     ...identity,
     owner: organizationId === null ? "egma" : "organization",
     ...behaviorFromRow(row, row.versionId),
+    language:
+      row.language ??
+      (typeof settings?.parameterValues.language === "string"
+        ? settings.parameterValues.language
+        : typeof defaultPersonaParameterValues(row.parameterContract).language ===
+            "string"
+        ? defaultPersonaParameterValues(row.parameterContract).language as string
+        : null),
     settings: settings ?? null,
   };
 }
@@ -588,6 +674,12 @@ export async function editPersona(
     changes.models === undefined
       ? undefined
       : validPersonaModels(changes.models);
+  const askedSettings = changes.settings === undefined
+    ? undefined
+    : personaParametersOfSettings(changes.settings);
+  if (askedModels !== undefined && askedSettings !== undefined) {
+    throw new UnprocessableInputError("choose persona settings once");
+  }
   return writing(() =>
     db().transaction(async (tx) => {
       const [locked] = await tx
@@ -631,40 +723,73 @@ export async function editPersona(
       const asked = normalizedBehavior({
         identityName: changes.identityName ?? current.identityName,
         personality: changes.personality ?? current.personality,
-        language: changes.language ?? current.language,
+        language: current.parameterContract.some(
+          (field) => field.key === "language",
+        )
+          ? null
+          : changes.language ?? current.language,
       });
       const coreChanged = !sameBehavior(current, asked);
-      if (askedModels !== undefined) {
+      const legacyUpgrade =
+        (askedModels !== undefined || askedSettings !== undefined) &&
+        !current.parameterContract.some(
+          (field) => field.key === "execution_policy_version",
+        );
+      let nextContract = current.parameterContract;
+      let settingsUpdate:
+        | { id: string; parameterValues: PersonaParameterValues }
+        | undefined;
+      if (askedModels !== undefined || askedSettings !== undefined) {
         const projectId = auth.projectId ?? locked.projectId;
         if (projectId === null || projectId === undefined) {
           throw new UnprocessableInputError(
             "persona settings belong to a project; choose a project before editing",
           );
         }
-        const values = validatePersonaParameterValues(
-          current.parameterContract,
-          personaParametersOfModels(askedModels),
-        );
         const settings = await ensureProjectPersonaOn(
           tx,
           auth,
           projectId,
           id,
-          values,
+          undefined,
           true,
         );
+        const candidate = legacyUpgrade
+          ? askedSettings ?? {
+              ...defaultPersonaParameterValues(
+                personaParameterContract(askedModels),
+              ),
+              ...settings.parameterValues,
+              ...(current.language === null
+                ? {}
+                : { language: current.language }),
+              ...personaModelParameterValues(askedModels!),
+            }
+          : askedSettings ?? {
+              ...settings.parameterValues,
+              ...personaModelParameterValues(askedModels!),
+            };
+        if (legacyUpgrade) {
+          nextContract = personaParameterContract(
+            personaModelsOfParameters(candidate),
+            personaControlsOfParameters(candidate),
+          );
+        }
+        const values = validatePersonaParameterValues(nextContract, candidate);
         if (
           JSON.stringify(settings.parameterValues) !== JSON.stringify(values)
         ) {
-          await tx
-            .update(projectPersona)
-            .set({ parameterValues: values, updatedAt: new Date() })
-            .where(eq(projectPersona.id, settings.id));
+          settingsUpdate = { id: settings.id, parameterValues: values };
         }
       }
       let versionId = current.id;
-      if (coreChanged) {
-        await assertPersonaSettingsCompatibleOn(tx, id, current.parameterContract, current.parameterContract);
+      if (coreChanged || legacyUpgrade) {
+        await assertPersonaSettingsCompatibleOn(
+          tx,
+          id,
+          current.parameterContract,
+          current.parameterContract,
+        );
         versionId = newId("prsv");
         await tx
           .insert(personaVersion)
@@ -673,11 +798,16 @@ export async function editPersona(
             personaId: id,
             version: current.version + 1,
             ...asked,
-            parameterContract: current.parameterContract,
+            language: nextContract.some(
+              (field) => field.key === "language",
+            )
+              ? null
+              : asked.language,
+            parameterContract: nextContract,
             createdBy: auth.userId,
           });
       }
-      if (coreChanged || metadataRequested) {
+      if (coreChanged || legacyUpgrade || metadataRequested) {
         await tx
           .update(persona)
           .set({
@@ -689,6 +819,15 @@ export async function editPersona(
             updatedAt: new Date(),
           })
           .where(eq(persona.id, id));
+      }
+      if (settingsUpdate !== undefined) {
+        await tx
+          .update(projectPersona)
+          .set({
+            parameterValues: settingsUpdate.parameterValues,
+            updatedAt: new Date(),
+          })
+          .where(eq(projectPersona.id, settingsUpdate.id));
       }
       return readPersonaOn(tx, auth, id);
     }),
@@ -710,24 +849,32 @@ export class PersonaVersionConflictError extends Error {
 export async function usePersona(
   auth: AuthContext,
   id: string,
-  models?: PersonaModels,
+  selection?: PersonaModels | PersonaSettings,
 ): Promise<Persona | undefined> {
   authorize(auth, "author_definitions", here(auth));
   if (auth.projectId === undefined) {
     throw new UnprocessableInputError("using a persona requires a project");
   }
-  const values =
-    models === undefined ? undefined : personaParametersOfModels(models);
   const projectId = auth.projectId;
   return writing(() =>
     db().transaction(async (tx) => {
       await lockPersonaProject(tx, auth, projectId);
       const [found] = await tx
-        .select({ id: persona.id })
+        .select({ id: persona.id, parameterContract: personaVersion.parameterContract })
         .from(persona)
+        .innerJoin(personaVersion, eq(personaVersion.id, persona.currentVersionId))
         .where(thePersona(auth, id))
         .limit(1);
       if (found === undefined) return undefined;
+      const current = await readProjectPersonaSettingsOn(tx, auth, projectId, id, found.parameterContract, true);
+      const values = selection === undefined || current !== undefined
+        ? undefined
+        : "models" in selection
+          ? personaParametersOfSettings(selection)
+          : validatePersonaParameterValues(found.parameterContract, {
+              ...defaultPersonaParameterValues(found.parameterContract),
+              ...personaModelParameterValues(selection),
+            });
       await ensureProjectPersonaOn(tx, auth, projectId, id, values);
       return readPersonaOn(tx, auth, id);
     }),
@@ -968,6 +1115,7 @@ export async function forkPersona(
       throw new Error("the persona's current version is missing");
     }
 
+    const sourceSettings = await ensureProjectPersonaOn(tx, auth, projectId, id, undefined, true);
     return insertPersona(
       tx,
       auth,
@@ -977,8 +1125,8 @@ export async function forkPersona(
         description: source.description ?? undefined,
       },
       normalizedBehavior(current),
-      (await ensureProjectPersonaOn(tx, auth, projectId, id, undefined, true)).models,
       current.parameterContract,
+      sourceSettings.parameterValues,
     );
   });
 }

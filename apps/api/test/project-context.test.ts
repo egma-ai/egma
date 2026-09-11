@@ -317,7 +317,7 @@ describe("a browser working in a project that is not the first", () => {
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
-      personas: ["Everyday caller"],
+      personas: ["Everyday Caller [Male]"],
     });
     expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 
@@ -424,7 +424,7 @@ describe("a browser working in a project that is not the first", () => {
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
-      personas: ["Everyday caller"],
+      personas: ["Everyday Caller [Male]"],
     });
     expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
     const started = await ask(api.app, "POST", "/v1/runs", keyForOutbound, {
@@ -504,7 +504,7 @@ describe("a browser working in a project that is not the first", () => {
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
-      personas: ["Everyday caller"],
+      personas: ["Everyday Caller [Male]"],
     });
     expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
     const started = await ask(api.app, "POST", "/v1/runs", keyForOutbound, {
@@ -596,7 +596,7 @@ describe("a browser working in a project that is not the first", () => {
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
-      personas: ["Everyday caller"],
+      personas: ["Everyday Caller [Male]"],
     });
     expect(authored.statusCode, authored.body).toBe(201);
     const testId = (authored.json() as { id: string }).id;
@@ -763,7 +763,7 @@ describe("a key for the whole organization, where the organization holds two pro
       name: "Reschedules a booked appointment",
       scenario: "Their cleaning has to move to any afternoon next week.",
       expectedBehaviors: ["confirms the new time back before finishing"],
-      personas: ["Everyday caller"],
+      personas: ["Everyday Caller [Male]"],
     });
     expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
 

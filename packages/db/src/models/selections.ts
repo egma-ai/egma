@@ -29,6 +29,8 @@ export type PersonaModels = {
 export type GraderModel = ModelSelection;
 
 export const SPEED_RANGE = { slowest: 0.6, fastest: 1.5 } as const;
+/** Broad structural bounds; provider capability validation applies narrower ranges. */
+export const PERSONA_AUTHORING_SPEED_RANGE = { slowest: 0.25, fastest: 4 } as const;
 
 function validSelection(
   job: ModelJob,
@@ -80,11 +82,11 @@ function validSpeech(value: unknown): SpeechSelection {
   if (
     typeof speed !== "number" ||
     !Number.isFinite(speed) ||
-    speed < SPEED_RANGE.slowest ||
-    speed > SPEED_RANGE.fastest
+    speed < PERSONA_AUTHORING_SPEED_RANGE.slowest ||
+    speed > PERSONA_AUTHORING_SPEED_RANGE.fastest
   ) {
     throw new UnprocessableInputError(
-      `speaking speed must be between ${SPEED_RANGE.slowest} and ${SPEED_RANGE.fastest}`,
+      `speaking speed must be between ${PERSONA_AUTHORING_SPEED_RANGE.slowest} and ${PERSONA_AUTHORING_SPEED_RANGE.fastest}`,
     );
   }
   return { ...selection, voiceId: voiceId.trim(), speed };

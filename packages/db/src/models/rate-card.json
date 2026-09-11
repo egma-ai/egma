@@ -200,6 +200,28 @@
       }
     },
     {
+      "provider": "cartesia",
+      "model": "sonic-3.6",
+      "effectiveFrom": "2026-09-10",
+      "source": "https://www.cartesia.ai/pricing",
+      "readAt": "2026-09-10",
+      "note": "Cartesia lists Sonic 3.6 under the same Text to Speech credit plans: Pro is $5 for 100K credits. Apply the established standard TTS meter of one credit per character, or $50 per 1M characters.",
+      "prices": {
+        "characters": { "unit": "character", "usdPerMillion": "50.00" }
+      }
+    },
+    {
+      "provider": "cartesia",
+      "model": "sonic-3.6-2026-08-27",
+      "effectiveFrom": "2026-09-10",
+      "source": "https://www.cartesia.ai/pricing",
+      "readAt": "2026-09-10",
+      "note": "The dated Sonic 3.6 snapshot uses the same Sonic 3.6 Text to Speech credit meter: one credit per character, priced from the Pro plan at $50 per 1M characters.",
+      "prices": {
+        "characters": { "unit": "character", "usdPerMillion": "50.00" }
+      }
+    },
+    {
       "provider": "openai",
       "model": "tts-1",
       "effectiveFrom": "2026-09-07",

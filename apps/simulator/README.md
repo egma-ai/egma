@@ -113,12 +113,12 @@ plus what only audio can owe:
 
 ## How it runs
 
-The simulator **pulls**. It long-polls a claim endpoint declaring how much
+The simulator **pulls** simulation work. It long-polls a claim endpoint declaring how much
 capacity it has free, runs each claimed simulation as one asyncio task
 (concurrency-capped, executor swappable by design), heartbeats every five
 seconds per running simulation, and honors cancel directives that arrive
-on heartbeat answers. It keeps zero inbound network surface: every arrow
-points out.
+on heartbeat answers. When Preview is enabled, one service-token-protected
+internal HTTP route accepts bounded voice sample requests from the control plane.
 
 A simulation ends one of five ways, each reported distinctly: the persona
 concludes, the agent ends the exchange, the turn limit trips, the duration
@@ -294,6 +294,7 @@ transport and process settings only.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `EGMA_SIMULATOR_CONTROL_PLANE_URL` | (required) | Where to claim, heartbeat, and report. |
+| `EGMA_SIMULATOR_PREVIEW_PORT` | (none) | Enables the internal persona Preview endpoint on this port. The control plane must use the same service token. |
 | `EGMA_SIMULATOR_SERVICE_TOKEN` | (none) | Sent as `Authorization: Bearer` on every outbound call. The real control plane requires it and checks it against its own `EGMA_SIMULATOR_SERVICE_TOKEN`. `egma self-host up` generates one private workspace value and gives the same value to both containers; an advanced deployment must supply the matching value to both processes. The claim answers carry live provider credentials. The workbench asks for none. |
 | `EGMA_SIMULATOR_CAPACITY` | `2` | Most simulations conducted at once. Compose passes an unset value through, so this process owns the default in every deployment. A voice simulation costs a channel on the deployment's carrier trunk, so raise it only as far as the trunk allows. |
 | `EGMA_SIMULATOR_MODE` | `persistent` | Keep the pull loop, or claim once with `one-shot`. One-shot mode defaults to capacity one and voice only. |

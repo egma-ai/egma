@@ -57,14 +57,34 @@ function pointerIn(document: unknown, pointer: string): unknown {
 }
 
 describe("the platform API operation registry", () => {
-  it("contains one unique definition for each of the 79 current operations", () => {
+  it("contains one unique definition for each of the 81 current operations", () => {
     const operations = Object.values(platformOperations);
-    expect(operations).toHaveLength(79);
+    expect(operations).toHaveLength(81);
     expect(new Set(operations.map((operation) => operation.operationId)).size).toBe(
       operations.length,
     );
     expect(new Set(operations.map((operation) => `${operation.method} ${operation.path}`)).size)
       .toBe(operations.length);
+  });
+
+  it("uses the shared interruption level on persona settings writes and reads", () => {
+    const savedControls = platformOperations.getPersona.responses[200].schema
+      .properties.settings.anyOf[0].properties.controls;
+    const inputControls = platformOperations.updatePersona.request.body.properties
+      .controls;
+    for (const controls of [savedControls, inputControls] as const) {
+      expect(controls.properties.interruptionLevel).toEqual({
+        type: "string",
+        enum: ["off", "occasional", "frequent"],
+      });
+      expect(controls.required).toContain("interruptionLevel");
+      expect(controls.additionalProperties).toBe(false);
+    }
+    expect(savedControls.properties.executionPolicyVersion).toMatchObject({
+      readOnly: true,
+      minimum: 1,
+    });
+    expect(inputControls.properties).not.toHaveProperty("executionPolicyVersion");
   });
 
   it("lets a LiveKit agent reserve one active worker key inside one project", () => {

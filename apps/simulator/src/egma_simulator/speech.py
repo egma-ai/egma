@@ -10,6 +10,7 @@ Scripted STT decodes samples, so tests verify the audio path and recording chann
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import struct
@@ -39,11 +40,11 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.settings import STTSettings
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.tracing.service_decorators import traced_stt, traced_tts
 
 from .config import STT_PROVIDERS, TTS_PROVIDERS, VAD_PROVIDERS
 from .provider_keys import ProviderKeyUnavailable, authentication_rejected
-from .spec import SelectedModels
+from .spec import PersonaParameters, SelectedModels
 from .usage import ProviderUsage, realtime_transcription_usage
 
 logger = logging.getLogger(__name__)
@@ -72,11 +73,17 @@ CARTESIA_SPEED_RANGE = (0.6, 1.5)
 A speed outside this range is refused. The adapter never changes the value
 selected by the pinned TTS model."""
 
+CARTESIA_API_VERSION = "2026-08-14"
+"""The Cartesia API shape used for locale and named accent steering."""
+
 OPENAI_REALTIME_PROXY_OPEN_SECONDS = 30.0
 """How long a proxied OpenAI Realtime socket may take to open."""
 
 OPENAI_REALTIME_PROXY_READY_SECONDS = 45.0
 """How long proxied OpenAI Realtime may take to become ready."""
+
+OPENAI_INSTRUCTIONLESS_TTS_MODELS = frozenset({"tts-1", "tts-1-hd"})
+"""OpenAI speech models that do not accept delivery instructions."""
 
 LISTENING_READY_SECONDS = 15.0
 """How long a listening leg may take to become able to hear.
@@ -94,15 +101,92 @@ class PersonaVoice:
     voice_id: str
     provider: str | None
     speed: float | None
+    language: str | None = None
+    emotion: str = "neutral"
+    accent: str = "voice_default"
+    speech_volume: float = 1.0
 
 
-def voice_from_models(models: SelectedModels) -> PersonaVoice:
+def voice_from_models(
+    models: SelectedModels, parameters: PersonaParameters | None = None
+) -> PersonaVoice:
     """Read the technical voice from its one owner."""
     return PersonaVoice(
         voice_id=models.tts.voice_id,
         provider=models.tts.provider,
         speed=models.tts.speed,
+        language=None if parameters is None else parameters.language,
+        emotion="neutral" if parameters is None else parameters.emotion,
+        accent="voice_default" if parameters is None else parameters.accent,
+        speech_volume=1.0 if parameters is None else parameters.speech_volume,
     )
+
+
+def tts_delivery_instructions(voice: PersonaVoice) -> str | None:
+    """Stable delivery instructions for an instruction-capable TTS model."""
+    emotions = {
+        "neutral": None,
+        "happy": "Use a consistently happy emotional delivery.",
+        "angry": "Use a consistently angry emotional delivery.",
+        "frustrated": "Use a consistently frustrated emotional delivery.",
+        "sad": "Use a consistently sad emotional delivery.",
+        "anxious": "Use a consistently anxious emotional delivery.",
+    }
+    accents = {
+        "voice_default": None,
+        "american": "Use an American accent.",
+        "british": "Use a British accent.",
+        "australian": "Use an Australian accent.",
+        "indian": "Use an Indian accent.",
+        "irish": "Use an Irish accent.",
+        "scottish": "Use a Scottish accent.",
+        "spanish": "Use a Spanish accent.",
+        "french": "Use a French accent.",
+        "german": "Use a German accent.",
+    }
+    if voice.emotion not in emotions or voice.accent not in accents:
+        raise SpeechFault("the resolved TTS delivery controls are not supported")
+    parts: list[str] = []
+    if voice.language:
+        parts.append(f"Speak in {voice.language}.")
+    if emotions[voice.emotion]:
+        parts.append(emotions[voice.emotion])
+    if accents[voice.accent]:
+        parts.append(accents[voice.accent])
+    return " ".join(parts) or None
+
+
+def apply_pcm_gain(pcm: bytes, gain: float) -> bytes:
+    """Apply a linear gain to signed 16-bit PCM and clip safely."""
+    samples = array("h")
+    samples.frombytes(pcm[: len(pcm) // SAMPLE_WIDTH_BYTES * SAMPLE_WIDTH_BYTES])
+    if sys.byteorder != "little":
+        samples.byteswap()
+    for index, sample in enumerate(samples):
+        samples[index] = max(-32768, min(32767, round(sample * gain)))
+    if sys.byteorder != "little":
+        samples.byteswap()
+    return samples.tobytes()
+
+
+def gained_speech_frame(frame: TTSAudioRawFrame, gain: float) -> TTSAudioRawFrame:
+    """Change only a speech frame's samples, preserving timing and context."""
+    frame.audio = apply_pcm_gain(frame.audio, gain)
+    return frame
+
+
+class SpeechGain(FrameProcessor):
+    """Apply Egma speech gain after TTS and before transport and recording."""
+
+    def __init__(self, gain: float) -> None:
+        super().__init__()
+        self.gain = gain
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if isinstance(frame, TTSAudioRawFrame) and self.gain != 1.0:
+            frame = gained_speech_frame(frame, self.gain)
+        await self.push_frame(frame, direction)
 
 
 # -- The scripted codec ------------------------------------------------------
@@ -486,7 +570,7 @@ def build_legs(providers: SpeechProviders, *, voice: PersonaVoice) -> SpeechLegs
     """
     providers = providers.checked()
     speaking, spoken_with, closers = _mouth(providers, voice)
-    listening_leg, listening = _ears(providers)
+    listening_leg, listening = _ears(providers, language=voice.language)
     return SpeechLegs(
         stt=listening_leg,
         tts=speaking,
@@ -569,12 +653,12 @@ def _mouth(
 
 
 def _ears(
-    providers: SpeechProviders,
+    providers: SpeechProviders, *, language: str | None = None
 ) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None]:
     if providers.stt == "openai_realtime":
-        return _openai_realtime_ears(providers)
+        return _openai_realtime_ears(providers, language=language)
     if providers.stt == "cartesia_manual":
-        return _cartesia_ears(providers)
+        return _cartesia_ears(providers, language=language)
     if providers.stt != "deepgram":
         return ScriptedSTT(), None
 
@@ -596,7 +680,9 @@ def _ears(
 
     leg = DeepgramSTTService(
         api_key=providers.stt_key,
-        settings=DeepgramSTTService.Settings(model=providers.stt_model),
+        settings=DeepgramSTTService.Settings(
+            model=providers.stt_model, language=language
+        ),
     )
 
     async def connected() -> None:
@@ -655,7 +741,7 @@ def _connection_opened_by(leg: FrameProcessor) -> asyncio.Event:
 
 
 def _cartesia_ears(
-    providers: SpeechProviders,
+    providers: SpeechProviders, *, language: str | None = None
 ) -> tuple[FrameProcessor, Callable[[], Awaitable[None]]]:
     """What the agent said, streamed through Cartesia's stock STT service.
 
@@ -673,9 +759,12 @@ def _cartesia_ears(
             "the cartesia_manual listening leg was chosen without a model"
         )
 
+    settings = {"model": providers.stt_model}
+    if language is not None:
+        settings["language"] = language
     leg = CartesiaSTTService(
         api_key=providers.stt_key,
-        settings=CartesiaSTTService.Settings(model=providers.stt_model),
+        settings=CartesiaSTTService.Settings(**settings),
     )
     opened = _connection_opened_by(leg)
 
@@ -705,6 +794,16 @@ def _cartesia_mouth(
     from pipecat.services.tts_service import TextAggregationMode
 
     class CartesiaTTSService(StockCartesiaTTSService):
+        def _build_msg(self, *args: Any, **kwargs: Any) -> str:
+            message = json.loads(super()._build_msg(*args, **kwargs))
+            if providers.tts_model.startswith("sonic-3.6"):
+                message.pop("language", None)
+                if spoken_with.language:
+                    message["locale"] = spoken_with.language
+                if spoken_with.accent != "voice_default":
+                    message["accent"] = spoken_with.accent
+            return json.dumps(message)
+
         async def _websocket_connect(self, uri: str, **kwargs: Any):
             parsed = urllib.parse.urlsplit(uri)
             query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
@@ -736,15 +835,27 @@ def _cartesia_mouth(
             "the cartesia speaking leg received a speed outside its supported "
             f"range {CARTESIA_SPEED_RANGE[0]}–{CARTESIA_SPEED_RANGE[1]}"
         )
+    if (
+        voice.accent != "voice_default"
+        and not providers.tts_model.startswith("sonic-3.6")
+    ):
+        raise SpeechFault(
+            "named Cartesia accents require sonic-3.6 or a newer compatible model"
+        )
     spoken_with = voice
     settings = CartesiaTTSService.Settings(
         model=providers.tts_model,
         voice=spoken_with.voice_id,
+        language=spoken_with.language,
     )
-    settings.generation_config = GenerationConfig(speed=spoken_with.speed)
+    settings.generation_config = GenerationConfig(
+        speed=spoken_with.speed,
+        emotion=None if spoken_with.emotion == "neutral" else spoken_with.emotion,
+    )
 
     leg = CartesiaTTSService(
         api_key=providers.tts_key,
+        cartesia_version=CARTESIA_API_VERSION,
         encoding="pcm_s16le",
         container="raw",
         settings=settings,
@@ -764,9 +875,10 @@ def _openai_mouth(
     providers: SpeechProviders, voice: PersonaVoice
 ) -> tuple[FrameProcessor, PersonaVoice, tuple[Callable[[], Awaitable[None]], ...]]:
     """The persona's voice through Pipecat's stock OpenAI service."""
-    from pipecat.services.openai.tts import OpenAITTSService as StockOpenAITTSService
+    from pipecat.services.openai import tts as openai_tts
 
-    class OpenAITTSService(StockOpenAITTSService):
+    class OpenAITTSService(openai_tts.OpenAITTSService):
+        @traced_tts
         async def run_tts(
             self, text: str, context_id: str
         ) -> AsyncGenerator[Frame, None]:
@@ -774,13 +886,63 @@ def _openai_mouth(
 
             spoke = False
             try:
-                async for frame in super().run_tts(text, context_id):
-                    if isinstance(frame, ErrorFrame):
-                        yield frame
-                        await self.remove_audio_context(context_id)
-                        return
-                    spoke = spoke or isinstance(frame, TTSAudioRawFrame)
-                    yield frame
+                voice_id = self._settings.voice
+                if not isinstance(voice_id, str) or not voice_id:
+                    yield ErrorFrame(error="OpenAI TTS voice must be specified")
+                    await self.remove_audio_context(context_id)
+                    return
+                if (
+                    not voice_id.startswith("voice_")
+                    and voice_id not in openai_tts.VALID_VOICES
+                ):
+                    yield ErrorFrame(
+                        error=f"OpenAI TTS voice {voice_id!r} is not supported"
+                    )
+                    await self.remove_audio_context(context_id)
+                    return
+                create_params: dict[str, Any] = {
+                    "input": text,
+                    "model": self._settings.model,
+                    "voice": (
+                        {"id": voice_id}
+                        if voice_id.startswith("voice_")
+                        else openai_tts.VALID_VOICES[voice_id]
+                    ),
+                    "response_format": "pcm",
+                }
+                if self._settings.instructions:
+                    create_params["instructions"] = self._settings.instructions
+                if self._settings.speed:
+                    create_params["speed"] = self._settings.speed
+                try:
+                    async with self._client.audio.speech.with_streaming_response.create(
+                        **create_params
+                    ) as response:
+                        if response.status_code != 200:
+                            error = await response.text()
+                            yield ErrorFrame(
+                                error=(
+                                    "Error getting audio "
+                                    f"(status: {response.status_code}, error: {error})"
+                                )
+                            )
+                            await self.remove_audio_context(context_id)
+                            return
+                        await self.start_tts_usage_metrics(text)
+                        async for chunk in response.iter_bytes(self.chunk_size):
+                            if chunk:
+                                await self.stop_ttfb_metrics()
+                                yield TTSAudioRawFrame(
+                                    chunk,
+                                    self.sample_rate,
+                                    1,
+                                    context_id=context_id,
+                                )
+                                spoke = True
+                except openai_tts.BadRequestError as fault:
+                    yield ErrorFrame(error=f"Unknown error occurred: {fault}")
+                    await self.remove_audio_context(context_id)
+                    return
             except asyncio.CancelledError:
                 await self.remove_audio_context(context_id)
                 raise
@@ -803,12 +965,22 @@ def _openai_mouth(
         raise SpeechFault("the openai speaking leg was chosen without a model")
     if voice.provider != "openai":
         raise SpeechFault("the openai speaking leg received a non-openai voice")
+    if voice.voice_id.startswith("voice_") and not providers.tts_customer_funded:
+        raise SpeechFault(
+            "an OpenAI private voice requires customer-funded credentials"
+        )
     spoken_with = voice
     settings = OpenAITTSService.Settings(
         model=providers.tts_model, voice=spoken_with.voice_id
     )
     if spoken_with.speed is not None:
         settings.speed = spoken_with.speed
+    instructions = tts_delivery_instructions(spoken_with)
+    if (
+        instructions is not None
+        and providers.tts_model not in OPENAI_INSTRUCTIONLESS_TTS_MODELS
+    ):
+        settings.instructions = instructions
     leg = OpenAITTSService(
         api_key=providers.tts_key,
         settings=settings,
@@ -816,11 +988,11 @@ def _openai_mouth(
         # finish; an idle timer can stop it while a response is still in flight.
         stop_frame_timeout_s=None,
     )
-    return leg, spoken_with, ()
+    return leg, spoken_with, (leg._client.close,)
 
 
 def _openai_realtime_ears(
-    providers: SpeechProviders,
+    providers: SpeechProviders, *, language: str | None = None
 ) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None]:
     """Streaming OpenAI transcription using local VAD boundaries from _AgentEar.
     The same boundaries drive transcript commits and recorded timing.
@@ -891,10 +1063,7 @@ def _openai_realtime_ears(
 
             transcription: dict[str, object] = {
                 "model": self._settings.model,
-                # Egma does not yet carry persona language into speech legs.
-                # Preserve the existing English behavior in the field this
-                # model accepts. Language capability is separate catalog work.
-                "languages": ["en"],
+                "languages": [_openai_transcription_language(self._settings.language)],
             }
             if self._settings.prompt:
                 transcription["prompt"] = self._settings.prompt
@@ -936,7 +1105,12 @@ def _openai_realtime_ears(
         # default, because a release changing it would move where a turn
         # ends without moving anything in this repository.
         turn_detection=False,
-        settings=OpenAIRealtimeSTTService.Settings(model=providers.stt_model),
+        settings=OpenAIRealtimeSTTService.Settings(
+            **{
+                "model": providers.stt_model,
+                **({} if language is None else {"language": language}),
+            }
+        ),
     )
 
     opened = _connection_opened_by(leg)
@@ -964,3 +1138,11 @@ def _openai_realtime_ears(
             await asyncio.sleep(0.05)
 
     return leg, connected
+
+
+def _openai_transcription_language(language: str | None) -> str:
+    """Convert a selected locale to OpenAI's accepted ISO-639 language code."""
+    code = (language or "en").strip().replace("_", "-").split("-", 1)[0].lower()
+    if not code:
+        raise SpeechFault("the selected transcription language is empty")
+    return code

@@ -96,7 +96,11 @@ class ScriptedBackend:
     def transport(self) -> ScriptedTransport:
         return self._transport
 
-    async def create_transport(self) -> VoiceMedia:
+    async def create_transport(self, *, audio_out_mixer: object = None) -> VoiceMedia:
+        if audio_out_mixer is not None:
+            raise MediaBackendError(
+                "the scripted phone backend cannot carry background sound"
+            )
         return self._transport.media
 
     async def dial(self, number: str) -> None:

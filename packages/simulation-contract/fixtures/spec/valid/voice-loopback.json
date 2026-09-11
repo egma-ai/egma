@@ -1,5 +1,5 @@
 {
-  "contract_version": 5,
+  "contract_version": 6,
   "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWEV",
   "modality": "voice",
   "connection": {
@@ -22,7 +22,15 @@
   "persona": {
     "name": "Dev",
     "personality": "Dev, 34, calling from a train platform. In a hurry, talks over slow answers, background noise comes and goes.",
-    "language": "en-US"
+    "parameters": {
+      "language": "en-US",
+      "emotion": "neutral",
+      "accent": "voice_default",
+      "speech_volume": 1,
+      "execution_policy_version": 1,
+      "background_sound_id": "none",
+      "background_volume": 0.0631
+    }
   },
   "scenario": {
     "instructions": "My card was charged twice for the same order this morning. I need the duplicate charge reversed and a confirmation number before my train arrives. Please be quick about it."

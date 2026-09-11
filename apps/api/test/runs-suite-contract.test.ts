@@ -81,7 +81,7 @@ async function readyToRun(
     name: "Reschedules a booking",
     scenario: "Move Thursday's booking to next week.",
     expectedBehaviors: ["confirms the new time before finishing"],
-    personas: ["Everyday caller"],
+    personas: ["Everyday Caller [Male]"],
   });
   expect(test.statusCode, JSON.stringify(test.body)).toBe(201);
 

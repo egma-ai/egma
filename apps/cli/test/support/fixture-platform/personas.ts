@@ -1,6 +1,6 @@
 /** The personas a project can name, as `/v1/personas` answers them. */
 
-import { given, NOT_AUTHENTICATED, refuse } from "./reading.ts";
+import { given, NOT_AUTHENTICATED, refuse, text } from "./reading.ts";
 import type { FixtureAnswer, FixtureRequest, RouteGroup } from "./server.ts";
 
 export type SeededPersona = {
@@ -20,7 +20,41 @@ export type PersonaControls = {
  * clear() creates an empty-list case for refusal tests. No default persona is
  * selected implicitly; tests must name their personas.
  */
-const EGMA_PREDEFINED = "Everyday caller";
+const EGMA_PREDEFINED = "Everyday Caller [Male]";
+
+const DEFAULT_MODELS = {
+  llm: { provider: "openai", model: "gpt-4o" },
+  stt: { provider: "deepgram", model: "nova-3" },
+  tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy", speed: 1 },
+};
+
+const DEFAULT_CONTROLS = {
+  language: "en-US",
+  emotion: "neutral",
+  accent: "voice_default",
+  speechVolume: 1,
+  backgroundSoundId: "none",
+  backgroundVolume: 0.0631,
+};
+
+function parameterContract() {
+  return Object.entries({
+    llm_provider: "openai",
+    llm_model: "gpt-4o",
+    stt_provider: "deepgram",
+    stt_model: "nova-3",
+    tts_provider: "openai",
+    tts_model: "gpt-4o-mini-tts",
+    tts_voice_id: "alloy",
+    tts_speed: 1,
+    language: "en-US",
+    emotion: "neutral",
+    accent: "voice_default",
+    speech_volume: 1,
+    background_sound_id: "none",
+    background_volume: 0.0631,
+  }).map(([key, defaultValue]) => ({ key, defaultValue }));
+}
 
 function bearer(request: FixtureRequest): string {
   const value = request.headers.authorization ?? "";
@@ -35,6 +69,7 @@ export function personaRoutes(options: {
   const personas: SeededPersona[] = [
     { id: "prs_egma_default", name: EGMA_PREDEFINED },
   ];
+  let settings: Record<string, unknown> | null = null;
   const behind = (request: FixtureRequest, action: () => FixtureAnswer): FixtureAnswer =>
     options.holdsKey(bearer(request)) ? action() : { status: 401, body: NOT_AUTHENTICATED };
   const projectGate = (id: string | undefined): FixtureAnswer | null =>
@@ -81,6 +116,70 @@ export function personaRoutes(options: {
                   nextPageToken: null,
                 },
               };
+            }),
+        },
+        {
+          method: "GET",
+          path: "/v1/personas/:personaId",
+          handle: (request) =>
+            behind(request, () => {
+              const gate = projectGate(given(request.url.searchParams.get("projectId")));
+              if (gate !== null) return gate;
+              const persona = personas.find((one) => one.id === request.params.personaId);
+              return persona === undefined
+                ? refuse(404, "not_found", "persona not found")
+                : {
+                    status: 200,
+                    body: {
+                      ...persona,
+                      description: "A regular conversationalist.",
+                      owner: "egma",
+                      visibility: "global",
+                      version: 1,
+                      currentVersionId: "pvr_fixture_default",
+                      identityName: "Naman",
+                      personality: "Speaks clearly and asks one question at a time.",
+                      language: "en-US",
+                      parameterContract: parameterContract(),
+                      settings,
+                      createdAt: "2026-09-10T00:00:00.000Z",
+                      updatedAt: "2026-09-10T00:00:00.000Z",
+                    },
+                  };
+            }),
+        },
+        {
+          method: "POST",
+          path: "/v1/personas/:personaId/use",
+          handle: (request) =>
+            behind(request, () => {
+              const gate = projectGate(given(text(request.body?.projectId)));
+              if (gate !== null) return gate;
+              settings = {
+                id: "pps_fixture_default",
+                models: request.body?.models ?? DEFAULT_MODELS,
+                controls: { ...(request.body?.controls as object ?? DEFAULT_CONTROLS), executionPolicyVersion: 1 },
+                createdAt: "2026-09-10T00:00:00.000Z",
+                updatedAt: "2026-09-10T00:00:00.000Z",
+              };
+              return { status: 200, body: { id: request.params.personaId, settings } };
+            }),
+        },
+        {
+          method: "PATCH",
+          path: "/v1/personas/:personaId",
+          handle: (request) =>
+            behind(request, () => {
+              const gate = projectGate(given(text(request.body?.projectId)));
+              if (gate !== null) return gate;
+              settings = {
+                id: "pps_fixture_default",
+                models: request.body?.models ?? DEFAULT_MODELS,
+                controls: { ...(request.body?.controls as object ?? DEFAULT_CONTROLS), executionPolicyVersion: 1 },
+                createdAt: "2026-09-10T00:00:00.000Z",
+                updatedAt: "2026-09-10T00:00:00.000Z",
+              };
+              return { status: 200, body: { id: request.params.personaId, settings } };
             }),
         },
       ],

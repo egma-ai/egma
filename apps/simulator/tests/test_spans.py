@@ -32,6 +32,7 @@ from opentelemetry.trace import (
 
 from egma_simulator import spans as spans_module
 from egma_simulator import telemetry
+from egma_simulator.conductor import InterruptionEvidence
 from egma_simulator.contract import contract_dir
 from egma_simulator.spans import (
     SCOPE_NAME,
@@ -112,6 +113,13 @@ def attribute(span: dict, key: str) -> str | None:
     for entry in span.get("attributes", []):
         if entry["key"] == key:
             return entry["value"]["stringValue"]
+    return None
+
+
+def raw_attribute(span: dict, key: str) -> dict | None:
+    for entry in span.get("attributes", []):
+        if entry["key"] == key:
+            return entry["value"]
     return None
 
 
@@ -372,6 +380,37 @@ def test_a_recording_origin_is_trace_evidence_on_the_media_clock():
     recording = named(sink.documents[0], "recording")[0]
     assert int(recording["startTimeUnixNano"]) == media_origin
     assert duration_ns(recording) == 0
+
+
+def test_interruption_evidence_keeps_recording_times_and_partial_text_separate():
+    spans, sink, _clock = emitter()
+    spans.opened()
+    spans.interruption(
+        InterruptionEvidence(
+            event="delivered",
+            at_unix_nano=9_000,
+            began_unix_nano=6_000,
+            ended_unix_nano=9_000,
+            overlap_ended_unix_nano=8_500,
+            generated_text="The provider generated more words.",
+            delivered_text=None,
+        )
+    )
+    spans.flush()
+
+    interruption = named(sink.documents[0], "persona_interruption")[0]
+    assert int(interruption["startTimeUnixNano"]) == 9_000
+    assert attribute(interruption, "egma.interruption.event") == "delivered"
+    assert raw_attribute(
+        interruption, "egma.interruption.began_unix_nano"
+    ) == {"intValue": "6000"}
+    assert raw_attribute(
+        interruption, "egma.interruption.overlap_ended_unix_nano"
+    ) == {"intValue": "8500"}
+    assert attribute(
+        interruption, "egma.interruption.generated_text"
+    ) == "The provider generated more words."
+    assert raw_attribute(interruption, "egma.interruption.delivered_text") is None
 
 
 # -- The trace's own shape ------------------------------------------------

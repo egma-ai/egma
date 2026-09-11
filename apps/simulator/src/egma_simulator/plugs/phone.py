@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..background import BackgroundSound, soundfile_mixer
 from ..config import MediaSettings
 from ..media import BACKENDS, MediaBackendError, VoiceMedia, backend_for
 from . import PlugError
@@ -45,6 +46,7 @@ class PhoneCall:
         job_dispatch_metadata: object = None,
         mock_tools: object = None,
         media: MediaSettings | None = None,
+        background: BackgroundSound | None = None,
     ) -> None:
         # A phone call is reached over the public telephone network, which
         # has never carried anything but a number, so this plug has
@@ -147,6 +149,7 @@ class PhoneCall:
         )
         self._media: VoiceMedia | None = None
         self._reference: str | None = None
+        self._background = background
 
     @property
     def provider_reference(self) -> str | None:
@@ -172,7 +175,17 @@ class PhoneCall:
     async def prepare(self) -> VoiceMedia:
         """Build the media transport before the Pipecat pipeline starts."""
         try:
-            self._media = await self._backend.create_transport()
+            mixer = (
+                None
+                if self._background is None
+                else soundfile_mixer(self._background)
+            )
+            if mixer is None:
+                self._media = await self._backend.create_transport()
+            else:
+                self._media = await self._backend.create_transport(
+                    audio_out_mixer=mixer
+                )
             return self._media
         except MediaBackendError as refused:
             raise PlugError(str(refused), ending=refused.ending) from refused

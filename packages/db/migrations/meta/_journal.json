@@ -15,6 +15,27 @@
       "when": 1789082964373,
       "tag": "0001_run_concurrency",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789093839387,
+      "tag": "0002_melodic_switch",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789171200000,
+      "tag": "0003_persona_background_sound",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789257600000,
+      "tag": "0004_persona_interruptions",
+      "breakpoints": true
     }
   ]
 }

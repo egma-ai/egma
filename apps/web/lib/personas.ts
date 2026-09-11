@@ -14,6 +14,7 @@ import type {
 export type Persona = GetPersonaResponse;
 
 export type PersonaModels = NonNullable<Persona["settings"]>["models"];
+export type PersonaControls = NonNullable<Persona["settings"]>["controls"];
 export type ModelSelection = PersonaModels["llm"];
 export type PersonaPage = ListPersonasResponse;
 
@@ -47,11 +48,11 @@ export const BLANK_BEHAVIOR: BehaviorDraft = {
 };
 
 /** The stored behavior, as the editor holds it. A version reads the same way. */
-export function behaviorDraftOf(stored: BehaviorDraft): BehaviorDraft {
+export function behaviorDraftOf(stored: Omit<BehaviorDraft, "language"> & { readonly language: string | null }): BehaviorDraft {
   return {
     identityName: stored.identityName,
     personality: stored.personality,
-    language: stored.language,
+    language: stored.language ?? "en-US",
   };
 }
 
@@ -74,9 +75,39 @@ export type ModelsDraft = {
   readonly ttsModel: string;
   readonly voiceId: string;
   readonly speed: string;
+  readonly language: string;
+  readonly emotion: PersonaControls["emotion"];
+  readonly accent: string;
+  readonly speechVolume: string;
+  readonly backgroundSoundId: PersonaControls["backgroundSoundId"];
+  /** The exact stored gain, kept separate from its dB editor value. */
+  readonly backgroundVolume: string;
+  readonly backgroundVolumeDb: string;
+  readonly interruptionLevel: PersonaControls["interruptionLevel"];
 };
 
-export function modelsDraftOf(models: PersonaModels): ModelsDraft {
+export const BACKGROUND_SOUNDS: ReadonlyArray<{ readonly id: PersonaControls["backgroundSoundId"]; readonly label: string }> = [
+  { id: "none", label: "None" },
+  { id: "office-v1", label: "Office" },
+  { id: "cafe-v1", label: "Café" },
+  { id: "street-traffic-v1", label: "Street traffic" },
+  { id: "crowd-talking-v1", label: "Crowd talking" },
+  { id: "inside-car-v1", label: "Inside a car" },
+  { id: "home-tv-v1", label: "Home with TV" },
+  { id: "wind-v1", label: "Wind" },
+  { id: "rain-v1", label: "Rain" },
+];
+
+export function gainToDecibels(gain: number): string {
+  return String(Math.round(20 * Math.log10(gain) * 10) / 10);
+}
+
+export function decibelsToGain(decibels: string): string {
+  const value = Number(decibels);
+  return Number.isFinite(value) ? String(10 ** (value / 20)) : decibels;
+}
+
+export function modelsDraftOf(models: PersonaModels, controls?: PersonaControls): ModelsDraft {
   return {
     llmProvider: models.llm.provider,
     llmModel: models.llm.model,
@@ -86,6 +117,26 @@ export function modelsDraftOf(models: PersonaModels): ModelsDraft {
     ttsModel: models.tts.model,
     voiceId: models.tts.voiceId,
     speed: String(models.tts.speed),
+    language: controls?.language ?? "en-US",
+    emotion: controls?.emotion ?? "neutral",
+    accent: controls?.accent ?? "voice_default",
+    speechVolume: String(controls?.speechVolume ?? 1),
+    backgroundSoundId: controls?.backgroundSoundId ?? "none",
+    backgroundVolume: String(controls?.backgroundVolume ?? 0.0631),
+    backgroundVolumeDb: gainToDecibels(controls?.backgroundVolume ?? 0.0631),
+    interruptionLevel: controls?.interruptionLevel ?? "off",
+  };
+}
+
+export function controlsFrom(draft: ModelsDraft): Omit<PersonaControls, "executionPolicyVersion"> {
+  return {
+    language: draft.language,
+    emotion: draft.emotion,
+    accent: draft.accent,
+    speechVolume: Number(draft.speechVolume),
+    backgroundSoundId: draft.backgroundSoundId,
+    backgroundVolume: Number(draft.backgroundVolume),
+    interruptionLevel: draft.interruptionLevel,
   };
 }
 
@@ -183,5 +234,19 @@ export function modelsOfPersona(persona: Persona): PersonaModels {
     llm: { provider: String(values.llm_provider), model: String(values.llm_model) },
     stt: { provider: String(values.stt_provider), model: String(values.stt_model) },
     tts: { provider: String(values.tts_provider), model: String(values.tts_model), voiceId: String(values.tts_voice_id), speed: Number(values.tts_speed) },
+  };
+}
+
+export function controlsOfPersona(persona: Persona): Omit<PersonaControls, "executionPolicyVersion"> {
+  if (persona.settings !== null) return persona.settings.controls;
+  const values = Object.fromEntries(persona.parameterContract.map((field) => [field.key, field.defaultValue]));
+  return {
+    language: String(values.language ?? persona.language ?? "en-US"),
+    emotion: String(values.emotion ?? "neutral") as PersonaControls["emotion"],
+    accent: String(values.accent ?? "voice_default"),
+    speechVolume: Number(values.speech_volume ?? 1),
+    backgroundSoundId: (values.background_sound_id ?? "none") as PersonaControls["backgroundSoundId"],
+    backgroundVolume: Number(values.background_volume ?? 0.0631),
+    interruptionLevel: (values.interruption_level ?? "off") as PersonaControls["interruptionLevel"],
   };
 }

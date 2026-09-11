@@ -7,6 +7,7 @@ not_answered; connection and carrier faults are error.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -19,6 +20,8 @@ from pipecat.frames.frames import (
     Frame,
     InterruptionFrame,
     OutputAudioRawFrame,
+    SystemFrame,
+    TTSStoppedFrame,
     UninterruptibleFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -87,6 +90,11 @@ class RemoteParticipantLeftFrame(ControlFrame, UninterruptibleFrame):
     completed: asyncio.Event
 
 
+@dataclass
+class PlayoutClearedFrame(SystemFrame, UninterruptibleFrame):
+    """The transport confirms that its outbound audio queue is clear."""
+
+
 TRANSPORT_ARRIVAL = "egma.transport_arrival"
 """When one inbound frame's first sample reached the transport.
 
@@ -103,6 +111,8 @@ The transport paces what it is handed: audio written while earlier audio
 is still playing waits its turn. This is where the frame lands after
 that wait, not when the speech leg made it.
 """
+
+_TRANSPORT_PLAYOUT_GENERATION = "egma.transport_playout_generation"
 
 
 def arrived_at(frame: object, seconds: float) -> None:
@@ -153,6 +163,7 @@ class PlayoutClock:
 
     def __init__(self) -> None:
         self._playing_through: float | None = None
+        self._cleared = asyncio.Event()
 
     def place(self, now: float, seconds: float) -> float:
         """Where the next ``seconds`` of audio start, and take that room."""
@@ -164,6 +175,32 @@ class PlayoutClock:
     def cleared(self) -> None:
         """The transport dropped whatever it had not played yet."""
         self._playing_through = None
+        self._cleared.set()
+        self._cleared = asyncio.Event()
+
+    async def wait_until_played(self) -> None:
+        """Wait until audio already accepted by the transport has played."""
+        through = self._playing_through
+        if through is None:
+            return
+        cleared = self._cleared
+        remaining = through - time.monotonic()
+        if remaining <= 0:
+            return
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(cleared.wait(), remaining)
+
+
+class PlayoutClearAcknowledger(FrameProcessor):
+    """Emit an ordered acknowledgement after the transport clears its queue."""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        await self.push_frame(frame, direction)
+        if direction == FrameDirection.DOWNSTREAM and isinstance(
+            frame, InterruptionFrame
+        ):
+            await self.push_frame(PlayoutClearedFrame(), direction)
 
 
 class PlayoutStamp(FrameProcessor):
@@ -172,22 +209,43 @@ class PlayoutStamp(FrameProcessor):
     Report interruptions so the recording discards audio removed before playback.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self, *, wait_for_playout: bool = False, acknowledged_clears: bool = False
+    ) -> None:
         super().__init__()
         self._playout = PlayoutClock()
+        self._wait_for_playout = wait_for_playout
+        self._generation = 0
+        self._acknowledged_clears = acknowledged_clears
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
+        if isinstance(frame, InterruptionFrame) and self._acknowledged_clears:
+            if direction == FrameDirection.DOWNSTREAM:
+                return
+            await self.push_frame(frame, direction)
+            cleared = PlayoutClearedFrame()
+            cleared.metadata[_TRANSPORT_PLAYOUT_GENERATION] = self._generation
+            played_out_at(cleared, time.monotonic())
+            self._playout.cleared()
+            self._generation += 1
+            await self.push_frame(cleared, FrameDirection.DOWNSTREAM)
+            return
         if isinstance(frame, OutputAudioRawFrame):
+            frame.metadata[_TRANSPORT_PLAYOUT_GENERATION] = self._generation
             played_out_at(
                 frame,
                 self._playout.place(
                     time.monotonic(), frame.num_frames / frame.sample_rate
                 ),
             )
-        elif isinstance(frame, InterruptionFrame):
+        elif isinstance(frame, (PlayoutClearedFrame, InterruptionFrame)):
+            frame.metadata[_TRANSPORT_PLAYOUT_GENERATION] = self._generation
             played_out_at(frame, time.monotonic())
             self._playout.cleared()
+            self._generation += 1
+        elif isinstance(frame, TTSStoppedFrame) and self._wait_for_playout:
+            await self._playout.wait_until_played()
         await self.push_frame(frame, direction)
 
 
@@ -221,7 +279,9 @@ class VoiceMedia:
 class MediaBackend(Protocol):
     """One outbound call, from opening the way in to hanging up."""
 
-    async def create_transport(self) -> VoiceMedia: ...
+    async def create_transport(
+        self, *, audio_out_mixer: object = None
+    ) -> VoiceMedia: ...
 
     async def dial(self, number: str) -> None: ...
 

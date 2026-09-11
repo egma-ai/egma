@@ -17,6 +17,7 @@ from ..mock_tools import MockToolRefusal
 from ..platform_logging import log_event
 from . import (
     MediaBackendError,
+    PlayoutClearAcknowledger,
     PlayoutStamp,
     RemoteParticipantLeftFrame,
     VoiceMedia,
@@ -876,7 +877,7 @@ class JoinedRoom:
         for participant_sid in self._subscribed_audio_tracks:
             self._note_startup_audio_track(participant_sid)
 
-    def create_transport(self) -> VoiceMedia:
+    def create_transport(self, *, audio_out_mixer: object = None) -> VoiceMedia:
         """Create stock LiveKit input and output processors without rates."""
         from pipecat.frames.frames import Frame, InputAudioRawFrame
         from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -886,7 +887,12 @@ class JoinedRoom:
             url=self._url,
             token=self._token,
             room_name=self._room_name,
-            params=LiveKitParams(audio_in_enabled=True, audio_out_enabled=True),
+            params=LiveKitParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                audio_out_sample_rate=24_000,
+                audio_out_mixer=audio_out_mixer,
+            ),
         )
         self._transport = transport
         input_transport = transport.input()
@@ -984,7 +990,11 @@ class JoinedRoom:
 
         return VoiceMedia(
             input=(input_transport, _Arrival()),
-            output=(transport.output(), PlayoutStamp()),
+            output=(
+                PlayoutClearAcknowledger(),
+                transport.output(),
+                PlayoutStamp(wait_for_playout=True, acknowledged_clears=True),
+            ),
             ended=self.ended,
             failed=self.failed,
             transport_name=f"livekit server at {self._quotable(self._url)}",

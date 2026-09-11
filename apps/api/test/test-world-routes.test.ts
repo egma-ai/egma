@@ -30,7 +30,7 @@ const TEST_BODY = {
   description: "A caller moves a booking.",
   scenario: "Move Thursday's booking to next week.",
   expectedBehaviors: ["confirms the new time before finishing"],
-  personas: ["Everyday caller"],
+  personas: ["Everyday Caller [Male]"],
 } as const;
 
 async function customer(label: string) {

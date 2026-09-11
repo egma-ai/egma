@@ -20,12 +20,22 @@ from conftest import (
     speech_in_the_recording,
 )
 from pipecat.audio.vad.vad_analyzer import VADState
-from pipecat.frames.frames import TextFrame
-from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.frames.frames import (
+    InterruptionFrame,
+    TextFrame,
+    TTSAudioRawFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from egma_simulator import conductor as conductor_module
 from egma_simulator.blob import FilesystemBlobStore
-from egma_simulator.conductor import ConductParameters, VoiceConductor
+from egma_simulator.conductor import (
+    ConductParameters,
+    InterruptionEvidence,
+    VoiceConductor,
+)
 from egma_simulator.contract import ERROR
 from egma_simulator.conversation import (
     Conducted,
@@ -86,6 +96,8 @@ class Observed:
     measures: list[tuple[str, float]] = field(default_factory=list)
     """Each measurement, as the name and the milliseconds its span holds."""
 
+    interruptions: list[InterruptionEvidence] = field(default_factory=list)
+
     @property
     def turns(self) -> list[tuple[str, str]]:
         return [(speaker, text) for speaker, text, _began, _ended in self.spans]
@@ -144,6 +156,7 @@ async def observe(
     """
     spans = [] if spans is None else spans
     measures: list[tuple[str, float]] = []
+    interruptions: list[InterruptionEvidence] = []
 
     async def on_utterance(speaker: str, text: str, began: int, ended: int) -> None:
         spans.append((speaker, text, began, ended))
@@ -163,9 +176,14 @@ async def observe(
         name="sim:voice-test",
         on_utterance=on_utterance,
         on_measured=on_measured,
+        on_interruption=interruptions.append,
     )
     return Observed(
-        conducted=conducted, assembled=assembled, spans=spans, measures=measures
+        conducted=conducted,
+        assembled=assembled,
+        spans=spans,
+        measures=measures,
+        interruptions=interruptions,
     )
 
 
@@ -405,8 +423,9 @@ async def test_incoming_audio_continues_while_the_persona_thinks(
         return await reply_to(persona, messages)
 
     monkeypatch.setattr(Persona, "reply_to", delayed)
-    observed = await observe(
-        conductor, assembled, spec, controls=ConversationControls()
+    observed = await asyncio.wait_for(
+        observe(conductor, assembled, spec, controls=ConversationControls()),
+        timeout=3,
     )
     assert observed.conducted.status == "completed"
 
@@ -1215,6 +1234,234 @@ async def test_genuine_overlap_stays_in_the_transcript_and_recording(
         assert measure not in observed.named
 
 
+async def test_frequent_interruption_is_audible_over_continuous_agent_speech(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The policy releases real persona PCM before a long agent turn ends."""
+    long_greeting = "Please keep listening while I explain every detail. " * 8
+    long_interruption = "Wait, " + "I need to clarify this important detail " * 12 + "."
+    deliberate_requests = 0
+    original_reply = Persona.reply_to
+
+    async def count_deliberate(self: Persona, context):
+        nonlocal deliberate_requests
+        if any(
+            "Interrupt now" in message.get("content", "")
+            for message in context.get_messages()
+        ):
+            deliberate_requests += 1
+        return await original_reply(self, context)
+
+    monkeypatch.setattr(Persona, "reply_to", count_deliberate)
+
+    async def four_one_second_frames(self: ScriptedTTS, _text: str) -> None:
+        await self.push_frame(TTSStartedFrame())
+        one_second = b"\x01\x00" * self.sample_rate_hz
+        for _ in range(4):
+            await self.push_frame(TTSAudioRawFrame(one_second, self.sample_rate_hz, 1))
+        await self.push_frame(TTSStoppedFrame())
+
+    monkeypatch.setattr(ScriptedTTS, "_speak", four_one_second_frames)
+    upstream_cancellations = 0
+    original_tts_process = ScriptedTTS.process_frame
+
+    async def observe_tts_cancel(self: ScriptedTTS, frame, direction) -> None:
+        nonlocal upstream_cancellations
+        if (
+            isinstance(frame, InterruptionFrame)
+            and direction == FrameDirection.UPSTREAM
+        ):
+            upstream_cancellations += 1
+        await original_tts_process(self, frame, direction)
+
+    monkeypatch.setattr(ScriptedTTS, "process_frame", observe_tts_cancel)
+    spec = spec_for(
+        scenario=f"{long_interruption} Then answer the remaining question.",
+        greeting=long_greeting,
+        replies=["I will continue with another detailed explanation. " * 8],
+        max_turns=3,
+    )
+    assembled = assemble(
+        spec,
+        blobs=FilesystemBlobStore(tmp_path),
+        speech=SCRIPTED_PAIR,
+        parameters=ConductParameters(
+            agent_opening_seconds=30,
+            interruption_level="frequent",
+        ),
+    )
+    conductor = assembled.conductor
+    assert conductor is not None
+    observed = await observe(
+        conductor, assembled, spec, controls=ConversationControls()
+    )
+
+    persona = next(span for span in observed.spans if span[0] == "human")
+    agent = next(span for span in observed.spans if span[0] == "agent")
+    assert persona[2] < agent[3] and agent[2] < persona[3]
+    assert persona[3] - persona[2] <= 3_000_000_000
+    assert persona[1] == ""
+    assert deliberate_requests == 1
+    assert upstream_cancellations == 1
+
+    audio = observed.assembled.audio
+    assert audio is not None
+    persona_track, agent_track, _rate = channels_of(
+        (tmp_path / audio["recording"]).read_bytes()
+    )
+    assert any(
+        persona_track[offset : offset + 2] != b"\x00\x00"
+        and agent_track[offset : offset + 2] != b"\x00\x00"
+        for offset in range(0, min(len(persona_track), len(agent_track)), 2)
+    )
+
+
+async def test_agent_stop_before_delayed_interruption_playout_yields_to_normal_reply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    original_reply = Persona.reply_to
+    deliberate_requests = 0
+
+    async def delayed_interruption(self: Persona, context):
+        nonlocal deliberate_requests
+        messages = context.get_messages()
+        if any("Interrupt now" in message.get("content", "") for message in messages):
+            deliberate_requests += 1
+            await asyncio.sleep(0.2)
+        return await original_reply(self, context)
+
+    monkeypatch.setattr(Persona, "reply_to", delayed_interruption)
+    spec = spec_for(
+        scenario="This is the normal answer.",
+        greeting="A short agent statement that ends soon.",
+        replies=["Thank you."],
+        max_turns=3,
+    )
+    assembled = assemble(
+        spec,
+        blobs=FilesystemBlobStore(tmp_path),
+        speech=SCRIPTED_PAIR,
+        parameters=ConductParameters(interruption_level="frequent"),
+    )
+    conductor = assembled.conductor
+    assert conductor is not None
+    conductor._random.uniform = lambda _low, _high: 0.1
+    observed = await observe(
+        conductor, assembled, spec, controls=ConversationControls()
+    )
+
+    agents = [turn for turn in observed.spans if turn[0] == "agent"]
+    assert [turn[1] for turn in agents] == [
+        "A short agent statement that ends soon.",
+        "Thank you.",
+    ]
+    agent = agents[0]
+    assert all(
+        not (turn[2] < agent[3] and agent[2] < turn[3])
+        for turn in observed.spans
+        if turn[0] == "human"
+    )
+    assert [turn for turn in observed.turns if turn[0] == "human"] == [
+        ("human", "This is the normal answer.")
+    ]
+    # Each continuous agent segment gets at most one attempt. The first canceled
+    # attempt did not create a delivered-interruption cooldown for the next segment.
+    assert deliberate_requests == 2
+
+
+async def test_failed_deliberate_model_request_does_not_steal_normal_reply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    original_reply = Persona.reply_to
+    attempts = 0
+
+    async def fail_deliberate(self: Persona, context):
+        nonlocal attempts
+        if any(
+            "Interrupt now" in message.get("content", "")
+            for message in context.get_messages()
+        ):
+            attempts += 1
+            raise RuntimeError("interruption request failed")
+        return await original_reply(self, context)
+
+    monkeypatch.setattr(Persona, "reply_to", fail_deliberate)
+    spec = spec_for(
+        scenario="This normal reply still belongs to the completed agent turn.",
+        greeting="A long enough agent statement to trigger one failed interruption.",
+        replies=["Thanks."],
+        max_turns=3,
+    )
+    assembled = assemble(
+        spec,
+        blobs=FilesystemBlobStore(tmp_path),
+        speech=SCRIPTED_PAIR,
+        parameters=ConductParameters(interruption_level="frequent"),
+    )
+    conductor = assembled.conductor
+    assert conductor is not None
+    delays = iter((0.1, 1.0))
+    conductor._random.uniform = lambda _low, _high: next(delays)
+
+    observed = await observe(
+        conductor, assembled, spec, controls=ConversationControls()
+    )
+
+    assert attempts == 1
+    assert [turn for turn in observed.turns if turn[0] == "human"] == [
+        ("human", "This normal reply still belongs to the completed agent turn.")
+    ]
+
+
+async def test_failed_deliberate_tts_before_audio_yields_to_normal_reply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    original_speak = ScriptedTTS._speak
+    attempts = 0
+
+    async def fail_first_speech(self: ScriptedTTS, text: str) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("deliberate speech request failed")
+        await original_speak(self, text)
+
+    monkeypatch.setattr(ScriptedTTS, "_speak", fail_first_speech)
+    spec = spec_for(
+        scenario="This normal reply remains available after speech synthesis fails.",
+        greeting="A long agent statement that keeps going past the interruption time.",
+        replies=["Thanks."],
+        max_turns=3,
+    )
+    assembled = assemble(
+        spec,
+        blobs=FilesystemBlobStore(tmp_path),
+        speech=SCRIPTED_PAIR,
+        parameters=ConductParameters(interruption_level="frequent"),
+    )
+    conductor = assembled.conductor
+    assert conductor is not None
+    conductor._random.uniform = lambda _low, _high: 0.1
+
+    observed = await observe(
+        conductor, assembled, spec, controls=ConversationControls()
+    )
+
+    # The failed deliberate request is followed by the ordinary answer. A later
+    # concluding turn may add one more successful speech request.
+    assert attempts >= 2
+    assert (
+        "human",
+        "This normal reply remains available after speech synthesis fails.",
+    ) in observed.turns
+    canceled = [
+        event for event in observed.interruptions if event.event == "canceled"
+    ]
+    assert [event.reason for event in canceled] == ["speech_provider_failed"]
+    assert canceled[0].began_unix_nano is None
+    assert canceled[0].ended_unix_nano is None
+
+
 # -- What the legs are, and whose voice --------------------------------------
 
 
@@ -1649,8 +1896,9 @@ async def test_customer_speech_auth_failure_keeps_provider_identity(
 
 @pytest.mark.timeout(12)
 @pytest.mark.parametrize("status", [401, 403])
+@pytest.mark.parametrize("voice_id", ["alloy", "voice_private_123"])
 async def test_openai_tts_auth_failure_survives_the_real_pipeline(
-    tmp_path, monkeypatch, status
+    tmp_path, monkeypatch, status, voice_id
 ):
     from aiohttp import web
     from conftest import direct_models
@@ -1688,7 +1936,8 @@ async def test_openai_tts_auth_failure_survives_the_real_pipeline(
         tts_customer_funded=True,
     )
     models = direct_models(
-        modality="voice", voice={"provider": "openai", "voiceId": "alloy", "speed": 1}
+        modality="voice",
+        voice={"provider": "openai", "voiceId": voice_id, "speed": 1},
     )
     try:
         with pytest.raises(ProviderKeyUnavailable) as caught:
@@ -1705,6 +1954,63 @@ async def test_openai_tts_auth_failure_survives_the_real_pipeline(
         assert len(requests) == 1
         assert requests[0][0] == "Bearer test-customer-speech-key"
         assert requests[0][1]["model"] == "tts-1"
-        assert requests[0][1]["voice"] == "alloy"
+        expected_voice = {"id": voice_id} if voice_id.startswith("voice_") else voice_id
+        assert requests[0][1]["voice"] == expected_voice
+        assert "language" not in requests[0][1]
+        assert "instructions" not in requests[0][1]
     finally:
         await runner.cleanup()
+
+
+@pytest.mark.timeout(12)
+async def test_openai_private_voice_reaches_the_real_http_speech_leg(
+    tmp_path, monkeypatch
+):
+    from aiohttp import web
+    from conftest import direct_models
+
+    requests = []
+
+    async def speak(request):
+        requests.append((request.headers["Authorization"], await request.json()))
+        return web.Response(body=encode_speech("Noted.", 24_000))
+
+    provider = web.Application()
+    provider.router.add_post("/v1/audio/speech", speak)
+    runner = web.AppRunner(provider)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = runner.addresses[0][1]
+    monkeypatch.setenv("OPENAI_BASE_URL", f"http://127.0.0.1:{port}/v1")
+    speech = SpeechProviders(
+        tts="openai",
+        tts_key="test-customer-speech-key",
+        tts_model="gpt-4o-mini-tts",
+        tts_provider="openai",
+        tts_customer_funded=True,
+    )
+    models = direct_models(
+        modality="voice",
+        voice={"provider": "openai", "voiceId": "voice_private_123", "speed": 1},
+    )
+    try:
+        await voice_simulation(
+            tmp_path,
+            speech=speech,
+            models=models,
+            scenario="One point.",
+            replies=["Noted."],
+        )
+    finally:
+        await runner.cleanup()
+
+    assert requests
+    for authorization, request in requests:
+        assert authorization == "Bearer test-customer-speech-key"
+        assert request["model"] == "gpt-4o-mini-tts"
+        assert request["voice"] == {"id": "voice_private_123"}
+        assert "language" not in request
+        assert request["response_format"] == "pcm"
+        assert request["speed"] == 1.0
+        assert "instructions" not in request

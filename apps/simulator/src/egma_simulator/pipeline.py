@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
+from .background import BackgroundSound
 from .blob import BlobStore
 from .conductor import DEFAULT_CONDUCT, ConductParameters, VoiceConductor
 from .config import MediaSettings
@@ -75,9 +76,7 @@ def assemble(
     """
     factory = plug_for(spec.connection_type)
     if factory is None:
-        raise PlugError(
-            f"no adapter for connection type {spec.connection_type!r}"
-        )
+        raise PlugError(f"no adapter for connection type {spec.connection_type!r}")
     # Built for every simulation, and handed to every plug: which of them
     # can put egma in front of the agent's tools is the plug's own answer,
     # not a list kept here of the ones that can. A plug that cannot takes
@@ -88,6 +87,12 @@ def assemble(
         if spec.connection_type == "livekit_room"
         else {}
     )
+    persona_parameters = spec.persona.parameters
+    if spec.modality == "voice" and persona_parameters is not None:
+        registration["background"] = BackgroundSound(
+            persona_parameters.background_sound_id,
+            persona_parameters.background_volume,
+        )
     plug = factory(
         modality=spec.modality,
         access_variant=spec.access_variant,
@@ -120,11 +125,22 @@ def assemble(
     return Assembled(
         conductor=VoiceConductor(
             connection=plug,
-            voice=voice_from_models(spec.models),
+            voice=voice_from_models(spec.models, spec.persona.parameters),
             speech=speech,
             blobs=blobs,
             recording_key=f"{spec.simulation_id}/{RECORDING_NAME}",
-            parameters=parameters or DEFAULT_CONDUCT,
+            parameters=(
+                parameters
+                if parameters is not None
+                else replace(
+                    DEFAULT_CONDUCT,
+                    interruption_level=(
+                        "off"
+                        if persona_parameters is None
+                        else persona_parameters.interruption_level
+                    ),
+                )
+            ),
         ),
         mock_tools=mock_tools,
     )

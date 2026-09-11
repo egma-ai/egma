@@ -3144,11 +3144,21 @@ export type UsePersonaData = {
                  */
                 voiceId: string;
                 /**
-                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                 * Provider-supported speech rate. Read the selected combination's capability range.
                  */
                 speed: number;
             };
         };
+        controls?: {
+            language: string;
+            emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
+            accent: string;
+            speechVolume: number;
+            backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+            backgroundVolume: number;
+            interruptionLevel: 'off' | 'occasional' | 'frequent';
+        };
+        voiceAccessProof?: string;
     };
     path: {
         personaId: string;
@@ -3210,9 +3220,9 @@ export type UsePersonaResponses = {
          */
         personality: string;
         /**
-         * The caller's language, such as en-US.
+         * Historical core language. New persona versions use controls.language and return null here.
          */
-        language: string;
+        language: string | null;
         parameterContract: Array<{
             key: string;
             label: string;
@@ -3247,10 +3257,20 @@ export type UsePersonaResponses = {
                      */
                     voiceId: string;
                     /**
-                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     * Provider-supported speech rate. Read the selected combination's capability range.
                      */
                     speed: number;
                 };
+            };
+            controls: {
+                language: string;
+                emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
+                accent: string;
+                speechVolume: number;
+                readonly executionPolicyVersion: number;
+                backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+                backgroundVolume: number;
+                interruptionLevel: 'off' | 'occasional' | 'frequent';
             };
             createdAt: string;
             updatedAt: string;
@@ -3325,9 +3345,9 @@ export type ListPersonasResponses = {
              */
             personality: string;
             /**
-             * The caller's language, such as en-US.
+             * Historical core language. New persona versions use controls.language and return null here.
              */
-            language: string;
+            language: string | null;
             parameterContract: Array<{
                 key: string;
                 label: string;
@@ -3362,10 +3382,20 @@ export type ListPersonasResponses = {
                          */
                         voiceId: string;
                         /**
-                         * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                         * Provider-supported speech rate. Read the selected combination's capability range.
                          */
                         speed: number;
                     };
+                };
+                controls: {
+                    language: string;
+                    emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
+                    accent: string;
+                    speechVolume: number;
+                    readonly executionPolicyVersion: number;
+                    backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+                    backgroundVolume: number;
+                    interruptionLevel: 'off' | 'occasional' | 'frequent';
                 };
                 createdAt: string;
                 updatedAt: string;
@@ -3398,10 +3428,6 @@ export type CreatePersonaData = {
          */
         personality: string;
         /**
-         * The caller's language, such as en-US.
-         */
-        language: string;
-        /**
          * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
          */
         models?: {
@@ -3421,11 +3447,21 @@ export type CreatePersonaData = {
                  */
                 voiceId: string;
                 /**
-                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                 * Provider-supported speech rate. Read the selected combination's capability range.
                  */
                 speed: number;
             };
         };
+        controls?: {
+            language: string;
+            emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
+            accent: string;
+            speechVolume: number;
+            backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+            backgroundVolume: number;
+            interruptionLevel: 'off' | 'occasional' | 'frequent';
+        };
+        voiceAccessProof?: string;
     };
     path?: never;
     query?: never;
@@ -3485,9 +3521,9 @@ export type CreatePersonaResponses = {
          */
         personality: string;
         /**
-         * The caller's language, such as en-US.
+         * Historical core language. New persona versions use controls.language and return null here.
          */
-        language: string;
+        language: string | null;
         parameterContract: Array<{
             key: string;
             label: string;
@@ -3522,10 +3558,20 @@ export type CreatePersonaResponses = {
                      */
                     voiceId: string;
                     /**
-                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     * Provider-supported speech rate. Read the selected combination's capability range.
                      */
                     speed: number;
                 };
+            };
+            controls: {
+                language: string;
+                emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
+                accent: string;
+                speechVolume: number;
+                readonly executionPolicyVersion: number;
+                backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+                backgroundVolume: number;
+                interruptionLevel: 'off' | 'occasional' | 'frequent';
             };
             createdAt: string;
             updatedAt: string;
@@ -3610,19 +3656,245 @@ export type GetPersonaFormResponses = {
                  */
                 voiceId: string;
                 /**
-                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                 * Provider-supported speech rate. Read the selected combination's capability range.
                  */
                 speed: number;
             };
-        };
-        speedRange: {
-            slowest: number;
-            fastest: number;
         };
     };
 };
 
 export type GetPersonaFormResponse = GetPersonaFormResponses[keyof GetPersonaFormResponses];
+
+export type GetPersonaCapabilitiesData = {
+    body?: never;
+    path?: never;
+    query: {
+        projectId?: string;
+        ttsProvider: string;
+        ttsModel: string;
+        sttProvider: string;
+        sttModel: string;
+        language?: string;
+        voiceId?: string;
+        refresh?: boolean;
+    };
+    url: '/v1/persona-capabilities';
+};
+
+export type GetPersonaCapabilitiesErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type GetPersonaCapabilitiesError = GetPersonaCapabilitiesErrors[keyof GetPersonaCapabilitiesErrors];
+
+export type GetPersonaCapabilitiesResponses = {
+    /**
+     * Capabilities for the selected combination.
+     */
+    200: {
+        voices: {
+            status: 'supported' | 'fixed' | 'unsupported' | 'unknown';
+            reason?: string;
+            choices?: Array<{
+                id: string;
+                name: string;
+                source: 'standard' | 'account';
+                presentation: 'male' | 'female' | 'neutral' | 'unknown';
+                languages: Array<string>;
+                accents: Array<string>;
+            }>;
+            value?: {
+                id: string;
+                name: string;
+                source: 'standard' | 'account';
+                presentation: 'male' | 'female' | 'neutral' | 'unknown';
+                languages: Array<string>;
+                accents: Array<string>;
+            };
+            range?: {
+                minimum: number;
+                maximum: number;
+                step: number;
+            };
+        };
+        language: {
+            status: 'supported' | 'fixed' | 'unsupported' | 'unknown';
+            reason?: string;
+            choices?: Array<string>;
+            value?: string;
+            range?: {
+                minimum: number;
+                maximum: number;
+                step: number;
+            };
+        };
+        accent: {
+            status: 'supported' | 'fixed' | 'unsupported' | 'unknown';
+            reason?: string;
+            choices?: Array<string>;
+            value?: string;
+            range?: {
+                minimum: number;
+                maximum: number;
+                step: number;
+            };
+        };
+        emotion: {
+            status: 'supported' | 'fixed' | 'unsupported' | 'unknown';
+            reason?: string;
+            choices?: Array<string>;
+            value?: string;
+            range?: {
+                minimum: number;
+                maximum: number;
+                step: number;
+            };
+        };
+        speed: {
+            status: 'supported' | 'fixed' | 'unsupported' | 'unknown';
+            reason?: string;
+            choices?: Array<number>;
+            value?: number;
+            range?: {
+                minimum: number;
+                maximum: number;
+                step: number;
+            };
+        };
+        speechVolume: {
+            status: 'supported' | 'fixed' | 'unsupported' | 'unknown';
+            reason?: string;
+            choices?: Array<number>;
+            value?: number;
+            range?: {
+                minimum: number;
+                maximum: number;
+                step: number;
+            };
+        };
+    };
+};
+
+export type GetPersonaCapabilitiesResponse = GetPersonaCapabilitiesResponses[keyof GetPersonaCapabilitiesResponses];
+
+export type PreviewPersonaData = {
+    body: {
+        projectId?: string;
+        /**
+         * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
+         */
+        models: {
+            llm: {
+                provider: string;
+                model: string;
+            };
+            stt: {
+                provider: string;
+                model: string;
+            };
+            tts: {
+                provider: string;
+                model: string;
+                /**
+                 * A voice identifier supported by the selected text-to-speech provider.
+                 */
+                voiceId: string;
+                /**
+                 * Provider-supported speech rate. Read the selected combination's capability range.
+                 */
+                speed: number;
+            };
+        };
+        controls: {
+            language: string;
+            emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
+            accent: string;
+            speechVolume: number;
+            backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+            backgroundVolume: number;
+            interruptionLevel: 'off' | 'occasional' | 'frequent';
+        };
+        /**
+         * A prior short-lived proof for an existing provider voice ID.
+         */
+        voiceAccessProof?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/v1/persona-preview';
+};
+
+export type PreviewPersonaErrors = {
+    /**
+     * The request was refused.
+     */
+    400: Refusal;
+    /**
+     * The request was refused.
+     */
+    401: Refusal;
+    /**
+     * The request was refused.
+     */
+    403: Refusal;
+    /**
+     * The request was refused.
+     */
+    404: Refusal;
+    /**
+     * The request was refused.
+     */
+    409: Refusal;
+    /**
+     * The request was refused.
+     */
+    422: Refusal;
+    /**
+     * The request rate limit was reached.
+     */
+    429: Refusal;
+};
+
+export type PreviewPersonaError = PreviewPersonaErrors[keyof PreviewPersonaErrors];
+
+export type PreviewPersonaResponses = {
+    /**
+     * Generated Preview audio and any new voice-access proof.
+     */
+    200: {
+        audioBase64: string;
+        contentType: string;
+        voiceAccessProof?: string;
+        expiresAt: string | null;
+        interruptionNotice: string;
+    };
+};
+
+export type PreviewPersonaResponse = PreviewPersonaResponses[keyof PreviewPersonaResponses];
 
 export type DeletePersonaData = {
     body?: never;
@@ -3737,9 +4009,9 @@ export type GetPersonaResponses = {
          */
         personality: string;
         /**
-         * The caller's language, such as en-US.
+         * Historical core language. New persona versions use controls.language and return null here.
          */
-        language: string;
+        language: string | null;
         parameterContract: Array<{
             key: string;
             label: string;
@@ -3774,10 +4046,20 @@ export type GetPersonaResponses = {
                      */
                     voiceId: string;
                     /**
-                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     * Provider-supported speech rate. Read the selected combination's capability range.
                      */
                     speed: number;
                 };
+            };
+            controls: {
+                language: string;
+                emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
+                accent: string;
+                speechVolume: number;
+                readonly executionPolicyVersion: number;
+                backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+                backgroundVolume: number;
+                interruptionLevel: 'off' | 'occasional' | 'frequent';
             };
             createdAt: string;
             updatedAt: string;
@@ -3808,10 +4090,6 @@ export type UpdatePersonaData = {
          */
         personality?: string;
         /**
-         * The caller's language, such as en-US.
-         */
-        language?: string;
-        /**
          * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
          */
         models?: {
@@ -3831,13 +4109,23 @@ export type UpdatePersonaData = {
                  */
                 voiceId: string;
                 /**
-                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                 * Provider-supported speech rate. Read the selected combination's capability range.
                  */
                 speed: number;
             };
         };
+        controls?: {
+            language: string;
+            emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
+            accent: string;
+            speechVolume: number;
+            backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+            backgroundVolume: number;
+            interruptionLevel: 'off' | 'occasional' | 'frequent';
+        };
+        voiceAccessProof?: string;
         /**
-         * The current versionId from Get a persona. Required when editing identityName, personality, or language. A stale value returns 409 version_conflict.
+         * The current versionId from Get a persona. Required when editing identityName or personality. A stale value returns 409 version_conflict.
          */
         expectedVersionId?: string;
     };
@@ -3901,9 +4189,9 @@ export type UpdatePersonaResponses = {
          */
         personality: string;
         /**
-         * The caller's language, such as en-US.
+         * Historical core language. New persona versions use controls.language and return null here.
          */
-        language: string;
+        language: string | null;
         parameterContract: Array<{
             key: string;
             label: string;
@@ -3938,10 +4226,20 @@ export type UpdatePersonaResponses = {
                      */
                     voiceId: string;
                     /**
-                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     * Provider-supported speech rate. Read the selected combination's capability range.
                      */
                     speed: number;
                 };
+            };
+            controls: {
+                language: string;
+                emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
+                accent: string;
+                speechVolume: number;
+                readonly executionPolicyVersion: number;
+                backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+                backgroundVolume: number;
+                interruptionLevel: 'off' | 'occasional' | 'frequent';
             };
             createdAt: string;
             updatedAt: string;
@@ -4014,9 +4312,9 @@ export type ListPersonaVersionsResponses = {
              */
             personality: string;
             /**
-             * The caller's language, such as en-US.
+             * Historical core language. New persona versions use controls.language and return null here.
              */
-            language: string;
+            language: string | null;
             parameterContract: Array<{
                 key: string;
                 label: string;
@@ -4145,9 +4443,9 @@ export type GetPersonaVersionResponses = {
          */
         personality: string;
         /**
-         * The caller's language, such as en-US.
+         * Historical core language. New persona versions use controls.language and return null here.
          */
-        language: string;
+        language: string | null;
         parameterContract: Array<{
             key: string;
             label: string;
@@ -4227,9 +4525,9 @@ export type ForkPersonaResponses = {
          */
         personality: string;
         /**
-         * The caller's language, such as en-US.
+         * Historical core language. New persona versions use controls.language and return null here.
          */
-        language: string;
+        language: string | null;
         parameterContract: Array<{
             key: string;
             label: string;
@@ -4264,10 +4562,20 @@ export type ForkPersonaResponses = {
                      */
                     voiceId: string;
                     /**
-                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     * Provider-supported speech rate. Read the selected combination's capability range.
                      */
                     speed: number;
                 };
+            };
+            controls: {
+                language: string;
+                emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
+                accent: string;
+                speechVolume: number;
+                readonly executionPolicyVersion: number;
+                backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+                backgroundVolume: number;
+                interruptionLevel: 'off' | 'occasional' | 'frequent';
             };
             createdAt: string;
             updatedAt: string;

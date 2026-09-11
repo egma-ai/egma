@@ -179,6 +179,10 @@ class ConductorProbe:
     def is_ending(self) -> bool:
         return bool(self.concluded)
 
+    @property
+    def deliberate_response_owned(self) -> bool:
+        return False
+
     async def the_agent_finished(
         self, said: str, heard_a_turn: bool
     ) -> Fraction | None:
@@ -190,8 +194,14 @@ class ConductorProbe:
         return None
 
     def persona_will_speak(
-        self, text: str, *, concludes: bool = False, silence_follow_up: int = 0
+        self,
+        text: str,
+        *,
+        concludes: bool = False,
+        silence_follow_up: int = 0,
+        deliberate: bool = False,
     ) -> None:
+        assert not deliberate
         self.spoken.append(text)
         self.history.append(Turn("human", text))
         if concludes:

@@ -540,6 +540,7 @@ export {
   priceUsageSpans,
   readUsageThisPeriod,
   recordProviderUsage,
+  recordPersonaPreviewUsage,
   type NewUsageRecord,
   type RecordedProviderUsage,
   type OrganizationUsage,
@@ -554,4 +555,4 @@ export type {
   UsageWorkKind,
 } from "../schema/billing.ts";
 
-export {createProviderFundingReceipt, readProviderFundingReceipt, readProviderKeys, putProviderKey, deleteProviderKey, resolveProviderKeysForWork, ProviderKeyUnavailableError, type ProviderKeyEntry} from './provider-keys.ts';
+export {createProviderFundingReceipt, readProviderFundingReceipt, readProviderKeys, putProviderKey, deleteProviderKey, resolveProviderKeyForAuthoring, resolveProviderKeysForWork, ProviderKeyUnavailableError, type ProviderKeyEntry} from './provider-keys.ts';

@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from ..background import BackgroundSound, soundfile_mixer
 from ..media import MediaBackendError, VoiceMedia
 from ..media.livekit_room import LiveKitRoomBackend, RoomSettings
 from ..mock_tools import MockToolSeam
@@ -41,6 +42,7 @@ class LiveKitRoom:
         media: object = None,
         driver: Any = None,
         on_provider_reference: Callable[[str], Awaitable[None]] | None = None,
+        background: BackgroundSound | None = None,
     ) -> None:
         # A room is reached with this connection's URL and authority. It does
         # not use the deployment's phone media bridge or the platform carrier
@@ -74,6 +76,7 @@ class LiveKitRoom:
         )
         self._media: VoiceMedia | None = None
         self._reference: str | None = None
+        self._background = background
 
     @property
     def provider_reference(self) -> str | None:
@@ -100,7 +103,17 @@ class LiveKitRoom:
     async def prepare(self) -> VoiceMedia:
         """Build the transport before the conductor starts its pipeline."""
         try:
-            self._media = await self._backend.create_transport()
+            mixer = (
+                None
+                if self._background is None
+                else soundfile_mixer(self._background)
+            )
+            if mixer is None:
+                self._media = await self._backend.create_transport()
+            else:
+                self._media = await self._backend.create_transport(
+                    audio_out_mixer=mixer
+                )
             return self._media
         except MediaBackendError as refused:
             raise PlugError(str(refused), ending=refused.ending) from refused

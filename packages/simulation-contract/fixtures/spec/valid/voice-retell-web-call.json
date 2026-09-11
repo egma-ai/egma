@@ -1,5 +1,5 @@
 {
-  "contract_version": 5,
+  "contract_version": 6,
   "simulation_id": "sim_01K5T2W8ZC4H6QJDXN9MRB7VFA",
   "modality": "voice",
   "connection": {
@@ -22,7 +22,15 @@
   "persona": {
     "name": "Eleanor",
     "personality": "Retired teacher, 68, calling from a quiet kitchen. Polite, thorough, repeats details back to be sure she has them right.",
-    "language": "en-US"
+    "parameters": {
+      "language": "en-US",
+      "emotion": "neutral",
+      "accent": "voice_default",
+      "speech_volume": 1,
+      "execution_policy_version": 1,
+      "background_sound_id": "none",
+      "background_volume": 0.0631
+    }
   },
   "scenario": {
     "instructions": "Your six-month check-up is on Tuesday and you now have to be somewhere else that morning. You want it moved to any Thursday in the next month, and you want the new date read back to you before the call ends."
@@ -56,7 +64,11 @@
   "mock_tools": [
     {
       "tool_name": "get_availability",
-      "answer": { "answer": { "slots": [] } }
+      "answer": {
+        "answer": {
+          "slots": []
+        }
+      }
     }
   ]
 }

@@ -172,7 +172,7 @@ async function claim(capacity: number): Promise<Record<string, unknown>> {
     url: CLAIMS_PATH,
     headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
     payload: {
-      contract_versions: [5],
+      contract_versions: [5, 6],
       claimant: "sim-1",
       capacity,
       wait_seconds: 0,

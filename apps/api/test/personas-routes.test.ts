@@ -3,11 +3,13 @@ import {
   createTest,
   createTestSuite,
   EGMA_PROVIDED_PERSONAS,
+  openBillingPlugIn,
   RECOMMENDED_PERSONA_MODELS,
-  SPEED_RANGE,
   type PersonaModels,
 } from "@egma/db";
 import { newId } from "@egma/ids";
+import Fastify from "fastify";
+import { request as httpRequest } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
@@ -35,13 +37,21 @@ afterEach(async () => {
 const BEHAVIOR = {
   identityName: "Rita Alvarez",
   personality: "Calls about a bill and wants it settled today.",
+} as const;
+
+const CONTROLS = {
   language: "en-US",
+  emotion: "neutral",
+  accent: "voice_default",
+  speechVolume: 1.2,
+  backgroundSoundId: "rain-v1",
+  backgroundVolume: 0.04,
+  interruptionLevel: "occasional",
 } as const;
 
 type Behavior = {
   readonly identityName: string;
   readonly personality: string;
-  readonly language: string;
 };
 
 /** One browser request: a session cookie, and the project in the address. */
@@ -78,7 +88,7 @@ type WirePersona = {
   identityName: string;
   personality: string;
   language: string;
-  settings: { id: string; models: PersonaModels } | null;
+  settings: { id: string; models: PersonaModels; controls: typeof CONTROLS & { executionPolicyVersion: number } } | null;
 };
 
 function personaIn(answer: Answer): WirePersona {
@@ -127,7 +137,6 @@ describe("creating and reading a persona", () => {
 
     expect(form.statusCode).toBe(200);
     expect(form.body.recommendedModels).toEqual(RECOMMENDED_PERSONA_MODELS);
-    expect(form.body.speedRange).toEqual(SPEED_RANGE);
     const catalog = form.body.modelCatalog as readonly Record<string, unknown>[];
     expect(
       catalog.map(
@@ -149,6 +158,8 @@ describe("creating and reading a persona", () => {
       "tts:openai:gpt-4o-mini-tts-2025-12-15",
       "stt:cartesia:ink-2",
       "tts:cartesia:sonic-3.5",
+      "tts:cartesia:sonic-3.6-2026-08-27",
+      "tts:cartesia:sonic-3.6",
       "tts:cartesia:sonic-preview",
       "tts:openai:gpt-4o-mini-tts",
       "tts:openai:tts-1",
@@ -174,7 +185,7 @@ describe("creating and reading a persona", () => {
     expect(made.name).toBe("Impatient Rita");
     expect(made.identityName).toBe(BEHAVIOR.identityName);
     expect(made.personality).toBe(BEHAVIOR.personality);
-    expect(made.language).toBe(BEHAVIOR.language);
+    expect(made.language).toBe("en-US");
     expect(made.version).toBe(1);
     expect(made.archivedAt).toBeNull();
     expect(made.owner).toBe("organization");
@@ -239,18 +250,15 @@ describe("creating and reading a persona", () => {
       message: "a persona needs a personality",
     });
 
-    const missingLanguage = await browse("POST", "/v1/personas", ada, {
+    const defaultLanguage = await browse("POST", "/v1/personas", ada, {
       projectId: ada.projectId,
-      name: "No silent language default",
+      name: "Default English language",
       identityName: BEHAVIOR.identityName,
       personality: BEHAVIOR.personality,
       models: RECOMMENDED_PERSONA_MODELS,
     });
-    expect(missingLanguage.statusCode).toBe(422);
-    expect(missingLanguage.body).toEqual({
-      error: "unprocessable",
-      message: "a persona needs a language",
-    });
+    expect(defaultLanguage.statusCode).toBe(201);
+    expect(personaIn(defaultLanguage).language).toBe("en-US");
 
     const missingModels = await browse("POST", "/v1/personas", ada, {
       projectId: ada.projectId,
@@ -286,7 +294,7 @@ describe("creating and reading a persona", () => {
 
     const carries =
       "a persona body carries projectId, name, description, identityName, " +
-      "personality, language, models.";
+      "personality, models, controls, voiceAccessProof.";
 
     const retired = {
       traits: { personality: "Old shape.", language: "en-US" },
@@ -341,7 +349,7 @@ describe("creating and reading a persona", () => {
     api = await createApi("personas_speed_range");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    for (const speed of [SPEED_RANGE.slowest, SPEED_RANGE.fastest]) {
+    for (const speed of [0.25, 4]) {
       const made = await browse("POST", "/v1/personas", ada, {
         projectId: ada.projectId,
         name: `Speed ${speed}`,
@@ -356,8 +364,8 @@ describe("creating and reading a persona", () => {
     }
 
     for (const speed of [
-      SPEED_RANGE.slowest - 0.0001,
-      SPEED_RANGE.fastest + 0.0001,
+      0.2499,
+      4.0001,
     ]) {
       const refused = await browse("POST", "/v1/personas", ada, {
         projectId: ada.projectId,
@@ -372,8 +380,7 @@ describe("creating and reading a persona", () => {
       expect(refused.body).toEqual({
         error: "unprocessable",
         message:
-          `speaking speed must be between ${SPEED_RANGE.slowest} and ` +
-          `${SPEED_RANGE.fastest}`,
+          "speaking speed must be between 0.25 and 4",
       });
     }
   });
@@ -426,15 +433,15 @@ describe("creating and reading a persona", () => {
     const found = items.find((one) => one.id === PREDEFINED_PERSONA);
 
     expect(found).toMatchObject({
-      name: "Everyday caller",
+      name: "Everyday Caller [Male]",
       description: "Regular conversationalist persona",
-      version: 2,
+      version: 5,
       owner: "egma",
       // Catalog content, and the whole point of it: nobody ever hears
-      // "Hi, I'm Everyday caller."
+      // "Hi, I'm Everyday Caller [Male]."
       identityName: "Alex Morgan",
       personality:
-        "Speaks clear, natural English. Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
+        "Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
       language: "en-US",
       settings: null,
     });
@@ -700,7 +707,6 @@ describe("editing a persona", () => {
       projectId: ada.projectId,
       identityName: "Vera Lindqvist",
       personality: "Vera, after a long wait.",
-      language: made.language,
       expectedVersionId: personaIn(renamedIdentity).versionId,
     });
     expect(identical.statusCode).toBe(200);
@@ -753,7 +759,7 @@ describe("editing a persona", () => {
       `/v1/personas/${made.id}/versions?projectId=${ada.projectId}`,
       ada,
     );
-    expect(history.body.versions).toMatchObject([{ version: 1, ...BEHAVIOR }]);
+    expect(history.body.versions).toMatchObject([{ version: 1, ...BEHAVIOR, language: null }]);
     expect((history.body.versions as Record<string, unknown>[])[0]).not.toHaveProperty("models");
     expect((history.body.versions as Record<string, unknown>[])[0]).not.toHaveProperty("settings");
   });
@@ -810,8 +816,11 @@ describe("forking a persona", () => {
     expect(fork.personality).toBe(made.personality);
     expect(fork.language).toBe(made.language);
     expect(made.settings).toBeNull();
-    expect(fork.settings?.models).toEqual({ ...RECOMMENDED_PERSONA_MODELS,
-      llm: { provider: "openai", model: "gpt-5.6-terra" } });
+    expect(fork.settings?.models).toEqual({
+      llm: { provider: "openai", model: "gpt-4o-mini" },
+      stt: { provider: "openai", model: "gpt-4o-mini-transcribe" },
+      tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "cedar", speed: 1 },
+    });
     expect(fork.owner).toBe("organization");
     // Its own history, starting over: the source's versions are the source's.
     expect(fork.version).toBe(1);
@@ -823,6 +832,232 @@ describe("forking a persona", () => {
       ada,
     );
     expect(history.body.versions).toHaveLength(1);
+  });
+
+  it("creates and clones the complete settings sent by the persona form", async () => {
+    api = await createApi("personas_complete_create_and_fork");
+    const ada = await signUp(api.app, "complete@acme.example", "Acme");
+    const models = {
+      ...RECOMMENDED_PERSONA_MODELS,
+      tts: { ...RECOMMENDED_PERSONA_MODELS.tts, voiceId: "alloy", speed: 1.25 },
+    };
+
+    const createdAnswer = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
+      name: "Configured caller",
+      ...BEHAVIOR,
+      models,
+      controls: CONTROLS,
+    });
+    expect(createdAnswer.statusCode, JSON.stringify(createdAnswer.body)).toBe(201);
+    const created = personaIn(createdAnswer);
+    expect(created.settings).toMatchObject({ models, controls: { ...CONTROLS, executionPolicyVersion: 1 } });
+
+    const forkedAnswer = await browse("POST", `/v1/personas/${created.id}/fork`, ada, {
+      projectId: ada.projectId,
+    });
+    expect(forkedAnswer.statusCode, JSON.stringify(forkedAnswer.body)).toBe(201);
+    expect(personaIn(forkedAnswer).settings).toMatchObject({
+      models,
+      controls: { ...CONTROLS, executionPolicyVersion: 1 },
+    });
+  });
+
+  it("validates models-only writes against voice access and retained controls", async () => {
+    api = await createApi("personas_models_only_validation");
+    const ada = await signUp(api.app, "model-validation@acme.example", "Acme");
+    const privateVoice = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
+      name: "Private voice",
+      ...BEHAVIOR,
+      models: {
+        ...RECOMMENDED_PERSONA_MODELS,
+        tts: { ...RECOMMENDED_PERSONA_MODELS.tts, voiceId: "customer-private-voice" },
+      },
+    });
+    expect(privateVoice.statusCode).toBe(422);
+    expect(privateVoice.body.message).toBe("models.tts.voiceId: Preview this existing OpenAI voice before saving it.");
+    const incompatibleStandard = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId, name: "Invalid standard voice", ...BEHAVIOR,
+      models: { ...RECOMMENDED_PERSONA_MODELS, tts: { provider: "openai", model: "tts-1", voiceId: "cedar", speed: 1 } },
+    });
+    expect(incompatibleStandard.statusCode).toBe(422);
+    expect(incompatibleStandard.body.message).toBe("models.tts.voiceId: cedar is not supported by tts-1.");
+
+    const retained = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId, name: "Retained controls", ...BEHAVIOR,
+      models: RECOMMENDED_PERSONA_MODELS, controls: CONTROLS,
+    });
+    expect(retained.statusCode, JSON.stringify(retained.body)).toBe(201);
+    const changedModels = { ...RECOMMENDED_PERSONA_MODELS, llm: { provider: "openai", model: "gpt-5.6-terra" } };
+    const changed = await browse("PATCH", `/v1/personas/${personaIn(retained).id}`, ada, {
+      projectId: ada.projectId, models: changedModels,
+    });
+    expect(changed.statusCode, JSON.stringify(changed.body)).toBe(200);
+    expect(personaIn(changed).settings).toMatchObject({
+      models: changedModels,
+      controls: { ...CONTROLS, executionPolicyVersion: 1 },
+    });
+
+    const configured = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
+      name: "Expressive caller",
+      ...BEHAVIOR,
+      models: RECOMMENDED_PERSONA_MODELS,
+      controls: { ...CONTROLS, emotion: "happy", accent: "british" },
+    });
+    expect(configured.statusCode, JSON.stringify(configured.body)).toBe(201);
+    const incompatible = await browse("PATCH", `/v1/personas/${personaIn(configured).id}`, ada, {
+      projectId: ada.projectId,
+      models: {
+        ...RECOMMENDED_PERSONA_MODELS,
+        tts: { provider: "openai", model: "tts-1", voiceId: "alloy", speed: 1 },
+      },
+    });
+    expect(incompatible.statusCode).toBe(422);
+    expect(incompatible.body.message).toContain("emotion:");
+  });
+
+  it("returns 422 for invalid controls and leaves saved settings unchanged", async () => {
+    api = await createApi("personas_invalid_controls");
+    const ada = await signUp(api.app, "invalid-controls@acme.example", "Acme");
+    const invalidCreate = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId, name: "Invalid", ...BEHAVIOR,
+      models: RECOMMENDED_PERSONA_MODELS,
+      controls: { ...CONTROLS, speechVolume: 99 },
+    });
+    expect(invalidCreate.statusCode).toBe(422);
+    expect(invalidCreate.body.message).toContain("speech volume");
+
+    const created = await createPersonaThrough(ada, "Stable settings");
+    const before = created.settings;
+    const invalidUpdate = await browse("PATCH", `/v1/personas/${created.id}`, ada, {
+      projectId: ada.projectId,
+      models: RECOMMENDED_PERSONA_MODELS,
+      controls: { ...CONTROLS, executionPolicyVersion: 9 },
+    });
+    expect(invalidUpdate.statusCode).toBe(422);
+    expect(invalidUpdate.body.message).toContain("server owns policy versions");
+    const after = await browse("GET", `/v1/personas/${created.id}?projectId=${ada.projectId}`, ada);
+    expect(personaIn(after).settings).toEqual(before);
+
+    const invalidPreview = await browse("POST", "/v1/persona-preview", ada, {
+      projectId: ada.projectId,
+      models: RECOMMENDED_PERSONA_MODELS,
+      controls: { ...CONTROLS, emotion: "surprised" },
+    });
+    expect(invalidPreview.statusCode).toBe(422);
+    expect(invalidPreview.body.message).toContain("emotion");
+  });
+});
+
+describe("Preview transport", () => {
+  it("refuses platform-funded Preview before contacting the renderer", async () => {
+    const open = openBillingPlugIn();
+    api = await createApi("persona_preview_funding", {
+      installBilling: true,
+      billing: {
+        ...open,
+        entitlements: {
+          ...open.entitlements,
+          mayPlatformKeyFund: async ({ providers }) => ({
+            funded: false as const,
+            providers,
+            message: "Add provider credit before Preview.",
+          }),
+        },
+      },
+      simulatorPreviewUrl: "http://127.0.0.1:1",
+    });
+    const ada = await signUp(api.app, "preview-funding@acme.example", "Acme");
+    const answer = await browse("POST", "/v1/persona-preview", ada, {
+      projectId: ada.projectId, models: RECOMMENDED_PERSONA_MODELS, controls: CONTROLS,
+    });
+    expect(answer.statusCode).toBe(422);
+    expect(answer.body.message).toBe("Add provider credit before Preview.");
+  });
+
+  it("uses a fresh settlement identity for each authenticated Preview", async () => {
+    const renderer = Fastify();
+    const requestIds: string[] = [];
+    renderer.post("/internal/persona-preview", async (request, reply) => {
+      requestIds.push((request.body as { requestId: string }).requestId);
+      return reply.send({ audioBase64: "UklGRg==", contentType: "audio/wav", usage: [] });
+    });
+    await renderer.listen({ host: "127.0.0.1", port: 0 });
+    const address = renderer.server.address();
+    if (address === null || typeof address === "string") throw new Error("Preview renderer did not bind");
+    try {
+      api = await createApi("persona_preview_identity", { simulatorPreviewUrl: `http://127.0.0.1:${address.port}` });
+      const ada = await signUp(api.app, "preview-id@acme.example", "Acme");
+      for (let index = 0; index < 2; index += 1) {
+        const answer = await browse("POST", "/v1/persona-preview", ada, {
+          projectId: ada.projectId, models: RECOMMENDED_PERSONA_MODELS, controls: CONTROLS,
+        });
+        expect(answer.statusCode, JSON.stringify(answer.body)).toBe(200);
+      }
+      expect(requestIds).toHaveLength(2);
+      expect(requestIds[0]).toMatch(/^[0-9a-f]{8}-[0-9a-f-]{27}$/u);
+      expect(requestIds[1]).not.toBe(requestIds[0]);
+
+      const keySaved = await api.app.inject({
+        method: "PUT", url: "/v1/provider-keys/openai", headers: { cookie: ada.cookie },
+        payload: { key: "test-private-voice-provider-key", expectedRevision: null },
+      });
+      expect(keySaved.statusCode, keySaved.body).toBe(200);
+      const privateModels = {
+        ...RECOMMENDED_PERSONA_MODELS,
+        tts: { ...RECOMMENDED_PERSONA_MODELS.tts, voiceId: "existing-private-voice" },
+      };
+      const preview = await browse("POST", "/v1/persona-preview", ada, {
+        projectId: ada.projectId, models: privateModels, controls: CONTROLS,
+      });
+      expect(preview.statusCode, JSON.stringify(preview.body)).toBe(200);
+      expect(preview.body.voiceAccessProof).toEqual(expect.any(String));
+      const saved = await browse("POST", "/v1/personas", ada, {
+        projectId: ada.projectId, name: "Private voice", ...BEHAVIOR,
+        models: privateModels, controls: CONTROLS, voiceAccessProof: preview.body.voiceAccessProof,
+      });
+      expect(saved.statusCode, JSON.stringify(saved.body)).toBe(201);
+    } finally {
+      await renderer.close();
+    }
+  });
+
+  it("aborts the renderer when the HTTP client disconnects after upload", async () => {
+    const renderer = Fastify();
+    let rendererStarted!: () => void;
+    const started = new Promise<void>((resolve) => { rendererStarted = resolve; });
+    let rendererAborted!: () => void;
+    const aborted = new Promise<void>((resolve) => { rendererAborted = resolve; });
+    renderer.post("/internal/persona-preview", async (request, reply) => {
+      rendererStarted();
+      await new Promise<void>((resolve) => {
+        const canceled = () => { rendererAborted(); resolve(); };
+        request.raw.once("aborted", canceled);
+        reply.raw.once("close", canceled);
+      });
+      return reply.code(499).send();
+    });
+    await renderer.listen({ host: "127.0.0.1", port: 0 });
+    const rendererAddress = renderer.server.address();
+    if (rendererAddress === null || typeof rendererAddress === "string") throw new Error("Preview renderer did not bind");
+    try {
+      api = await createApi("persona_preview_disconnect", { simulatorPreviewUrl: `http://127.0.0.1:${rendererAddress.port}` });
+      const ada = await signUp(api.app, "preview-cancel@acme.example", "Acme");
+      await api.app.listen({ host: "127.0.0.1", port: 0 });
+      const apiAddress = api.app.server.address();
+      if (apiAddress === null || typeof apiAddress === "string") throw new Error("API did not bind");
+      const payload = JSON.stringify({ projectId: ada.projectId, models: RECOMMENDED_PERSONA_MODELS, controls: CONTROLS });
+      const client = httpRequest({ host: "127.0.0.1", port: apiAddress.port, path: "/v1/persona-preview", method: "POST", headers: { cookie: ada.cookie, "content-type": "application/json", "content-length": Buffer.byteLength(payload) } });
+      client.on("error", () => undefined);
+      client.end(payload);
+      await started;
+      client.destroy();
+      await expect(aborted).resolves.toBeUndefined();
+    } finally {
+      await renderer.close();
+    }
   });
 });
 
@@ -1010,6 +1245,16 @@ describe("what a viewer is refused", () => {
         `/v1/personas/${made.id}/fork`,
         { projectId: ada.projectId },
         "fork personas",
+      ],
+      [
+        "POST",
+        "/v1/persona-preview",
+        {
+          projectId: ada.projectId,
+          models: RECOMMENDED_PERSONA_MODELS,
+          controls: CONTROLS,
+        },
+        "preview personas",
       ],
       [
         "DELETE",

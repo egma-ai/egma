@@ -170,7 +170,7 @@ describe("creating a project", () => {
       `/v1/personas?projectId=${String(made.body.id)}`,
       { cookie: ada.cookie },
     );
-    expect((personas.body.personas as unknown[]).length).toBe(1);
+    expect((personas.body.personas as unknown[]).length).toBe(5);
 
     const { rows } = await api.database.sql<{ grader_definition_id: string }>(
       `select grader_definition_id

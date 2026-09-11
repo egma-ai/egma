@@ -1,18 +1,28 @@
 {
-  "contract_version": 5,
+  "contract_version": 6,
   "simulation_id": "sim_fixture_adapter_missing",
   "modality": "voice",
   "connection": {
     "agent_platform": null,
     "connection_type": "phone_number",
     "access_variant": "phone_number.public_e164",
-    "config": { "phoneNumber": "+15550000000" },
+    "config": {
+      "phoneNumber": "+15550000000"
+    },
     "credentials": null
   },
   "persona": {
     "name": "Alex",
     "personality": "Patient and direct.",
-    "language": "en-US"
+    "parameters": {
+      "language": "en-US",
+      "emotion": "neutral",
+      "accent": "voice_default",
+      "speech_volume": 1,
+      "execution_policy_version": 1,
+      "background_sound_id": "none",
+      "background_volume": 0.0631
+    }
   },
   "scenario": {
     "instructions": "Ask for the next available appointment."

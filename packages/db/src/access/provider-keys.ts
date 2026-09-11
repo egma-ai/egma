@@ -155,6 +155,44 @@ export class ProviderKeyUnavailableError extends Error {
     this.provider = provider;
   }
 }
+
+/** Open one organization key for an authenticated authoring request. */
+export async function resolveProviderKeyForAuthoring(
+  auth: AuthContext,
+  provider: ModelProvider,
+): Promise<{ key: string; credentialRef: string } | undefined> {
+  authorize(auth, "read_organization", here(auth));
+  const [row] = await db()
+    .select({
+      credentials: providerKey.credentials,
+      revision: providerKey.revision,
+    })
+    .from(providerKey)
+    .where(
+      and(
+        eq(providerKey.organizationId, auth.organizationId),
+        eq(providerKey.provider, provider),
+      ),
+    )
+    .limit(1);
+  if (row === undefined) return undefined;
+  try {
+    const decoded: unknown = openCredentials(row.credentials);
+    if (
+      typeof decoded !== "object" ||
+      decoded === null ||
+      !("key" in decoded) ||
+      typeof decoded.key !== "string" ||
+      decoded.key.length < 8
+    ) {
+      throw new Error("invalid credential");
+    }
+    return { key: decoded.key, credentialRef: row.revision };
+  } catch {
+    throw new ProviderKeyUnavailableError(provider);
+  }
+}
+
 /** Only contexts derived from internal work claims can open organization keys. */
 export async function resolveProviderKeysForWork(
   auth: AuthContext,

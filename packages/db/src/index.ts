@@ -91,6 +91,7 @@ export {
   type VoiceSeconds,
 } from "./billing/period-usage.ts";
 export {
+  billing,
   billingIsConfigured,
   faultTolerantEntitlements,
   discardingUsageSink,
@@ -264,14 +265,33 @@ export { defaultGraderParameterValues, LLM_GRADER_PARAMETER_CONTRACT, graderMode
 export { usePersona, PersonaVersionConflictError } from "./access/personas.ts";
 export {
   defaultPersonaParameterValues,
+  legacyPersonaParameterContract,
+  ticket01PersonaParameterContract,
+  ticket02PersonaParameterContract,
+  BACKGROUND_SOUND_IDS,
+  BACKGROUND_VOLUME_DEFAULT,
+  BACKGROUND_VOLUME_RANGE,
+  PERSONA_EMOTIONS,
+  PERSONA_INTERRUPTION_LEVELS,
+  PERSONA_EXECUTION_POLICY_VERSION,
   PERSONA_PARAMETER_CONTRACT,
+  SPEECH_VOLUME_RANGE,
+  personaControlsOfParameters,
   personaParameterContract,
   personaParametersOfModels,
+  personaParametersOfSettings,
   personaModelsOfParameters,
+  personaSettingsOfParameters,
   speechProvidersOfParameters,
+  validPersonaControls,
   validatePersonaParameterContract,
   validatePersonaParameterValues,
+  type PersonaControls,
+  type BackgroundSoundId,
+  type PersonaEmotion,
+  type PersonaInterruptionLevel,
   type PersonaParameterValues,
+  type PersonaSettings,
 } from "./persona-library/parameters.ts";
 export type { ProjectPersonaSettings } from "./access/project-personas.ts";
 

@@ -187,6 +187,7 @@ services:
       # interpolated identically into the simulator below. `egma self-host up`
       # creates one value and hands the same value to both containers.
       EGMA_SIMULATOR_SERVICE_TOKEN: ${EGMA_SIMULATOR_SERVICE_TOKEN:?no default — egma self-host up generates it in .egma-platform/platform.env}
+      EGMA_SIMULATOR_PREVIEW_URL: ${EGMA_SIMULATOR_PREVIEW_URL:-http://simulator:8091}
       # Where a browser reaches this instance. The pages and the API answer on
       # one origin, and that origin is the self-hoster's own — which is why
       # there is no default for it to quietly be wrong about. Every agent
@@ -418,6 +419,7 @@ services:
       # above and the two halves always match. It has no public default;
       # `egma self-host up` supplies the private workspace value.
       EGMA_SIMULATOR_SERVICE_TOKEN: ${EGMA_SIMULATOR_SERVICE_TOKEN:?no default — egma self-host up generates it in .egma-platform/platform.env}
+      EGMA_SIMULATOR_PREVIEW_PORT: ${EGMA_SIMULATOR_PREVIEW_PORT:-8091}
       # Limit concurrent simulations per worker; blank uses the simulator default.
       # More replicas increase total capacity. Phone simulations also consume
       # carrier channels, whose capacity must cover the combined workload.

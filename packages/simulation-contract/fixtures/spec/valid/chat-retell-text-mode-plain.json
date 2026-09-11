@@ -1,5 +1,5 @@
 {
-  "contract_version": 5,
+  "contract_version": 6,
   "simulation_id": "sim_01K5T4RB9F0C2XKQNZ7MVD4HTA",
   "modality": "chat",
   "connection": {
@@ -16,7 +16,15 @@
   "persona": {
     "name": "Eleanor",
     "personality": "Retired teacher, 68, typing carefully. Polite, thorough, repeats details back to be sure she has them right.",
-    "language": "en-US"
+    "parameters": {
+      "language": "en-US",
+      "emotion": "neutral",
+      "accent": "voice_default",
+      "speech_volume": 1,
+      "execution_policy_version": 1,
+      "background_sound_id": "none",
+      "background_volume": 0.0631
+    }
   },
   "scenario": {
     "instructions": "You want to know whether the practice is open on Saturday mornings. Conclude once you have been told."

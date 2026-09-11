@@ -189,6 +189,8 @@ export type TestApiOptions = {
   readonly retellFetch?: RetellFetch;
   /** Current model-provider keys for claim and grader boundary tests. */
   readonly providerCredentials?: ProviderCredentialSource;
+  /** Loopback Preview renderer used by authenticated route tests. */
+  readonly simulatorPreviewUrl?: string;
   /**
    * The billing plug-in this instance runs on. Absent is the deployment
    * everybody runs: every allowance unlimited, every usage record discarded.
@@ -292,6 +294,9 @@ export async function createApi(
     ...(options.providerCredentials === undefined
       ? {}
       : { providerCredentials: options.providerCredentials }),
+    ...(options.simulatorPreviewUrl === undefined
+      ? {}
+      : { simulatorPreviewUrl: options.simulatorPreviewUrl }),
     ...(options.voiceFleet === undefined ? {} : { voiceFleet: options.voiceFleet }),
     ...(options.billing === undefined ? {} : { billing: options.billing }),
   });

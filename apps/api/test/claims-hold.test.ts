@@ -73,7 +73,7 @@ async function claim(
       "content-type": "application/json",
       authorization: `Bearer ${SERVICE_TOKEN}`,
     },
-    body: JSON.stringify({ contract_versions: [5], ...body }),
+    body: JSON.stringify({ contract_versions: [5, 6], ...body }),
   });
   const answered = (await response.json()) as { specs: unknown[] };
   return {

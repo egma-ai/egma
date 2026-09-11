@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import random
 import time
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field, replace
@@ -32,6 +33,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TextFrame,
     TranscriptionFrame,
+    TTSAudioRawFrame,
     TTSStoppedFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
@@ -65,8 +67,10 @@ from .conversation import (
     turn_limit_reached,
 )
 from .media import (
+    _TRANSPORT_PLAYOUT_GENERATION,
     TRANSPORT_ARRIVAL,
     TRANSPORT_PLAYOUT,
+    PlayoutClearedFrame,
     RemoteParticipantLeftFrame,
     VoiceMedia,
     transport_time,
@@ -82,6 +86,7 @@ from .speech import (
     PersonaVoice,
     ProviderUsageMetricsData,
     SpeechFault,
+    SpeechGain,
     SpeechLegs,
     SpeechProviders,
     build_legs,
@@ -93,6 +98,9 @@ logger = logging.getLogger(__name__)
 
 MediaPosition = Fraction
 _INPUT_SOURCE_RANGE = "egma.input_source_range"
+_INTERRUPTION_AUDIO = "egma.interruption_audio"
+_INTERRUPTION_CAP_END = "egma.interruption_cap_end"
+_INTERRUPTION_STOPPED = "egma.interruption_stopped"
 
 
 @dataclass(frozen=True)
@@ -104,6 +112,11 @@ class ConductParameters:
     agent_quiet_seconds: float = SILENCE_WAIT_SECONDS
     agent_turn_backstop_seconds: float = 5.0
     yields_to_the_agent: bool = True
+    interruption_level: str = "off"
+
+    def __post_init__(self) -> None:
+        if self.interruption_level not in {"off", "occasional", "frequent"}:
+            raise ValueError("interruption level must be off, occasional, or frequent")
 
 
 DEFAULT_CONDUCT = ConductParameters()
@@ -114,9 +127,26 @@ PERSONA_ENDED_SILENCE: Ending = (
 )
 
 OnUtterance = Callable[[str, str, int, int], Awaitable[None]]
+OnPartialUtterance = Callable[[str, int, int], Awaitable[None]]
 OnMeasured = Callable[[str, int, int], Awaitable[None]]
 OnProviderUsage = Callable[[ProviderUsage], Awaitable[None]]
 OnAnswered = Callable[[], Awaitable[None]]
+
+
+@dataclass(frozen=True)
+class InterruptionEvidence:
+    event: str
+    at_unix_nano: int
+    scheduled_for_unix_nano: int | None = None
+    began_unix_nano: int | None = None
+    ended_unix_nano: int | None = None
+    overlap_ended_unix_nano: int | None = None
+    reason: str | None = None
+    generated_text: str | None = None
+    delivered_text: str | None = None
+
+
+OnInterruption = Callable[[InterruptionEvidence], None]
 
 
 @dataclass
@@ -280,6 +310,7 @@ class _EvidenceRecorder(AudioBufferProcessor):
         self._origin_seconds: float | None = None
         self._origin_unix_nano = 0
         self._real_time = real_time
+        self._cleared_playout: dict[int, float] = {}
 
     @staticmethod
     def _source_range(
@@ -320,6 +351,7 @@ class _EvidenceRecorder(AudioBufferProcessor):
             self._persona = _RecordedTrack()
             self._origin_seconds = None
             self._origin_unix_nano = 0
+            self._cleared_playout.clear()
 
     async def _process_recording(self, frame: Frame) -> None:
         """Put one frame on the recording, at the time it happened.
@@ -336,7 +368,7 @@ class _EvidenceRecorder(AudioBufferProcessor):
                 await self._record_agent(frame)
             elif isinstance(frame, OutputAudioRawFrame):
                 await self._record_persona(frame)
-            elif isinstance(frame, InterruptionFrame):
+            elif isinstance(frame, (InterruptionFrame, PlayoutClearedFrame)):
                 self._drop_what_was_never_played(frame)
             else:
                 return
@@ -386,11 +418,28 @@ class _EvidenceRecorder(AudioBufferProcessor):
     async def _record_persona(self, frame: OutputAudioRawFrame) -> None:
         """The persona's audio, where the transport plays it out."""
         played = self._transport_time(frame, TRANSPORT_PLAYOUT, "persona audio")
-        audio = await self._resample_output_audio(frame)
+        source_audio = frame.audio
+        generation = frame.metadata.get(_TRANSPORT_PLAYOUT_GENERATION)
+        cleared = (
+            self._cleared_playout.get(generation)
+            if isinstance(generation, int)
+            else None
+        )
+        through = played + frame.num_frames / frame.sample_rate
+        if cleared is not None:
+            if cleared <= played:
+                return
+            if cleared < through:
+                heard_frames = int((cleared - played) * frame.sample_rate)
+                bytes_per_frame = len(source_audio) // frame.num_frames
+                source_audio = source_audio[: heard_frames * bytes_per_frame]
+                through = played + heard_frames / frame.sample_rate
+        audio = await self._output_resampler.resample(
+            source_audio, frame.sample_rate, self.sample_rate
+        )
         written = len(audio) // 2
         if not written:
             return
-        through = played + frame.num_frames / frame.sample_rate
         self._place(
             self._bot_audio_buffer,
             self._persona,
@@ -404,7 +453,12 @@ class _EvidenceRecorder(AudioBufferProcessor):
         audio that was played.
         """
         cleared = transport_time(frame, TRANSPORT_PLAYOUT)
-        if cleared is None or self._origin_seconds is None:
+        if cleared is None:
+            return
+        generation = frame.metadata.get(_TRANSPORT_PLAYOUT_GENERATION)
+        if isinstance(generation, int):
+            self._cleared_playout[generation] = cleared
+        if self._origin_seconds is None:
             return
         heard_through = self._sample_at(cleared)
         written_through = self._persona.written_through
@@ -554,6 +608,22 @@ class _EvidenceRecorder(AudioBufferProcessor):
         if not self.sample_rate or self._persona.written_through is None:
             return Fraction(0)
         return Fraction(self._persona.written_through, self.sample_rate)
+
+    def playout_position(self, frame: OutputAudioRawFrame) -> MediaPosition:
+        """Map an accepted transport frame onto the recording clock."""
+        played = self._transport_time(frame, TRANSPORT_PLAYOUT, "persona audio")
+        if not self.sample_rate:
+            return Fraction(0)
+        return Fraction(self._sample_at(played), self.sample_rate)
+
+    @property
+    def clock_position(self) -> MediaPosition:
+        """Where real playout has reached on the recording clock."""
+        if not self.sample_rate or self._origin_seconds is None:
+            return Fraction(0)
+        if not self._real_time:
+            return self.position
+        return Fraction(self._sample_at(_monotonic()), self.sample_rate)
 
     @property
     def position(self) -> MediaPosition:
@@ -811,6 +881,20 @@ class _PersonaReplyGate(FrameProcessor):
         self._collecting = False
         self._text: list[str] = []
         self._silence_follow_up = 0
+        self._kind = "ordinary"
+        self._idle = asyncio.Event()
+        self._idle.set()
+
+    @property
+    def busy(self) -> bool:
+        return self._waiting is not None
+
+    def cancel_pending(self) -> None:
+        if self._waiting is not None and not self._waiting.done():
+            self._waiting.cancel()
+
+    async def wait_idle(self) -> None:
+        await self._idle.wait()
 
     async def request(
         self,
@@ -819,19 +903,22 @@ class _PersonaReplyGate(FrameProcessor):
         push: Callable[[Frame], Awaitable[None]],
         *,
         silence_follow_up: int = 0,
+        kind: str = "ordinary",
     ) -> None:
         if self._waiting is not None:
             raise RuntimeError("the persona model already has a reply in flight")
         waiting = asyncio.get_running_loop().create_future()
         self._waiting = waiting
+        self._idle.clear()
         self._due = due
         self._silence_follow_up = silence_follow_up
+        self._kind = kind
         try:
             await push(LLMContextFrame(context=context))
             await waiting
         except BaseException:
             if self._waiting is waiting:
-                self._reset()
+                waiting.cancel()
             raise
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
@@ -862,12 +949,19 @@ class _PersonaReplyGate(FrameProcessor):
         assert due is not None
         try:
             reply = self._service.take_reply()
+            if waiting.cancelled():
+                return
             received = "".join(self._text)
             if received != reply.text:
                 raise RuntimeError(
                     "Pipecat's persona response did not match its model reply"
                 )
-            if reply.concluded and not reply.text:
+            if (
+                self._kind == "deliberate"
+                and not self._conductor.may_start_interruption
+            ):
+                self._conductor.interruption_canceled("agent_stopped_before_playout")
+            elif reply.concluded and not reply.text:
                 self._conductor.persona_concluded_without_speech()
             elif not self._conductor.is_ending:
                 await self._conductor.wait_until(due)
@@ -876,6 +970,7 @@ class _PersonaReplyGate(FrameProcessor):
                         reply.text,
                         concludes=reply.concluded,
                         silence_follow_up=self._silence_follow_up,
+                        deliberate=self._kind == "deliberate",
                     )
                     await self.push_frame(LLMFullResponseStartFrame())
                     await self.push_frame(TextFrame(reply.text))
@@ -884,18 +979,29 @@ class _PersonaReplyGate(FrameProcessor):
             waiting.cancel()
             raise
         except Exception as fault:
-            waiting.set_exception(fault)
+            if not waiting.done():
+                waiting.set_exception(fault)
         else:
-            waiting.set_result(None)
+            if not waiting.done():
+                waiting.set_result(None)
         finally:
             self._reset()
 
     def _reset(self) -> None:
+        canceled_deliberate = (
+            self._kind == "deliberate"
+            and self._waiting is not None
+            and self._waiting.cancelled()
+        )
         self._waiting = None
         self._due = None
         self._collecting = False
         self._text = []
         self._silence_follow_up = 0
+        self._kind = "ordinary"
+        self._idle.set()
+        if canceled_deliberate:
+            self._conductor.interruption_generation_drained()
 
 
 class _PersonaBrain(FrameProcessor):
@@ -913,6 +1019,8 @@ class _PersonaBrain(FrameProcessor):
         self._conductor = conductor
         self._replies = replies
         self._heard: list[str] = []
+        self._answer_lock = asyncio.Lock()
+        self._deferred: set[asyncio.Task[None]] = set()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
@@ -920,8 +1028,18 @@ class _PersonaBrain(FrameProcessor):
             self._heard.append(frame.text)
         await self.push_frame(frame, direction)
         if isinstance(frame, _AgentFinished):
+            said = " ".join(piece for piece in self._heard if piece)
+            self._heard.clear()
+            if self._conductor.deliberate_response_owned or self._replies.busy:
+                deferred = asyncio.create_task(self._answer_when_idle(frame, said))
+                self._deferred.add(deferred)
+                deferred.add_done_callback(self._deferred.discard)
+                return
             await self._answer(
-                frame.heard_a_turn, frame.silence_follow_up, frame.silence_wait_seconds
+                frame.heard_a_turn,
+                frame.silence_follow_up,
+                frame.silence_wait_seconds,
+                said=said,
             )
 
     async def _answer(
@@ -929,10 +1047,13 @@ class _PersonaBrain(FrameProcessor):
         heard_a_turn: bool,
         silence_follow_up: int = 0,
         silence_wait_seconds: float = SILENCE_WAIT_SECONDS,
+        *,
+        said: str | None = None,
     ) -> None:
         try:
-            said = " ".join(piece for piece in self._heard if piece)
-            self._heard.clear()
+            if said is None:
+                said = " ".join(piece for piece in self._heard if piece)
+                self._heard.clear()
             due = await self._conductor.the_agent_finished(said, heard_a_turn)
             if due is None:
                 return
@@ -948,6 +1069,203 @@ class _PersonaBrain(FrameProcessor):
             )
         except Exception as fault:
             self._conductor.the_brain_failed(fault)
+
+    async def _answer_when_idle(self, frame: _AgentFinished, said: str) -> None:
+        try:
+            async with self._answer_lock:
+                while self._replies.busy or self._conductor.deliberate_response_owned:
+                    await self._replies.wait_idle()
+                    await self._conductor.wait_until_interruption_idle()
+                await self._answer(
+                    frame.heard_a_turn,
+                    frame.silence_follow_up,
+                    frame.silence_wait_seconds,
+                    said=said,
+                )
+        except Exception as fault:
+            self._conductor.the_brain_failed(fault)
+
+    async def cleanup(self) -> None:
+        for task in self._deferred:
+            task.cancel()
+        if self._deferred:
+            await asyncio.gather(*self._deferred, return_exceptions=True)
+        self._deferred.clear()
+        await super().cleanup()
+
+
+class _InterruptionScheduler(FrameProcessor):
+    """Start one deliberate reply inside each eligible continuous speech segment."""
+
+    def __init__(
+        self, *, persona: Persona, conductor: VoiceConductor, replies: _PersonaReplyGate
+    ) -> None:
+        super().__init__()
+        self._persona = persona
+        self._conductor = conductor
+        self._replies = replies
+        self._attempt: asyncio.Task[None] | None = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if direction == FrameDirection.DOWNSTREAM:
+            if isinstance(frame, VADUserStartedSpeakingFrame):
+                self._conductor.agent_speech_started()
+            elif isinstance(frame, VADUserStoppedSpeakingFrame):
+                self._conductor.agent_speech_stopped()
+                self._cancel_attempt()
+            elif (
+                isinstance(frame, InputAudioRawFrame)
+                and self._conductor.interruption_due
+            ):
+                if self._attempt is None and not self._replies.busy:
+                    self._conductor.interruption_preparing()
+                    self._attempt = asyncio.create_task(self._prepare())
+            elif (
+                isinstance(frame, InterruptionFrame)
+                and self._conductor.deliberate_delivering
+            ):
+                return
+        await self.push_frame(frame, direction)
+
+    async def _prepare(self) -> None:
+        assert self._persona is not None
+        try:
+            await self._replies.request(
+                self._persona.interruption_context(self._conductor.history),
+                self._conductor.position,
+                self.push_frame,
+                kind="deliberate",
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as fault:
+            self._conductor.interruption_provider_failed(
+                f"provider_failed:{type(fault).__name__}"
+            )
+        finally:
+            self._attempt = None
+
+    def _cancel_attempt(self) -> None:
+        self.cancel_owned_work()
+
+    def cancel_owned_work(self) -> None:
+        """Cancel generation directly when no pipeline frame can pass it."""
+        self._replies.cancel_pending()
+        if self._attempt is not None and not self._attempt.done():
+            if self._attempt is not asyncio.current_task():
+                self._attempt.cancel()
+
+    async def cleanup(self) -> None:
+        self._replies.cancel_pending()
+        if self._attempt is not None and not self._attempt.done():
+            self._attempt.cancel()
+            await asyncio.gather(self._attempt, return_exceptions=True)
+        await super().cleanup()
+
+
+class _InterruptionAudioLimit(FrameProcessor):
+    """Keep deliberate speech handed to transport within three seconds."""
+
+    def __init__(self, conductor: VoiceConductor) -> None:
+        super().__init__()
+        self._conductor = conductor
+        self._frames = 0
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if direction != FrameDirection.DOWNSTREAM:
+            await self.push_frame(frame, direction)
+            return
+        if (
+            isinstance(frame, TTSStoppedFrame)
+            and self._conductor.discarding_deliberate_audio
+        ):
+            self._conductor.deliberate_audio_discarded()
+            await self.push_frame(frame, direction)
+            return
+        if (
+            isinstance(frame, TTSAudioRawFrame)
+            and self._conductor.discarding_deliberate_audio
+        ):
+            return
+        if (
+            isinstance(frame, TTSAudioRawFrame)
+            and self._conductor.deliberate_response_owned
+        ):
+            if not (
+                self._conductor.deliberate_delivering
+                or self._conductor.deliberate_audio_queued
+            ):
+                if not self._conductor.may_start_interruption:
+                    self._conductor.interruption_canceled(
+                        "agent_stopped_before_playout"
+                    )
+                    await self.push_frame(InterruptionFrame())
+                    return
+                self._frames = 0
+                self._conductor.interruption_audio_queued()
+            frame.metadata[_INTERRUPTION_AUDIO] = True
+            limit = frame.sample_rate * 3
+            remaining = min(
+                max(0, limit - self._frames),
+                self._conductor.interruption_playout_frames_remaining(
+                    frame.sample_rate
+                ),
+            )
+            if remaining == 0:
+                if not self._conductor.deliberate_audio_capped:
+                    self._conductor.interruption_audio_exhausted()
+                    await self.push_frame(
+                        InterruptionFrame(), FrameDirection.UPSTREAM
+                    )
+                    await self.push_frame(TTSStoppedFrame())
+                return
+            if frame.num_frames > remaining:
+                bytes_per_frame = len(frame.audio) // frame.num_frames
+                frame = TTSAudioRawFrame(
+                    frame.audio[: remaining * bytes_per_frame],
+                    frame.sample_rate,
+                    frame.num_channels,
+                    context_id=frame.context_id,
+                )
+                self._conductor.interruption_audio_capped()
+            self._frames += frame.num_frames
+            if self._frames == limit:
+                self._conductor.interruption_audio_capped()
+                frame.metadata[_INTERRUPTION_CAP_END] = True
+        await self.push_frame(frame, direction)
+
+
+class _InterruptionPlayout(FrameProcessor):
+    """Cancel unused synthesis only after the bounded final frame is accepted."""
+
+    def __init__(self, conductor: VoiceConductor) -> None:
+        super().__init__()
+        self._conductor = conductor
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        interruption_audio = (
+            direction == FrameDirection.DOWNSTREAM
+            and isinstance(frame, OutputAudioRawFrame)
+            and frame.metadata.get(_INTERRUPTION_AUDIO) is True
+        )
+        if interruption_audio:
+            # Reaching this processor means every transport output processor
+            # accepted the frame. Recording happens downstream on the same frame.
+            self._conductor.interruption_playout_started(frame)
+        await self.push_frame(frame, direction)
+        if direction != FrameDirection.DOWNSTREAM or not isinstance(
+            frame, OutputAudioRawFrame
+        ):
+            return
+        if interruption_audio:
+            if not self._conductor.interruption_playout_may_continue():
+                return
+        if frame.metadata.get(_INTERRUPTION_CAP_END) is True:
+            await self.push_frame(InterruptionFrame(), FrameDirection.UPSTREAM)
+            await self.push_frame(TTSStoppedFrame())
 
 
 class _Timeline(FrameProcessor):
@@ -971,13 +1289,16 @@ class _Timeline(FrameProcessor):
             self.started.set()
         elif isinstance(frame, InputAudioRawFrame):
             self._media.input_recorded(frame)
-        elif isinstance(frame, OutputAudioRawFrame):
+        elif isinstance(frame, TTSAudioRawFrame):
             self._conductor.persona_audio(
                 frame, recorded_until=self._recorder.bot_position
             )
         elif isinstance(frame, TTSStoppedFrame):
             await self._conductor.persona_stopped()
-        elif isinstance(frame, InterruptionFrame):
+            stopped = frame.metadata.get(_INTERRUPTION_STOPPED)
+            if isinstance(stopped, asyncio.Event):
+                stopped.set()
+        elif isinstance(frame, (InterruptionFrame, PlayoutClearedFrame)):
             self._conductor.persona_interrupted(
                 heard_through=self._recorder.bot_position
             )
@@ -1095,6 +1416,8 @@ class VoiceConductor:
         self._controls = ConversationControls()
         self._on_utterance: OnUtterance | None = None
         self._on_measured: OnMeasured | None = None
+        self._on_partial_utterance: OnPartialUtterance | None = None
+        self._on_interruption: OnInterruption | None = None
         self._on_answered: OnAnswered | None = None
         self._on_provider_usage: OnProviderUsage | None = None
 
@@ -1127,6 +1450,25 @@ class VoiceConductor:
         self._fault = ""
         self._brain_fault: BaseException | None = None
         self._closed = False
+        self._ignored_pipeline_faults = 0
+        self._interruption_model_fault_observed = False
+        self._control_tasks: set[asyncio.Task[None]] = set()
+        self._interruptions: _InterruptionScheduler | None = None
+        self._discard_deliberate_audio = False
+        self._cancel_after_accepted_audio: str | None = None
+        self._interruption_playout_began: MediaPosition | None = None
+        self._agent_to_playout_offset: MediaPosition | None = None
+        self._random = random.Random()
+        self._agent_speech_began: MediaPosition | None = None
+        self._agent_speech_ended: MediaPosition | None = None
+        self._interruption_due_at: MediaPosition | None = None
+        self._interruption_attempted = False
+        self._interruption_state = "listening"
+        self._interruption_idle = asyncio.Event()
+        self._interruption_idle.set()
+        self._segment_waiting_for_interruption_owner = False
+        self._last_interruption_end: MediaPosition | None = None
+        self._deliberate_capped = False
 
         self.audio: AudioFacts | None = None
         self.evidence_error: str | None = None
@@ -1159,6 +1501,290 @@ class VoiceConductor:
             or self._controls.cause is not None
         )
 
+    @property
+    def position(self) -> MediaPosition:
+        return self._position
+
+    @property
+    def deliberate_response_owned(self) -> bool:
+        return self._interruption_state in {
+            "preparing",
+            "ready",
+            "awaiting_playout",
+            "delivering",
+        }
+
+    @property
+    def deliberate_delivering(self) -> bool:
+        return self._interruption_state == "delivering"
+
+    @property
+    def deliberate_audio_queued(self) -> bool:
+        return self._interruption_state == "awaiting_playout"
+
+    @property
+    def deliberate_audio_capped(self) -> bool:
+        return self._deliberate_capped
+
+    @property
+    def discarding_deliberate_audio(self) -> bool:
+        return self._discard_deliberate_audio
+
+    @property
+    def may_start_interruption(self) -> bool:
+        ear = self._ear
+        return (
+            not self.is_ending
+            and ear is not None
+            and ear.hearing_speech
+            and self._interruption_state in {"preparing", "ready"}
+        )
+
+    @property
+    def interruption_due(self) -> bool:
+        return (
+            self._interruption_due_at is not None
+            and self._position >= self._interruption_due_at
+            and self._interruption_state == "scheduled"
+        )
+
+    def agent_speech_started(self) -> None:
+        self._agent_speech_began = self._position
+        self._agent_speech_ended = None
+        self._interruption_attempted = False
+        if self.deliberate_response_owned:
+            self._segment_waiting_for_interruption_owner = True
+            return
+        self._arm_interruption_for_active_segment()
+
+    def _arm_interruption_for_active_segment(self) -> None:
+        self._segment_waiting_for_interruption_owner = False
+        if self.is_ending or self._agent_speech_ended is not None:
+            self._interruption_due_at = None
+            return
+        level = self._parameters.interruption_level
+        policy = {"occasional": ((6.0, 10.0), 30.0), "frequent": ((2.0, 4.0), 12.0)}
+        selected = policy.get(level)
+        if selected is None:
+            self._interruption_due_at = None
+            return
+        delay_range, cooldown = selected
+        delay = self._random.uniform(*delay_range)
+        due_at = self._agent_speech_began + _seconds(delay)
+        if self._last_interruption_end is not None:
+            due_at = max(due_at, self._last_interruption_end + _seconds(cooldown))
+        self._interruption_due_at = due_at
+        self._interruption_state = "scheduled"
+        self._report_interruption(
+            InterruptionEvidence(
+                event="scheduled",
+                at_unix_nano=self._at(self._position),
+                scheduled_for_unix_nano=self._at(self._interruption_due_at),
+            )
+        )
+        log_event(
+            logger,
+            logging.INFO,
+            "egma.persona.interruption_scheduled",
+            "a deliberate interruption was scheduled",
+            attributes={"egma.interruption.delay_seconds": delay},
+        )
+
+    def agent_speech_stopped(self) -> None:
+        self._agent_speech_ended = self._position
+        self._segment_waiting_for_interruption_owner = False
+        self._interruption_due_at = None
+        queued_deliberate_audio = (
+            self._interruption_state == "awaiting_playout"
+            or (
+                self._interruption_state == "delivering"
+                and not self._deliberate_playout_has_begun()
+            )
+        )
+        if queued_deliberate_audio or self._interruption_state in {
+            "scheduled",
+            "preparing",
+            "ready",
+            "awaiting_playout",
+        }:
+            self.interruption_canceled(
+                "agent_stopped_before_playout", force=queued_deliberate_audio
+            )
+
+    def _deliberate_playout_has_begun(self) -> bool:
+        began = self._interruption_playout_began
+        recorder = self._recorder
+        return began is not None and (
+            recorder is None or recorder.clock_position >= began
+        )
+
+    def interruption_preparing(self) -> None:
+        if self._interruption_state != "scheduled":
+            return
+        self._interruption_attempted = True
+        self._interruption_due_at = None
+        self._interruption_state = "preparing"
+        self._interruption_idle.clear()
+
+    async def wait_until_interruption_idle(self) -> None:
+        await self._interruption_idle.wait()
+
+    def interruption_audio_queued(self) -> None:
+        self._interruption_state = "awaiting_playout"
+        self._deliberate_capped = False
+        self._interruption_playout_began = None
+        self._agent_to_playout_offset = None
+
+    def interruption_playout_started(self, frame: OutputAudioRawFrame) -> None:
+        if self._interruption_state == "awaiting_playout":
+            self._interruption_state = "delivering"
+            recorder = self._recorder
+            if recorder is not None:
+                self._interruption_playout_began = recorder.playout_position(frame)
+                ear_position = Fraction(0) if self._ear is None else self._ear.position
+                self._agent_to_playout_offset = (
+                    self._interruption_playout_began - ear_position
+                )
+
+    def interruption_playout_may_continue(self) -> bool:
+        media = self._media
+        if self._controls.cause is not None:
+            self._cancel_delivering_after_recording("simulation_stopped")
+            return False
+        if media is not None and media.failed.is_set():
+            self._cancel_delivering_after_recording("transport_failed")
+            return False
+        if self._agent_departed or (media is not None and media.ended.is_set()):
+            self._cancel_delivering_after_recording("agent_disconnected")
+            return False
+        return True
+
+    def _cancel_delivering_after_recording(self, reason: str) -> None:
+        if self.deliberate_delivering and self._persona_began is None:
+            self._cancel_after_accepted_audio = reason
+            self._discard_deliberate_audio = True
+            if self._interruptions is not None:
+                self._interruptions.cancel_owned_work()
+            return
+        self.interruption_canceled(reason, force=True)
+
+    def deliberate_audio_discarded(self) -> None:
+        self._discard_deliberate_audio = False
+
+    def interruption_audio_capped(self) -> None:
+        self._deliberate_capped = True
+
+    def interruption_playout_frames_remaining(self, sample_rate: int) -> int:
+        """Return PCM that still fits before the accepted-audio deadline."""
+        began = self._interruption_playout_began
+        if began is None:
+            began = self._persona_began
+        if began is None:
+            return sample_rate * 3
+        accepted_through = max(
+            self._playout_clock_position(), self._persona_ended or began
+        )
+        remaining = began + _seconds(3.0) - accepted_through
+        if remaining <= 0:
+            return 0
+        return remaining.numerator * sample_rate // remaining.denominator
+
+    def interruption_audio_exhausted(self) -> None:
+        self._deliberate_capped = True
+        self._discard_deliberate_audio = True
+
+    async def _finish_interruption_at_deadline(self) -> None:
+        if (
+            not self.deliberate_delivering
+            or self._deliberate_capped
+            or self._interruption_playout_began is None
+        ):
+            return
+        if self._playout_clock_position() < (
+            self._interruption_playout_began + _seconds(3.0)
+        ):
+            return
+        self.interruption_audio_exhausted()
+        if self._interruptions is not None:
+            self._interruptions.cancel_owned_work()
+        if self._worker is not None:
+            stopped = asyncio.Event()
+            frame = TTSStoppedFrame()
+            frame.metadata[_INTERRUPTION_STOPPED] = stopped
+            await self._worker.queue_frame(frame)
+            await stopped.wait()
+
+    def _playout_clock_position(self) -> MediaPosition:
+        recorder = self._recorder
+        ear = self._ear
+        offset = self._agent_to_playout_offset
+        if recorder is None or ear is None or offset is None:
+            return self._position
+        return max(self._position, ear.position + offset)
+
+    def interruption_canceled(self, reason: str, *, force: bool = False) -> None:
+        cancelable = {"scheduled", "preparing", "ready", "awaiting_playout"}
+        if force:
+            cancelable.add("delivering")
+        if self._interruption_state not in cancelable:
+            return
+        was_delivering = self._interruption_state == "delivering"
+        was_awaiting_playout = self._interruption_state == "awaiting_playout"
+        heard_audio = was_delivering and self._deliberate_playout_has_begun()
+        began = self._persona_began if heard_audio else None
+        ended = self._persona_ended if heard_audio else None
+        self._interruption_state = "listening"
+        self._interruption_idle.set()
+        self._cancel_after_accepted_audio = None
+        self._interruption_playout_began = None
+        self._agent_to_playout_offset = None
+        self._interruption_due_at = None
+        generated_text = self._pending_persona_text
+        self._pending_persona_text = None
+        if was_delivering or was_awaiting_playout:
+            self._discard_deliberate_audio = True
+        if self._interruptions is not None:
+            self._interruptions.cancel_owned_work()
+        if force and self._worker is not None:
+            flush = asyncio.create_task(self._worker.queue_frame(InterruptionFrame()))
+            self._control_tasks.add(flush)
+            flush.add_done_callback(self._control_tasks.discard)
+        self._report_interruption(
+            InterruptionEvidence(
+                event="canceled",
+                at_unix_nano=self._at(self._position),
+                began_unix_nano=None if began is None else self._at(began),
+                ended_unix_nano=None if ended is None else self._at(ended),
+                reason=reason,
+                generated_text=generated_text,
+            )
+        )
+        log_event(
+            logger,
+            logging.INFO,
+            "egma.persona.interruption_canceled",
+            "a deliberate interruption was canceled",
+            attributes={"egma.interruption.cancel_reason": reason},
+        )
+        self.media_advanced()
+        if self._segment_waiting_for_interruption_owner:
+            self._arm_interruption_for_active_segment()
+
+    def _report_interruption(self, evidence: InterruptionEvidence) -> None:
+        if self._on_interruption is not None:
+            self._on_interruption(evidence)
+
+    def interruption_generation_drained(self) -> None:
+        """The reply gate's idle signal resumes any deferred normal turn."""
+        self.media_advanced()
+
+    def interruption_provider_failed(self, reason: str) -> None:
+        if self._interruption_model_fault_observed:
+            self._interruption_model_fault_observed = False
+        else:
+            self._ignored_pipeline_faults += 1
+        self.interruption_canceled(reason)
+
     async def conduct(
         self,
         *,
@@ -1169,6 +1795,8 @@ class VoiceConductor:
         name: str,
         on_utterance: OnUtterance,
         on_measured: OnMeasured,
+        on_partial_utterance: OnPartialUtterance | None = None,
+        on_interruption: OnInterruption | None = None,
         on_answered: OnAnswered | None = None,
         on_provider_usage: OnProviderUsage | None = None,
         on_execution_ended: OnExecutionEnded | None = None,
@@ -1178,8 +1806,11 @@ class VoiceConductor:
         self._controls = controls
         self._on_utterance = on_utterance
         self._on_measured = on_measured
+        self._on_partial_utterance = on_partial_utterance
+        self._on_interruption = on_interruption
         self._on_answered = on_answered
         self._on_provider_usage = on_provider_usage
+        self._random.seed(name)
 
         watchdog = asyncio.create_task(
             _duration_watchdog(max_duration_seconds, controls),
@@ -1280,6 +1911,12 @@ class VoiceConductor:
         model = _PersonaLLMService(persona=self._persona)
         replies = _PersonaReplyGate(service=model, conductor=self)
         brain = _PersonaBrain(persona=self._persona, conductor=self, replies=replies)
+        interruptions = _InterruptionScheduler(
+            persona=self._persona, conductor=self, replies=replies
+        )
+        self._interruptions = interruptions
+        interruption_limit = _InterruptionAudioLimit(self)
+        interruption_playout = _InterruptionPlayout(self)
         media = self._media
         recorder = _EvidenceRecorder(
             num_channels=2,
@@ -1308,11 +1945,15 @@ class VoiceConductor:
                 self._legs.stt,
                 turns,
                 turn_boundary,
+                interruptions,
                 brain,
                 model,
                 replies,
                 self._legs.tts,
+                interruption_limit,
+                SpeechGain(self._legs.voice.speech_volume),
                 *media.output,
+                interruption_playout,
                 recorder,
                 timeline,
                 ledger,
@@ -1342,6 +1983,17 @@ class VoiceConductor:
                 return
             exception = getattr(error, "exception", None)
             processor = getattr(error, "processor", None)
+            if self._ignored_pipeline_faults:
+                self._ignored_pipeline_faults -= 1
+                return
+            if self.deliberate_response_owned:
+                if processor is model:
+                    self._interruption_model_fault_observed = True
+                self.interruption_canceled(
+                    "speech_provider_failed",
+                    force=self.deliberate_delivering,
+                )
+                return
             if isinstance(exception, ProviderKeyUnavailable):
                 self._brain_fault = exception
             elif authentication_rejected(exception):
@@ -1395,6 +2047,7 @@ class VoiceConductor:
         if self._closed:
             return
         self._closed = True
+        self.interruption_canceled("simulation_closed")
         cleanup_fault: Exception | None = None
         try:
             await self._end_pipeline()
@@ -1415,6 +2068,9 @@ class VoiceConductor:
         if self._running is None or self._worker is None:
             return
         try:
+            if self._control_tasks:
+                await asyncio.gather(*self._control_tasks, return_exceptions=True)
+                self._control_tasks.clear()
             await self._worker.queue_frame(EndFrame())
             await asyncio.wait_for(asyncio.shield(self._running), timeout=10.0)
         except Exception as unfinished:
@@ -1470,6 +2126,7 @@ class VoiceConductor:
         media = self._media
         if media is not None and media.failed.is_set():
             raise self._transport_lost()
+        await self._finish_interruption_at_deadline()
         ear = self._ear
         if ear is None:
             return
@@ -1563,7 +2220,9 @@ class VoiceConductor:
                 self._record.quiet_since = max(self._record.quiet_since, ended)
         if self._on_answered is not None:
             await self._on_answered()
-        if self._ending is not None:
+        if self._ending is not None or self._controls.cause is not None:
+            self._owes_a_turn = False
+            self.media_advanced()
             return None
         if self._agent_departed:
             self._owes_a_turn = False
@@ -1604,12 +2263,15 @@ class VoiceConductor:
         *,
         concludes: bool = False,
         silence_follow_up: int = 0,
+        deliberate: bool = False,
     ) -> None:
         self._pending_persona_text = text
         self._pending_persona_concludes = concludes
         self._pending_silence_follow_up = silence_follow_up
         self._persona_began = None
         self._persona_ended = None
+        if deliberate:
+            self._interruption_state = "ready"
 
     def persona_audio(
         self,
@@ -1629,6 +2291,9 @@ class VoiceConductor:
                 self._pending_silence_follow_up = 0
         self._persona_ended = recorded_until
         self.media_advanced()
+        cancel = self._cancel_after_accepted_audio
+        if cancel is not None:
+            self.interruption_canceled(cancel, force=True)
 
     def persona_interrupted(self, *, heard_through: MediaPosition) -> None:
         """Start waiting from the last audio heard before an interruption.
@@ -1676,9 +2341,46 @@ class VoiceConductor:
             raise SpeechFault(
                 "the persona's transcript turn ended without recorded audio"
             )
-        await self._took_a_turn(
-            "human", text, began, ended, apply_turn_limit=not concludes
-        )
+        deliberate = self.deliberate_response_owned
+        if deliberate and self._deliberate_capped:
+            await self._took_partial_persona_turn(began, ended)
+        else:
+            await self._took_a_turn(
+                "human", text, began, ended, apply_turn_limit=not concludes
+            )
+        if deliberate:
+            overlap_end = min(ended, self._agent_speech_ended or ended)
+            capped = self._deliberate_capped
+            self._report_interruption(
+                InterruptionEvidence(
+                    event="delivered",
+                    at_unix_nano=self._at(ended),
+                    began_unix_nano=self._at(began),
+                    ended_unix_nano=self._at(ended),
+                    overlap_ended_unix_nano=self._at(overlap_end),
+                    generated_text=text if capped else None,
+                    delivered_text=None if capped else text,
+                )
+            )
+            self._last_interruption_end = ended
+            self._interruption_state = "listening"
+            self._interruption_idle.set()
+            self._interruption_playout_began = None
+            self._agent_to_playout_offset = None
+            self._deliberate_capped = False
+            log_event(
+                logger,
+                logging.INFO,
+                "egma.persona.interruption_delivered",
+                "a deliberate interruption reached playout",
+                attributes={
+                    "egma.recording.start_ns": self._at(began),
+                    "egma.recording.end_ns": self._at(ended),
+                    "egma.interruption.overlap_end_ns": self._at(overlap_end),
+                },
+            )
+            if self._segment_waiting_for_interruption_owner:
+                self._arm_interruption_for_active_segment()
         self._record.persona_last_stopped_at = ended
         self._record.persona_response_pending = False
         self._record.quiet_since = max(self._record.quiet_since, ended)
@@ -1728,6 +2430,20 @@ class VoiceConductor:
             self._ending = turn_limit_reached(self._max_turns)
             self.media_advanced()
 
+    async def _took_partial_persona_turn(
+        self, began: MediaPosition, ended: MediaPosition
+    ) -> None:
+        """Record audible speech without guessing which generated words played."""
+        self._record.history.append(Turn("human", ""))
+        self._record.turns += 1
+        if self._on_partial_utterance is not None:
+            await self._on_partial_utterance("human", self._at(began), self._at(ended))
+        elif self._on_utterance is not None:
+            await self._on_utterance("human", "", self._at(began), self._at(ended))
+        if self._record.turns >= self._max_turns and self._ending is None:
+            self._ending = turn_limit_reached(self._max_turns)
+            self.media_advanced()
+
     async def _measure(
         self, measure: str, began: MediaPosition, ended: MediaPosition
     ) -> None:
@@ -1761,6 +2477,7 @@ class VoiceConductor:
     def agent_is_departing(self) -> None:
         """Stop new persona work while the ordered departure marker drains."""
         self._agent_departed = True
+        self.interruption_canceled("agent_disconnected", force=True)
         self._owes_a_turn = False
         self.media_advanced()
 
@@ -1785,9 +2502,11 @@ class VoiceConductor:
 
     def _stop_if_asked(self) -> None:
         if self._controls.cause is not None:
+            self.interruption_canceled("simulation_stopped", force=True)
             raise _Stopped()
 
     def _transport_lost(self) -> PlugError:
+        self.interruption_canceled("transport_failed", force=True)
         transport = (
             self._media.transport_name if self._media is not None else "voice transport"
         )
@@ -1796,6 +2515,7 @@ class VoiceConductor:
     async def _agent_left(self) -> None:
         """Finish any active input turn before recording a normal departure."""
         self._agent_departed = True
+        self.interruption_canceled("agent_disconnected", force=True)
         if self._ear is not None:
             await self._ear.finalize_active_utterance()
         self.media_advanced()

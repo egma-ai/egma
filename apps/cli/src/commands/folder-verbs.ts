@@ -35,6 +35,8 @@ export type FolderCommandOptions = {
   readonly fail: (line: string) => void;
   /** The network boundary, replaced only by command-level tests. */
   readonly fetchImpl?: Fetch;
+  /** Stops an active platform request when the command is interrupted. */
+  readonly signal?: AbortSignal;
 };
 
 /** The folder and the key, or the number to exit with instead. */

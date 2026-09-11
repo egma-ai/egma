@@ -1,5 +1,5 @@
 {
-  "contract_version": 5,
+  "contract_version": 6,
   "simulation_id": "sim_01K4RE4P0D3S8VXHNB2GQZT6MF",
   "modality": "voice",
   "connection": {
@@ -17,7 +17,15 @@
   "persona": {
     "name": "Sam",
     "personality": "Terse and to the point; asks one thing and waits.",
-    "language": "en-US"
+    "parameters": {
+      "language": "en-US",
+      "emotion": "neutral",
+      "accent": "voice_default",
+      "speech_volume": 1,
+      "execution_policy_version": 1,
+      "background_sound_id": "none",
+      "background_volume": 0.0631
+    }
   },
   "scenario": {
     "instructions": "Ask whether Thursday morning is free."
@@ -52,7 +60,9 @@
     {
       "tool_name": "check_calendar",
       "answer": {
-        "answer": { "slots": [] },
+        "answer": {
+          "slots": []
+        },
         "error": "the calendar service is down"
       }
     }

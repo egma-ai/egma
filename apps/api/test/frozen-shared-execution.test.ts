@@ -20,7 +20,7 @@ import {
   type AuthContext,
   type NewSpan,
 } from "@egma/db";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 
 import { gradeClaim } from "../../grader/src/grade.ts";
 import { scriptedJudge, met } from "../../grader/test/support/scripted-judge.ts";
@@ -29,9 +29,27 @@ import { createApi, type TestApi } from "./support/api.ts";
 import { contextFor, signUp } from "./support/traces.ts";
 
 let api: TestApi;
-afterEach(async () => { await api?.close(); });
+afterEach(async () => {
+  vi.unstubAllGlobals();
+  await api?.close();
+});
 
 it("freezes shared grader and persona selections together while later work receives one compatible release", async () => {
+  vi.stubGlobal("fetch", async (input: string | URL) => {
+    if (!String(input).startsWith("https://api.cartesia.ai/voices")) {
+      throw new Error(`unexpected request ${String(input)}`);
+    }
+    return new Response(JSON.stringify({
+      data: [{
+        id: "later-project-voice",
+        name: "Later project voice",
+        access: "public",
+        visibility: "all",
+        fine_tunes: [{ public_model_id: "sonic-3.5" }],
+      }],
+      has_more: false,
+    }), { status: 200 });
+  });
   api = await createApi("frozen_shared_execution", { traceStore: true });
   const who = await signUp(api.app, "frozen-shared@example.test", "Frozen shared execution");
   const firstAuth = contextFor(who, "admin");
@@ -50,8 +68,8 @@ it("freezes shared grader and persona selections together while later work recei
     return response.json();
   }
   const projects = [
-    { projectId: who.projectId, model: "gpt-4o-mini", speed: 0.85, voice: "first-project-voice" },
-    { projectId: second.id, model: "gpt-5.6-terra", speed: 1.2, voice: "second-project-voice" },
+    { projectId: who.projectId, model: "gpt-4o-mini", speed: 0.85, voice: "alloy" },
+    { projectId: second.id, model: "gpt-5.6-terra", speed: 1.2, voice: "coral" },
   ];
   const prepared = [];
   for (const [index, project] of projects.entries()) {
@@ -111,11 +129,11 @@ it("freezes shared grader and persona selections together while later work recei
   const graderPublications = await Promise.all([reconcileGraderCatalog([updatedGrader]), reconcileGraderCatalog([updatedGrader])]);
   expect(graderPublications.flatMap((one) => one.definitions)).toEqual([{ id: grader.id, name: grader.name, version: 2 }]);
   const personaPublications = await Promise.all([seedPersonaLibrary([updatedPersona]), seedPersonaLibrary([updatedPersona])]);
-  expect(personaPublications.flat()).toEqual([{ id: persona.id, name: persona.name, version: 3, versionId: releasedPersona.id }]);
+  expect(personaPublications.flat()).toEqual([{ id: persona.id, name: persona.name, version: releasedPersona.version, versionId: releasedPersona.id }]);
 
   for (const project of prepared) {
     const current = await request(project.projectId, "GET", `/v1/personas/${persona.id}`);
-    expect(current).toMatchObject({ version: 3, settings: { id: project.personaSettingsId, models: { llm: { model: project.model }, tts: { speed: project.speed, voiceId: project.voice } } } });
+    expect(current).toMatchObject({ version: releasedPersona.version, settings: { id: project.personaSettingsId, models: { llm: { model: project.model }, tts: { speed: project.speed, voiceId: project.voice } } } });
     const policy = await request(project.projectId, "GET", "/v1/graders");
     expect(policy.graders).toEqual(expect.arrayContaining([expect.objectContaining({ id: project.projectGraderId, settings: { llm_provider: "openai", llm_model: project.model } })]));
   }
@@ -128,7 +146,7 @@ it("freezes shared grader and persona selections together while later work recei
     llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "openai", model: "gpt-live-transcribe" },
     tts: { provider: "cartesia", model: "sonic-3.5", voiceId: "later-project-voice", speed: 1.3 },
   } });
-  const claim = await api.app.inject({ method: "POST", url: CLAIMS_PATH, headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` }, payload: { contract_versions: [5], claimant: "after-shared-release", capacity: 2, wait_seconds: 0 } });
+  const claim = await api.app.inject({ method: "POST", url: CLAIMS_PATH, headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` }, payload: { contract_versions: [5, 6], claimant: "after-shared-release", capacity: 2, wait_seconds: 0 } });
   expect(claim.statusCode, claim.body).toBe(200);
   const specs = claim.json().specs as { simulation_id: string; persona: unknown; models: unknown }[];
   expect(specs).toHaveLength(2);
@@ -165,7 +183,7 @@ it("freezes shared grader and persona selections together while later work recei
   const laterPlan = await getGradingPlan(firstAuth, later.runId);
   expect(laterPlan?.groups[0]?.items).toEqual(expect.arrayContaining([expect.objectContaining({ graderDefinitionVersion: 2, projectGraderId: first.projectGraderId, passThreshold: 0.95, parameterValues: { llm_provider: "openai", llm_model: "gpt-5.6-terra" }, definition: expect.objectContaining({ prompt: updatedGrader.prompt }) })]));
   expect(await getSimulation(firstAuth, later.simulationId)).toMatchObject({ personaVersionId: releasedPersona.id });
-  const laterClaim = await api.app.inject({ method: "POST", url: CLAIMS_PATH, headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` }, payload: { contract_versions: [5], claimant: "later-release", capacity: 1, wait_seconds: 0 } });
+  const laterClaim = await api.app.inject({ method: "POST", url: CLAIMS_PATH, headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` }, payload: { contract_versions: [5, 6], claimant: "later-release", capacity: 1, wait_seconds: 0 } });
   expect(laterClaim.statusCode, laterClaim.body).toBe(200);
   expect(laterClaim.json().specs).toMatchObject([{ simulation_id: later.simulationId, persona: { personality: releasedPersona.personality }, models: { llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "openai", model: "gpt-live-transcribe" }, tts: { provider: "cartesia", model: "sonic-3.5", voice_id: "later-project-voice", speed: 1.3 } } }]);
   const detail = await request(first.projectId, "GET", `/v1/simulations/${oldRuns[0]!.simulationId}`);

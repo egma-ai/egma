@@ -1,5 +1,5 @@
 {
-  "contract_version": 5,
+  "contract_version": 6,
   "simulation_id": "sim_01K3XQ7M4E8YB2FVN0H9TZQWER",
   "modality": "chat",
   "connection": {
@@ -16,7 +16,15 @@
   "persona": {
     "name": "Margaret",
     "personality": "Margaret, 68, retired schoolteacher. Polite but easily flustered; asks for things to be repeated and apologises for it.",
-    "language": "en-US"
+    "parameters": {
+      "language": "en-US",
+      "emotion": "neutral",
+      "accent": "voice_default",
+      "speech_volume": 1,
+      "execution_policy_version": 1,
+      "background_sound_id": "none",
+      "background_volume": 0.0631
+    }
   },
   "scenario": {
     "instructions": "You booked a dental cleaning for next Tuesday and need to move it to Thursday the same week. You do not remember the exact time of the original appointment. Conclude once the new time has been read back to you."

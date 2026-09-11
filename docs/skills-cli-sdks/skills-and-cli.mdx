@@ -28,3 +28,19 @@ egma login
 ```
 
 The command opens your browser so you can sign in and select an Egma project.
+
+## Configure personas from the CLI
+
+Persona commands are promptless and use the project in `egma/config.yaml`.
+
+```bash
+egma persona list
+egma persona settings <Persona ID>
+egma persona capabilities --stt-provider <id> --stt-model <id> \
+  --tts-provider <id> --tts-model <id>
+```
+
+Use the capability response to select supported values. The `use`, `create`,
+`update`, and `preview` commands accept complete model and speech controls.
+Run `egma persona <command> --help` for the exact flags. Preview returns a
+short audio sample; use a full simulation to test interruptions.

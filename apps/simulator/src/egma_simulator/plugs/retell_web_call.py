@@ -22,6 +22,7 @@ from urllib.parse import quote
 
 import aiohttp
 
+from ..background import BackgroundSound, soundfile_mixer
 from ..client import UNREACHABLE
 from ..contract import AGENT_NEVER_JOINED
 from ..media import MediaBackendError, VoiceMedia
@@ -78,6 +79,7 @@ class RetellWebCall:
         mock_tools: object = None,
         media: object = None,
         driver: Any = None,
+        background: BackgroundSound | None = None,
     ) -> None:
         # Retell carries this call's audio itself, so the deployment's
         # carrier is nothing to it. And egma is not in this agent's tool
@@ -165,6 +167,7 @@ class RetellWebCall:
         self._conducted = False
         self._room: Any = None
         self._media: VoiceMedia | None = None
+        self._background = background
 
     @property
     def base_url(self) -> str:
@@ -222,7 +225,17 @@ class RetellWebCall:
             confirm_remote_end=self._confirm_remote_end,
         )
         try:
-            self._media = await self._room.create_transport()
+            mixer = (
+                None
+                if self._background is None
+                else soundfile_mixer(self._background)
+            )
+            if mixer is None:
+                self._media = await self._room.create_transport()
+            else:
+                self._media = await self._room.create_transport(
+                    audio_out_mixer=mixer
+                )
             return self._media
         except MediaBackendError as refused:
             raise PlugError(

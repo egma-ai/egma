@@ -53,6 +53,13 @@ egma agent monitoring stop
 
 egma project api-key create
 egma persona list
+egma persona settings
+egma persona capabilities
+egma persona use
+egma persona create
+egma persona clone
+egma persona update
+egma persona preview
 egma suite create
 egma suite delete
 egma test delete
@@ -70,8 +77,8 @@ egma agent connection --help
 egma agent connection add --help
 ```
 
-The CLI has no wizard, interactive setup state machine, JSON output mode, or
-public recovery and retry-key controls.
+The CLI has no wizard or interactive setup state machine. Persona read and
+write commands print JSON so coding agents can use the complete API response.
 
 ## Sign in and initialize a repository
 

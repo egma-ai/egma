@@ -29,7 +29,8 @@ function compileFromDisk(schemaFile: string): ValidateFunction {
   return ajv.compile(schema as Record<string, unknown>);
 }
 
-let compiledSpec: ValidateFunction | undefined;
+let compiledSpecV5: ValidateFunction | undefined;
+let compiledSpecV6: ValidateFunction | undefined;
 let compiledReport: ValidateFunction | undefined;
 
 /**
@@ -57,8 +58,14 @@ function complaintsFrom(
  * complaint per attempt that will never be retried.
  */
 export function specComplaints(document: unknown): readonly string[] {
-  compiledSpec ??= compileFromDisk("simulation-spec.v5.schema.json");
-  return complaintsFrom(compiledSpec, document);
+  const version = typeof document === "object" && document !== null && "contract_version" in document
+    ? (document as { contract_version?: unknown }).contract_version : undefined;
+  if (version === 5) {
+    compiledSpecV5 ??= compileFromDisk("simulation-spec.v5.schema.json");
+    return complaintsFrom(compiledSpecV5, document);
+  }
+  compiledSpecV6 ??= compileFromDisk("simulation-spec.v6.schema.json");
+  return complaintsFrom(compiledSpecV6, document);
 }
 
 /**

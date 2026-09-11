@@ -14,6 +14,16 @@ afterEach(async () => {
   await api?.close();
 });
 
+const DEFAULT_CONTROLS = {
+  language: "en-US",
+  emotion: "neutral",
+  accent: "voice_default",
+  speechVolume: 1,
+  backgroundSoundId: "none",
+  backgroundVolume: 0.0631,
+  interruptionLevel: "off",
+} as const;
+
 async function request(
   who: Customer,
   method: "GET" | "POST" | "PATCH",
@@ -45,7 +55,7 @@ it("saves independent shared-persona settings, clones current behavior, and reje
     ...RECOMMENDED_PERSONA_MODELS,
     tts: {
       ...RECOMMENDED_PERSONA_MODELS.tts,
-      voiceId: "my-private-provider-voice",
+      voiceId: "coral",
       speed: 0.85,
     },
   };
@@ -129,7 +139,7 @@ it("rejects incomplete, unknown and invalid settings without creating a partial 
     name: "Unwritten",
     identityName: "Nora",
     personality: "Patient",
-    language: "en-US",
+    controls: DEFAULT_CONTROLS,
   };
   for (const models of [{ llm: { provider: "openai" } }, { extra: true }]) {
     const rejected = await request(who, "POST", "/v1/personas", {
@@ -165,7 +175,7 @@ it("serializes first use and current core edits without duplicate settings or lo
   );
   const shared = EGMA_PROVIDED_PERSONAS.defaultPersona;
   const uses = await Promise.all(
-    ["first-voice", "second-voice", "third-voice"].map((voiceId) =>
+    ["alloy", "coral", "echo"].map((voiceId) =>
       request(who, "POST", `/v1/personas/${shared}/use`, {
         projectId: who.projectId,
         models: {
@@ -222,7 +232,8 @@ it("refuses another project's custom persona at every write and history door", a
     name: "Private Nora",
     identityName: "Nora",
     personality: "Patient and clear.",
-    language: "en-US",
+    models: RECOMMENDED_PERSONA_MODELS,
+    controls: DEFAULT_CONTROLS,
   });
   expect(created.statusCode, created.body).toBe(201);
   const persona = created.json();
@@ -301,7 +312,7 @@ it("refuses invalid settings saves before changing any current project values", 
       stt: { provider: "openai", model: "nova-3-general" },
     },
     { ...RECOMMENDED_PERSONA_MODELS, llm: { provider: 4, model: "gpt-4o" } },
-    ...["1", 0.5, 1.6].map((speed) => ({
+    ...["1", 0.24, 4.01].map((speed) => ({
       ...RECOMMENDED_PERSONA_MODELS,
       tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed },
     })),

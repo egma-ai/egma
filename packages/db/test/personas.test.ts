@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   createPersona,
   editPersona,
+  usePersona,
   getPersona,
   getPersonaVersion,
   NotPermittedError,
@@ -13,6 +14,7 @@ import {
   PERSONA_PARAMETER_CONTRACT,
   EGMA_PROVIDED_PERSONAS,
   defaultPersonaParameterValues,
+  legacyPersonaParameterContract,
   type NewPersona,
   type PersonaChanges,
   type Role,
@@ -114,7 +116,7 @@ describe("creating a persona", () => {
   it("stores behavior separately from complete project settings", async () => {
     const created = await createPersona(actingAsAcme(), rita);
     const version = await getPersonaVersion(actingAsAcme(), created.versionId);
-    expect(version).toMatchObject({ identityName: rita.identityName, personality: rita.personality, language: rita.language });
+    expect(version).toMatchObject({ identityName: rita.identityName, personality: rita.personality, language: null });
     expect(version).not.toHaveProperty("models");
     expect(created.settings?.models).toEqual(RECOMMENDED_PERSONA_MODELS);
   });
@@ -197,6 +199,65 @@ describe("a credential for the whole organization", () => {
 });
 
 describe("editing a persona's personality", () => {
+  it("upgrades legacy settings through one append-only version", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
+    const legacyContract = legacyPersonaParameterContract();
+    const legacyVersionId = newId("prsv");
+    await database.sql(
+      `insert into persona_definition_version
+         (id, persona_id, version, identity_name, personality, language,
+          parameter_contract, created_by)
+       select $2, persona_id, 2, identity_name, personality, 'es-ES', $3::jsonb,
+              created_by
+         from persona_definition_version
+        where id=$1`,
+      [created.versionId, legacyVersionId, JSON.stringify(legacyContract)],
+    );
+    await database.sql(
+      "update persona_definition set current_version_id=$2 where id=$1",
+      [created.id, legacyVersionId],
+    );
+    await database.sql(
+      "update project_persona set parameter_values=$2::jsonb where id=$1",
+      [
+        created.settings!.id,
+        JSON.stringify(defaultPersonaParameterValues(legacyContract)),
+      ],
+    );
+
+    const settings = {
+      models: RECOMMENDED_PERSONA_MODELS,
+      language: "es-ES",
+      emotion: "happy" as const,
+      accent: "voice_default",
+      speechVolume: 1.1,
+      executionPolicyVersion: 1,
+      backgroundSoundId: "office-v1" as const,
+      backgroundVolume: 0.0631,
+      interruptionLevel: "occasional" as const,
+    };
+    const upgraded = await editPersona(actingAsAcme(), created.id, { settings });
+
+    expect(upgraded).toMatchObject({ version: 3, language: "es-ES" });
+    expect(upgraded?.settings?.models).toEqual(settings.models);
+    expect(upgraded?.settings?.parameterValues).toMatchObject({
+      language: "es-ES",
+      emotion: "happy",
+      accent: "voice_default",
+      speech_volume: 1.1,
+      execution_policy_version: 1,
+      background_sound_id: "office-v1",
+      background_volume: 0.0631,
+      interruption_level: "occasional",
+    });
+    const legacy = await getPersonaVersion(actingAsAcme(), legacyVersionId);
+    expect(legacy).toMatchObject({ version: 2, language: "es-ES" });
+    expect(legacy?.parameterContract).toEqual(legacyContract);
+    const current = await getPersonaVersion(actingAsAcme(), upgraded!.versionId);
+    expect(current).toMatchObject({ version: 3, language: null });
+    expect(current?.parameterContract).toHaveLength(16);
+  });
+
   it("creates version 2, moves the pointer, and leaves version 1 untouched", async () => {
     const created = await createPersona(actingAsAcme(), rita);
 
@@ -338,7 +399,20 @@ describe("editing a persona's identity name", () => {
 
 describe("editing a persona's model selection", () => {
   it("updates project settings without creating a core version", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
+    const created = await createPersona(actingAsAcme(), {
+      ...rita,
+      settings: {
+        models: RECOMMENDED_PERSONA_MODELS,
+        language: "es-ES",
+        emotion: "angry",
+        accent: "spanish",
+        speechVolume: 1.3,
+        backgroundSoundId: "cafe-v1",
+        backgroundVolume: 0.08,
+        interruptionLevel: "frequent",
+        executionPolicyVersion: 1,
+      },
+    });
     const nextModels = {
       ...RECOMMENDED_PERSONA_MODELS,
       stt: { provider: "deepgram", model: "nova-3-general" },
@@ -351,7 +425,24 @@ describe("editing a persona's model selection", () => {
 
     expect(edited?.version).toBe(1);
     expect(edited?.settings?.models).toEqual(nextModels);
+    expect(edited?.settings?.parameterValues).toMatchObject({
+      language: "es-ES", emotion: "angry", accent: "spanish", speech_volume: 1.3,
+      background_sound_id: "cafe-v1", background_volume: 0.08, interruption_level: "frequent",
+    });
     expect(await getPersonaVersion(actingAsAcme(), created.versionId)).not.toHaveProperty("models");
+  });
+
+  it("applies model overrides on first use without replacing preset controls", async () => {
+    const models = {
+      ...RECOMMENDED_PERSONA_MODELS,
+      llm: { provider: "openai", model: "gpt-5.6-terra" },
+    } as const;
+    const used = await usePersona(actingAsAcme(), EGMA_PROVIDED_PERSONAS.spanishCaller, models);
+
+    expect(used?.settings?.models).toEqual(models);
+    expect(used?.settings?.parameterValues).toMatchObject({
+      language: "es-ES", emotion: "neutral", background_sound_id: "none", interruption_level: "off",
+    });
   });
 
   it("updates speaking speed without creating a core version", async () => {
@@ -388,7 +479,7 @@ describe("editing a persona's model selection", () => {
       editPersona(actingAsAcme(), created.id, {
         models: {
           ...RECOMMENDED_PERSONA_MODELS,
-          tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed: 2 },
+          tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed: 4.1 },
         },
       }),
     ).rejects.toThrow(/speed/i);
@@ -668,7 +759,12 @@ describe("stored core and project settings validation", () => {
   });
   it("refuses invalid project values written around the module", async () => {
     const created = await createPersona(actingAsAcme(), rita);
-    await expect(database.sql(`update project_persona set parameter_values = jsonb_set(parameter_values, '{tts_speed}', '1.9') where persona_definition_id = $1`, [created.id])).rejects.toMatchObject({ code: POSTGRES_ERROR.checkViolation });
+    await expect(database.sql(`update project_persona set parameter_values = jsonb_set(parameter_values, '{tts_speed}', '4.1') where persona_definition_id = $1`, [created.id])).rejects.toMatchObject({ code: POSTGRES_ERROR.checkViolation });
+  });
+  it("refuses unknown background assets and out-of-range background gain", async () => {
+    const created = await createPersona(actingAsAcme(), rita);
+    await expect(database.sql(`update project_persona set parameter_values = jsonb_set(parameter_values, '{background_sound_id}', '"unknown-v1"') where persona_definition_id = $1`, [created.id])).rejects.toMatchObject({ code: POSTGRES_ERROR.checkViolation });
+    await expect(database.sql(`update project_persona set parameter_values = jsonb_set(parameter_values, '{background_volume}', '0.3') where persona_definition_id = $1`, [created.id])).rejects.toMatchObject({ code: POSTGRES_ERROR.checkViolation });
   });
 });
 
@@ -751,12 +847,17 @@ describe("project persona storage boundaries", () => {
     const settings = created.settings;
     if (settings === null) throw new Error("creation saved no settings");
     const complete = defaultPersonaParameterValues(PERSONA_PARAMETER_CONTRACT);
+    expect(Object.keys(complete)).toHaveLength(16);
+    expect(complete.interruption_level).toBe("off");
     const { tts_speed: _speed, ...missing } = complete;
     for (const values of [
       missing,
       { ...complete, unrecognized: 1 },
       { ...complete, tts_speed: "1" },
       { ...complete, tts_voice_id: " " },
+      { ...complete, interruption_level: "constant" },
+      { ...complete, interruption_level: 1 },
+      { ...complete, execution_policy_version: 2 },
     ]) {
       await expect(
         database.sql(

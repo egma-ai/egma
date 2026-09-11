@@ -20,6 +20,7 @@ import json
 import time
 from collections.abc import Callable
 from contextvars import Token
+from typing import Protocol
 
 from opentelemetry import context as context_api
 from opentelemetry.context import Context
@@ -88,6 +89,18 @@ Flush = Callable[[bytes], None]
 """What an emitter does with a finished document: hand it to delivery."""
 
 Clock = Callable[[], int]
+
+
+class _InterruptionEvidence(Protocol):
+    event: str
+    at_unix_nano: int
+    scheduled_for_unix_nano: int | None
+    began_unix_nano: int | None
+    ended_unix_nano: int | None
+    overlap_ended_unix_nano: int | None
+    reason: str | None
+    generated_text: str | None
+    delivered_text: str | None
 """Wall-clock nanoseconds since the epoch, which is what OTLP timestamps
 are. Injected so a test can hold time still."""
 
@@ -200,6 +213,7 @@ class SpanEmitter:
         *,
         began_unix_nano: int,
         ended_unix_nano: int,
+        platform_notes: tuple[str, ...] = (),
     ) -> None:
         """Record a voice turn using its audio-derived start and end times.
         Do not infer either endpoint from when Python received the observation.
@@ -207,11 +221,16 @@ class SpanEmitter:
         name = TURN_SPAN_OF.get(speaker)
         if name is None:
             raise ValueError(f"a turn was taken by {speaker!r}, who is not a speaker")
+        attributes = {TURN_TEXT_ATTRIBUTE: text}
+        if platform_notes:
+            attributes[TURN_PLATFORM_NOTES_ATTRIBUTE] = json.dumps(
+                list(platform_notes), separators=(",", ":"), ensure_ascii=False
+            )
         self._author(
             name,
             started_unix_nano=began_unix_nano,
             ended_unix_nano=ended_unix_nano,
-            attributes={TURN_TEXT_ATTRIBUTE: text},
+            attributes=attributes,
         )
 
     def recording(self, *, started_unix_nano: int) -> None:
@@ -226,6 +245,30 @@ class SpanEmitter:
             RECORDING_SPAN,
             started_unix_nano=started_unix_nano,
             ended_unix_nano=started_unix_nano,
+        )
+
+    def interruption(self, evidence: _InterruptionEvidence) -> None:
+        """Record one deliberate-interruption lifecycle event on the trace."""
+        event = evidence.event
+        at = evidence.at_unix_nano
+        attributes: dict[str, object] = {"egma.interruption.event": event}
+        for field_name in (
+            "scheduled_for_unix_nano",
+            "began_unix_nano",
+            "ended_unix_nano",
+            "overlap_ended_unix_nano",
+            "reason",
+            "generated_text",
+            "delivered_text",
+        ):
+            value = getattr(evidence, field_name)
+            if value is not None:
+                attributes[f"egma.interruption.{field_name}"] = value
+        self._author(
+            "persona_interruption",
+            started_unix_nano=at,
+            ended_unix_nano=at,
+            attributes=attributes,
         )
 
     def measured(

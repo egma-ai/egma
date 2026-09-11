@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 
 import aiohttp
 
-from .contract import spec_contract_version
+from .contract import supported_spec_contract_versions
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +141,7 @@ class ControlPlaneClient:
                     "claimant": claimant,
                     "capacity": capacity,
                     "wait_seconds": self._claim_wait_seconds,
-                    "contract_versions": [spec_contract_version()],
+                    "contract_versions": list(supported_spec_contract_versions()),
                     **({} if modalities is None else {"modalities": list(modalities)}),
                     **({} if self._runtime is None else {"runtime": self._runtime}),
                 },

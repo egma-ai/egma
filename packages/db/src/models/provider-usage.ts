@@ -21,6 +21,11 @@ export type UsageIdentity =
       readonly projectGraderId: string;
       readonly httpAttempt: number;
       readonly attemptId: string;
+    }
+  | {
+      readonly work: "persona_preview";
+      readonly previewId: string;
+      readonly spanId: string;
     };
 export type NewUsageRecord = {
   readonly identity: UsageIdentity;
@@ -99,7 +104,7 @@ export function providerUsageSpan(
   if (!record.traceId)
     throw new Error("provider usage must belong to its trace");
   const spanId =
-    record.identity.work === "simulation"
+    record.identity.work === "simulation" || record.identity.work === "persona_preview"
       ? record.identity.spanId
       : createHash("sha256")
           .update(canonicalUsage(record.identity))

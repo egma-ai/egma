@@ -14,6 +14,12 @@ const personaParams = parameters({ personaId: stringIdSchema }, ["personaId"]);
 const versionParams = parameters({ versionId: stringIdSchema }, ["versionId"]);
 
 const projectQuery = parameters({ projectId: stringIdSchema });
+const capabilityQuery = parameters({
+  projectId: stringIdSchema,
+  ttsProvider: { type: "string" }, ttsModel: { type: "string" },
+  sttProvider: { type: "string" }, sttModel: { type: "string" },
+  language: { type: "string" }, voiceId: { type: "string" }, refresh: { type: "boolean" },
+}, ["ttsProvider", "ttsModel", "sttProvider", "sttModel"]);
 const personaListQuery = parameters({
   projectId: stringIdSchema,
   pageToken: stringIdSchema,
@@ -43,8 +49,8 @@ const behavior = {
     description: "How the caller behaves and speaks. Put the situation and goal in the test scenario.",
   },
   language: {
-    type: "string",
-    description: "The caller's language, such as en-US.",
+    ...nullable({ type: "string" }),
+    description: "Historical core language. New persona versions use controls.language and return null here.",
   },
 } as const;
 
@@ -70,7 +76,7 @@ const speechSelection = {
     },
     speed: {
       type: "number",
-      description: "Speech rate from 0.6 through 1.5. Use 1 for the normal rate.",
+      description: "Provider-supported speech rate. Read the selected combination's capability range.",
     },
   },
   required: [...modelSelection.required, "voiceId", "speed"],
@@ -89,11 +95,42 @@ const personaModels = {
   additionalProperties: false,
 } as const;
 
+const personaControls = {
+  type: "object",
+  properties: {
+    language: { type: "string", minLength: 1 },
+    emotion: { type: "string", enum: ["neutral", "happy", "angry", "frustrated", "sad", "anxious"] },
+    accent: { type: "string", minLength: 1 },
+    speechVolume: { type: "number", minimum: 0.5, maximum: 1.5 },
+    executionPolicyVersion: { type: "integer", minimum: 1, readOnly: true },
+    backgroundSoundId: { type: "string", enum: ["none", "office-v1", "cafe-v1", "street-traffic-v1", "crowd-talking-v1", "inside-car-v1", "home-tv-v1", "wind-v1", "rain-v1"] },
+    backgroundVolume: { type: "number", minimum: 0.015848931924611134, maximum: 0.251188643150958 },
+    interruptionLevel: { type: "string", enum: ["off", "occasional", "frequent"] },
+  },
+  required: ["language", "emotion", "accent", "speechVolume", "executionPolicyVersion", "backgroundSoundId", "backgroundVolume", "interruptionLevel"],
+  additionalProperties: false,
+} as const;
+
+const personaControlsInput = {
+  type: "object",
+  properties: {
+    language: personaControls.properties.language,
+    emotion: personaControls.properties.emotion,
+    accent: personaControls.properties.accent,
+    speechVolume: personaControls.properties.speechVolume,
+    backgroundSoundId: personaControls.properties.backgroundSoundId,
+    backgroundVolume: personaControls.properties.backgroundVolume,
+    interruptionLevel: personaControls.properties.interruptionLevel,
+  },
+  required: ["language", "emotion", "accent", "speechVolume", "backgroundSoundId", "backgroundVolume", "interruptionLevel"],
+  additionalProperties: false,
+} as const;
+
 const parameterContract = arrayOf(graderSettingDefinitionSchema);
 
 const projectPersonaSettings = {
-  type: "object", properties: { id: stringIdSchema, models: personaModels, createdAt: dateTimeSchema, updatedAt: dateTimeSchema },
-  required: ["id", "models", "createdAt", "updatedAt"], additionalProperties: false,
+  type: "object", properties: { id: stringIdSchema, models: personaModels, controls: personaControls, createdAt: dateTimeSchema, updatedAt: dateTimeSchema },
+  required: ["id", "models", "controls", "createdAt", "updatedAt"], additionalProperties: false,
 } as const;
 
 const persona = {
@@ -194,18 +231,51 @@ const personaForm = {
   properties: {
     modelCatalog: arrayOf(modelCatalogEntry),
     recommendedModels: personaModels,
-    speedRange: {
-      type: "object",
-      properties: {
-        slowest: { type: "number" },
-        fastest: { type: "number" },
-      },
-      required: ["slowest", "fastest"],
-      additionalProperties: false,
-    },
   },
-  required: ["modelCatalog", "recommendedModels", "speedRange"],
+  required: ["modelCatalog", "recommendedModels"],
   additionalProperties: false,
+} as const;
+
+const capabilityState = (choice: Readonly<Record<string, unknown>>) => ({
+  type: "object",
+  properties: {
+    status: { type: "string", enum: ["supported", "fixed", "unsupported", "unknown"] },
+    reason: { type: "string" }, choices: arrayOf(choice), value: choice,
+    range: { type: "object", properties: { minimum: { type: "number" }, maximum: { type: "number" }, step: { type: "number" } }, required: ["minimum", "maximum", "step"], additionalProperties: false },
+  },
+  required: ["status"], additionalProperties: false,
+}) as const;
+
+const voiceChoice = {
+  type: "object", properties: {
+    id: { type: "string" }, name: { type: "string" },
+    source: { type: "string", enum: ["standard", "account"] },
+    presentation: { type: "string", enum: ["male", "female", "neutral", "unknown"] },
+    languages: arrayOf({ type: "string" }), accents: arrayOf({ type: "string" }),
+  }, required: ["id", "name", "source", "presentation", "languages", "accents"], additionalProperties: false,
+} as const;
+
+const personaCapabilities = {
+  type: "object", properties: {
+    voices: capabilityState(voiceChoice), language: capabilityState({ type: "string" }),
+    accent: capabilityState({ type: "string" }), emotion: capabilityState({ type: "string" }),
+    speed: capabilityState({ type: "number" }), speechVolume: capabilityState({ type: "number" }),
+  }, required: ["voices", "language", "accent", "emotion", "speed", "speechVolume"], additionalProperties: false,
+} as const;
+
+const previewBody = {
+  type: "object", properties: {
+    projectId: stringIdSchema, models: personaModels, controls: personaControlsInput,
+    voiceAccessProof: { type: "string", description: "A prior short-lived proof for an existing provider voice ID." },
+  }, required: ["models", "controls"], additionalProperties: false,
+} as const;
+
+const personaPreview = {
+  type: "object", properties: {
+    audioBase64: { type: "string", contentEncoding: "base64" }, contentType: { type: "string" },
+    voiceAccessProof: { type: "string" }, expiresAt: nullable(dateTimeSchema),
+    interruptionNotice: { type: "string" },
+  }, required: ["audioBase64", "contentType", "expiresAt", "interruptionNotice"], additionalProperties: false,
 } as const;
 
 const namedTest = {
@@ -234,10 +304,13 @@ const createPersonaBody = {
       description: "Your team's label in the persona library. The caller does not speak this label.",
     },
     description: { type: "string" },
-    ...behavior,
+    identityName: behavior.identityName,
+    personality: behavior.personality,
     models: personaModels,
+    controls: personaControlsInput,
+    voiceAccessProof: { type: "string" },
   },
-  required: ["name", ...behaviorRequired],
+  required: ["name", "identityName", "personality"],
   additionalProperties: false,
   examples: [{
     name: "Caller in a hurry",
@@ -245,7 +318,6 @@ const createPersonaBody = {
     identityName: "Morgan Chen",
     personality:
       "Answers briefly, asks for the earliest appointment, and stays polite when asking the agent to get to the point.",
-    language: "en-US",
     models: {
       llm: { provider: "openai", model: "gpt-4o-mini" },
       stt: { provider: "openai", model: "gpt-4o-mini-transcribe" },
@@ -266,7 +338,7 @@ const updatePersonaBody = {
     description: nullable({ type: "string" }),
     expectedVersionId: {
       ...stringIdSchema,
-      description: "The current versionId from Get a persona. Required when editing identityName, personality, or language. A stale value returns 409 version_conflict.",
+      description: "The current versionId from Get a persona. Required when editing identityName or personality. A stale value returns 409 version_conflict.",
     },
   },
   additionalProperties: false,
@@ -296,7 +368,7 @@ export const personaOperations = {
   usePersona: defineOperation({
     operationId: "usePersona", method: "POST", path: "/v1/personas/{personaId}/use", summary: "Use a persona", tag: "Personas", security: "credentialed",
     description: "Save this project's first model settings for the persona. Omit models to use its declared defaults. Repeated use returns the existing settings; use Update a persona to change them.",
-    request: { params: personaParams, body: { type: "object", properties: { projectId: stringIdSchema, models: personaModels }, additionalProperties: false }, bodyRequired: false },
+    request: { params: personaParams, body: { type: "object", properties: { projectId: stringIdSchema, models: personaModels, controls: personaControlsInput, voiceAccessProof: { type: "string" } }, additionalProperties: false }, bodyRequired: false },
     responses: { 200: { description: "The persona with its saved project settings.", schema: persona }, ...writeRefusals },
   }),
   listPersonas: defineOperation({
@@ -327,6 +399,22 @@ export const personaOperations = {
       200: { description: "The supported persona model choices.", schema: personaForm },
       ...readRefusals,
     },
+  }),
+
+  getPersonaCapabilities: defineOperation({
+    operationId: "getPersonaCapabilities", method: "GET", path: "/v1/persona-capabilities",
+    summary: "Resolve persona capabilities", tag: "Personas", security: "credentialed",
+    description: "Resolve the selected provider, model, voice, and language combination. Status and reason values are authoritative for authoring, Preview, and voice execution.",
+    request: { query: capabilityQuery },
+    responses: { 200: { description: "Capabilities for the selected combination.", schema: personaCapabilities }, ...readRefusals },
+  }),
+
+  previewPersona: defineOperation({
+    operationId: "previewPersona", method: "POST", path: "/v1/persona-preview",
+    summary: "Preview persona audio", tag: "Personas", security: "credentialed",
+    description: "Generate one short sample with the same capability and speech-rendering path used by voice simulations. This does not create a test or run.",
+    request: { body: previewBody },
+    responses: { 200: { description: "Generated Preview audio and any new voice-access proof.", schema: personaPreview }, ...writeRefusals },
   }),
 
   getPersona: defineOperation({

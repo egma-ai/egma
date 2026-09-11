@@ -113,7 +113,8 @@ export const personaVersion = pgTable(
      */
     identityName: text("identity_name").notNull(),
     personality: text("personality").notNull(),
-    language: text("language").notNull(),
+    /** Historical core language. New contracts carry language in parameters. */
+    language: text("language"),
     parameterContract: jsonb("parameter_contract")
       .$type<readonly GraderParameter[]>()
       .notNull(),
@@ -126,7 +127,17 @@ export const personaVersion = pgTable(
     prefixCheck("persona_version_id_prefix", table.id, "prsv"),
     nonEmpty("persona_version_identity_name_stated", table.identityName),
     nonEmpty("persona_version_personality_stated", table.personality),
-    nonEmpty("persona_version_language_stated", table.language),
+    check(
+      "persona_version_language_matches_contract",
+      sql`(
+        (${table.language} is not null and btrim(${table.language}) <> '' and not jsonb_path_exists(
+          ${table.parameterContract}, '$[*] ? (@.key == "language")'
+        ))
+        or (${table.language} is null and jsonb_path_exists(
+          ${table.parameterContract}, '$[*] ? (@.key == "language")'
+        ))
+      )`,
+    ),
     check("persona_definition_version_parameter_contract_is_array", sql`jsonb_typeof(${table.parameterContract}) = 'array'`),
     unique("persona_version_persona_id_version_unique").on(
       table.personaId,

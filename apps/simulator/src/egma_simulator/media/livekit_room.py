@@ -1451,14 +1451,16 @@ class LiveKitRoomBackend(RoomLifecycle):
 
     MODALITY = "voice"
 
-    async def create_transport(self) -> VoiceMedia:
+    async def create_transport(self, *, audio_out_mixer: object = None) -> VoiceMedia:
         """Get a way into the room and build its Pipecat transport."""
         way_in = await self._way_in()
         self._server_url = way_in.url
         self._room = self._joined_room(way_in)
         self._room.watch_startup(self._startup)
         self._room.answer_when_joined(self._answer_for_mocked_tools)
-        return self._room.create_transport()
+        if audio_out_mixer is None:
+            return self._room.create_transport()
+        return self._room.create_transport(audio_out_mixer=audio_out_mixer)
 
     async def wait_answered(self, seconds: float) -> str:
         """Keep the bounded arrival and audio contract for non-Egma room users."""

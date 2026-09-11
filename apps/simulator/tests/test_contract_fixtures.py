@@ -110,7 +110,7 @@ EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
         "name",
     ),
     "spec/persona-missing-language.json": (
-        "/persona",
+        "/persona/parameters",
         "required",
         "language",
     ),
@@ -173,20 +173,13 @@ def place_of(error: ValidationError) -> str:
 
 
 def test_each_schema_compiles_and_pins_its_contract_version():
-    assert spec_validator().schema["properties"]["contract_version"]["const"] == 5
+    assert spec_validator().schema["properties"]["contract_version"]["const"] == 6
     assert report_validator().schema["properties"]["contract_version"]["const"] == 1
-    assert spec_validator().schema["$id"] == "urn:egma:simulation-contract:spec:v5"
+    assert spec_validator().schema["$id"] == "urn:egma:simulation-contract:spec:v6"
     assert report_validator().schema["$id"] == "urn:egma:simulation-contract:report:v1"
 
 
-def test_this_simulator_reads_one_version_and_refuses_the_one_before_it():
-    """One contract version, and no tolerance for its predecessor.
-
-    The version the claim client advertises is read out of the schema this
-    process validates with, so a claim can never ask for a version the
-    parser does not implement. A work order in the version before it is
-    refused as a document — there is no branch that would read it.
-    """
+def test_this_simulator_advertises_v6_and_preserves_v5_execution():
     document = read_json(
         contract_dir()
         / "fixtures"
@@ -194,7 +187,17 @@ def test_this_simulator_reads_one_version_and_refuses_the_one_before_it():
         / "valid"
         / "chat-retell-text-mode-plain.json"
     )
-    assert document["contract_version"] == spec_contract_version() == 5
+    assert document["contract_version"] == spec_contract_version() == 6
+
+    legacy = {**document, "contract_version": 5}
+    legacy["persona"] = {
+        "name": document["persona"]["name"],
+        "personality": document["persona"]["personality"],
+        "language": document["persona"]["parameters"]["language"],
+    }
+    parsed = SimulationSpec.from_document(legacy)
+    assert parsed.persona.language == "en-US"
+    assert parsed.persona.parameters is None
 
     with pytest.raises(ContractViolation) as refusal:
         SimulationSpec.from_document({**document, "contract_version": 4})
@@ -262,7 +265,7 @@ def test_a_persona_value_of_only_whitespace_is_refused_by_this_engine_too():
     )
     persona = document["persona"]
 
-    for field in ("name", "personality", "language"):
+    for field in ("name", "personality"):
         for blank in (" ", "   ", "\t", "\n", " \t\n "):
             with pytest.raises(ContractViolation) as refusal:
                 SimulationSpec.from_document(
@@ -278,6 +281,17 @@ def test_a_persona_value_of_only_whitespace_is_refused_by_this_engine_too():
         # nothing and does not tidy what somebody wrote.
         padded = f" {persona[field]} "
         validate_spec({**document, "persona": {**persona, field: padded}})
+
+    for blank in (" ", "   ", "\t", "\n", " \t\n "):
+        parameters = {**persona["parameters"], "language": blank}
+        with pytest.raises(ContractViolation) as refusal:
+            SimulationSpec.from_document(
+                {**document, "persona": {**persona, "parameters": parameters}}
+            )
+        assert any(
+            complaint.startswith("/persona/parameters/language")
+            for complaint in refusal.value.complaints
+        )
 
 
 def test_a_spec_carries_a_named_version_and_this_simulations_variables():

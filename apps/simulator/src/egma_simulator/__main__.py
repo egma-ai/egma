@@ -93,6 +93,24 @@ async def _run(config: SimulatorConfig) -> None:
     # and redaction path as every later third-party record.
     from .service import SimulatorService
 
+    preview_runner = None
+    preview_port = os.environ.get("EGMA_SIMULATOR_PREVIEW_PORT")
+    if preview_port:
+        if config.service_token is None:
+            raise ValueError(
+                "EGMA_SIMULATOR_SERVICE_TOKEN is required when preview is enabled"
+            )
+        from .preview import start_preview_server
+
+        preview_runner = await start_preview_server(
+            service_token=config.service_token,
+            usage_callback_url=(
+                f"{config.control_plane_url}/internal/persona-preview-usage"
+            ),
+            secrets=registry,
+            port=int(preview_port),
+        )
+
     service = SimulatorService(config, secrets=registry)
     task = asyncio.ensure_future(service.run())
 
@@ -113,6 +131,9 @@ async def _run(config: SimulatorConfig) -> None:
         await task
     except asyncio.CancelledError:
         pass
+    finally:
+        if preview_runner is not None:
+            await preview_runner.cleanup()
 
 
 def main() -> None:

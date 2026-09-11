@@ -37,6 +37,43 @@ class MockTool:
 
 
 @dataclass(frozen=True)
+class PersonaParameters:
+    """Frozen controls that affect this simulation's persona execution."""
+
+    language: str
+    emotion: str = "neutral"
+    accent: str = "voice_default"
+    speech_volume: float = 1.0
+    background_sound_id: str = "none"
+    background_volume: float = 0.0631
+    interruption_level: str = "off"
+    execution_policy_version: int = 1
+
+    @classmethod
+    def from_document(
+        cls, written: Any, *, legacy_language: str | None
+    ) -> PersonaParameters:
+        parameters = written.get("parameters")
+        if parameters is None:
+            if not legacy_language:
+                raise ContractViolation(
+                    "spec",
+                    ["/persona: language is absent from both core and parameters"],
+                )
+            return cls(language=legacy_language)
+        return cls(
+            language=parameters["language"],
+            emotion=parameters["emotion"],
+            accent=parameters["accent"],
+            speech_volume=float(parameters["speech_volume"]),
+            background_sound_id=parameters.get("background_sound_id", "none"),
+            background_volume=float(parameters.get("background_volume", 0.0631)),
+            interruption_level=parameters.get("interruption_level", "off"),
+            execution_policy_version=int(parameters["execution_policy_version"]),
+        )
+
+
+@dataclass(frozen=True)
 class AuthoredPersona:
     """Authored persona identity, behavior, and language.
     The name is what the persona gives the agent, not a library label or model
@@ -46,14 +83,20 @@ class AuthoredPersona:
     name: str
     personality: str
     language: str
+    parameters: PersonaParameters | None = None
 
     @classmethod
     def from_document(cls, written: Any) -> AuthoredPersona:
         """Read the required, already validated persona block."""
+        legacy_language = written.get("language")
+        parameters = PersonaParameters.from_document(
+            written, legacy_language=legacy_language
+        )
         return cls(
             name=written["name"],
             personality=written["personality"],
-            language=written["language"],
+            language=parameters.language,
+            parameters=parameters if "parameters" in written else None,
         )
 
 

@@ -124,6 +124,7 @@ const CONTEXT_REQUIRING = [
   "putProviderKey",
   "deleteProviderKey",
   "resolveProviderKeysForWork",
+  "resolveProviderKeyForAuthoring",
   "createProviderFundingReceipt",
   "readProviderFundingReceipt",
   "cloneGraderInProject",
@@ -259,6 +260,7 @@ const CONTEXT_REQUIRING = [
   // a simulation's claim or a grading claim — so the organization and the
   // project come off the row that authorised the work.
   "recordProviderUsage",
+  "recordPersonaPreviewUsage",
   "reconcileGraderCatalog",
   "recordDeviceAuthorization",
   "recordGradingHeartbeat",
@@ -484,6 +486,7 @@ const THE_ALLOWANCES = [
  * caller who could fetch the plug-in could ask it anything from anywhere.
  */
 const THE_BILLING_SEAM = [
+  "billing",
   "billingIsConfigured",
   "discardingUsageSink",
   "entitlementSourceContract",
@@ -496,11 +499,25 @@ const THE_BILLING_SEAM = [
 
 const THE_PERSONA_LIBRARY = [
   "PERSONA_PARAMETER_CONTRACT",
+  "BACKGROUND_SOUND_IDS",
+  "BACKGROUND_VOLUME_DEFAULT",
+  "BACKGROUND_VOLUME_RANGE",
+  "PERSONA_EMOTIONS",
+  "PERSONA_EXECUTION_POLICY_VERSION",
+  "PERSONA_INTERRUPTION_LEVELS",
+  "SPEECH_VOLUME_RANGE",
   "defaultPersonaParameterValues",
+  "legacyPersonaParameterContract",
   "personaModelsOfParameters",
+  "personaControlsOfParameters",
   "personaParameterContract",
   "personaParametersOfModels",
+  "personaParametersOfSettings",
+  "personaSettingsOfParameters",
   "speechProvidersOfParameters",
+  "ticket01PersonaParameterContract",
+  "ticket02PersonaParameterContract",
+  "validPersonaControls",
   "validatePersonaParameterContract",
   "validatePersonaParameterValues",
   "PERSONA_LIBRARY_CATALOG",

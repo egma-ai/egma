@@ -9,7 +9,7 @@ import {
 import {
   RECOMMENDED_GRADER_MODEL,
   RECOMMENDED_PERSONA_MODELS,
-  SPEED_RANGE,
+  PERSONA_AUTHORING_SPEED_RANGE,
   personaModelsFromRow,
   validGraderModel,
   validPersonaModels,
@@ -85,8 +85,11 @@ describe("one complete persona model selection", () => {
     );
   });
 
-  it.each([SPEED_RANGE.slowest, SPEED_RANGE.fastest])(
-    "accepts the shared speaking-speed boundary %s",
+  it.each([
+    PERSONA_AUTHORING_SPEED_RANGE.slowest,
+    PERSONA_AUTHORING_SPEED_RANGE.fastest,
+  ])(
+    "accepts the broad authoring speed boundary %s before provider resolution",
     (speed) => {
       expect(
         validPersonaModels({
@@ -97,7 +100,10 @@ describe("one complete persona model selection", () => {
     },
   );
 
-  it.each([SPEED_RANGE.slowest - 0.0001, SPEED_RANGE.fastest + 0.0001])(
+  it.each([
+    PERSONA_AUTHORING_SPEED_RANGE.slowest - 0.0001,
+    PERSONA_AUTHORING_SPEED_RANGE.fastest + 0.0001,
+  ])(
     "refuses speaking speed %s before a simulation can claim it",
     (speed) => {
       expect(() =>
@@ -106,7 +112,7 @@ describe("one complete persona model selection", () => {
           tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed },
         }),
       ).toThrow(
-        `speaking speed must be between ${SPEED_RANGE.slowest} and ${SPEED_RANGE.fastest}`,
+        `speaking speed must be between ${PERSONA_AUTHORING_SPEED_RANGE.slowest} and ${PERSONA_AUTHORING_SPEED_RANGE.fastest}`,
       );
     },
   );
@@ -143,6 +149,17 @@ describe("one complete persona model selection", () => {
       }).stt,
     ).toEqual({ provider, model });
   });
+
+  it.each(["sonic-3.6", "sonic-3.6-2026-08-27"])(
+    "accepts the stable Cartesia TTS model %s",
+    (model) => {
+      expect(catalogEntry("tts", "cartesia", model)).toMatchObject({
+        adapter: "cartesia",
+        recommendedVoiceId: "47c38ca4-5f35-497b-b1a3-415245fb35e1",
+        recommendedSpeed: 1,
+      });
+    },
+  );
 
   it("refuses arbitrary model text even for a known provider", () => {
     expect(() =>

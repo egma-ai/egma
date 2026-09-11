@@ -49,21 +49,25 @@ Your name is {name}. Give that name when the agent asks who is calling, and use 
 
 - Stay in character’s personality for the whole exchange. Never mention being a simulator, or an AI.
 - The roleplay language is {language}
+- Express a consistent {emotion} emotional state in your wording for the whole exchange.
 - You are allowed to make up details in order to fulfill the scenario unless explicitly stated otherwise. Examples include appointment details, or other details that someone in your situation might have handy. Your name is not one of them: it is given above, and you never answer to another.
 - Pursue what you came for until it is concluded to your satisfaction, and let your personality decide how patiently.
 - When your goal is concluded and nothing further is needed, say a brief goodbye and end your reply with the `end_call` tool
 """
 
 
-def compose_system_prompt(
-    authored: AuthoredPersona, scenario_instructions: str
-) -> str:
+def compose_system_prompt(authored: AuthoredPersona, scenario_instructions: str) -> str:
     """The exact platform prompt, filled from the claimed persona and test."""
     return _PROMPT_FRAME.format(
         name=authored.name,
         personality=authored.personality,
         scenario=scenario_instructions,
         language=authored.language,
+        emotion=(
+            authored.parameters.emotion
+            if authored.parameters is not None
+            else "neutral"
+        ),
     )
 
 
@@ -138,6 +142,21 @@ class Persona:
             tools=PERSONA_TOOLS,
             tool_choice="auto",
         )
+
+    def interruption_context(self, history: Sequence[Turn]) -> LLMContext:
+        """Ask for one brief interruption grounded in the conversation so far."""
+        messages = self.messages(history)
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "Interrupt now with one short, relevant sentence of at most "
+                    "eight words. Stay in character. Do not end the call or claim "
+                    "the other speaker finished. Return only that sentence."
+                ),
+            }
+        )
+        return LLMContext(messages=messages)
 
     async def reply_to(self, context: LLMContext) -> PersonaReply:
         """Ask the configured model without changing its provider contract."""

@@ -5400,18 +5400,8 @@ it(
       const address = `${origin}/projects/${projectId}/personas`;
       await walk.goto(address);
       await reactHasTakenOver(walk, "table");
-      await walk.getByRole("button", { name: "New persona" }).first().click();
-      await walk.fill("#new-persona-name", "Directly authored Rita");
-      await walk.fill("#new-persona-identity-name", "Rita");
-      await walk.fill(
-        "#new-persona-personality",
-        "Speaks clearly and asks one question.",
-      );
-      await walk.getByRole("button", { name: "Create persona" }).click();
-      await walk.getByText("Custom · v1", { exact: true }).waitFor();
-      await walk.keyboard.press("Escape");
       await walk
-        .getByRole("button", { name: "Everyday caller", exact: true })
+        .getByRole("button", { name: "Everyday Caller [Male]", exact: true })
         .click();
       await reactHasTakenOver(walk, "form");
       expect(await walk.locator("#persona-personality").count()).toBe(0);
@@ -5419,14 +5409,17 @@ it(
       await walk.selectOption("#persona-stt", "deepgram::nova-3-general");
       await walk.selectOption("#persona-tts", "openai::tts-1-hd");
       await walk.fill("#persona-tts-speed", "0.85");
-      await walk.fill("#persona-tts-voice", "my-custom-voice");
+      await walk.selectOption("#persona-tts-voice", "alloy");
+      await walk.selectOption("#persona-interruption-level", "frequent");
+      await walk.selectOption("#persona-background-sound", "office-v1");
+      await walk.fill("#persona-background-volume", "-18");
       await walk.getByRole("button", { name: "Use persona" }).click();
       await walk.getByRole("button", { name: "Saved", exact: true }).waitFor();
       await walk.getByRole("region", { name: "Settings" }).waitFor();
-      expect(await walk.inputValue("#persona-tts-voice")).toBe("my-custom-voice");
+      expect(await walk.inputValue("#persona-tts-voice")).toBe("alloy");
       await walk.keyboard.press("Escape");
       await walk
-        .getByRole("button", { name: "Everyday caller", exact: true })
+        .getByRole("button", { name: "Everyday Caller [Male]", exact: true })
         .click();
       await walk.getByRole("region", { name: "Settings" }).waitFor();
       expect(await walk.inputValue("#persona-llm")).toBe("openai::gpt-4o");
@@ -5436,27 +5429,37 @@ it(
       expect(await walk.inputValue("#persona-tts")).toBe("openai::tts-1-hd");
       expect(await walk.inputValue("#persona-tts-speed")).toBe("0.85");
       expect(await walk.inputValue("#persona-tts-voice")).toBe(
-        "my-custom-voice",
+        "alloy",
       );
-      await walk.fill("#persona-tts-voice", " ");
-      const invalid = walk.waitForResponse(
-        (response) =>
-          response.request().method() === "PATCH" &&
-          new URL(response.url()).pathname.startsWith("/v1/personas/"),
-      );
-      await walk.getByRole("button", { name: "Save changes" }).click();
-      expect((await invalid).status()).toBe(422);
-      await walk.getByRole("alert").waitFor();
-      await walk.fill("#persona-tts-voice", "my-saved-voice");
-      await walk.getByRole("button", { name: "Save changes" }).click();
-      await walk.getByRole("button", { name: "Saved", exact: true }).waitFor();
+      expect(await walk.inputValue("#persona-interruption-level")).toBe("frequent");
+      expect(await walk.inputValue("#persona-background-sound")).toBe("office-v1");
+      expect(await walk.inputValue("#persona-background-volume")).toBe("-18");
+      await walk.locator("#persona-background-sound").scrollIntoViewIfNeeded();
+      await walk.screenshot({
+        path: "/tmp/tasktemporaryfiles/persona-filled-built-in.png",
+        fullPage: true,
+      });
+      await walk.selectOption("#persona-tts", "openai::gpt-4o-mini-tts");
+      await walk.selectOption("#persona-emotion", "angry");
+      await walk.selectOption("#persona-tts", "openai::tts-1-hd");
+      await walk.getByRole("button", { name: "Use Neutral", exact: true }).waitFor();
+      expect(await walk.inputValue("#persona-emotion")).toBe("angry");
+      expect(await walk.getByRole("button", { name: "Save changes" }).isDisabled()).toBe(true);
+      await walk.locator("#persona-emotion").scrollIntoViewIfNeeded();
+      await walk.screenshot({
+        path: "/tmp/tasktemporaryfiles/persona-invalid-draft.png",
+        fullPage: true,
+      });
+      await walk.keyboard.press("Escape");
+      await walk.getByRole("dialog", { name: "Leave without saving?" }).getByRole("button", { name: "Discard changes" }).click();
+      await walk.getByRole("button", { name: "Everyday Caller [Male]", exact: true }).click();
       await walk
-        .getByRole("button", { name: "Actions for Everyday caller" })
+        .getByRole("button", { name: "Actions for Everyday Caller [Male]" })
         .click();
       await walk.getByRole("menuitem", { name: "Clone" }).click();
       await walk.locator("#persona-name").waitFor();
       expect(await walk.inputValue("#persona-tts-voice")).toBe(
-        "my-saved-voice",
+        "alloy",
       );
       await walk.fill("#persona-name", "Patient Nora");
       await walk.getByRole("button", { name: "Save changes" }).click();
@@ -5489,7 +5492,7 @@ it(
       await walk.keyboard.press("Tab");
       expect(
         await walk
-          .getByRole("button", { name: "Cancel", exact: true })
+          .locator("#persona-existing-voice-id")
           .evaluate(element => element === element.ownerDocument.activeElement),
       ).toBe(true);
       expect(
@@ -5558,7 +5561,7 @@ it(
       );
       expect(saved.personas.map((persona) => persona.id)).toEqual([cloned?.id]);
       expect(cloned?.version).toBe(2);
-      expect(cloned?.settings?.models.tts.voiceId).toBe("my-saved-voice");
+      expect(cloned?.settings?.models.tts.voiceId).toBe("alloy");
     } finally {
       await walk.context().close();
     }
@@ -5584,7 +5587,7 @@ describe("run advanced settings", () => {
       const suite = await create<{ id: string }>("test-suites", { name: "Appointment checks" });
       await create("tests", {
         suiteId: suite.id, name: "Book an appointment", scenario: "Ask for an appointment.",
-        expectedBehaviors: ["Confirms the time"], personas: ["Everyday caller"],
+        expectedBehaviors: ["Confirms the time"], personas: ["Everyday Caller [Male]"],
       });
       const targets = new Map<string, { agent: { id: string }; connection: { id: string } }>();
       for (const modality of ["voice", "chat"]) {

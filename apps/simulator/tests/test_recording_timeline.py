@@ -12,15 +12,21 @@ from fractions import Fraction
 
 import pytest
 from pipecat.frames.frames import (
+    Frame,
     InputAudioRawFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
     StartFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from egma_simulator import conductor as conductor_module
 from egma_simulator.media import (
+    _TRANSPORT_PLAYOUT_GENERATION,
     TRANSPORT_ARRIVAL,
+    PlayoutClearAcknowledger,
+    PlayoutClearedFrame,
+    PlayoutStamp,
     arrived_at,
     arrived_now,
     played_out_at,
@@ -301,6 +307,93 @@ async def test_audio_the_transport_threw_away_is_not_in_the_recording(
 
     persona_track, _agent_track = tracks(recorder)
     assert speaking(persona_track) == pytest.approx((0.0, 0.4), abs=0.01)
+
+
+async def test_clear_overtaking_queued_audio_discards_only_the_unheard_generation(
+) -> None:
+    """A system clear can reach the recorder before older queued audio."""
+    recorder = await recorder_started()
+    cleared = InterruptionFrame()
+    cleared.metadata[_TRANSPORT_PLAYOUT_GENERATION] = 0
+    played_out_at(cleared, 0.01)
+    await recorder._process_recording(cleared)
+
+    partly_heard = OutputAudioRawFrame(
+        audio=tone(), sample_rate=BAND, num_channels=1
+    )
+    partly_heard.metadata[_TRANSPORT_PLAYOUT_GENERATION] = 0
+    played_out_at(partly_heard, 0.0)
+    await recorder._process_recording(partly_heard)
+
+    unheard = OutputAudioRawFrame(audio=tone(), sample_rate=BAND, num_channels=1)
+    unheard.metadata[_TRANSPORT_PLAYOUT_GENERATION] = 0
+    played_out_at(unheard, 0.1)
+    await recorder._process_recording(unheard)
+
+    fresh = OutputAudioRawFrame(audio=tone(), sample_rate=BAND, num_channels=1)
+    fresh.metadata[_TRANSPORT_PLAYOUT_GENERATION] = 1
+    played_out_at(fresh, 0.2)
+    await recorder._process_recording(fresh)
+
+    accepted_after_clear = OutputAudioRawFrame(
+        audio=tone(), sample_rate=BAND, num_channels=1
+    )
+    accepted_after_clear.metadata[_TRANSPORT_PLAYOUT_GENERATION] = 1
+    played_out_at(accepted_after_clear, 0.3)
+    await recorder._process_recording(accepted_after_clear)
+
+    persona_track, _agent_track = tracks(recorder)
+    assert audible(persona_track, apart=0.05) == pytest.approx(
+        [(0.0, 0.01), (0.2, 0.24)], abs=0.01
+    )
+
+
+@pytest.mark.parametrize("direction", list(FrameDirection))
+async def test_playout_clear_is_acknowledged_after_native_clear(
+    direction, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both pipeline directions acknowledge one completed native queue clear."""
+
+    acknowledger = PlayoutClearAcknowledger()
+    stamp = PlayoutStamp(acknowledged_clears=True)
+    cleared = False
+    clears = 0
+    acks = 0
+
+    async def no_base_processing(*_args) -> None:
+        return None
+
+    async def native(frame: Frame, direction: FrameDirection) -> None:
+        nonlocal cleared, clears
+        if direction == FrameDirection.DOWNSTREAM:
+            await stamp.process_frame(frame, direction)
+        else:
+            await acknowledger.process_frame(frame, direction)
+        if isinstance(frame, InterruptionFrame):
+            cleared = True
+            clears += 1
+
+    async def from_acknowledger(frame: Frame, direction: FrameDirection) -> None:
+        if direction == FrameDirection.DOWNSTREAM:
+            await native(frame, direction)
+
+    async def from_stamp(frame: Frame, direction: FrameDirection) -> None:
+        nonlocal acks
+        if direction == FrameDirection.UPSTREAM:
+            await native(frame, direction)
+        elif isinstance(frame, PlayoutClearedFrame):
+            assert cleared
+            acks += 1
+
+    monkeypatch.setattr(FrameProcessor, "process_frame", no_base_processing)
+    monkeypatch.setattr(acknowledger, "push_frame", from_acknowledger)
+    monkeypatch.setattr(stamp, "push_frame", from_stamp)
+
+    start = acknowledger if direction == FrameDirection.DOWNSTREAM else stamp
+    await start.process_frame(InterruptionFrame(), direction)
+
+    assert clears == 1
+    assert acks == 1
 
 
 async def test_a_delivery_that_stalls_and_catches_up_stays_on_time() -> None:

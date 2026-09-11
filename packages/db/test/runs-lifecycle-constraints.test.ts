@@ -119,7 +119,7 @@ async function seedPersona(
   await db.sql(
     `insert into persona_definition_version
        (id, persona_id, version, identity_name, personality, language, parameter_contract)
-     values ($1, $2, 1, 'Rita Alvarez', 'Speaks plainly and stays patient.', 'en-US', $3::jsonb)`,
+     values ($1, $2, 1, 'Rita Alvarez', 'Speaks plainly and stays patient.', null, $3::jsonb)`,
     [version, persona, JSON.stringify(PERSONA_PARAMETER_CONTRACT)],
   );
   await db.sql("commit");
