@@ -130,7 +130,7 @@ jobs:
 
       - name: Install the voice sentence tokenizer
         working-directory: apps/simulator
-        run: uv run python -m nltk.downloader punkt_tab
+        run: uv run --frozen python ../../.github/install-nltk-punkt-tab.py
 
       - name: Warm the object-store image
         # Only where a skip is not allowed. The recording suites start a MinIO
@@ -240,6 +240,10 @@ jobs:
         # --frozen` brings its own interpreter and installs the locked
         # dependencies, so nothing here sets up Python separately.
         run: pipx install uv
+
+      - name: Install the voice sentence tokenizer
+        working-directory: apps/simulator
+        run: uv run --frozen python ../../.github/install-nltk-punkt-tab.py
 
       - name: Run the simulator tests
         run: pnpm test:simulator
