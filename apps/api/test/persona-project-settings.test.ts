@@ -21,7 +21,8 @@ const DEFAULT_CONTROLS = {
   speechVolume: 1,
   backgroundSoundId: "none",
   backgroundVolume: 0.0631,
-  interruptionLevel: "off",
+  interruptionLevel: "none",
+  speechSpeed: "normal",
 } as const;
 
 async function request(
@@ -71,7 +72,7 @@ it("saves independent shared-persona settings, clones current behavior, and reje
     models,
   });
   expect(second.statusCode, second.body).toBe(200);
-  expect(second.json().settings.models).toEqual(models);
+  expect(second.json().settings.models).toEqual({ ...models, tts: { ...models.tts, speed: 0.8 } });
   const firstRead = await request(
     who,
     "GET",
@@ -84,7 +85,7 @@ it("saves independent shared-persona settings, clones current behavior, and reje
   });
   expect(clone.statusCode, clone.body).toBe(201);
   const custom = clone.json();
-  expect(custom.settings.models).toEqual(models);
+  expect(custom.settings.models).toEqual({ ...models, tts: { ...models.tts, speed: 0.8 } });
   const moved = await request(who, "PATCH", `/v1/personas/${custom.id}`, {
     projectId: other.id,
     expectedVersionId: custom.versionId,

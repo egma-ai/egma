@@ -3124,10 +3124,8 @@ export type UpdateOrganizationResponse = UpdateOrganizationResponses[keyof Updat
 export type UsePersonaData = {
     body?: {
         projectId?: string;
-        /**
-         * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
-         */
         models?: {
+            mode: 'separate';
             llm: {
                 provider: string;
                 model: string;
@@ -3143,10 +3141,21 @@ export type UsePersonaData = {
                  * A voice identifier supported by the selected text-to-speech provider.
                  */
                 voiceId: string;
+            };
+        } | {
+            mode: 'live';
+            llm: {
+                provider: string;
+                model: string;
+            };
+            live: {
+                provider: 'openai';
+                model: 'gpt-live-1';
+                adapter: 'openai_live';
                 /**
-                 * Provider-supported speech rate. Read the selected combination's capability range.
+                 * A built-in voice supported by GPT Live.
                  */
-                speed: number;
+                voiceId: string;
             };
         };
         controls?: {
@@ -3156,7 +3165,11 @@ export type UsePersonaData = {
             speechVolume: number;
             backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
             backgroundVolume: number;
-            interruptionLevel: 'off' | 'occasional' | 'frequent';
+            interruptionLevel: 'none' | 'occasional' | 'frequent';
+            /**
+             * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
+             */
+            speechSpeed: 'slow' | 'normal' | 'fast';
         };
     };
     path: {
@@ -3236,10 +3249,8 @@ export type UsePersonaResponses = {
          */
         settings: {
             id: string;
-            /**
-             * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
-             */
             models: {
+                mode: 'separate';
                 llm: {
                     provider: string;
                     model: string;
@@ -3256,9 +3267,24 @@ export type UsePersonaResponses = {
                      */
                     voiceId: string;
                     /**
-                     * Provider-supported speech rate. Read the selected combination's capability range.
+                     * Resolved provider speed for the selected speechSpeed category.
                      */
-                    speed: number;
+                    readonly speed: number;
+                };
+            } | {
+                mode: 'live';
+                llm: {
+                    provider: string;
+                    model: string;
+                };
+                live: {
+                    provider: 'openai';
+                    model: 'gpt-live-1';
+                    adapter: 'openai_live';
+                    /**
+                     * A built-in voice supported by GPT Live.
+                     */
+                    voiceId: string;
                 };
             };
             controls: {
@@ -3269,7 +3295,11 @@ export type UsePersonaResponses = {
                 readonly executionPolicyVersion: number;
                 backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
                 backgroundVolume: number;
-                interruptionLevel: 'off' | 'occasional' | 'frequent';
+                interruptionLevel: 'none' | 'occasional' | 'frequent';
+                /**
+                 * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
+                 */
+                speechSpeed: 'slow' | 'normal' | 'fast';
             };
             createdAt: string;
             updatedAt: string;
@@ -3361,10 +3391,8 @@ export type ListPersonasResponses = {
              */
             settings: {
                 id: string;
-                /**
-                 * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
-                 */
                 models: {
+                    mode: 'separate';
                     llm: {
                         provider: string;
                         model: string;
@@ -3381,9 +3409,24 @@ export type ListPersonasResponses = {
                          */
                         voiceId: string;
                         /**
-                         * Provider-supported speech rate. Read the selected combination's capability range.
+                         * Resolved provider speed for the selected speechSpeed category.
                          */
-                        speed: number;
+                        readonly speed: number;
+                    };
+                } | {
+                    mode: 'live';
+                    llm: {
+                        provider: string;
+                        model: string;
+                    };
+                    live: {
+                        provider: 'openai';
+                        model: 'gpt-live-1';
+                        adapter: 'openai_live';
+                        /**
+                         * A built-in voice supported by GPT Live.
+                         */
+                        voiceId: string;
                     };
                 };
                 controls: {
@@ -3394,7 +3437,11 @@ export type ListPersonasResponses = {
                     readonly executionPolicyVersion: number;
                     backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
                     backgroundVolume: number;
-                    interruptionLevel: 'off' | 'occasional' | 'frequent';
+                    interruptionLevel: 'none' | 'occasional' | 'frequent';
+                    /**
+                     * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
+                     */
+                    speechSpeed: 'slow' | 'normal' | 'fast';
                 };
                 createdAt: string;
                 updatedAt: string;
@@ -3426,10 +3473,8 @@ export type CreatePersonaData = {
          * How the caller behaves and speaks. Put the situation and goal in the test scenario.
          */
         personality: string;
-        /**
-         * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
-         */
         models?: {
+            mode: 'separate';
             llm: {
                 provider: string;
                 model: string;
@@ -3445,10 +3490,21 @@ export type CreatePersonaData = {
                  * A voice identifier supported by the selected text-to-speech provider.
                  */
                 voiceId: string;
+            };
+        } | {
+            mode: 'live';
+            llm: {
+                provider: string;
+                model: string;
+            };
+            live: {
+                provider: 'openai';
+                model: 'gpt-live-1';
+                adapter: 'openai_live';
                 /**
-                 * Provider-supported speech rate. Read the selected combination's capability range.
+                 * A built-in voice supported by GPT Live.
                  */
-                speed: number;
+                voiceId: string;
             };
         };
         controls?: {
@@ -3458,7 +3514,11 @@ export type CreatePersonaData = {
             speechVolume: number;
             backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
             backgroundVolume: number;
-            interruptionLevel: 'off' | 'occasional' | 'frequent';
+            interruptionLevel: 'none' | 'occasional' | 'frequent';
+            /**
+             * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
+             */
+            speechSpeed: 'slow' | 'normal' | 'fast';
         };
     };
     path?: never;
@@ -3536,10 +3596,8 @@ export type CreatePersonaResponses = {
          */
         settings: {
             id: string;
-            /**
-             * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
-             */
             models: {
+                mode: 'separate';
                 llm: {
                     provider: string;
                     model: string;
@@ -3556,9 +3614,24 @@ export type CreatePersonaResponses = {
                      */
                     voiceId: string;
                     /**
-                     * Provider-supported speech rate. Read the selected combination's capability range.
+                     * Resolved provider speed for the selected speechSpeed category.
                      */
-                    speed: number;
+                    readonly speed: number;
+                };
+            } | {
+                mode: 'live';
+                llm: {
+                    provider: string;
+                    model: string;
+                };
+                live: {
+                    provider: 'openai';
+                    model: 'gpt-live-1';
+                    adapter: 'openai_live';
+                    /**
+                     * A built-in voice supported by GPT Live.
+                     */
+                    voiceId: string;
                 };
             };
             controls: {
@@ -3569,7 +3642,11 @@ export type CreatePersonaResponses = {
                 readonly executionPolicyVersion: number;
                 backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
                 backgroundVolume: number;
-                interruptionLevel: 'off' | 'occasional' | 'frequent';
+                interruptionLevel: 'none' | 'occasional' | 'frequent';
+                /**
+                 * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
+                 */
+                speechSpeed: 'slow' | 'normal' | 'fast';
             };
             createdAt: string;
             updatedAt: string;
@@ -3628,16 +3705,15 @@ export type GetPersonaFormResponses = {
     200: {
         modelCatalog: Array<{
             provider: string;
-            job: 'llm' | 'stt' | 'tts';
+            job: 'llm' | 'stt' | 'tts' | 'live';
             model: string;
             label: string;
             modelLabel?: string;
             recommendedVoiceId?: string;
+            adapter?: string;
         }>;
-        /**
-         * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
-         */
         recommendedModels: {
+            mode: 'separate';
             llm: {
                 provider: string;
                 model: string;
@@ -3654,9 +3730,24 @@ export type GetPersonaFormResponses = {
                  */
                 voiceId: string;
                 /**
-                 * Provider-supported speech rate. Read the selected combination's capability range.
+                 * Resolved provider speed for the selected speechSpeed category.
                  */
-                speed: number;
+                readonly speed: number;
+            };
+        } | {
+            mode: 'live';
+            llm: {
+                provider: string;
+                model: string;
+            };
+            live: {
+                provider: 'openai';
+                model: 'gpt-live-1';
+                adapter: 'openai_live';
+                /**
+                 * A built-in voice supported by GPT Live.
+                 */
+                voiceId: string;
             };
         };
     };
@@ -3667,12 +3758,15 @@ export type GetPersonaFormResponse = GetPersonaFormResponses[keyof GetPersonaFor
 export type GetPersonaCapabilitiesData = {
     body?: never;
     path?: never;
-    query: {
+    query?: {
         projectId?: string;
-        ttsProvider: string;
-        ttsModel: string;
-        sttProvider: string;
-        sttModel: string;
+        mode?: 'separate' | 'live';
+        ttsProvider?: string;
+        ttsModel?: string;
+        sttProvider?: string;
+        sttModel?: string;
+        liveProvider?: string;
+        liveModel?: string;
         language?: string;
         voiceId?: string;
         refresh?: boolean;
@@ -3777,6 +3871,17 @@ export type GetPersonaCapabilitiesResponses = {
             reason?: string;
             choices?: Array<number>;
             value?: number;
+            range?: {
+                minimum: number;
+                maximum: number;
+                step: number;
+            };
+        };
+        speechSpeed: {
+            status: 'supported' | 'fixed' | 'unsupported' | 'unknown';
+            reason?: string;
+            choices?: Array<'slow' | 'normal' | 'fast'>;
+            value?: 'slow' | 'normal' | 'fast';
             range?: {
                 minimum: number;
                 maximum: number;
@@ -3929,10 +4034,8 @@ export type GetPersonaResponses = {
          */
         settings: {
             id: string;
-            /**
-             * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
-             */
             models: {
+                mode: 'separate';
                 llm: {
                     provider: string;
                     model: string;
@@ -3949,9 +4052,24 @@ export type GetPersonaResponses = {
                      */
                     voiceId: string;
                     /**
-                     * Provider-supported speech rate. Read the selected combination's capability range.
+                     * Resolved provider speed for the selected speechSpeed category.
                      */
-                    speed: number;
+                    readonly speed: number;
+                };
+            } | {
+                mode: 'live';
+                llm: {
+                    provider: string;
+                    model: string;
+                };
+                live: {
+                    provider: 'openai';
+                    model: 'gpt-live-1';
+                    adapter: 'openai_live';
+                    /**
+                     * A built-in voice supported by GPT Live.
+                     */
+                    voiceId: string;
                 };
             };
             controls: {
@@ -3962,7 +4080,11 @@ export type GetPersonaResponses = {
                 readonly executionPolicyVersion: number;
                 backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
                 backgroundVolume: number;
-                interruptionLevel: 'off' | 'occasional' | 'frequent';
+                interruptionLevel: 'none' | 'occasional' | 'frequent';
+                /**
+                 * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
+                 */
+                speechSpeed: 'slow' | 'normal' | 'fast';
             };
             createdAt: string;
             updatedAt: string;
@@ -3992,10 +4114,8 @@ export type UpdatePersonaData = {
          * How the caller behaves and speaks. Put the situation and goal in the test scenario.
          */
         personality?: string;
-        /**
-         * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
-         */
         models?: {
+            mode: 'separate';
             llm: {
                 provider: string;
                 model: string;
@@ -4011,10 +4131,21 @@ export type UpdatePersonaData = {
                  * A voice identifier supported by the selected text-to-speech provider.
                  */
                 voiceId: string;
+            };
+        } | {
+            mode: 'live';
+            llm: {
+                provider: string;
+                model: string;
+            };
+            live: {
+                provider: 'openai';
+                model: 'gpt-live-1';
+                adapter: 'openai_live';
                 /**
-                 * Provider-supported speech rate. Read the selected combination's capability range.
+                 * A built-in voice supported by GPT Live.
                  */
-                speed: number;
+                voiceId: string;
             };
         };
         controls?: {
@@ -4024,7 +4155,11 @@ export type UpdatePersonaData = {
             speechVolume: number;
             backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
             backgroundVolume: number;
-            interruptionLevel: 'off' | 'occasional' | 'frequent';
+            interruptionLevel: 'none' | 'occasional' | 'frequent';
+            /**
+             * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
+             */
+            speechSpeed: 'slow' | 'normal' | 'fast';
         };
         /**
          * The current versionId from Get a persona. Required when editing identityName or personality. A stale value returns 409 version_conflict.
@@ -4108,10 +4243,8 @@ export type UpdatePersonaResponses = {
          */
         settings: {
             id: string;
-            /**
-             * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
-             */
             models: {
+                mode: 'separate';
                 llm: {
                     provider: string;
                     model: string;
@@ -4128,9 +4261,24 @@ export type UpdatePersonaResponses = {
                      */
                     voiceId: string;
                     /**
-                     * Provider-supported speech rate. Read the selected combination's capability range.
+                     * Resolved provider speed for the selected speechSpeed category.
                      */
-                    speed: number;
+                    readonly speed: number;
+                };
+            } | {
+                mode: 'live';
+                llm: {
+                    provider: string;
+                    model: string;
+                };
+                live: {
+                    provider: 'openai';
+                    model: 'gpt-live-1';
+                    adapter: 'openai_live';
+                    /**
+                     * A built-in voice supported by GPT Live.
+                     */
+                    voiceId: string;
                 };
             };
             controls: {
@@ -4141,7 +4289,11 @@ export type UpdatePersonaResponses = {
                 readonly executionPolicyVersion: number;
                 backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
                 backgroundVolume: number;
-                interruptionLevel: 'off' | 'occasional' | 'frequent';
+                interruptionLevel: 'none' | 'occasional' | 'frequent';
+                /**
+                 * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
+                 */
+                speechSpeed: 'slow' | 'normal' | 'fast';
             };
             createdAt: string;
             updatedAt: string;
@@ -4444,10 +4596,8 @@ export type ForkPersonaResponses = {
          */
         settings: {
             id: string;
-            /**
-             * The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.
-             */
             models: {
+                mode: 'separate';
                 llm: {
                     provider: string;
                     model: string;
@@ -4464,9 +4614,24 @@ export type ForkPersonaResponses = {
                      */
                     voiceId: string;
                     /**
-                     * Provider-supported speech rate. Read the selected combination's capability range.
+                     * Resolved provider speed for the selected speechSpeed category.
                      */
-                    speed: number;
+                    readonly speed: number;
+                };
+            } | {
+                mode: 'live';
+                llm: {
+                    provider: string;
+                    model: string;
+                };
+                live: {
+                    provider: 'openai';
+                    model: 'gpt-live-1';
+                    adapter: 'openai_live';
+                    /**
+                     * A built-in voice supported by GPT Live.
+                     */
+                    voiceId: string;
                 };
             };
             controls: {
@@ -4477,7 +4642,11 @@ export type ForkPersonaResponses = {
                 readonly executionPolicyVersion: number;
                 backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
                 backgroundVolume: number;
-                interruptionLevel: 'off' | 'occasional' | 'frequent';
+                interruptionLevel: 'none' | 'occasional' | 'frequent';
+                /**
+                 * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
+                 */
+                speechSpeed: 'slow' | 'normal' | 'fast';
             };
             createdAt: string;
             updatedAt: string;

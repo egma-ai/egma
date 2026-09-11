@@ -47,6 +47,8 @@ class PersonaParameters:
     background_sound_id: str = "none"
     background_volume: float = 0.0631
     interruption_level: str = "off"
+    speech_speed: str = "normal"
+    tts_speed: float = 1.0
     execution_policy_version: int = 1
 
     @classmethod
@@ -69,6 +71,8 @@ class PersonaParameters:
             background_sound_id=parameters.get("background_sound_id", "none"),
             background_volume=float(parameters.get("background_volume", 0.0631)),
             interruption_level=parameters.get("interruption_level", "off"),
+            speech_speed=parameters.get("speech_speed", "normal"),
+            tts_speed=float(parameters.get("tts_speed", 1.0)),
             execution_policy_version=int(parameters["execution_policy_version"]),
         )
 
@@ -176,23 +180,51 @@ class SpeechSelection(ModelSelection):
 
 
 @dataclass(frozen=True)
+class LiveSelection(ModelSelection):
+    """The GPT Live conversation model and its session-fixed voice."""
+
+    voice_id: str = ""
+
+
+@dataclass(frozen=True)
 class SelectedModels:
     """The complete model selection from the pinned persona version."""
 
     llm: ModelSelection
-    stt: ModelSelection
-    tts: SpeechSelection
+    stt: ModelSelection | None
+    tts: SpeechSelection | None
+    live: LiveSelection | None = None
+    mode: str = "separate"
 
     @property
     def secrets(self) -> tuple[str, ...]:
         """Every direct provider credential carried by this work order."""
-        return tuple(key for key in (self.llm.key, self.stt.key, self.tts.key) if key)
+        selections = (self.llm, self.stt, self.tts, self.live)
+        return tuple(item.key for item in selections if item is not None and item.key)
 
     @classmethod
     def from_document(cls, written: Any) -> SelectedModels:
         """Read the required, already validated model block."""
+        mode = written.get("mode", "separate")
+        if mode == "live":
+            live = written["live"]
+            return cls(
+                mode="live",
+                llm=_selection(written["llm"]),
+                stt=None,
+                tts=None,
+                live=LiveSelection(
+                    provider=live["provider"],
+                    model=live["model"],
+                    adapter=live["adapter"],
+                    key=_provider_key(live),
+                    funding_receipt=live.get("funding_receipt"),
+                    voice_id=live["voice_id"],
+                ),
+            )
         tts = written["tts"]
         return cls(
+            mode="separate",
             llm=_selection(written["llm"]),
             stt=_selection(written["stt"]),
             tts=SpeechSelection(

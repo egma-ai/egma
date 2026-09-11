@@ -5,7 +5,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 
-import { createPersona, readTraceGrades } from "@egma/db";
+import { readTraceGrades } from "@egma/db";
 import { safeRetellProviderData } from "@egma/retell";
 import type { Page } from "playwright-core";
 import { afterAll, expect, it } from "vitest";
@@ -33,6 +33,7 @@ const MOCKS = process.env["SIMULATION_E2E_MOCKS"] !== "off";
 const RETELL_KEY = process.env["SIMULATION_E2E_RETELL_API_KEY"]?.trim() ?? "";
 const MODEL_KEY = process.env["SIMULATION_E2E_MODEL_API_KEY"]?.trim() ??
   process.env["LIVEKIT_E2E_OPENAI_API_KEY"]?.trim() ?? "";
+const LIVE_PERSONA_MODE = process.env["SIMULATION_E2E_PERSONA_MODE"] === "live";
 const SERVICE_TOKEN = "egma_st_held-by-this-test-suite-alone";
 const REPOSITORY = path.join(import.meta.dirname, "../../..");
 const SIMULATOR = path.join(REPOSITORY, "apps/simulator");
@@ -567,15 +568,44 @@ it.skipIf(!ENABLED || storage?.available !== true)(
         role: "member" as const,
         via: "session" as const,
       };
-      await createPersona(auth, {
-        name: "Appointment Rita",
-        ...NEUTRAL_PERSON,
-        models: {
-          llm: { provider: "openai", model: "gpt-4o-mini" },
-          stt: { provider: "openai", model: "gpt-live-transcribe" },
-          tts: { provider: "openai", model: "tts-1", voiceId: "alloy", speed: 1 },
+      const authoredPersona = await request(instance, "POST", "/v1/personas", {
+        key: projectKey,
+        body: {
+          projectId: identity.project.id,
+          name: "Appointment Rita",
+          ...NEUTRAL_PERSON,
+          controls: { speechSpeed: "slow" },
+          models: LIVE_PERSONA_MODE ? {
+            mode: "live",
+            llm: { provider: "openai", model: "gpt-4o-mini" },
+            live: { provider: "openai", model: "gpt-live-1", voiceId: "alloy" },
+          } : {
+            mode: "separate",
+            llm: { provider: "openai", model: "gpt-4o-mini" },
+            stt: { provider: "openai", model: "gpt-live-transcribe" },
+            tts: { provider: "openai", model: "tts-1", voiceId: "alloy" },
+          },
         },
       });
+      expect(authoredPersona.status, JSON.stringify(authoredPersona.body)).toBe(201);
+      if (LIVE_PERSONA_MODE) {
+        expect(authoredPersona.body).toMatchObject({
+          settings: {
+            models: {
+              mode: "live",
+              llm: { provider: "openai", model: "gpt-4o-mini" },
+              live: { provider: "openai", model: "gpt-live-1", voiceId: "alloy" },
+            },
+          },
+        });
+      } else {
+        expect(authoredPersona.body).toMatchObject({
+          settings: {
+            controls: { speechSpeed: "slow" },
+            models: { tts: { speed: 0.8 } },
+          },
+        });
+      }
       const suite = await request(instance, "POST", "/v1/test-suites", {
         key: projectKey, body: { name: "Retell live appointment" },
       });
@@ -718,6 +748,7 @@ it.skipIf(!ENABLED || storage?.available !== true)(
         commitSha: process.env["GITHUB_SHA"] ?? "local-working-tree",
         connection: CONNECTION,
         mocked: MOCKS,
+        personaMode: LIVE_PERSONA_MODE ? "live" : "separate",
         providerMetadata: provisioned.providerMetadata,
         outcomes: { simulation: "completed", grade: validGrade, browser: true },
       }, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });

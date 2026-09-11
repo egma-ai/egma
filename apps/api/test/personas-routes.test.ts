@@ -44,6 +44,7 @@ const CONTROLS = {
   backgroundSoundId: "rain-v1",
   backgroundVolume: 0.04,
   interruptionLevel: "occasional",
+  speechSpeed: "normal",
 } as const;
 
 type Behavior = {
@@ -122,6 +123,32 @@ function predefinedRefusal(personaId: string): Record<string, unknown> {
 }
 
 describe("creating and reading a persona", () => {
+  it("saves GPT Live with an independent reasoning model and no inactive speech services", async () => {
+    api = await createApi("personas_gpt_live_authoring");
+    const ada = await signUp(api.app, "live-author@acme.example", "Acme");
+    const models = {
+      mode: "live" as const,
+      llm: { provider: "openai", model: "gpt-5.6-sol" },
+      live: { provider: "openai" as const, model: "gpt-live-1" as const, adapter: "openai_live" as const, voiceId: "beacon" },
+    };
+    const made = await browse("POST", "/v1/personas", ada, { projectId: ada.projectId, name: "Live caller", ...BEHAVIOR, models, controls: CONTROLS });
+    expect(made.statusCode, JSON.stringify(made.body)).toBe(201);
+    expect(personaIn(made).settings?.models).toEqual(models);
+    expect(personaIn(made).settings?.models).not.toHaveProperty("stt");
+    expect(personaIn(made).settings?.models).not.toHaveProperty("tts");
+    const read = await browse("GET", `/v1/personas/${personaIn(made).id}?projectId=${ada.projectId}`, ada);
+    expect(personaIn(read).settings?.models).toEqual(models);
+
+    const refused = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
+      name: "Invalid Live voice",
+      ...BEHAVIOR,
+      models: { ...models, live: { ...models.live, voiceId: "nova" } },
+      controls: CONTROLS,
+    });
+    expect(refused.statusCode).toBe(422);
+    expect(refused.body).toMatchObject({ message: expect.stringContaining("models.live.voiceId") });
+  });
   it("exports the closed model catalog and the release recommendations", async () => {
     api = await createApi("personas_model_catalog");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
@@ -140,6 +167,7 @@ describe("creating and reading a persona", () => {
         (entry) => `${entry.job}:${entry.provider}:${entry.model}`,
       ),
     ).toEqual([
+      "live:openai:gpt-live-1",
       "llm:openai:gpt-4o-mini",
       "llm:openai:gpt-4o",
       "llm:openai:gpt-5.6-terra",
@@ -342,11 +370,11 @@ describe("creating and reading a persona", () => {
     expect(personaIn(still).name).toBe("Shapely Sam");
   });
 
-  it("accepts only speaking speeds that can reach the simulator", async () => {
+  it("maps retained numeric speaking speeds to categorical simulator targets", async () => {
     api = await createApi("personas_speed_range");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    for (const speed of [0.25, 4]) {
+    for (const [speed, target] of [[0.25, 0.8], [4, 1.5]] as const) {
       const made = await browse("POST", "/v1/personas", ada, {
         projectId: ada.projectId,
         name: `Speed ${speed}`,
@@ -357,7 +385,7 @@ describe("creating and reading a persona", () => {
         },
       });
       expect(made.statusCode, JSON.stringify(made.body)).toBe(201);
-      expect(personaIn(made).settings?.models.tts.speed).toBe(speed);
+      expect(personaIn(made).settings?.models).toMatchObject({ tts: { speed: target } });
     }
 
     for (const speed of [
@@ -377,7 +405,7 @@ describe("creating and reading a persona", () => {
       expect(refused.body).toEqual({
         error: "unprocessable",
         message:
-          "speaking speed must be between 0.25 and 4",
+          "models.tts.speed: Choose a historical numeric value from 0.25 through 4, or use controls.speechSpeed.",
       });
     }
   });
@@ -432,7 +460,7 @@ describe("creating and reading a persona", () => {
     expect(found).toMatchObject({
       name: "Everyday Caller [Male]",
       description: "Regular conversationalist persona",
-      version: 5,
+      version: 6,
       owner: "egma",
       // Catalog content, and the whole point of it: nobody ever hears
       // "Hi, I'm Everyday Caller [Male]."
@@ -748,7 +776,7 @@ describe("editing a persona", () => {
     });
 
     expect(changed.statusCode).toBe(200);
-    expect(personaIn(changed)).toMatchObject({ version: 1, settings: { models } });
+    expect(personaIn(changed)).toMatchObject({ version: 1, settings: { models: { ...models, tts: { ...models.tts, speed: 1 } } } });
     expect(personaIn(changed).versionId).toBe(made.versionId);
 
     const history = await browse(
@@ -814,6 +842,7 @@ describe("forking a persona", () => {
     expect(fork.language).toBe(made.language);
     expect(made.settings).toBeNull();
     expect(fork.settings?.models).toEqual({
+      mode: "separate",
       llm: { provider: "openai", model: "gpt-4o-mini" },
       stt: { provider: "openai", model: "gpt-4o-mini-transcribe" },
       tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "cedar", speed: 1 },
@@ -848,15 +877,16 @@ describe("forking a persona", () => {
     });
     expect(createdAnswer.statusCode, JSON.stringify(createdAnswer.body)).toBe(201);
     const created = personaIn(createdAnswer);
-    expect(created.settings).toMatchObject({ models, controls: { ...CONTROLS, executionPolicyVersion: 1 } });
+    const resolvedModels = { ...models, tts: { ...models.tts, speed: 1 } };
+    expect(created.settings).toMatchObject({ models: resolvedModels, controls: { ...CONTROLS, executionPolicyVersion: 2 } });
 
     const forkedAnswer = await browse("POST", `/v1/personas/${created.id}/fork`, ada, {
       projectId: ada.projectId,
     });
     expect(forkedAnswer.statusCode, JSON.stringify(forkedAnswer.body)).toBe(201);
     expect(personaIn(forkedAnswer).settings).toMatchObject({
-      models,
-      controls: { ...CONTROLS, executionPolicyVersion: 1 },
+      models: resolvedModels,
+      controls: { ...CONTROLS, executionPolicyVersion: 2 },
     });
   });
 
@@ -893,7 +923,7 @@ describe("forking a persona", () => {
     expect(changed.statusCode, JSON.stringify(changed.body)).toBe(200);
     expect(personaIn(changed).settings).toMatchObject({
       models: changedModels,
-      controls: { ...CONTROLS, executionPolicyVersion: 1 },
+      controls: { ...CONTROLS, executionPolicyVersion: 2 },
     });
 
     const configured = await browse("POST", "/v1/personas", ada, {

@@ -28,6 +28,8 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     MetricsFrame,
+    OutputAudioRawFrame,
+    SpeechOutputAudioRawFrame,
     StartFrame,
     TextFrame,
     TranscriptionFrame,
@@ -169,7 +171,9 @@ def apply_pcm_gain(pcm: bytes, gain: float) -> bytes:
     return samples.tobytes()
 
 
-def gained_speech_frame(frame: TTSAudioRawFrame, gain: float) -> TTSAudioRawFrame:
+def gained_speech_frame(
+    frame: OutputAudioRawFrame, gain: float
+) -> OutputAudioRawFrame:
     """Change only a speech frame's samples, preserving timing and context."""
     frame.audio = apply_pcm_gain(frame.audio, gain)
     return frame
@@ -184,7 +188,10 @@ class SpeechGain(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
-        if isinstance(frame, TTSAudioRawFrame) and self.gain != 1.0:
+        if (
+            isinstance(frame, (TTSAudioRawFrame, SpeechOutputAudioRawFrame))
+            and self.gain != 1.0
+        ):
             frame = gained_speech_frame(frame, self.gain)
         await self.push_frame(frame, direction)
 

@@ -2023,9 +2023,9 @@ class VoiceConductor:
         self._running = asyncio.create_task(
             self._runner.run(), name=f"voice-pipeline:{name}"
         )
-        await self._reach_event(timeline.started)
-        await self._reach_step(self._legs.ready())
         try:
+            await self._reach_event(timeline.started)
+            await self._reach_step(self._legs.ready())
             await self._reach_step(self._connection.open())
         except (PipelineGone, SpeechFault) as refused:
             # Transport processors start only once Pipecat receives its

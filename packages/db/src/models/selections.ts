@@ -19,12 +19,26 @@ export type SpeechSelection = ModelSelection & {
   readonly speed: number;
 };
 
+export type LiveSelection = ModelSelection & {
+  readonly adapter: "openai_live";
+  readonly voiceId: string;
+};
+
 /** The complete executable model choice owned by one persona version. */
-export type PersonaModels = {
+export type SeparatePersonaModels = {
+  readonly mode: "separate";
   readonly llm: LlmSelection;
   readonly stt: ModelSelection;
   readonly tts: SpeechSelection;
 };
+
+export type LivePersonaModels = {
+  readonly mode: "live";
+  readonly llm: LlmSelection;
+  readonly live: LiveSelection;
+};
+
+export type PersonaModels = SeparatePersonaModels | LivePersonaModels;
 
 export type GraderModel = ModelSelection;
 
@@ -92,20 +106,36 @@ function validSpeech(value: unknown): SpeechSelection {
   return { ...selection, voiceId: voiceId.trim(), speed };
 }
 
+function validLive(value: unknown): LiveSelection {
+  const selection = validSelection("live", value, ["provider", "model", "adapter", "voiceId"]);
+  const { adapter, voiceId } = value as Record<string, unknown>;
+  const entry = catalogEntry("live", selection.provider, selection.model);
+  if (adapter !== entry?.adapter) throw new UnprocessableInputError("the live selection needs its catalog adapter");
+  if (typeof voiceId !== "string" || voiceId.trim() === "") throw new UnprocessableInputError("the live selection needs a built-in voice id");
+  return { ...selection, adapter: "openai_live", voiceId: voiceId.trim() };
+}
+
 export function validPersonaModels(value: unknown): PersonaModels {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new UnprocessableInputError("persona models must be an object");
   }
   const held = value as Record<string, unknown>;
-  const unsupported = Object.keys(held).filter(
-    (key) => !["llm", "stt", "tts"].includes(key),
-  );
+  const mode = held.mode;
+  if (mode !== "separate" && mode !== "live") throw new UnprocessableInputError("persona models need mode separate or live");
+  const accepted = mode === "live" ? ["mode", "llm", "live"] : ["mode", "llm", "stt", "tts"];
+  const unsupported = Object.keys(held).filter((key) => !accepted.includes(key));
   if (unsupported.length > 0) {
     throw new UnprocessableInputError(
       `persona models have unsupported fields ${unsupported.join(", ")}`,
     );
   }
+  if (mode === "live") return {
+    mode,
+    llm: validSelection("llm", held.llm),
+    live: validLive(held.live),
+  };
   return {
+    mode,
     llm: validSelection("llm", held.llm),
     stt: validSelection("stt", held.stt),
     tts: validSpeech(held.tts),
@@ -128,6 +158,9 @@ function sameSelection(a: ModelSelection, b: ModelSelection): boolean {
 }
 
 export function samePersonaModels(a: PersonaModels, b: PersonaModels): boolean {
+  if (a.mode !== b.mode) return false;
+  if (a.mode === "live" && b.mode === "live") return sameSelection(a.llm, b.llm) && sameSelection(a.live, b.live) && a.live.adapter === b.live.adapter && a.live.voiceId === b.live.voiceId;
+  if (a.mode === "live" || b.mode === "live") return false;
   return (
     sameSelection(a.llm, b.llm) &&
     sameSelection(a.stt, b.stt) &&
@@ -193,7 +226,8 @@ function recommendedSpeech(): SpeechSelection {
   };
 }
 
-export const RECOMMENDED_PERSONA_MODELS: PersonaModels = {
+export const RECOMMENDED_PERSONA_MODELS: SeparatePersonaModels = {
+  mode: "separate",
   llm: recommendedSelection("llm"),
   stt: recommendedSelection("stt"),
   tts: recommendedSpeech(),
@@ -234,16 +268,14 @@ export const RECOMMENDED_GRADER_MODEL: GraderModel =
  * it with the same list — one provider serving two legs is one provider.
  */
 export function providersNeededBy(
-  models: {
-    readonly llm: { readonly provider: string };
-    readonly stt: { readonly provider: string };
-    readonly tts: { readonly provider: string };
-  },
+  models: PersonaModels,
   modality: "chat" | "voice",
 ): readonly string[] {
   const needed =
     modality === "chat"
       ? [models.llm.provider]
-      : [models.llm.provider, models.stt.provider, models.tts.provider];
+      : models.mode === "live"
+        ? [models.llm.provider, models.live.provider]
+        : [models.llm.provider, models.stt.provider, models.tts.provider];
   return [...new Set(needed)];
 }

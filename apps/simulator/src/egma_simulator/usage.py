@@ -204,6 +204,32 @@ def characters_usage(
     )
 
 
+def live_duration_usage(
+    usage: Any, *, selection_model: str, session_id: str | None = None
+) -> ProviderUsage | None:
+    """The latest cumulative duration reported for one GPT Live session.
+
+    Callers keep only the newest snapshot and emit it once when the session
+    ends. This avoids charging each cumulative update as an increment.
+    """
+    if hasattr(usage, "model_dump"):
+        usage = usage.model_dump(exclude_none=True)
+    if not isinstance(usage, dict):
+        return None
+    seconds = _counted(usage, "seconds")
+    if not seconds:
+        return None
+    return ProviderUsage(
+        provider="openai",
+        model=selection_model,
+        operation="openai_live",
+        measurement=PROVIDER_REPORTED,
+        quantities={"audio_seconds": seconds},
+        provider_ref=session_id,
+        raw=dict(usage),
+    )
+
+
 def as_json(value: Any) -> str:
     """The compact JSON a span attribute carries, or ``{}`` for anything else."""
     try:

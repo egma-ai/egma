@@ -1478,7 +1478,7 @@ async def test_the_speech_legs_need_no_corpus_and_no_download(
     def starved(*_args: object, **_kwargs: object):
         raise LookupError("no tokenizer corpus, and none is meant to be needed")
 
-    monkeypatch.setattr(pipecat.utils.string, "sent_tokenize", starved)
+    monkeypatch.setattr(pipecat.utils.string, "_sent_tokenizer", lambda: starved)
     monkeypatch.setattr(nltk.data, "load", starved)
     monkeypatch.setattr(nltk.data, "find", starved)
 

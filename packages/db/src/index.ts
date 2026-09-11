@@ -169,6 +169,9 @@ export {
   type LlmSelection,
   type ModelSelection,
   type PersonaModels,
+  type SeparatePersonaModels,
+  type LivePersonaModels,
+  type LiveSelection,
   type SpeechSelection,
 } from "./models/selections.ts";
 export { fromOnePov, povOf, type SpanPov } from "./models/pov.ts";
@@ -273,11 +276,15 @@ export {
   BACKGROUND_VOLUME_RANGE,
   PERSONA_EMOTIONS,
   PERSONA_INTERRUPTION_LEVELS,
+  PERSONA_SPEECH_SPEEDS,
+  PERSONA_SPEECH_SPEED_TARGETS,
   PERSONA_EXECUTION_POLICY_VERSION,
   PERSONA_PARAMETER_CONTRACT,
   SPEECH_VOLUME_RANGE,
   personaControlsOfParameters,
   personaParameterContract,
+  preCategoricalPersonaParameterContract,
+  personaSpeechSpeedOfTarget,
   personaParametersOfModels,
   personaParametersOfSettings,
   personaModelsOfParameters,
@@ -290,6 +297,7 @@ export {
   type BackgroundSoundId,
   type PersonaEmotion,
   type PersonaInterruptionLevel,
+  type PersonaSpeechSpeed,
   type PersonaParameterValues,
   type PersonaSettings,
 } from "./persona-library/parameters.ts";

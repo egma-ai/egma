@@ -17,16 +17,29 @@ export type PersonaArguments = {
 type PersonaModels = NonNullable<GetPersonaResponse["settings"]>["models"];
 type PersonaControls = Omit<NonNullable<GetPersonaResponse["settings"]>["controls"], "executionPolicyVersion">;
 
+function speechSpeedOf(target: number): PersonaControls["speechSpeed"] {
+  const choices = [["slow", 0.8], ["normal", 1], ["fast", 1.5]] as const;
+  return [...choices].sort((left, right) => Math.abs(target - left[1]) - Math.abs(target - right[1]) || (left[0] === "normal" ? -1 : right[0] === "normal" ? 1 : 0))[0]![0];
+}
+
 function numberValue(args: PersonaArguments, name: string, fallback: number): number {
   const value = args.values[name];
   return value === undefined ? fallback : Number(value);
 }
 
 function models(args: PersonaArguments, fallback?: PersonaModels) {
+  const mode = args.values["--speech-mode"] ?? fallback?.mode ?? "separate";
+  const llm = { provider: args.values["--llm-provider"] ?? fallback?.llm.provider ?? "", model: args.values["--llm-model"] ?? fallback?.llm.model ?? "" };
+  if (mode === "live") return {
+    mode: "live" as const,
+    llm,
+    live: { provider: "openai" as const, model: "gpt-live-1" as const, adapter: "openai_live" as const, voiceId: args.values["--voice"] ?? (fallback?.mode === "live" ? fallback.live.voiceId : "alloy") },
+  };
   return {
-    stt: { provider: args.values["--stt-provider"] ?? fallback?.stt.provider ?? "", model: args.values["--stt-model"] ?? fallback?.stt.model ?? "" },
-    tts: { provider: args.values["--tts-provider"] ?? fallback?.tts.provider ?? "", model: args.values["--tts-model"] ?? fallback?.tts.model ?? "", voiceId: args.values["--voice"] ?? fallback?.tts.voiceId ?? "", speed: numberValue(args, "--speed", fallback?.tts.speed ?? 1) },
-    llm: { provider: args.values["--llm-provider"] ?? fallback?.llm.provider ?? "", model: args.values["--llm-model"] ?? fallback?.llm.model ?? "" },
+    mode: "separate" as const,
+    stt: { provider: args.values["--stt-provider"] ?? (fallback !== undefined && fallback.mode !== "live" ? fallback.stt.provider : ""), model: args.values["--stt-model"] ?? (fallback !== undefined && fallback.mode !== "live" ? fallback.stt.model : "") },
+    tts: { provider: args.values["--tts-provider"] ?? (fallback !== undefined && fallback.mode !== "live" ? fallback.tts.provider : ""), model: args.values["--tts-model"] ?? (fallback !== undefined && fallback.mode !== "live" ? fallback.tts.model : ""), voiceId: args.values["--voice"] ?? (fallback !== undefined && fallback.mode !== "live" ? fallback.tts.voiceId : "") },
+    llm,
   };
 }
 
@@ -38,7 +51,8 @@ function controls(args: PersonaArguments, fallback?: PersonaControls) {
     speechVolume: numberValue(args, "--speech-volume", fallback?.speechVolume ?? 1),
     backgroundSoundId: (args.values["--background-sound"] ?? fallback?.backgroundSoundId ?? "none") as NonNullable<GetPersonaResponse["settings"]>["controls"]["backgroundSoundId"],
     backgroundVolume: numberValue(args, "--background-volume", fallback?.backgroundVolume ?? 0.0631),
-    interruptionLevel: (args.values["--interruption-level"] ?? fallback?.interruptionLevel ?? "off") as PersonaControls["interruptionLevel"],
+    interruptionLevel: (args.values["--interruption-level"] ?? fallback?.interruptionLevel ?? "none") as PersonaControls["interruptionLevel"],
+    speechSpeed: (args.values["--speech-speed"] ?? fallback?.speechSpeed ?? "normal") as PersonaControls["speechSpeed"],
   };
 }
 
@@ -47,6 +61,7 @@ function effectiveSettings(persona: GetPersonaResponse) {
   const values = Object.fromEntries(persona.parameterContract.map((field) => [field.key, field.defaultValue]));
   return {
     models: {
+      mode: "separate" as const,
       llm: { provider: String(values.llm_provider), model: String(values.llm_model) },
       stt: { provider: String(values.stt_provider), model: String(values.stt_model) },
       tts: { provider: String(values.tts_provider), model: String(values.tts_model), voiceId: String(values.tts_voice_id), speed: Number(values.tts_speed) },
@@ -58,12 +73,13 @@ function effectiveSettings(persona: GetPersonaResponse) {
       speechVolume: Number(values.speech_volume ?? 1),
       backgroundSoundId: (values.background_sound_id ?? "none") as NonNullable<GetPersonaResponse["settings"]>["controls"]["backgroundSoundId"],
       backgroundVolume: Number(values.background_volume ?? 0.0631),
-      interruptionLevel: (values.interruption_level ?? "off") as PersonaControls["interruptionLevel"],
+      interruptionLevel: (values.interruption_level === "off" ? "none" : values.interruption_level ?? "none") as PersonaControls["interruptionLevel"],
+      speechSpeed: (values.speech_speed ?? speechSpeedOf(Number(values.tts_speed))) as PersonaControls["speechSpeed"],
     },
   };
 }
 
-const SETTING_FLAGS = ["--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice", "--speed", "--language", "--emotion", "--accent", "--speech-volume", "--background-sound", "--background-volume", "--interruption-level"] as const;
+const SETTING_FLAGS = ["--speech-mode", "--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice", "--speech-speed", "--language", "--emotion", "--accent", "--speech-volume", "--background-sound", "--background-volume", "--interruption-level"] as const;
 
 async function projectContext(options: FolderCommandOptions) {
   const ready = await readyToSync(options);
@@ -95,7 +111,7 @@ export async function runPersonaActionCommand(options: FolderCommandOptions, act
     const common = { projectId: context.projectId, models: models(args, saved?.models), controls: controls(args, saved?.controls) };
     const settingsChanged = SETTING_FLAGS.some((flag) => args.values[flag] !== undefined);
     const answer = action === "settings" ? await getPersona({ personaId: id, projectId: context.projectId }, requestOptions)
-      : action === "capabilities" ? await getPersonaCapabilities({ projectId: context.projectId, ttsProvider: common.models.tts.provider, ttsModel: common.models.tts.model, sttProvider: common.models.stt.provider, sttModel: common.models.stt.model, language: common.controls.language, ...(common.models.tts.voiceId === "" ? {} : { voiceId: common.models.tts.voiceId }) }, requestOptions)
+      : action === "capabilities" ? await getPersonaCapabilities(common.models.mode === "live" ? { projectId: context.projectId, mode: "live", liveProvider: common.models.live.provider, liveModel: common.models.live.model, language: common.controls.language, voiceId: common.models.live.voiceId } : { projectId: context.projectId, mode: "separate", ttsProvider: common.models.tts.provider, ttsModel: common.models.tts.model, sttProvider: common.models.stt.provider, sttModel: common.models.stt.model, language: common.controls.language, ...(common.models.tts.voiceId === "" ? {} : { voiceId: common.models.tts.voiceId }) }, requestOptions)
       : action === "use" ? await usePersona({ personaId: id, ...common } as Parameters<typeof usePersona>[0], requestOptions)
       : action === "create" ? await createPersona({ ...common, name: args.values["--name"] ?? "", identityName: args.values["--identity-name"] ?? "", personality: args.values["--personality"] ?? "", ...(args.values["--description"] === undefined ? {} : { description: args.values["--description"] }) } as Parameters<typeof createPersona>[0], requestOptions)
       : action === "clone" ? await forkPersona({ personaId: id, projectId: context.projectId }, requestOptions)

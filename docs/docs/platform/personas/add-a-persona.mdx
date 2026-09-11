@@ -39,6 +39,10 @@ Start with **Everyday Caller [Male]**, or create a custom persona when you need 
     `update`. `egma persona settings <Persona ID>` prints the
     current project settings as JSON.
 
+    Use `--speech-speed slow`, `--speech-speed normal`, or `--speech-speed fast`.
+    These choices resolve to 0.8×, 1.0×, and 1.5× when the selected voice
+    supports them. Use `--interruption-level none`, `occasional`, or `frequent`.
+
     Selecting a persona for the first time saves its model, voice, language,
     accent, emotion, interruption level, speech rate, speech volume, background
     sound, and background level for your project. All tests
@@ -59,12 +63,26 @@ Start with **Everyday Caller [Male]**, or create a custom persona when you need 
     3. Write a **Personality** that describes how the caller acts. For example:
        `Answers briefly, asks for the earliest appointment, and asks the agent to
        get to the point if it repeats a question. Remains polite.`
-    4. Choose speech-to-text, text-to-speech, and language models. Then choose
+    4. Choose **Separate speech models** to configure speech-to-text and
+       text-to-speech independently, or choose **GPT Live** for one continuous
+       speech model. Then choose the reasoning language model independently.
+       GPT Live uses `gpt-live-1` and a supported built-in OpenAI voice. It does
+       not require speech-to-text or text-to-speech settings or credentials.
+       Choose
        the language, voice, accent, emotion, interruption level, speech rate,
        speech volume, and background sound that the selected providers support.
        New selections use standard OpenAI voices or Cartesia account voices
        that Egma discovers. Run a full simulation to check how the persona
        sounds and interrupts.
+
+       **Speech rate** uses Slow, Normal, and Fast. A fixed-speed voice permits
+       Normal only and explains the restriction. **Interruptions** uses None,
+       Occasional, and Frequent. None keeps the existing non-interrupting
+       behavior.
+
+       Your speech settings remain saved for voice runs. A text simulation uses
+       the selected reasoning model, identity, personality, language, and
+       emotional wording without calling any speech service.
     5. Select **Create persona**, run `egma persona list`, and add the persona to
        your test.
 

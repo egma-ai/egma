@@ -45,7 +45,7 @@ it("refuses a shared contract that cannot use saved project settings and keeps t
     controls: {
       language: "en-US", emotion: "neutral", accent: "voice_default",
       speechVolume: 0.85, backgroundSoundId: "none",
-      backgroundVolume: 0.0631, interruptionLevel: "off",
+      backgroundVolume: 0.0631, interruptionLevel: "none", speechSpeed: "normal",
     },
   } });
   expect(usedPersona.statusCode, usedPersona.body).toBe(200);
@@ -58,7 +58,7 @@ it("refuses a shared contract that cannot use saved project settings and keeps t
   }])).rejects.toThrow("Speech volume must be at least 0.9");
   const currentPersona = await api.app.inject({ method: "GET", url: `/v1/personas/${persona.id}?projectId=${who.projectId}`, headers });
   expect(currentPersona.statusCode, currentPersona.body).toBe(200);
-  expect(currentPersona.json()).toMatchObject({ version: version.version, versionId: version.id, settings: { models: { tts: { speed: 0.85 } } } });
+  expect(currentPersona.json()).toMatchObject({ version: version.version, versionId: version.id, settings: { models: { tts: { speed: 1 } } } });
 });
 
 it("refuses changed parameter units without reinterpreting saved grader or persona values", async () => {

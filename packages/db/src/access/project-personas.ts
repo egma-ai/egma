@@ -6,6 +6,8 @@ import { validateUnchangedParameterUnits } from "../grader-library/parameters.ts
 import {
   defaultPersonaParameterValues,
   personaModelsOfParameters,
+  personaControlsOfParameters,
+  personaParameterContract,
   validatePersonaParameterValues,
   type PersonaParameterValues,
 } from "../persona-library/parameters.ts";
@@ -36,6 +38,7 @@ export async function readProjectPersonaSettingsOn(
     .select({
       id: projectPersona.id,
       parameterValues: projectPersona.parameterValues,
+      parameterContract: projectPersona.parameterContract,
       createdAt: projectPersona.createdAt,
       updatedAt: projectPersona.updatedAt,
     })
@@ -56,7 +59,7 @@ export async function readProjectPersonaSettingsOn(
     : query);
   if (row === undefined) return undefined;
   const parameterValues = validatePersonaParameterValues(
-    contract,
+    row.parameterContract ?? contract,
     row.parameterValues,
   );
   return {
@@ -109,6 +112,9 @@ export async function ensureProjectPersonaOn(
           version.parameterContract,
           parameterValues,
         );
+  const settingsContract = parameterValues === undefined || parameterValues.speech_mode === undefined
+    ? version.parameterContract
+    : personaParameterContract(personaModelsOfParameters(parameterValues), personaControlsOfParameters(parameterValues));
   await on
     .insert(projectPersona)
     .values({
@@ -117,6 +123,7 @@ export async function ensureProjectPersonaOn(
       projectId,
       personaDefinitionId: definitionId,
       parameterValues: values,
+      parameterContract: settingsContract,
     })
     .onConflictDoNothing({
       target: [projectPersona.projectId, projectPersona.personaDefinitionId],
@@ -126,7 +133,7 @@ export async function ensureProjectPersonaOn(
     auth,
     projectId,
     definitionId,
-    version.parameterContract,
+    settingsContract,
     true,
   );
   if (saved === undefined) {

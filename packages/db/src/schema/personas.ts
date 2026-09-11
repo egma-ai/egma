@@ -167,6 +167,9 @@ export const projectPersona = pgTable(
     parameterValues: jsonb("parameter_values")
       .$type<PersonaParameterValues>()
       .notNull(),
+    parameterContract: jsonb("parameter_contract")
+      .$type<readonly GraderParameter[]>()
+      .notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

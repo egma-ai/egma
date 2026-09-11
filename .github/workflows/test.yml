@@ -13,6 +13,11 @@ on:
       - main
   workflow_dispatch:
     inputs:
+      gpt_live_personas:
+        description: Run the opt-in real-provider GPT Live persona cells
+        required: true
+        type: boolean
+        default: false
       deploy:
         description: Replace production and ship the web after publishing the images
         required: true
@@ -397,7 +402,7 @@ jobs:
           retention-days: 7
 
   simulation-e2e-livekit:
-    name: Simulation to grade (${{ matrix.language }}, LiveKit 1.7.1, ${{ matrix.modality }}, project credentials, mocks on)
+    name: Simulation to grade (${{ matrix.language }}, LiveKit 1.7.1, ${{ matrix.modality }}, ${{ matrix.access }}, ${{ matrix.persona_mode }} persona, mocks on)
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'workflow_dispatch' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
@@ -406,6 +411,11 @@ jobs:
       matrix:
         language: [python, javascript]
         modality: [chat, voice]
+        access: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.gpt_live_personas && '["project_credentials", "customer_token_endpoint"]' || '["project_credentials"]') }}
+        # Normal CI keeps the existing separate speech path. A manual run can
+        # add the paid real-provider GPT Live cells without making them a
+        # probabilistic merge gate.
+        persona_mode: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.gpt_live_personas && '["separate", "live"]' || '["separate"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -466,7 +476,8 @@ jobs:
           SIMULATION_E2E_LIVE: "1"
           SIMULATION_E2E_LANGUAGE: ${{ matrix.language }}
           SIMULATION_E2E_MODALITY: ${{ matrix.modality }}
-          SIMULATION_E2E_ACCESS: project_credentials
+          SIMULATION_E2E_ACCESS: ${{ matrix.access }}
+          SIMULATION_E2E_PERSONA_MODE: ${{ matrix.persona_mode }}
           SIMULATION_E2E_MOCKS: "on"
           LIVEKIT_E2E_PYTHON_AGENTS_VERSION: "1.7.1"
           LIVEKIT_E2E_JAVASCRIPT_AGENTS_VERSION: "1.7.1"
@@ -480,14 +491,14 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: simulation-e2e-${{ matrix.language }}-livekit-1.7.1-${{ matrix.modality }}-project-credentials-on-${{ github.sha }}
+          name: simulation-e2e-${{ matrix.language }}-livekit-1.7.1-${{ matrix.modality }}-${{ matrix.access }}-${{ matrix.persona_mode }}-on-${{ github.sha }}
           path: .proofs/simulation-e2e/*
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
 
   simulation-e2e-retell:
-    name: Simulation to grade (Retell ${{ matrix.connection }}, mocks on)
+    name: Simulation to grade (Retell ${{ matrix.connection }}, ${{ matrix.persona_mode }} persona, mocks on)
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -499,6 +510,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        connection: [text, web]
+        persona_mode: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.gpt_live_personas && '["separate", "live"]' || '["separate"]') }}
         include:
           - connection: text
             tunnel_id_var: SIMULATION_E2E_TUNNEL_TEXT_ID
@@ -584,6 +597,7 @@ jobs:
           EGMA_REQUIRE_OBJECT_STORAGE: "1"
           SIMULATION_E2E_RETELL: "1"
           SIMULATION_E2E_RETELL_CONNECTION: ${{ matrix.connection }}
+          SIMULATION_E2E_PERSONA_MODE: ${{ matrix.persona_mode }}
           SIMULATION_E2E_MOCKS: "on"
           SIMULATION_E2E_RETELL_API_KEY: ${{ secrets.SIMULATION_E2E_RETELL_API_KEY }}
           SIMULATION_E2E_MODEL_API_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
@@ -598,11 +612,79 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: simulation-e2e-retell-${{ matrix.connection }}-on-${{ github.sha }}
+          name: simulation-e2e-retell-${{ matrix.connection }}-${{ matrix.persona_mode }}-on-${{ github.sha }}
           path: .proofs/simulation-e2e/*
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
+
+  simulation-e2e-phone:
+    name: Simulation to grade (configured phone destination, live persona)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.gpt_live_personas && !inputs.deploy }}
+    # The carrier must reach the SIP and RTP ports published by this runner.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Compose parses the complete file before selecting services. These
+      # inert values satisfy unrelated service declarations; only the three
+      # named LiveKit services start below.
+      EGMA_AUTH_SECRET: simulation-e2e-unused
+      EGMA_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      EGMA_SIMULATOR_SERVICE_TOKEN: simulation-e2e-unused
+      EGMA_BASE_URL: http://127.0.0.1:3100
+      EGMA_S3_ACCESS_KEY_ID: simulation-e2e-unused
+      EGMA_S3_SECRET_ACCESS_KEY: simulation-e2e-unused
+      EGMA_S3_READ_ACCESS_KEY_ID: simulation-e2e-unused
+      EGMA_S3_READ_SECRET_ACCESS_KEY: simulation-e2e-unused
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+        with:
+          version: "0.11.33"
+      - name: Require the configured phone route
+        env:
+          MODEL_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
+          DESTINATION: ${{ secrets.SIMULATION_E2E_PHONE_NUMBER }}
+          SOURCE: ${{ secrets.SIMULATION_E2E_PHONE_SOURCE_NUMBER }}
+          TRUNK_ADDRESS: ${{ secrets.SIMULATION_E2E_PHONE_TRUNK_ADDRESS }}
+          TRUNK_USERNAME: ${{ secrets.SIMULATION_E2E_PHONE_TRUNK_USERNAME }}
+          TRUNK_PASSWORD: ${{ secrets.SIMULATION_E2E_PHONE_TRUNK_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in MODEL_KEY DESTINATION SOURCE TRUNK_ADDRESS TRUNK_USERNAME TRUNK_PASSWORD; do
+            [ -n "${!name}" ] || { echo "$name is required for the opt-in phone proof." >&2; exit 1; }
+          done
+      - name: Create ephemeral LiveKit credentials
+        run: |
+          key="egma_$(openssl rand -hex 16)"
+          secret="$(openssl rand -hex 32)"
+          echo "EGMA_LIVEKIT_API_KEY=$key" >> "$GITHUB_ENV"
+          echo "EGMA_LIVEKIT_API_SECRET=$secret" >> "$GITHUB_ENV"
+          echo "TEST_LIVEKIT_API_KEY=$key" >> "$GITHUB_ENV"
+          echo "TEST_LIVEKIT_API_SECRET=$secret" >> "$GITHUB_ENV"
+      - name: Start the pinned LiveKit phone bridge
+        run: docker compose up --detach --wait livekit-redis livekit livekit-sip
+      - name: Sync the shipped simulator
+        working-directory: apps/simulator
+        run: uv sync --frozen
+      - name: Dial the configured destination with GPT Live
+        working-directory: apps/simulator
+        env:
+          TEST_GPT_LIVE: "1"
+          TEST_LIVEKIT_URL: ws://127.0.0.1:7880
+          TEST_PHONE_NUMBER: ${{ secrets.SIMULATION_E2E_PHONE_NUMBER }}
+          TEST_SIP_TRUNK_ADDRESS: ${{ secrets.SIMULATION_E2E_PHONE_TRUNK_ADDRESS }}
+          TEST_SIP_TRUNK_NUMBER: ${{ secrets.SIMULATION_E2E_PHONE_SOURCE_NUMBER }}
+          TEST_SIP_TRUNK_USERNAME: ${{ secrets.SIMULATION_E2E_PHONE_TRUNK_USERNAME }}
+          TEST_SIP_TRUNK_PASSWORD: ${{ secrets.SIMULATION_E2E_PHONE_TRUNK_PASSWORD }}
+          TEST_MODEL_API_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
+        run: uv run --frozen pytest tests/test_live_phone.py -v
+      - name: Stop the phone bridge
+        if: ${{ always() }}
+        run: docker compose down --volumes
 
   deploy:
     name: Deploy

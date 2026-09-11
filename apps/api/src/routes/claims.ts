@@ -24,6 +24,7 @@ import {
   resolveSimulationConnection,
   type EntitlementSource,
   type PersonaModels,
+  type PersonaControls,
   type PersonaVersion,
   type ProviderCatalogEntry,
   type Run,
@@ -155,7 +156,8 @@ const SIMULATION_LIMITS = {
 
 /** The one clean-cut contract this control plane and simulator speak. */
 const LEGACY_CONTRACT_VERSION = 5;
-const CURRENT_CONTRACT_VERSION = 6;
+const CONTROLLED_CONTRACT_VERSION = 6;
+const CURRENT_CONTRACT_VERSION = 7;
 
 type Body = Record<string, unknown>;
 
@@ -190,10 +192,10 @@ async function modelsBlock(
   models: PersonaModels,
   source: ProviderCredentialSource,
   claim: SimulationClaim,
-  controls?: { readonly language: string; readonly emotion: string; readonly accent: string },
+  controls?: Pick<PersonaControls, "language" | "emotion" | "accent" | "speechSpeed">,
   deploymentSecretEnvironment?: Readonly<Record<string, string>>,
 ): Promise<Record<string, unknown>> {
-  const entryFor = <Job extends "llm" | "stt" | "tts">(
+  const entryFor = <Job extends "llm" | "stt" | "tts" | "live">(
     job: Job,
     selection: { readonly provider: string; readonly model: string },
   ): ProviderCatalogEntry<Job> => {
@@ -206,11 +208,7 @@ async function modelsBlock(
     }
     return entry;
   };
-  const entries = {
-    llm: entryFor("llm", models.llm),
-    stt: entryFor("stt", models.stt),
-    tts: entryFor("tts", models.tts),
-  };
+  const llmEntry = entryFor("llm", models.llm);
   const needed = providersNeededBy(models, modality).map((provider) => {
     if (!isModelProvider(provider))
       throw new Error("The selected model provider is not supported.");
@@ -249,6 +247,39 @@ async function modelsBlock(
     const variable = deploymentSecretEnvironment?.[provider];
     return variable === undefined ? credentialFor(credentials, provider) : `env:${variable}`;
   };
+  if (models.mode === "live") {
+    const liveEntry = entryFor("live", models.live);
+    return {
+      mode: "live",
+      llm: {
+        provider: models.llm.provider,
+        model: models.llm.model,
+        adapter: llmEntry.adapter,
+        ...(llmEntry.reasoningEffort === undefined
+          ? {}
+          : { reasoning_effort: llmEntry.reasoningEffort }),
+        key: keyFor(models.llm.provider),
+        ...receiptFor(models.llm.provider),
+      },
+      live: {
+        provider: models.live.provider,
+        model: models.live.model,
+        adapter: liveEntry.adapter,
+        voice_id: models.live.voiceId,
+        ...(modality === "voice"
+          ? {
+              key: keyFor(models.live.provider),
+              ...receiptFor(models.live.provider),
+            }
+          : {}),
+      },
+    };
+  }
+  const entries = {
+    llm: llmEntry,
+    stt: entryFor("stt", models.stt),
+    tts: entryFor("tts", models.tts),
+  };
   if (modality === "voice" && controls !== undefined) {
     const voices = models.tts.provider === "cartesia"
       ? await discoverCartesiaVoices(credentialFor(credentials, "cartesia"))
@@ -264,7 +295,7 @@ async function modelsBlock(
       sttProvider: models.stt.provider, sttModel: models.stt.model,
       language: controls.language, voiceId: models.tts.voiceId,
     }, voices);
-    const refusal = personaCapabilityRefusal(capabilities, { ...controls, speed: models.tts.speed });
+    const refusal = personaCapabilityRefusal(capabilities, controls);
     if (refusal !== undefined) throw new PersonaCapabilityError(`the pinned persona is incompatible: ${refusal}`);
   }
   const speechKey = (
@@ -275,6 +306,7 @@ async function modelsBlock(
       : {};
 
   return {
+    mode: "separate",
     llm: {
       provider: models.llm.provider,
       model: models.llm.model,
@@ -462,10 +494,13 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
         `implements. Send a non-empty list that includes ${LEGACY_CONTRACT_VERSION} or ${CURRENT_CONTRACT_VERSION}.`,
     };
   }
-  if (!contractVersions.some((version) => version === LEGACY_CONTRACT_VERSION || version === CURRENT_CONTRACT_VERSION)) {
+  if (!contractVersions.some((version) =>
+    version === LEGACY_CONTRACT_VERSION ||
+    version === CONTROLLED_CONTRACT_VERSION ||
+    version === CURRENT_CONTRACT_VERSION)) {
     return {
       refusal:
-        `this control plane sends simulation contract versions ${LEGACY_CONTRACT_VERSION} and ${CURRENT_CONTRACT_VERSION}, ` +
+        `this control plane sends simulation contract versions ${LEGACY_CONTRACT_VERSION}, ${CONTROLLED_CONTRACT_VERSION}, and ${CURRENT_CONTRACT_VERSION}, ` +
         "and this worker does not say it can read it. Deploy the matching " +
         "simulator before it claims work.",
     };
@@ -602,7 +637,11 @@ async function assembledSpec(
   const personaControls = Object.hasOwn(personaParameters, "execution_policy_version")
     ? personaControlsOfParameters(personaParameters)
     : undefined;
-  const contractVersion = personaControls === undefined ? LEGACY_CONTRACT_VERSION : CURRENT_CONTRACT_VERSION;
+  const contractVersion = personaControls === undefined
+    ? LEGACY_CONTRACT_VERSION
+    : Object.hasOwn(personaParameters, "speech_speed")
+      ? CURRENT_CONTRACT_VERSION
+      : CONTROLLED_CONTRACT_VERSION;
   if (!workerContractVersions.includes(contractVersion))
     return { retryable: `the worker does not support simulation contract version ${contractVersion}`, deferredBy: "runtime" };
   try {
@@ -691,11 +730,25 @@ async function assembledSpec(
             execution_policy_version: personaControls.executionPolicyVersion,
             background_sound_id: personaControls.backgroundSoundId,
             background_volume: personaControls.backgroundVolume,
-            interruption_level: personaControls.interruptionLevel,
+            interruption_level:
+              contractVersion === CONTROLLED_CONTRACT_VERSION
+                ? String(personaParameters.interruption_level)
+                : personaControls.interruptionLevel,
+            ...(contractVersion === CURRENT_CONTRACT_VERSION
+              ? {
+                  speech_speed: personaControls.speechSpeed,
+                  tts_speed: Number(personaParameters.tts_speed),
+                }
+              : {}),
           } }
         : {}),
     },
-    models,
+    models:
+      contractVersion === CURRENT_CONTRACT_VERSION
+        ? ("mode" in models ? models : { mode: "separate", ...models })
+        : Object.fromEntries(
+            Object.entries(models).filter(([key]) => key !== "mode"),
+          ),
     scenario: { instructions: testVersion.scenario },
     // The same walls the chat lane has always had, by modality and by nothing
     // else. A text-mode exchange is a chat, so it gets the chat numbers.

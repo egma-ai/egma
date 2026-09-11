@@ -5,6 +5,7 @@ import {
   editPersona,
   getSimulation,
   legacyPersonaParameterContract,
+  preCategoricalPersonaParameterContract,
   listRunEvents,
   SPEED_RANGE,
   RECOMMENDED_PERSONA_MODELS,
@@ -197,7 +198,7 @@ async function claim(
     ...(token === undefined
       ? {}
       : { headers: { authorization: `Bearer ${token}` } }),
-    payload: { contract_versions: [5, 6], ...body },
+    payload: { contract_versions: [5, 6, 7], ...body },
   });
   return {
     statusCode: response.statusCode,
@@ -318,6 +319,7 @@ async function aRealtimeVoiceCustomerReadyToRun(
     name: "Realtime Rita",
     ...NEUTRAL_PERSON,
     models: {
+      mode: "separate",
       llm: {
         provider: "openai",
         model: "gpt-5.6-terra",
@@ -468,7 +470,7 @@ describe("claiming work", () => {
     // exactly what the simulator's own check will accept.
     expect(specComplaints(spec)).toEqual([]);
 
-    expect(spec.contract_version).toBe(6);
+    expect(spec.contract_version).toBe(7);
     expect(spec.simulation_id).toBe(simulationId);
     expect(
       lines
@@ -499,13 +501,16 @@ describe("claiming work", () => {
         emotion: "neutral",
         accent: "voice_default",
         speech_volume: 1,
-        execution_policy_version: 1,
+        execution_policy_version: 2,
         background_sound_id: "none",
         background_volume: 0.0631,
-        interruption_level: "off",
+        interruption_level: "none",
+        speech_speed: "normal",
+        tts_speed: 1,
       },
     });
     expect(spec.models).toEqual({
+      mode: "separate",
       llm: {
         provider: "openai",
         model: "gpt-4o-mini",
@@ -589,10 +594,12 @@ describe("claiming work", () => {
         emotion: "neutral",
         accent: "voice_default",
         speech_volume: 1,
-        execution_policy_version: 1,
+        execution_policy_version: 2,
         background_sound_id: "none",
         background_volume: 0.0631,
-        interruption_level: "off",
+        interruption_level: "none",
+        speech_speed: "normal",
+        tts_speed: 1,
       },
     });
     // And it is still a document the contract accepts, so this cannot be
@@ -1017,6 +1024,7 @@ describe("one source of execution truth", () => {
         `claims_llm_${model.replaceAll(".", "_")}`,
         {},
         {
+          mode: "separate",
           llm: { provider: "openai", model },
           stt: { provider: "deepgram", model: "nova-3-general" },
           tts: {
@@ -1074,6 +1082,7 @@ describe("one source of execution truth", () => {
     const spec = (answered.body.specs as Record<string, unknown>[])[0];
     expect(specComplaints(spec)).toEqual([]);
     expect(spec?.models).toEqual({
+      mode: "separate",
       llm: {
         provider: "openai",
         model: "gpt-5.6-terra",
@@ -1092,7 +1101,7 @@ describe("one source of execution truth", () => {
         model: "sonic-3.5",
         adapter: "cartesia",
         voice_id: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
-        speed: SPEED_RANGE.slowest,
+        speed: 0.8,
         key: "one-cartesia-account-key",
       },
     });
@@ -1610,7 +1619,7 @@ describe("one source of execution truth", () => {
       claimant: "sim-under-test",
       capacity: 1,
       wait_seconds: 0,
-      contract_versions: [5, 6],
+      contract_versions: [5, 6, 7],
     });
 
     expect(answered.statusCode).toBe(200);
@@ -1660,6 +1669,7 @@ describe("one source of execution truth", () => {
     };
     const legacyVersionId = "prsv_01K4R000000000000000000099";
     const legacyContract = legacyPersonaParameterContract({
+      mode: "separate",
       llm: { provider: "openai", model: "gpt-5.6-terra" },
       stt: { provider: "openai", model: "gpt-live-transcribe" },
       tts: {
@@ -1747,6 +1757,158 @@ describe("one source of execution truth", () => {
     );
     expect(specComplaints(spec)).toEqual([]);
   });
+
+  it("dispatches a frozen pre-category work order as version 6 without rewriting speed or off", async () => {
+    const { key, connectionId, testId, versionId, persona } =
+      await aCustomerReadyToRun("claims_pre_category_dispatch");
+    const historicalModels: PersonaModels = {
+      mode: "separate",
+      llm: { provider: "openai", model: "gpt-5.6-terra" },
+      stt: { provider: "openai", model: "gpt-live-transcribe" },
+      tts: {
+        provider: "openai",
+        model: "gpt-4o-mini-tts-2025-12-15",
+        voiceId: "alloy",
+        speed: 1.3,
+      },
+    };
+    const historicalContract = preCategoricalPersonaParameterContract(
+      historicalModels,
+      {
+        language: "en-US",
+        emotion: "neutral",
+        accent: "voice_default",
+        speechVolume: 1,
+        executionPolicyVersion: 1,
+        backgroundSoundId: "none",
+        backgroundVolume: 0.0631,
+        interruptionLevel: "off",
+      },
+    );
+    const historicalValues = Object.fromEntries(
+      historicalContract.map((field) => [field.key, field.defaultValue]),
+    );
+    const historicalVersionId = "prsv_01K4R000000000000000000098";
+    await api.database.sql(
+      `insert into persona_definition_version
+         (id, persona_id, version, identity_name, personality, language,
+          parameter_contract, created_by)
+       select $2, persona_id, 2, identity_name, personality, language,
+              $3::jsonb, created_by
+         from persona_definition_version
+        where id = $1`,
+      [persona.versionId, historicalVersionId, JSON.stringify(historicalContract)],
+    );
+    await api.database.sql(
+      `update persona_definition set current_version_id = $2 where id = $1`,
+      [persona.id, historicalVersionId],
+    );
+    await api.database.sql(
+      `update project_persona set parameter_values = $2::jsonb
+        where persona_definition_id = $1`,
+      [persona.id, JSON.stringify(historicalValues)],
+    );
+    const repinned = await ask(api.app, "PATCH", `/v1/tests/${testId}`, key, {
+      scenario: `${RESCHEDULING.scenario} Preserve the historical settings.`,
+      personas: [persona.name],
+      expectedVersionId: versionId,
+    });
+    expect(repinned.statusCode, JSON.stringify(repinned.body)).toBe(200);
+    await aQueuedRun(key, connectionId, String(repinned.body.versionId));
+
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "v6-worker",
+      capacity: 1,
+      wait_seconds: 0,
+      contract_versions: [5, 6, 7],
+    });
+    const [spec] = answered.body.specs as Record<string, any>[];
+    expect(spec?.contract_version).toBe(6);
+    expect(spec?.persona.parameters.interruption_level).toBe("off");
+    expect(spec?.models.tts.speed).toBe(1.3);
+    expect(spec?.persona.parameters).not.toHaveProperty("speech_speed");
+    expect(specComplaints(spec)).toEqual([]);
+  });
+
+  it("claims GPT Live with the selected backend and organization credential", async () => {
+    const liveModels: PersonaModels = {
+      mode: "live",
+      llm: { provider: "openai", model: "gpt-5.6-luna" },
+      live: {
+        provider: "openai",
+        model: "gpt-live-1",
+        adapter: "openai_live",
+        voiceId: "alloy",
+      },
+    };
+    const { key, connectionId, versionId } = await aCustomerReadyToRun(
+      "claims_gpt_live",
+      { retellFetch: RETELL_WEB_CALL_FETCH },
+      liveModels,
+      {},
+      WEB_CALL,
+    );
+    await aQueuedRun(key, connectionId, versionId);
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "gpt-live-worker",
+      capacity: 1,
+      wait_seconds: 0,
+      contract_versions: [7],
+    });
+    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
+    const [spec] = answered.body.specs as Record<string, any>[];
+    if (spec === undefined) throw new Error("the GPT Live work order was not dispatched");
+    expect(spec?.models).toMatchObject({
+      mode: "live",
+      llm: {
+        provider: "openai",
+        model: "gpt-5.6-luna",
+        adapter: "openai_chat_completions",
+        key: "openai-key-held-by-this-test-suite",
+      },
+      live: {
+        provider: "openai",
+        model: "gpt-live-1",
+        adapter: "openai_live",
+        voice_id: "alloy",
+        key: "openai-key-held-by-this-test-suite",
+      },
+    });
+    expect(spec?.models).not.toHaveProperty("stt");
+    expect(spec?.models).not.toHaveProperty("tts");
+    expect(specComplaints(spec)).toEqual([]);
+  });
+
+  it("claims a Live persona for text with only its selected reasoning key", async () => {
+    const { key, connectionId, versionId } = await aCustomerReadyToRun(
+      "claims_gpt_live_text",
+      {},
+      {
+        mode: "live",
+        llm: { provider: "openai", model: "gpt-5.6-luna" },
+        live: {
+          provider: "openai",
+          model: "gpt-live-1",
+          adapter: "openai_live",
+          voiceId: "alloy",
+        },
+      },
+    );
+    await aQueuedRun(key, connectionId, versionId);
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "gpt-live-text-worker",
+      capacity: 1,
+      wait_seconds: 0,
+      contract_versions: [7],
+    });
+    const [spec] = answered.body.specs as Record<string, any>[];
+    expect(spec?.modality).toBe("chat");
+    expect(spec?.models.llm.key).toBe("openai-key-held-by-this-test-suite");
+    expect(spec?.models.live).not.toHaveProperty("key");
+    expect(spec?.models).not.toHaveProperty("stt");
+    expect(spec?.models).not.toHaveProperty("tts");
+    expect(specComplaints(spec)).toEqual([]);
+  });
 });
 
 
@@ -1759,6 +1921,7 @@ describe("persona settings frozen before dispatch", () => {
     }, RECOMMENDED_PERSONA_MODELS, {}, modality === "voice" ? WEB_CALL : RETELL);
     await aQueuedRun(key, connectionId, versionId);
     const editedModels: PersonaModels = {
+      mode: "separate",
       llm: { provider: "openai", model: "gpt-4o" },
       stt: { provider: "deepgram", model: "nova-3-general" },
       tts: { provider: "openai", model: "tts-1", voiceId: "alloy", speed: 1.3 },
@@ -1770,7 +1933,8 @@ describe("persona settings frozen before dispatch", () => {
     expect(deferred.body.specs).toEqual([]);
     const retried = await claim(api.config.simulatorServiceToken, { claimant: "frozen-settings", capacity: 1, wait_seconds: 0 });
     const [original] = retried.body.specs as Record<string, unknown>[];
-    expect(original?.persona).toEqual({ name: NEUTRAL_PERSON.identityName, personality: NEUTRAL_PERSON.personality, parameters: { language: NEUTRAL_PERSON.language, emotion: "neutral", accent: "voice_default", speech_volume: 1, execution_policy_version: 1, background_sound_id: "none", background_volume: 0.0631, interruption_level: "off" } });
+    expect(original?.contract_version).toBe(7);
+    expect(original?.persona).toEqual({ name: NEUTRAL_PERSON.identityName, personality: NEUTRAL_PERSON.personality, parameters: { language: NEUTRAL_PERSON.language, emotion: "neutral", accent: "voice_default", speech_speed: "normal", tts_speed: 1, speech_volume: 1, execution_policy_version: 2, background_sound_id: "none", background_volume: 0.0631, interruption_level: "none" } });
     expect(original?.models).toMatchObject({
       llm: RECOMMENDED_PERSONA_MODELS.llm, stt: RECOMMENDED_PERSONA_MODELS.stt,
       tts: { provider: RECOMMENDED_PERSONA_MODELS.tts.provider, model: RECOMMENDED_PERSONA_MODELS.tts.model, voice_id: RECOMMENDED_PERSONA_MODELS.tts.voiceId, speed: RECOMMENDED_PERSONA_MODELS.tts.speed },
@@ -1779,8 +1943,10 @@ describe("persona settings frozen before dispatch", () => {
     await aQueuedRun(key, connectionId, versionId);
     const later = await claim(api.config.simulatorServiceToken, { claimant: "later-settings", capacity: 1, wait_seconds: 0 });
     const [next] = later.body.specs as Record<string, unknown>[];
+    expect(next?.contract_version).toBe(7);
     expect(next?.persona).toMatchObject({ personality: "Has one clear question." });
-    expect(next?.models).toMatchObject({ llm: editedModels.llm, stt: editedModels.stt, tts: { provider: "openai", model: "tts-1", voice_id: "alloy", speed: 1.3 } });
+    expect(next?.persona).toMatchObject({ parameters: { speech_speed: "normal", tts_speed: 1 } });
+    expect(next?.models).toMatchObject({ llm: editedModels.llm, stt: editedModels.stt, tts: { provider: "openai", model: "tts-1", voice_id: "alloy", speed: 1 } });
     expect(specComplaints(next)).toEqual([]);
   });
 });

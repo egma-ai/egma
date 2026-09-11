@@ -63,6 +63,7 @@ const LIVE_LANGUAGE = process.env["SIMULATION_E2E_LANGUAGE"] ?? "python";
 const LIVE_MODALITY = process.env["SIMULATION_E2E_MODALITY"] ?? "chat";
 const LIVE_MOCKS = process.env["SIMULATION_E2E_MOCKS"] !== "off";
 const LIVE_ACCESS = process.env["SIMULATION_E2E_ACCESS"] ?? "project_credentials";
+const LIVE_PERSONA_MODE = process.env["SIMULATION_E2E_PERSONA_MODE"] === "live";
 
 type CustomerTurn = {
   kind: "turn:human" | "turn:agent";
@@ -997,7 +998,6 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       simulator.stderr?.on("data", (piece: Buffer) => {
         simulatorSaid += piece.toString("utf8");
       });
-
       // The real grader, in this process and against these same two stores,
       // claiming the work each terminal landing mints. Started beside the
       // simulator rather than after it, so the pass to a grade is one
@@ -1498,20 +1498,41 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           role: "member",
           via: "session",
         };
-        await createPersona(auth, {
-          name: "Focused caller",
-          ...NEUTRAL_PERSON,
-          models: {
-            llm: { provider: "openai", model: "gpt-4o-mini" },
-            stt: { provider: "openai", model: "gpt-live-transcribe" },
-            tts: {
-              provider: "openai",
-              model: "tts-1",
-              voiceId: "alloy",
-              speed: 1,
+        const authoredPersona = await call("POST", "/v1/personas", {
+          key,
+          body: {
+            projectId,
+            name: "Focused caller",
+            ...NEUTRAL_PERSON,
+            controls: { speechSpeed: "normal" },
+            models: LIVE_PERSONA_MODE ? {
+              mode: "live",
+              llm: { provider: "openai", model: "gpt-4o-mini" },
+              live: { provider: "openai", model: "gpt-live-1", voiceId: "alloy" },
+            } : {
+              mode: "separate",
+              llm: { provider: "openai", model: "gpt-4o-mini" },
+              stt: { provider: "openai", model: "gpt-live-transcribe" },
+              tts: { provider: "openai", model: "tts-1", voiceId: "alloy" },
             },
           },
         });
+        expect(authoredPersona.status, JSON.stringify(authoredPersona.body)).toBe(201);
+        if (LIVE_PERSONA_MODE) {
+          expect(authoredPersona.body).toMatchObject({
+            settings: {
+              models: {
+                mode: "live",
+                llm: { provider: "openai", model: "gpt-4o-mini" },
+                live: { provider: "openai", model: "gpt-live-1", voiceId: "alloy" },
+              },
+            },
+          });
+        } else {
+          expect(authoredPersona.body).toMatchObject({
+            settings: { controls: { speechSpeed: "normal" }, models: { tts: { speed: 1 } } },
+          });
+        }
         const suite = await call("POST", "/v1/test-suites", {
           key,
           body: { name: "Packaged LiveKit appointment" },
@@ -1757,6 +1778,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           path.join(proofDirectory, `${caseId}.json`),
           JSON.stringify({
             caseId,
+            personaMode: LIVE_PERSONA_MODE ? "live" : "separate",
             commitSha: process.env["GITHUB_SHA"] ?? "local-working-tree",
             artifact,
             runtime,

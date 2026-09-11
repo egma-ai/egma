@@ -48,14 +48,17 @@ CARTESIA_API_KEY = credential("TEST_CARTESIA_API_KEY", "CARTESIA_API_KEY")
 # default, whose turns are one sentence each, and a live call conducted that
 # way proves the carrier and the wire while saying nothing about speech.
 MODEL_API_KEY = credential("TEST_MODEL_API_KEY", "OPENAI_API_KEY")
+GPT_LIVE = credential("TEST_GPT_LIVE") == "1"
 
 REQUIRED = {
     "TEST_LIVEKIT_URL": LIVEKIT_URL,
     "TEST_LIVEKIT_API_KEY": LIVEKIT_API_KEY,
     "TEST_LIVEKIT_API_SECRET": LIVEKIT_API_SECRET,
     "TEST_PHONE_NUMBER": PHONE_NUMBER,
-    "TEST_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
-    "TEST_CARTESIA_API_KEY": CARTESIA_API_KEY,
+    **({} if GPT_LIVE else {
+        "TEST_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
+        "TEST_CARTESIA_API_KEY": CARTESIA_API_KEY,
+    }),
     "TEST_SIP_TRUNK_ADDRESS": TRUNK_ADDRESS,
     "TEST_SIP_TRUNK_NUMBER": TRUNK_NUMBER,
     "TEST_SIP_TRUNK_USERNAME": TRUNK_USERNAME,
@@ -82,7 +85,7 @@ CORPUS_ROOT = _corpus_root()
 
 pytestmark = [
     pytest.mark.skipif(
-        bool(MISSING),
+        bool(MISSING) and not GPT_LIVE,
         reason=(
             "no live phone deployment: set "
             + ", ".join(MISSING)
@@ -90,7 +93,7 @@ pytestmark = [
         ),
     ),
     pytest.mark.skipif(
-        not CORPUS_ROOT,
+        not CORPUS_ROOT and not GPT_LIVE,
         reason=(
             "no sentence-tokenizer corpus on this machine: the image ships "
             "one, and speaking a turn of two sentences needs it — "
@@ -103,9 +106,11 @@ SECRETS = tuple(
     secret
     for secret in (
         LIVEKIT_API_SECRET,
+        PHONE_NUMBER,
         TRUNK_PASSWORD,
         DEEPGRAM_API_KEY,
         CARTESIA_API_KEY,
+        MODEL_API_KEY,
     )
     if secret
 )
@@ -152,6 +157,38 @@ def platform() -> dict:
 async def test_the_simulator_dials_a_real_number_and_holds_a_conversation(
     workbench, start_simulator
 ):
+    if GPT_LIVE and MISSING:
+        pytest.fail("TEST_GPT_LIVE requires " + ", ".join(MISSING))
+    models = (
+        {
+            "mode": "live",
+            "llm": {
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "adapter": "openai_chat_completions",
+                "key": MODEL_API_KEY,
+            },
+            "live": {
+                "provider": "openai",
+                "model": "gpt-live-1",
+                "adapter": "openai_live",
+                "voice_id": "marin",
+                "key": MODEL_API_KEY,
+            },
+        }
+        if GPT_LIVE
+        else direct_models(
+            modality="voice",
+            voice={
+                "provider": "cartesia",
+                "voice_id": "794f9389-aac1-45b6-b726-9d9369183238",
+                "speed": 1.0,
+            },
+            llm_key=MODEL_API_KEY,
+            stt_key=DEEPGRAM_API_KEY,
+            tts_key=CARTESIA_API_KEY,
+        )
+    )
     spec = phone_spec(
         "sim-phone-live-001",
         number=PHONE_NUMBER,
@@ -164,24 +201,27 @@ async def test_the_simulator_dials_a_real_number_and_holds_a_conversation(
         max_turns=MAX_TURNS,
         max_duration_seconds=MAX_DURATION_SECONDS,
         platform=platform(),
-        models=direct_models(
-            modality="voice",
-            voice={
-                "provider": "cartesia",
-                "voice_id": "794f9389-aac1-45b6-b726-9d9369183238",
-                "speed": 1.0,
-            },
-            llm_key=MODEL_API_KEY,
-            stt_key=DEEPGRAM_API_KEY,
-            tts_key=CARTESIA_API_KEY,
-        ),
+        models=models,
     )
+    if GPT_LIVE:
+        spec["contract_version"] = 7
+        spec["persona"].pop("language", None)
+        spec["persona"]["parameters"] = {
+            "language": "en-US",
+            "emotion": "neutral",
+            "accent": "voice_default",
+            "speech_speed": "normal",
+            "tts_speed": 1,
+            "speech_volume": 1,
+            "interruption_level": "none",
+            "execution_policy_version": 2,
+        }
     await workbench.offer(spec)
     simulator = start_simulator(
         workbench,
         extra_env=deployment(),
         direct_model=True,
-        direct_speech=True,
+        direct_speech=not GPT_LIVE,
     )
 
     records = await workbench.wait_for(
