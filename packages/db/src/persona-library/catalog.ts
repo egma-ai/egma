@@ -1,7 +1,7 @@
 import {
   RECOMMENDED_PERSONA_MODELS,
 } from "../models/selections.ts";
-import { personaParameterContract } from "./parameters.ts";
+import { legacyPersonaParameterContract, personaParameterContract } from "./parameters.ts";
 import type { GraderParameter } from "../grader-library/parameters.ts";
 import { EGMA_PROVIDED_PERSONAS } from "./ids.ts";
 
@@ -22,7 +22,7 @@ export type EgmaProvidedPersonaVersion = {
    */
   readonly identityName: string;
   readonly personality: string;
-  readonly language: string;
+  readonly language: string | null;
   readonly parameterContract: readonly GraderParameter[];
   readonly createdAt: Date;
 };
@@ -36,7 +36,7 @@ export type EgmaProvidedPersona = {
   readonly versions: readonly EgmaProvidedPersonaVersion[];
 };
 
-const EVERYDAY_CALLER_V1_CONTRACT = personaParameterContract({
+const EVERYDAY_CALLER_V1_CONTRACT = legacyPersonaParameterContract({
   ...RECOMMENDED_PERSONA_MODELS,
   llm: {
     provider: "openai",
@@ -50,7 +50,7 @@ const EVERYDAY_CALLER_V1_CONTRACT = personaParameterContract({
   },
 });
 
-const EVERYDAY_CALLER_V2_CONTRACT = personaParameterContract({
+const EVERYDAY_CALLER_V2_CONTRACT = legacyPersonaParameterContract({
   ...RECOMMENDED_PERSONA_MODELS,
   llm: {
     provider: "openai",
