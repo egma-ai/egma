@@ -15,6 +15,12 @@ export function quickTunnelUrl(output: string): string | undefined {
 }
 
 const PUBLIC_TUNNEL_READY_MILLISECONDS = 60_000;
+const QUICK_TUNNEL_ATTEMPTS = 3;
+type TunnelLaunch = (
+  command: string,
+  arguments_: string[],
+  options: { stdio: ["ignore", "pipe", "pipe"] },
+) => ChildProcess;
 
 type NamedTunnelSettings = {
   readonly id: string;
@@ -52,47 +58,95 @@ export function namedTunnelSettings(
   return { ...values, url: address.origin };
 }
 
-export async function startPublicTunnel(localUrl: string): Promise<{
+export async function startPublicTunnel(localUrl: string, dependencies: {
+  readonly env?: NodeJS.ProcessEnv;
+  readonly launch?: TunnelLaunch;
+  readonly now?: () => number;
+  readonly pause?: (milliseconds: number) => Promise<void>;
+} = {}): Promise<{
   process: ChildProcess;
   url: string;
   output: () => string;
 }> {
-  const named = namedTunnelSettings();
-  const child = spawn(
-    process.env["SIMULATION_E2E_CLOUDFLARED"] ?? "cloudflared",
-    named === undefined
-      ? ["tunnel", "--no-autoupdate", "--url", localUrl]
-      : [
-          "tunnel",
-          "--no-autoupdate",
-          "--url",
-          localUrl,
-          "run",
-          "--credentials-file",
-          named.credentialsFile,
-          named.id,
-        ],
-    { stdio: ["ignore", "pipe", "pipe"] },
+  const env = dependencies.env ?? process.env;
+  const named = namedTunnelSettings(env);
+  const launch = dependencies.launch ?? ((command, arguments_, options) =>
+    spawn(command, arguments_, options));
+  const pause = dependencies.pause ?? ((milliseconds) =>
+    new Promise((resolve) => setTimeout(resolve, milliseconds)));
+  const now = dependencies.now ?? Date.now;
+  const deadline = now() + PUBLIC_TUNNEL_READY_MILLISECONDS;
+  const failed: string[] = [];
+  const timedOut = (said = "") => new Error(
+    `cloudflared did not publish a URL within 60s:\n${[...failed, said].join("\n")}`,
   );
-  let said = "";
-  child.stdout?.on("data", (piece: Buffer) => { said += piece.toString("utf8"); });
-  child.stderr?.on("data", (piece: Buffer) => { said += piece.toString("utf8"); });
-  const deadline = Date.now() + PUBLIC_TUNNEL_READY_MILLISECONDS;
-  if (named !== undefined) {
-    return { process: child, url: named.url, output: () => said };
-  }
-  for (;;) {
-    const found = quickTunnelUrl(said);
-    if (found !== undefined) return { process: child, url: found, output: () => said };
-    if (child.exitCode !== null) {
-      throw new Error(`cloudflared exited with ${String(child.exitCode)}:\n${said}`);
+  const pauseBeforeDeadline = async (milliseconds: number, said = "") => {
+    const remaining = deadline - now();
+    if (remaining <= 0) throw timedOut(said);
+    await pause(Math.min(milliseconds, remaining));
+  };
+  const attempts = named === undefined ? QUICK_TUNNEL_ATTEMPTS : 1;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    if (now() >= deadline) throw timedOut();
+    const child = launch(
+      env["SIMULATION_E2E_CLOUDFLARED"] ?? "cloudflared",
+      named === undefined
+        ? ["tunnel", "--no-autoupdate", "--url", localUrl]
+        : [
+            "tunnel",
+            "--no-autoupdate",
+            "--url",
+            localUrl,
+            "run",
+            "--credentials-file",
+            named.credentialsFile,
+            named.id,
+          ],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let said = "";
+    child.stdout?.on("data", (piece: Buffer) => { said += piece.toString("utf8"); });
+    child.stderr?.on("data", (piece: Buffer) => { said += piece.toString("utf8"); });
+    // The close event follows process exit and completion of its stdio streams.
+    const closed = child.exitCode !== null &&
+      (child.stdout === null || child.stdout.readableEnded) &&
+      (child.stderr === null || child.stderr.readableEnded)
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => child.once("close", () => resolve()));
+    if (named !== undefined) {
+      return { process: child, url: named.url, output: () => said };
     }
-    if (Date.now() > deadline) {
-      child.kill("SIGTERM");
-      throw new Error(`cloudflared did not publish a URL within 60s:\n${said}`);
+    for (;;) {
+      const found = quickTunnelUrl(said);
+      if (found !== undefined) {
+        return {
+          process: child,
+          url: found,
+          output: () => [...failed, said].join("\n"),
+        };
+      }
+      if (child.exitCode !== null) {
+        await closed;
+        failed.push(
+          `quick tunnel attempt ${attempt} exited with ${String(child.exitCode)}:\n${said}`,
+        );
+        await stopChild(child);
+        if (attempt === attempts) {
+          throw new Error(
+            `cloudflared exited before publishing a URL after ${attempts} attempts:\n${failed.join("\n")}`,
+          );
+        }
+        await pauseBeforeDeadline(250 * 2 ** (attempt - 1));
+        break;
+      }
+      if (now() >= deadline) {
+        child.kill("SIGTERM");
+        throw timedOut(said);
+      }
+      await pauseBeforeDeadline(100, said);
     }
-    await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  throw new Error("cloudflared did not start");
 }
 
 /** Wait until the public tunnel reaches the fixture server. */
