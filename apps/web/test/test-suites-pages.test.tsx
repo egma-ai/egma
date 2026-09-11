@@ -1947,7 +1947,7 @@ describe("the suite-first Tests route", () => {
     const written = screen.getByText("Books service").closest("tr");
     if (written === null) throw new Error("the test's row is not on screen");
     fireEvent.click(within(written).getByText("Impatient Rita"));
-    fireEvent.click(within(written).getByRole("button", { name: "Edit personas" }));
+    fireEvent.click(within(written).getByRole("button", { name: "+ Add a persona" }));
 
     await waitFor(() => {
       expect(screen.getAllByRole("dialog", { name: "Choose personas" })).toHaveLength(1);
@@ -1989,7 +1989,7 @@ describe("the suite-first Tests route", () => {
     const written = screen.getByText("Books service").closest("tr");
     if (written === null) throw new Error("the test's row is not on screen");
     fireEvent.click(within(written).getByText("Impatient Rita"));
-    fireEvent.click(within(written).getByRole("button", { name: "Edit personas" }));
+    fireEvent.click(within(written).getByRole("button", { name: "+ Add a persona" }));
     fireEvent.click(await screen.findByRole("option", { name: "Calm Ben" }));
     expect(sent.some((request) => request.method === "PATCH")).toBe(false);
 
@@ -2040,6 +2040,55 @@ describe("the suite-first Tests route", () => {
     expect(entryTrigger.getAttribute("aria-expanded")).toBe("true");
   });
 
+  it("keeps the chips quiet at rest, and grows a cross on each when the cell wakes", async () => {
+    const BEN = { id: "prs_2", name: "Calm Ben", archivedAt: null };
+    gridAnswers({ tests: [testBody({ personas: [PERSONA, BEN] })] });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    const written = screen.getByText("Books service").closest("tr");
+    if (written === null) throw new Error("the test's row is not on screen");
+
+    // A row nobody is editing offers nothing: the chips say who calls, in the
+    // order the test names them, and carry no control at all.
+    const chips = within(written).getAllByRole("listitem");
+    expect(chips.map((chip) => chip.textContent)).toEqual([
+      "Impatient Rita",
+      "Calm Ben",
+    ]);
+    expect(
+      within(written).queryAllByRole("button", { name: /^Remove / }),
+    ).toHaveLength(0);
+    // Nothing on a stored row arrives, so no chip animates on a page load.
+    // The slot is what the theme keys the arrival and the press feedback to.
+    expect(chips.map((chip) => chip.getAttribute("data-slot"))).toEqual([
+      "persona-chip",
+      "persona-chip",
+    ]);
+    expect(chips.map((chip) => chip.hasAttribute("data-arrived"))).toEqual([
+      false,
+      false,
+    ]);
+
+    fireEvent.click(within(written).getByText("Impatient Rita"));
+
+    const crosses = within(written).getAllByRole("button", { name: /^Remove / });
+    expect(crosses.map((cross) => cross.getAttribute("aria-label"))).toEqual([
+      "Remove Impatient Rita",
+      "Remove Calm Ben",
+    ]);
+    expect(crosses.map((cross) => cross.getAttribute("data-slot"))).toEqual([
+      "persona-chip-remove",
+      "persona-chip-remove",
+    ]);
+    // The very same chips: the list is drawn in one place in both states, so
+    // waking a cell grows the crosses rather than drawing the chips again.
+    const awake = within(written).getAllByRole("listitem");
+    expect(awake[0]).toBe(chips[0]);
+    expect(awake[1]).toBe(chips[1]);
+  });
+
   it("takes a persona off a woken cell and commits the rest in their order", async () => {
     const BEN = { id: "prs_2", name: "Calm Ben", archivedAt: null };
     const CHRIS = { id: "prs_3", name: "Careful Chris", archivedAt: null };
@@ -2060,33 +2109,22 @@ describe("the suite-first Tests route", () => {
     expect(await screen.findByText("Books service")).toBeTruthy();
     const written = screen.getByText("Books service").closest("tr");
     if (written === null) throw new Error("the test's row is not on screen");
-    fireEvent.click(
-      within(written).getByText("Impatient Rita, Calm Ben, Careful Chris"),
-    );
+    fireEvent.click(within(written).getByText("Impatient Rita"));
 
-    // The way in says what the panel does. A cell that already names somebody
-    // is edited, not only added to.
-    expect(
-      within(written).queryByRole("button", { name: "+ Add a persona" }),
-    ).toBeNull();
-    fireEvent.click(within(written).getByRole("button", { name: "Edit personas" }));
-
-    // The panel opens on who is on the test, in the order the test names them.
-    const panel = await screen.findByRole("dialog", { name: "Choose personas" });
-    expect(
-      within(panel)
-        .getAllByRole("listitem")
-        .map((row) => row.textContent),
-    ).toEqual(["Impatient RitaRemove", "Calm BenRemove", "Careful ChrisRemove"]);
-
-    fireEvent.click(within(panel).getByRole("button", { name: "Remove Calm Ben" }));
+    fireEvent.click(within(written).getByRole("button", { name: "Remove Calm Ben" }));
 
     // Taking somebody off a test is an edit, not a destruction: nothing is
-    // asked, and nothing is sent until the panel shuts, exactly as unticking.
-    expect(screen.queryAllByRole("dialog")).toHaveLength(1);
+    // asked, and nothing is sent until the cell is left, exactly as unticking.
+    expect(screen.queryAllByRole("dialog")).toHaveLength(0);
     expect(sent.some((request) => request.method === "PATCH")).toBe(false);
+    expect(
+      within(written)
+        .getAllByRole("listitem")
+        .map((chip) => chip.textContent),
+    ).toEqual(["Impatient Rita", "Careful Chris"]);
 
-    fireEvent.click(within(panel).getByRole("button", { name: "Done" }));
+    // The page's own background takes no focus, so leaving is the press itself.
+    fireEvent.pointerDown(document.body);
 
     await waitFor(() => {
       expect(sent.filter((request) => request.method === "PATCH")).toEqual([
@@ -2099,6 +2137,118 @@ describe("the suite-first Tests route", () => {
     });
   });
 
+  it("keeps the picker open when a cross is pressed beside it, and saves both on Done", async () => {
+    const BEN = { id: "prs_2", name: "Calm Ben", archivedAt: null };
+    const CHRIS = { id: "prs_3", name: "Careful Chris", archivedAt: null };
+    routed.pathname = "/projects/prj_1/tests/suites/ste_1";
+    routed.params = { projectId: "prj_1", suiteId: "ste_1" };
+    answers({
+      "/api/me": { status: 200, body: meWith("admin") },
+      "/v1/test-suites/ste_1": { status: 200, body: suiteBody() },
+      "/v1/tests": {
+        status: 200,
+        body: { tests: [testBody({ personas: [PERSONA, BEN] })], nextPageToken: null },
+      },
+      "/v1/tests/tst_1": {
+        status: 200,
+        body: testBody({ personas: [PERSONA, CHRIS], version: 2, versionId: "tstv_2" }),
+      },
+      "/v1/personas": {
+        status: 200,
+        body: { personas: [PERSONA, BEN, CHRIS], nextPageToken: null },
+      },
+    });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    const written = screen.getByText("Books service").closest("tr");
+    if (written === null) throw new Error("the test's row is not on screen");
+    fireEvent.click(within(written).getByText("Impatient Rita"));
+    fireEvent.click(within(written).getByRole("button", { name: "+ Add a persona" }));
+    const panel = await screen.findByRole("dialog", { name: "Choose personas" });
+    fireEvent.click(await within(panel).findByRole("option", { name: "Careful Chris" }));
+
+    /*
+     * A real press on a cross is a pointerdown before the click, and pointerdown
+     * is what the open panel would dismiss on. It must not: dismissal commits,
+     * an unchanged draft rests the cell, and the click would then land on a
+     * cross that no longer exists.
+     */
+    const cross = within(written).getByRole("button", { name: "Remove Calm Ben" });
+    fireEvent.pointerDown(cross);
+    fireEvent.mouseDown(cross);
+    fireEvent.click(cross);
+
+    // The panel stands, the chip is gone, its row is unticked, nothing is sent.
+    expect(screen.getAllByRole("dialog", { name: "Choose personas" })).toHaveLength(1);
+    expect(
+      within(written)
+        .getAllByRole("listitem")
+        .map((chip) => chip.textContent),
+    ).toEqual(["Impatient Rita", "Careful Chris"]);
+    expect(
+      within(panel).getByRole("option", { name: "Calm Ben" }).getAttribute("aria-checked"),
+    ).toBe("false");
+    expect(sent.some((request) => request.method === "PATCH")).toBe(false);
+
+    // Done commits the tick and the removal together, as one save.
+    fireEvent.click(within(panel).getByRole("button", { name: "Done" }));
+    await waitFor(() => {
+      expect(sent.filter((request) => request.method === "PATCH")).toEqual([
+        {
+          path: "/v1/tests/tst_1",
+          method: "PATCH",
+          body: { personas: ["prs_1", "prs_3"], expectedVersionId: "tstv_1" },
+        },
+      ]);
+    });
+  });
+
+  it("holds the caret in the cell when a cross takes the chip it stood on", async () => {
+    const BEN = { id: "prs_2", name: "Calm Ben", archivedAt: null };
+    const CHRIS = { id: "prs_3", name: "Careful Chris", archivedAt: null };
+    gridAnswers({ tests: [testBody({ personas: [PERSONA, BEN, CHRIS] })] });
+
+    render(<TestSuitePage />);
+
+    expect(await screen.findByText("Books service")).toBeTruthy();
+    const written = screen.getByText("Books service").closest("tr");
+    if (written === null) throw new Error("the test's row is not on screen");
+    fireEvent.click(within(written).getByText("Impatient Rita"));
+
+    /*
+     * The caret goes to the chip that took the removed one's place. Dropped to
+     * the body it would blur the cell, and a blur commits — so a keyboard
+     * removal would save itself the moment it happened.
+     */
+    const ben = within(written).getByRole("button", { name: "Remove Calm Ben" });
+    ben.focus();
+    fireEvent.click(ben);
+    expect(document.activeElement).toBe(
+      within(written).getByRole("button", { name: "Remove Careful Chris" }),
+    );
+    expect(document.querySelector("[data-woken-cell]")).not.toBeNull();
+
+    // One persona has to stay, so the chip left behind carries no cross. The
+    // add line takes the caret instead, and it is still inside the cell.
+    fireEvent.click(
+      within(written).getByRole("button", { name: "Remove Careful Chris" }),
+    );
+    const add = within(written).getByRole("button", { name: "+ Add a persona" });
+    expect(document.activeElement).toBe(add);
+    expect(sent.some((request) => request.method === "PATCH")).toBe(false);
+
+    // Escape reverts the cell, chips and all: nothing was sent, so the test
+    // still names everybody it named.
+    fireEvent.keyDown(add, { key: "Escape" });
+    expect(
+      within(written)
+        .getAllByRole("listitem")
+        .map((chip) => chip.textContent),
+    ).toEqual(["Impatient Rita", "Calm Ben", "Careful Chris"]);
+  });
+
   it("keeps the one persona a test has left, and says why on the row", async () => {
     gridAnswers();
 
@@ -2108,26 +2258,56 @@ describe("the suite-first Tests route", () => {
     const written = screen.getByText("Books service").closest("tr");
     if (written === null) throw new Error("the test's row is not on screen");
     fireEvent.click(within(written).getByText("Impatient Rita"));
-    fireEvent.click(within(written).getByRole("button", { name: "Edit personas" }));
 
+    // The last persona standing carries no cross: a test says who calls.
+    expect(
+      within(written).queryByRole("button", { name: "Remove Impatient Rita" }),
+    ).toBeNull();
+
+    // Unticking that persona in the picker is the way somebody still tries, so
+    // that is where the refusal is answered, on the row and out loud.
+    fireEvent.click(within(written).getByRole("button", { name: "+ Add a persona" }));
     const panel = await screen.findByRole("dialog", { name: "Choose personas" });
-    const remove = within(panel).getByRole("button", {
-      name: "Remove Impatient Rita",
-    }) as HTMLButtonElement;
-    expect(remove.disabled).toBe(true);
-
-    // The reason is drawn on the row and named by the button, so a keyboard
-    // and a screen reader reach it rather than only a resting pointer.
-    const why = within(panel).getByText("A test needs at least one persona");
-    expect(remove.getAttribute("aria-describedby")).toBe(why.id);
-
-    fireEvent.click(remove);
+    fireEvent.click(
+      await within(panel).findByRole("option", { name: "Impatient Rita" }),
+    );
     fireEvent.click(within(panel).getByRole("button", { name: "Done" }));
 
-    await waitFor(() => {
-      expect(screen.queryAllByRole("dialog", { name: "Choose personas" })).toHaveLength(0);
-    });
+    expect((await within(written).findByRole("alert")).textContent).toBe(
+      "A test needs at least one persona, because a test says who calls. The stored personas stand.",
+    );
     expect(sent.some((request) => request.method === "PATCH")).toBe(false);
+  });
+
+  it("lets the entry row take off every persona it named", async () => {
+    gridAnswers({ tests: [] });
+
+    render(<TestSuitePage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "+ Write a test" }));
+    fireEvent.click(screen.getByRole("button", { name: "+ Add a persona" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Impatient Rita" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    // The row is not a test yet, so nothing has to stay: its one chip keeps
+    // its cross, and the caret lands on the way to name somebody again.
+    const cross = screen.getByRole("button", { name: "Remove Impatient Rita" });
+    // A persona somebody just chose is marked as having arrived, which is what
+    // the theme animates. A stored chip carries no such mark.
+    expect(cross.closest("li")?.hasAttribute("data-arrived")).toBe(true);
+    cross.focus();
+    fireEvent.click(cross);
+    expect(screen.queryByRole("button", { name: "Remove Impatient Rita" })).toBeNull();
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "+ Add a persona" }),
+    );
+
+    // The row's own Save is what says a test needs one persona.
+    const save = screen.getByRole("button", { name: "Save test" });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      document.getElementById(save.getAttribute("aria-describedby") ?? "")?.textContent,
+    ).toContain("one persona");
   });
 
   it("shows a deleted persona a test still names, and takes it off", async () => {
@@ -2149,23 +2329,23 @@ describe("the suite-first Tests route", () => {
     expect(await screen.findByText("Books service")).toBeTruthy();
     const written = screen.getByText("Books service").closest("tr");
     if (written === null) throw new Error("the test's row is not on screen");
-    fireEvent.click(within(written).getByText("Impatient Rita, Retired Rae"));
-    fireEvent.click(within(written).getByRole("button", { name: "Edit personas" }));
+    fireEvent.click(within(written).getByText("Impatient Rita"));
 
+    // The chip says the persona is gone, which is what makes its cross make
+    // sense: the add list holds the project's available personas and nothing
+    // else, so the chip is the only place this one was ever reachable.
+    expect(within(written).getByText("(deleted)")).toBeTruthy();
+    fireEvent.click(within(written).getByRole("button", { name: "Remove Retired Rae" }));
+
+    fireEvent.click(within(written).getByRole("button", { name: "+ Add a persona" }));
     const panel = await screen.findByRole("dialog", { name: "Choose personas" });
-
-    // The add list holds the project's available personas and nothing else, so
-    // this one is reachable nowhere but the section that names the test's own.
     expect(await within(panel).findByRole("option", { name: "Impatient Rita" }))
       .toBeTruthy();
     expect(within(panel).queryByRole("option", { name: "Retired Rae" })).toBeNull();
-    expect(within(panel).getByText("(deleted)")).toBeTruthy();
-
-    fireEvent.click(within(panel).getByRole("button", { name: "Remove Retired Rae" }));
-    fireEvent.click(within(panel).getByRole("button", { name: "Done" }));
 
     // The deleted persona is what refuses every later edit of this test, and
-    // this is the one way it comes off.
+    // the cross is the one way it comes off.
+    fireEvent.click(within(panel).getByRole("button", { name: "Done" }));
     await waitFor(() => {
       expect(sent.filter((request) => request.method === "PATCH")).toEqual([
         {
