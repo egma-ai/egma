@@ -82,29 +82,34 @@ export async function runPersonaActionCommand(options: FolderCommandOptions, act
   const context = await projectContext(options);
   if (context.kind === "stop") return context.code;
   const client = platformClient(context.ready.signedIn, options.fetchImpl);
+  const requestOptions = { client, ...(options.signal === undefined ? {} : { signal: options.signal }) };
   const id = args.positionals[0] ?? "";
   try {
     let saved: ReturnType<typeof effectiveSettings> | undefined;
     if (action === "use" || action === "update") {
-      const read = await getPersona({ personaId: id, projectId: context.projectId }, { client });
+      const read = await getPersona({ personaId: id, projectId: context.projectId }, requestOptions);
       const response = platformResponse(read, context.ready.signedIn.url);
       if (!response.ok || read.data === undefined) throw new PlatformRefusedError(response.status, platformRefusalMessage(read.error, response.status));
       saved = effectiveSettings(read.data);
     }
     const common = { projectId: context.projectId, models: models(args, saved?.models), controls: controls(args, saved?.controls), ...(args.values["--voice-access-proof"] === undefined ? {} : { voiceAccessProof: args.values["--voice-access-proof"] }) };
     const settingsChanged = SETTING_FLAGS.some((flag) => args.values[flag] !== undefined);
-    const answer = action === "settings" ? await getPersona({ personaId: id, projectId: context.projectId }, { client })
-      : action === "capabilities" ? await getPersonaCapabilities({ projectId: context.projectId, ttsProvider: common.models.tts.provider, ttsModel: common.models.tts.model, sttProvider: common.models.stt.provider, sttModel: common.models.stt.model, language: common.controls.language, ...(common.models.tts.voiceId === "" ? {} : { voiceId: common.models.tts.voiceId }) }, { client })
-      : action === "use" ? await usePersona({ personaId: id, ...common } as Parameters<typeof usePersona>[0], { client })
-      : action === "create" ? await createPersona({ ...common, name: args.values["--name"] ?? "", identityName: args.values["--identity-name"] ?? "", personality: args.values["--personality"] ?? "", ...(args.values["--description"] === undefined ? {} : { description: args.values["--description"] }) } as Parameters<typeof createPersona>[0], { client })
-      : action === "clone" ? await forkPersona({ personaId: id, projectId: context.projectId }, { client })
-      : action === "update" ? await updatePersona({ personaId: id, ...(settingsChanged || args.values["--voice-access-proof"] !== undefined ? common : { projectId: context.projectId }), ...(args.values["--name"] === undefined ? {} : { name: args.values["--name"] }), ...(args.values["--description"] === undefined ? {} : { description: args.values["--description"] }), ...(args.values["--identity-name"] === undefined ? {} : { identityName: args.values["--identity-name"] }), ...(args.values["--personality"] === undefined ? {} : { personality: args.values["--personality"] }), ...(args.values["--expected-version"] === undefined ? {} : { expectedVersionId: args.values["--expected-version"] }) } as Parameters<typeof updatePersona>[0], { client })
-      : await previewPersona(common as Parameters<typeof previewPersona>[0], { client });
+    const answer = action === "settings" ? await getPersona({ personaId: id, projectId: context.projectId }, requestOptions)
+      : action === "capabilities" ? await getPersonaCapabilities({ projectId: context.projectId, ttsProvider: common.models.tts.provider, ttsModel: common.models.tts.model, sttProvider: common.models.stt.provider, sttModel: common.models.stt.model, language: common.controls.language, ...(common.models.tts.voiceId === "" ? {} : { voiceId: common.models.tts.voiceId }) }, requestOptions)
+      : action === "use" ? await usePersona({ personaId: id, ...common } as Parameters<typeof usePersona>[0], requestOptions)
+      : action === "create" ? await createPersona({ ...common, name: args.values["--name"] ?? "", identityName: args.values["--identity-name"] ?? "", personality: args.values["--personality"] ?? "", ...(args.values["--description"] === undefined ? {} : { description: args.values["--description"] }) } as Parameters<typeof createPersona>[0], requestOptions)
+      : action === "clone" ? await forkPersona({ personaId: id, projectId: context.projectId }, requestOptions)
+      : action === "update" ? await updatePersona({ personaId: id, ...(settingsChanged || args.values["--voice-access-proof"] !== undefined ? common : { projectId: context.projectId }), ...(args.values["--name"] === undefined ? {} : { name: args.values["--name"] }), ...(args.values["--description"] === undefined ? {} : { description: args.values["--description"] }), ...(args.values["--identity-name"] === undefined ? {} : { identityName: args.values["--identity-name"] }), ...(args.values["--personality"] === undefined ? {} : { personality: args.values["--personality"] }), ...(args.values["--expected-version"] === undefined ? {} : { expectedVersionId: args.values["--expected-version"] }) } as Parameters<typeof updatePersona>[0], requestOptions)
+      : await previewPersona(common as Parameters<typeof previewPersona>[0], requestOptions);
     const response = platformResponse(answer, context.ready.signedIn.url);
     if (!response.ok || answer.data === undefined) throw new PlatformRefusedError(response.status, platformRefusalMessage(answer.error, response.status));
     options.out(JSON.stringify(answer.data, null, 2));
     return FOLDER_EXIT.done;
   } catch (cause) {
+    if (options.signal?.aborted === true) {
+      options.fail("The command was interrupted before it finished.");
+      return FOLDER_EXIT.interrupted;
+    }
     if (cause instanceof PlatformUnreachableError || cause instanceof PlatformRefusedError) { options.fail(cause.message); return FOLDER_EXIT.unreachable; }
     throw cause;
   }

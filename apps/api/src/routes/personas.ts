@@ -474,6 +474,8 @@ export async function personaRoutes(
   registerPlatformOperation(app, personaOperations.previewPersona, async (request, reply) => {
     const { auth } = requesterOf(request);
     const body = (request.body ?? {}) as Body;
+    const refused = mayAuthor(reply, auth, "preview personas");
+    if (refused !== undefined) return refused;
     const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
     const models = validPersonaModels(body.models);

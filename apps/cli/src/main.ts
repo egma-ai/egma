@@ -759,7 +759,9 @@ async function dispatch(
     case "persona clone":
     case "persona update":
     case "persona preview":
-      return runPersonaActionCommand(options, invocation.command.slice("persona ".length) as "settings" | "capabilities" | "use" | "create" | "clone" | "update" | "preview", args);
+      return withCommandSignal(async (signal) =>
+        runPersonaActionCommand({ ...options, signal }, invocation.command.slice("persona ".length) as "settings" | "capabilities" | "use" | "create" | "clone" | "update" | "preview", args),
+      );
     case "suite create":
       return withCommandSignal(async (signal) =>
         runSuiteCreateCommand({

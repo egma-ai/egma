@@ -1247,6 +1247,16 @@ describe("what a viewer is refused", () => {
         "fork personas",
       ],
       [
+        "POST",
+        "/v1/persona-preview",
+        {
+          projectId: ada.projectId,
+          models: RECOMMENDED_PERSONA_MODELS,
+          controls: CONTROLS,
+        },
+        "preview personas",
+      ],
+      [
         "DELETE",
         `/v1/personas/${made.id}?projectId=${ada.projectId}`,
         undefined,
