@@ -5410,6 +5410,7 @@ it(
       await walk.selectOption("#persona-tts", "openai::tts-1-hd");
       await walk.fill("#persona-tts-speed", "0.85");
       await walk.selectOption("#persona-tts-voice", "alloy");
+      await walk.selectOption("#persona-interruption-level", "frequent");
       await walk.selectOption("#persona-background-sound", "office-v1");
       await walk.fill("#persona-background-volume", "-18");
       await walk.getByRole("button", { name: "Use persona" }).click();
@@ -5430,6 +5431,7 @@ it(
       expect(await walk.inputValue("#persona-tts-voice")).toBe(
         "alloy",
       );
+      expect(await walk.inputValue("#persona-interruption-level")).toBe("frequent");
       expect(await walk.inputValue("#persona-background-sound")).toBe("office-v1");
       expect(await walk.inputValue("#persona-background-volume")).toBe("-18");
       await walk.locator("#persona-background-sound").scrollIntoViewIfNeeded();
@@ -5490,7 +5492,7 @@ it(
       await walk.keyboard.press("Tab");
       expect(
         await walk
-          .getByRole("button", { name: "Cancel", exact: true })
+          .locator("#persona-existing-voice-id")
           .evaluate(element => element === element.ownerDocument.activeElement),
       ).toBe(true);
       expect(

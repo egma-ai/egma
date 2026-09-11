@@ -40,8 +40,8 @@ Start with **Everyday Caller [Male]**, or create a custom persona when you need 
     current project settings as JSON.
 
     Selecting a persona for the first time saves its model, voice, language,
-    accent, emotion, speech rate, speech volume, background sound, and background
-    level for your project. All tests
+    accent, emotion, interruption level, speech rate, speech volume, background
+    sound, and background level for your project. All tests
     in that project share those settings. Test files keep only the persona
     selection; `egma pull` and `egma push` do not copy settings into the file.
   </Tab>
@@ -60,9 +60,10 @@ Start with **Everyday Caller [Male]**, or create a custom persona when you need 
        `Answers briefly, asks for the earliest appointment, and asks the agent to
        get to the point if it repeats a question. Remains polite.`
     4. Choose speech-to-text, text-to-speech, and language models. Then choose
-       the language, voice, accent, emotion, speech rate, speech volume, and
-       background sound that
-       the selected providers support.
+       the language, voice, accent, emotion, interruption level, speech rate,
+       speech volume, and background sound that the selected providers support.
+       Preview is a short voice sample. Test interruption timing in a full
+       simulation.
     5. Select **Create persona**, run `egma persona list`, and add the persona to
        your test.
 

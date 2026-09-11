@@ -193,7 +193,10 @@ export function CreatePersonaSheet({
   const [models, setModels] = useState<ModelsDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [settingsValid, setSettingsValid] = useState(true);
+  const [previewAvailable, setPreviewAvailable] = useState(false);
+  const previewAction = useRef<(() => void) | null>(null);
   const [voiceAccessProof, setVoiceAccessProof] = useState<string | null>(null);
+  const [voiceAccessProofReset, setVoiceAccessProofReset] = useState(0);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
 
   const choices = form?.status === "ready" ? form.value : null;
@@ -290,6 +293,10 @@ export function CreatePersonaSheet({
       // Everything typed stays where it is, and the refusal's own sentence
       // says what to do next.
       setRefusal(written.refusal);
+      if (written.refusal.message.includes("Preview this existing OpenAI voice")) {
+        setVoiceAccessProof(null);
+        setVoiceAccessProofReset((value) => value + 1);
+      }
       return;
     }
     onCreated(written.value);
@@ -352,14 +359,13 @@ export function CreatePersonaSheet({
             projectId={projectId}
             onValidityChange={setSettingsValid}
             onVoiceAccessProof={setVoiceAccessProof}
+            voiceAccessProofReset={voiceAccessProofReset}
+            onPreviewAvailabilityChange={setPreviewAvailable}
+            onPreviewActionChange={(action) => { previewAction.current = action; }}
           />
         </SheetBody>
         <SheetFooter
-          secondary={
-            <Button type="button" size="lg" variant="secondary" disabled={saving} onClick={leave}>
-              Cancel
-            </Button>
-          }
+          secondary={<div className="flex gap-2"><Button type="button" size="lg" variant="secondary" disabled={saving} onClick={leave}>Cancel</Button><Button type="button" size="lg" variant="secondary" disabled={!previewAvailable} onClick={() => previewAction.current?.()}>Preview voice</Button></div>}
         >
           <Button
             type="submit"
@@ -529,7 +535,10 @@ export function PersonaSheet({
   const [editing, setEditing] = useState(startEditing);
   const [saving, setSaving] = useState(false);
   const [settingsValid, setSettingsValid] = useState(true);
+  const [previewAvailable, setPreviewAvailable] = useState(false);
+  const previewAction = useRef<(() => void) | null>(null);
   const [voiceAccessProof, setVoiceAccessProof] = useState<string | null>(null);
+  const [voiceAccessProofReset, setVoiceAccessProofReset] = useState(0);
   const [saved, setSaved] = useState(false);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
 
@@ -656,6 +665,10 @@ export function PersonaSheet({
     }
     if (written.status !== "ready") {
       setRefusal(written.refusal);
+      if (written.refusal.message.includes("Preview this existing OpenAI voice")) {
+        setVoiceAccessProof(null);
+        setVoiceAccessProofReset((value) => value + 1);
+      }
       if (written.refusal.error === "version_conflict") {
         refresh();
       }
@@ -811,6 +824,9 @@ export function PersonaSheet({
         projectId={projectId}
         onValidityChange={setSettingsValid}
         onVoiceAccessProof={setVoiceAccessProof}
+        voiceAccessProofReset={voiceAccessProofReset}
+        onPreviewAvailabilityChange={setPreviewAvailable}
+        onPreviewActionChange={(action) => { previewAction.current = action; }}
       />
     );
   }
@@ -849,17 +865,7 @@ export function PersonaSheet({
     if (settingsReady) {
       return (
         <SheetFooter
-          secondary={
-            <Button
-              type="button"
-              size="lg"
-              variant="secondary"
-              disabled={saving}
-              onClick={editing ? leaveEditor : leave}
-            >
-              Cancel
-            </Button>
-          }
+          secondary={<div className="flex gap-2"><Button type="button" size="lg" variant="secondary" disabled={saving} onClick={editing ? leaveEditor : leave}>Cancel</Button><Button type="button" size="lg" variant="secondary" disabled={!previewAvailable} onClick={() => previewAction.current?.()}>Preview voice</Button></div>}
         >
           <Button
             type="submit"

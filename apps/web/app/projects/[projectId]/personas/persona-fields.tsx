@@ -41,6 +41,24 @@ function Note({ children }: { readonly children: ReactNode }) {
   );
 }
 
+function languageLabel(value: string): string {
+  try {
+    const locale = new Intl.Locale(value);
+    const languages = new Intl.DisplayNames(["en"], { type: "language" });
+    const regions = new Intl.DisplayNames(["en"], { type: "region" });
+    const language = languages.of(locale.language) ?? locale.language;
+    return locale.region === undefined ? language : `${language} (${regions.of(locale.region) ?? locale.region})`;
+  } catch {
+    return value;
+  }
+}
+
+function accentLabel(value: string): string {
+  return value === "voice_default"
+    ? "Voice default"
+    : value.replaceAll("_", " ").replace(/^./u, (letter) => letter.toUpperCase());
+}
+
 /**
  * The team's word for this persona, and the line people pick them by.
  *
@@ -230,6 +248,9 @@ export function ModelFields({
   projectId,
   onValidityChange,
   onVoiceAccessProof,
+  voiceAccessProofReset = 0,
+  onPreviewAvailabilityChange,
+  onPreviewActionChange,
 }: {
   readonly prefix: FieldPrefix;
   readonly draft: ModelsDraft;
@@ -239,6 +260,9 @@ export function ModelFields({
   readonly projectId: string;
   readonly onValidityChange?: (valid: boolean) => void;
   readonly onVoiceAccessProof?: (proof: string | null) => void;
+  readonly voiceAccessProofReset?: number;
+  readonly onPreviewAvailabilityChange?: (available: boolean) => void;
+  readonly onPreviewActionChange?: (action: (() => void) | null) => void;
 }) {
   const [capabilities, setCapabilities] = useState<GetPersonaCapabilitiesResponse | null>(null);
   const [capabilityError, setCapabilityError] = useState<string | null>(null);
@@ -251,13 +275,26 @@ export function ModelFields({
   const [voiceAccessProof, setVoiceAccessProof] = useState<string | null>(null);
   const request = useRef(0);
   const previewRequest = useRef<AbortController | null>(null);
+  const previewUrlRef = useRef<string | null>(null);
+  const proofExpiry = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftKey = JSON.stringify(draft);
+
+  useEffect(() => {
+    if (voiceAccessProofReset === 0) return;
+    setVoiceAccessProof(null);
+    if (proofExpiry.current !== null) clearTimeout(proofExpiry.current);
+  }, [voiceAccessProofReset]);
 
   function change(next: ModelsDraft): void {
     previewRequest.current?.abort();
     setPreviewing(false);
-    setVoiceAccessProof(null);
-    onVoiceAccessProof?.(null);
+    const proofBindingChanged = next.ttsProvider !== draft.ttsProvider
+      || next.ttsModel !== draft.ttsModel
+      || next.voiceId !== draft.voiceId;
+    if (proofBindingChanged) {
+      setVoiceAccessProof(null);
+      onVoiceAccessProof?.(null);
+    }
     if (next.ttsProvider !== draft.ttsProvider || next.ttsModel !== draft.ttsModel || next.sttProvider !== draft.sttProvider || next.sttModel !== draft.sttModel || next.language !== draft.language || next.voiceId !== draft.voiceId) {
       setCapabilities(null);
     }
@@ -335,7 +372,7 @@ export function ModelFields({
     previewRequest.current?.abort();
     previewRequest.current = controller;
     setPreviewing(true); setPreviewError(null);
-    const answer = await platformAnswer(previewPersona({ projectId, models: modelsFrom(draft), controls: controlsFrom(draft) } as Parameters<typeof previewPersona>[0], { client: platformClient }));
+    const answer = await platformAnswer(previewPersona({ projectId, models: modelsFrom(draft), controls: controlsFrom(draft) } as Parameters<typeof previewPersona>[0], { client: platformClient, signal: controller.signal }));
     if (controller.signal.aborted) return;
     setPreviewing(false);
     if (answer.status !== "ready") { if (answer.status !== "signed-out") setPreviewError(answer.refusal.message); return; }
@@ -346,7 +383,38 @@ export function ModelFields({
     const proof = answer.value.voiceAccessProof ?? null;
     setVoiceAccessProof(proof);
     onVoiceAccessProof?.(proof);
+    if (proofExpiry.current !== null) clearTimeout(proofExpiry.current);
+    if (proof !== null && answer.value.expiresAt !== null) {
+      const delay = Math.max(0, Date.parse(answer.value.expiresAt) - Date.now());
+      if (delay <= 2_147_483_647) {
+        proofExpiry.current = setTimeout(() => {
+          setVoiceAccessProof(null);
+          onVoiceAccessProof?.(null);
+        }, delay);
+      }
+    }
   }
+
+  useEffect(() => {
+    onPreviewAvailabilityChange?.(previewValid && !previewing && !disabled);
+  }, [disabled, onPreviewAvailabilityChange, previewValid, previewing]);
+
+  useEffect(() => {
+    const run = () => void preview();
+    onPreviewActionChange?.(run);
+    return () => onPreviewActionChange?.(null);
+  });
+
+  useEffect(() => {
+    previewUrlRef.current = previewUrl;
+  }, [previewUrl]);
+
+  useEffect(() => () => {
+    previewRequest.current?.abort();
+    if (proofExpiry.current !== null) clearTimeout(proofExpiry.current);
+    if (previewUrlRef.current !== null) URL.revokeObjectURL(previewUrlRef.current);
+  }, []);
+
 
   const stateNote = (label: string, state: { status: string; reason?: string }) => state.status === "supported" ? null : <Note>{label}: {state.status}. {state.reason ?? "The provider did not explain this capability."}</Note>;
   return (
@@ -387,11 +455,24 @@ export function ModelFields({
         {capabilityError === null ? null : <p role="alert" className="m-0 text-sm text-failure">{capabilityError}</p>}
         <Field label="Language*" htmlFor={`${prefix}-language`}>
           <Select id={`${prefix}-language`} value={draft.language} aria-required="true" disabled={disabled || capabilities?.language.status === "fixed"} onChange={(event) => change({ ...draft, language: event.target.value })}>
-            {capabilities?.language.choices?.includes(draft.language) === false ? <option value={draft.language}>{draft.language} · Saved locale</option> : null}
-            {(capabilities?.language.choices ?? [draft.language]).map((value) => <option key={value} value={value}>{value}</option>)}
+            {capabilities?.language.choices?.includes(draft.language) === false ? <option value={draft.language}>{languageLabel(draft.language)} · Saved locale</option> : null}
+            {(capabilities?.language.choices ?? [draft.language]).map((value) => <option key={value} value={value}>{languageLabel(value)}</option>)}
           </Select>
         </Field>
         {capabilities === null ? <Note>Loading voice capabilities…</Note> : stateNote("Language", capabilities.language)}
+        <Field label="Find a voice" htmlFor={`${prefix}-voice-search`}><Input id={`${prefix}-voice-search`} value={voiceSearch} disabled={disabled} placeholder="Search the full voice catalog" onChange={(event) => setVoiceSearch(event.target.value)} /></Field>
+        <Field label="Voice type" htmlFor={`${prefix}-voice-type`}><Select id={`${prefix}-voice-type`} value={voiceType} disabled={disabled} onChange={(event) => setVoiceType(event.target.value)}><option value="all">All</option><option value="male">Male</option><option value="female">Female</option></Select></Field>
+        <Field label="Voice*" htmlFor={`${prefix}-tts-voice`}><Select id={`${prefix}-tts-voice`} value={draft.voiceId} aria-required="true" disabled={disabled || capabilities?.voices.status !== "supported"} onChange={(event) => change({ ...draft, voiceId: event.target.value })}>{voices.some((voice) => voice.id === draft.voiceId) ? null : <option value={draft.voiceId}>{draft.voiceId}</option>}{voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name} · {voice.presentation === "unknown" ? "Type unknown" : voice.presentation}</option>)}</Select></Field>
+        {capabilities === null ? null : stateNote("Voice", capabilities.voices)}
+        {draft.ttsProvider === "openai" ? <Field label="Existing voice ID [optional]" htmlFor={`${prefix}-existing-voice-id`} hint="Preview an existing OpenAI voice ID before you save it."><Input id={`${prefix}-existing-voice-id`} value={draft.voiceId} disabled={disabled} autoComplete="off" spellCheck={false} onChange={(event) => change({ ...draft, voiceId: event.target.value })} /></Field> : null}
+        {existingOpenAiVoice && voiceAccessProof === null ? <Note>Preview this existing voice ID successfully before you save it.</Note> : null}
+        <Field label="Accent*" htmlFor={`${prefix}-accent`}>
+          <Select id={`${prefix}-accent`} value={draft.accent} aria-required="true" disabled={disabled || capabilities?.accent.status !== "supported"} onChange={(event) => change({ ...draft, accent: event.target.value })}>
+            {(capabilities?.accent.choices ?? [draft.accent]).map((value) => <option key={value} value={value}>{accentLabel(value)}</option>)}
+          </Select>
+        </Field>
+        {capabilities === null ? null : stateNote("Accent", capabilities.accent)}
+        {capabilities?.accent.status === "fixed" && draft.accent !== capabilities.accent.value && capabilities.accent.value === "voice_default" ? <Button type="button" variant="secondary" disabled={disabled} onClick={() => change({ ...draft, accent: "voice_default" })}>Use voice default</Button> : null}
         <Field label="Emotion*" htmlFor={`${prefix}-emotion`}>
           <Select id={`${prefix}-emotion`} value={draft.emotion} aria-required="true" disabled={disabled || capabilities?.emotion.status !== "supported"} onChange={(event) => change({ ...draft, emotion: event.target.value as ModelsDraft["emotion"] })}>
             {(capabilities?.emotion.choices ?? [draft.emotion]).map((value) => <option key={value} value={value}>{value[0]?.toUpperCase()}{value.slice(1)}</option>)}
@@ -399,13 +480,13 @@ export function ModelFields({
         </Field>
         {capabilities === null ? null : stateNote("Emotion", capabilities.emotion)}
         {capabilities?.emotion.status === "fixed" && draft.emotion !== capabilities.emotion.value && capabilities.emotion.value === "neutral" ? <Button type="button" variant="secondary" disabled={disabled} onClick={() => change({ ...draft, emotion: "neutral" })}>Use Neutral</Button> : null}
-        <Field label="Accent*" htmlFor={`${prefix}-accent`}>
-          <Select id={`${prefix}-accent`} value={draft.accent} aria-required="true" disabled={disabled || capabilities?.accent.status !== "supported"} onChange={(event) => change({ ...draft, accent: event.target.value })}>
-            {(capabilities?.accent.choices ?? [draft.accent]).map((value) => <option key={value} value={value}>{value}</option>)}
+        <Field label="Interruptions*" htmlFor={`${prefix}-interruption-level`} hint="An interruption finishes one brief sentence, then the caller listens again.">
+          <Select id={`${prefix}-interruption-level`} value={draft.interruptionLevel} aria-required="true" disabled={disabled} onChange={(event) => change({ ...draft, interruptionLevel: event.target.value as ModelsDraft["interruptionLevel"] })}>
+            <option value="off">Off</option>
+            <option value="occasional">Occasional</option>
+            <option value="frequent">Frequent</option>
           </Select>
         </Field>
-        {capabilities === null ? null : stateNote("Accent", capabilities.accent)}
-        {capabilities?.accent.status === "fixed" && draft.accent !== capabilities.accent.value && capabilities.accent.value === "voice_default" ? <Button type="button" variant="secondary" disabled={disabled} onClick={() => change({ ...draft, accent: "voice_default" })}>Use voice default</Button> : null}
         {/*
          * The rate carries no `min`, `max` or `step`, and that is deliberate.
          * The accepted range is the server's rule, and a bound written here
@@ -434,14 +515,7 @@ export function ModelFields({
         </Field>
         {draft.backgroundSoundId === "none" ? null : <NumberField id={`${prefix}-background-volume`} label="Background level*" value={draft.backgroundVolumeDb} disabled={disabled} required min={-36} max={-12} step={1} unit="dB" hint="Independent of speech volume." onChange={(backgroundVolumeDb) => change({ ...draft, backgroundVolumeDb, backgroundVolume: decibelsToGain(backgroundVolumeDb) })} />}
 
-        <Field label="Find a voice" htmlFor={`${prefix}-voice-search`}><Input id={`${prefix}-voice-search`} value={voiceSearch} disabled={disabled} placeholder="Search the full voice catalog" onChange={(event) => setVoiceSearch(event.target.value)} /></Field>
-        <Field label="Voice type" htmlFor={`${prefix}-voice-type`}><Select id={`${prefix}-voice-type`} value={voiceType} disabled={disabled} onChange={(event) => setVoiceType(event.target.value)}><option value="all">All</option><option value="male">Male</option><option value="female">Female</option></Select></Field>
-        <Field label="Voice*" htmlFor={`${prefix}-tts-voice`}><Select id={`${prefix}-tts-voice`} value={draft.voiceId} aria-required="true" disabled={disabled || capabilities?.voices.status !== "supported"} onChange={(event) => change({ ...draft, voiceId: event.target.value })}>{voices.some((voice) => voice.id === draft.voiceId) ? null : <option value={draft.voiceId}>{draft.voiceId}</option>}{voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name} · {voice.presentation === "unknown" ? "Type unknown" : voice.presentation}</option>)}</Select></Field>
-        {capabilities === null ? null : stateNote("Voice", capabilities.voices)}
-        {draft.ttsProvider === "openai" ? <Field label="Existing voice ID [optional]" htmlFor={`${prefix}-existing-voice-id`} hint="Preview an existing OpenAI voice ID before you save it."><Input id={`${prefix}-existing-voice-id`} value={existingOpenAiVoice ? draft.voiceId : ""} disabled={disabled} autoComplete="off" spellCheck={false} onChange={(event) => change({ ...draft, voiceId: event.target.value })} /></Field> : null}
-        {existingOpenAiVoice && voiceAccessProof === null ? <Note>Preview this existing voice ID successfully before you save it.</Note> : null}
         {previewError === null ? null : <p role="alert" className="m-0 text-sm text-failure">{previewError}</p>}
-        <Button type="button" variant="secondary" disabled={disabled || !previewValid || previewing} busy={previewing} onClick={() => void preview()}>{previewing ? "Generating preview…" : "Preview voice"}</Button>
         {previewUrl === null ? null : <><audio controls src={previewUrl} className="w-full" />{previewedDraft !== draftKey ? <Note>This preview is out of date. Select Preview voice to replace it.</Note> : null}</>}
         <Note>Preview is a short voice sample. Test interruptions in a full simulation.</Note>
       </div>

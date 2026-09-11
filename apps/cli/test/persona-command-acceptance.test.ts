@@ -63,4 +63,5 @@ const DEFAULT_EXPECTED_CONTROLS = {
   emotion: "neutral",
   accent: "voice_default",
   speechVolume: 1,
+  interruptionLevel: "off",
 };

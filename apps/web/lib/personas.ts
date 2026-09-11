@@ -83,6 +83,7 @@ export type ModelsDraft = {
   /** The exact stored gain, kept separate from its dB editor value. */
   readonly backgroundVolume: string;
   readonly backgroundVolumeDb: string;
+  readonly interruptionLevel: PersonaControls["interruptionLevel"];
 };
 
 export const BACKGROUND_SOUNDS: ReadonlyArray<{ readonly id: PersonaControls["backgroundSoundId"]; readonly label: string }> = [
@@ -123,6 +124,7 @@ export function modelsDraftOf(models: PersonaModels, controls?: PersonaControls)
     backgroundSoundId: controls?.backgroundSoundId ?? "none",
     backgroundVolume: String(controls?.backgroundVolume ?? 0.0631),
     backgroundVolumeDb: gainToDecibels(controls?.backgroundVolume ?? 0.0631),
+    interruptionLevel: controls?.interruptionLevel ?? "off",
   };
 }
 
@@ -134,6 +136,7 @@ export function controlsFrom(draft: ModelsDraft): Omit<PersonaControls, "executi
     speechVolume: Number(draft.speechVolume),
     backgroundSoundId: draft.backgroundSoundId,
     backgroundVolume: Number(draft.backgroundVolume),
+    interruptionLevel: draft.interruptionLevel,
   };
 }
 
@@ -244,5 +247,6 @@ export function controlsOfPersona(persona: Persona): Omit<PersonaControls, "exec
     speechVolume: Number(values.speech_volume ?? 1),
     backgroundSoundId: (values.background_sound_id ?? "none") as PersonaControls["backgroundSoundId"],
     backgroundVolume: Number(values.background_volume ?? 0.0631),
+    interruptionLevel: (values.interruption_level ?? "off") as PersonaControls["interruptionLevel"],
   };
 }

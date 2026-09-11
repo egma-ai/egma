@@ -38,6 +38,7 @@ function controls(args: PersonaArguments, fallback?: PersonaControls) {
     speechVolume: numberValue(args, "--speech-volume", fallback?.speechVolume ?? 1),
     backgroundSoundId: (args.values["--background-sound"] ?? fallback?.backgroundSoundId ?? "none") as NonNullable<GetPersonaResponse["settings"]>["controls"]["backgroundSoundId"],
     backgroundVolume: numberValue(args, "--background-volume", fallback?.backgroundVolume ?? 0.0631),
+    interruptionLevel: (args.values["--interruption-level"] ?? fallback?.interruptionLevel ?? "off") as PersonaControls["interruptionLevel"],
   };
 }
 
@@ -57,11 +58,12 @@ function effectiveSettings(persona: GetPersonaResponse) {
       speechVolume: Number(values.speech_volume ?? 1),
       backgroundSoundId: (values.background_sound_id ?? "none") as NonNullable<GetPersonaResponse["settings"]>["controls"]["backgroundSoundId"],
       backgroundVolume: Number(values.background_volume ?? 0.0631),
+      interruptionLevel: (values.interruption_level ?? "off") as PersonaControls["interruptionLevel"],
     },
   };
 }
 
-const SETTING_FLAGS = ["--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice", "--speed", "--language", "--emotion", "--accent", "--speech-volume", "--background-sound", "--background-volume"] as const;
+const SETTING_FLAGS = ["--stt-provider", "--stt-model", "--tts-provider", "--tts-model", "--llm-provider", "--llm-model", "--voice", "--speed", "--language", "--emotion", "--accent", "--speech-volume", "--background-sound", "--background-volume", "--interruption-level"] as const;
 
 async function projectContext(options: FolderCommandOptions) {
   const ready = await readyToSync(options);
