@@ -1128,6 +1128,18 @@ class _InterruptionAudioLimit(FrameProcessor):
             await self.push_frame(frame, direction)
             return
         if (
+            isinstance(frame, TTSStoppedFrame)
+            and self._conductor.discarding_deliberate_audio
+        ):
+            self._conductor.deliberate_audio_discarded()
+            await self.push_frame(frame, direction)
+            return
+        if (
+            isinstance(frame, TTSAudioRawFrame)
+            and self._conductor.discarding_deliberate_audio
+        ):
+            return
+        if (
             isinstance(frame, TTSAudioRawFrame)
             and self._conductor.deliberate_response_owned
         ):
@@ -1179,6 +1191,8 @@ class _InterruptionPlayout(FrameProcessor):
         ):
             return
         if frame.metadata.get(_INTERRUPTION_AUDIO) is True:
+            if not self._conductor.interruption_playout_may_continue():
+                return
             self._conductor.interruption_playout_started()
         if frame.metadata.get(_INTERRUPTION_CAP_END) is True:
             await self.push_frame(InterruptionFrame(), FrameDirection.UPSTREAM)
@@ -1366,6 +1380,8 @@ class VoiceConductor:
         self._closed = False
         self._ignored_pipeline_faults = 0
         self._interruption_model_fault_observed = False
+        self._control_tasks: set[asyncio.Task[None]] = set()
+        self._discard_deliberate_audio = False
         self._random = random.Random()
         self._agent_speech_began: MediaPosition | None = None
         self._agent_speech_ended: MediaPosition | None = None
@@ -1430,6 +1446,10 @@ class VoiceConductor:
     @property
     def deliberate_audio_capped(self) -> bool:
         return self._deliberate_capped
+
+    @property
+    def discarding_deliberate_audio(self) -> bool:
+        return self._discard_deliberate_audio
 
     @property
     def may_start_interruption(self) -> bool:
@@ -1510,6 +1530,21 @@ class VoiceConductor:
         if self._interruption_state == "awaiting_playout":
             self._interruption_state = "delivering"
 
+    def interruption_playout_may_continue(self) -> bool:
+        media = self._media
+        if self._controls.cause is not None:
+            self.interruption_canceled("simulation_stopped", force=True)
+            return False
+        if self._agent_departed or (
+            media is not None and (media.ended.is_set() or media.failed.is_set())
+        ):
+            self.interruption_canceled("agent_disconnected", force=True)
+            return False
+        return True
+
+    def deliberate_audio_discarded(self) -> None:
+        self._discard_deliberate_audio = False
+
     def interruption_audio_capped(self) -> None:
         self._deliberate_capped = True
 
@@ -1520,14 +1555,19 @@ class VoiceConductor:
         if self._interruption_state not in cancelable:
             return
         was_delivering = self._interruption_state == "delivering"
+        was_awaiting_playout = self._interruption_state == "awaiting_playout"
         began = self._persona_began if was_delivering else None
         ended = self._persona_ended if was_delivering else None
         self._interruption_state = "listening"
         self._interruption_due_at = None
         generated_text = self._pending_persona_text
         self._pending_persona_text = None
+        if was_delivering or was_awaiting_playout:
+            self._discard_deliberate_audio = True
         if force and self._worker is not None:
-            asyncio.create_task(self._worker.queue_frame(InterruptionFrame()))
+            flush = asyncio.create_task(self._worker.queue_frame(InterruptionFrame()))
+            self._control_tasks.add(flush)
+            flush.add_done_callback(self._control_tasks.discard)
         self._report_interruption(
             InterruptionEvidence(
                 event="canceled",
@@ -1841,6 +1881,9 @@ class VoiceConductor:
         if self._running is None or self._worker is None:
             return
         try:
+            if self._control_tasks:
+                await asyncio.gather(*self._control_tasks, return_exceptions=True)
+                self._control_tasks.clear()
             await self._worker.queue_frame(EndFrame())
             await asyncio.wait_for(asyncio.shield(self._running), timeout=10.0)
         except Exception as unfinished:
