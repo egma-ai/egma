@@ -220,6 +220,17 @@ class PlayoutStamp(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
+        if isinstance(frame, InterruptionFrame) and self._acknowledged_clears:
+            if direction == FrameDirection.DOWNSTREAM:
+                return
+            await self.push_frame(frame, direction)
+            cleared = PlayoutClearedFrame()
+            cleared.metadata[_TRANSPORT_PLAYOUT_GENERATION] = self._generation
+            played_out_at(cleared, time.monotonic())
+            self._playout.cleared()
+            self._generation += 1
+            await self.push_frame(cleared, FrameDirection.DOWNSTREAM)
+            return
         if isinstance(frame, OutputAudioRawFrame):
             frame.metadata[_TRANSPORT_PLAYOUT_GENERATION] = self._generation
             played_out_at(
@@ -228,15 +239,11 @@ class PlayoutStamp(FrameProcessor):
                     time.monotonic(), frame.num_frames / frame.sample_rate
                 ),
             )
-        elif isinstance(frame, PlayoutClearedFrame) or (
-            isinstance(frame, InterruptionFrame) and not self._acknowledged_clears
-        ):
+        elif isinstance(frame, (PlayoutClearedFrame, InterruptionFrame)):
             frame.metadata[_TRANSPORT_PLAYOUT_GENERATION] = self._generation
             played_out_at(frame, time.monotonic())
             self._playout.cleared()
             self._generation += 1
-        elif isinstance(frame, InterruptionFrame):
-            return
         elif isinstance(frame, TTSStoppedFrame) and self._wait_for_playout:
             await self._playout.wait_until_played()
         await self.push_frame(frame, direction)

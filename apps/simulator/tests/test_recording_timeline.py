@@ -12,16 +12,21 @@ from fractions import Fraction
 
 import pytest
 from pipecat.frames.frames import (
+    Frame,
     InputAudioRawFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
     StartFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from egma_simulator import conductor as conductor_module
 from egma_simulator.media import (
     _TRANSPORT_PLAYOUT_GENERATION,
     TRANSPORT_ARRIVAL,
+    PlayoutClearAcknowledger,
+    PlayoutClearedFrame,
+    PlayoutStamp,
     arrived_at,
     arrived_now,
     played_out_at,
@@ -341,6 +346,54 @@ async def test_clear_overtaking_queued_audio_discards_only_the_unheard_generatio
     assert audible(persona_track, apart=0.05) == pytest.approx(
         [(0.0, 0.01), (0.2, 0.24)], abs=0.01
     )
+
+
+@pytest.mark.parametrize("direction", list(FrameDirection))
+async def test_playout_clear_is_acknowledged_after_native_clear(
+    direction, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both pipeline directions acknowledge one completed native queue clear."""
+
+    acknowledger = PlayoutClearAcknowledger()
+    stamp = PlayoutStamp(acknowledged_clears=True)
+    cleared = False
+    clears = 0
+    acks = 0
+
+    async def no_base_processing(*_args) -> None:
+        return None
+
+    async def native(frame: Frame, direction: FrameDirection) -> None:
+        nonlocal cleared, clears
+        if direction == FrameDirection.DOWNSTREAM:
+            await stamp.process_frame(frame, direction)
+        else:
+            await acknowledger.process_frame(frame, direction)
+        if isinstance(frame, InterruptionFrame):
+            cleared = True
+            clears += 1
+
+    async def from_acknowledger(frame: Frame, direction: FrameDirection) -> None:
+        if direction == FrameDirection.DOWNSTREAM:
+            await native(frame, direction)
+
+    async def from_stamp(frame: Frame, direction: FrameDirection) -> None:
+        nonlocal acks
+        if direction == FrameDirection.UPSTREAM:
+            await native(frame, direction)
+        elif isinstance(frame, PlayoutClearedFrame):
+            assert cleared
+            acks += 1
+
+    monkeypatch.setattr(FrameProcessor, "process_frame", no_base_processing)
+    monkeypatch.setattr(acknowledger, "push_frame", from_acknowledger)
+    monkeypatch.setattr(stamp, "push_frame", from_stamp)
+
+    start = acknowledger if direction == FrameDirection.DOWNSTREAM else stamp
+    await start.process_frame(InterruptionFrame(), direction)
+
+    assert clears == 1
+    assert acks == 1
 
 
 async def test_a_delivery_that_stalls_and_catches_up_stays_on_time() -> None:
