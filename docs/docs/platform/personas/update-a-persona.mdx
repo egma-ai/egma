@@ -10,7 +10,7 @@ Update a persona when you want to change the caller's behavior or how it speaks.
   <Tab title="UI">
     1. Open **Personas** and select the persona.
     2. For a custom persona, select **Edit** to change its identity, personality, or language. For a provided persona, its project settings open directly.
-    3. Review the models, voice, and speech rate, then save your changes.
+    3. Review the models and supported speech controls, then save your changes.
 
     Clone a provided persona if you need different behavior; its original behavior is maintained by Egma.
 
@@ -24,10 +24,16 @@ Update a persona when you want to change the caller's behavior or how it speaks.
 
 Open the persona in **Personas** to view its project settings. For a custom persona, select **Edit** to change its behavior.
 
-Choose the language model, speech-to-text model, text-to-speech model, voice,
-and speech rate. The supported speech rate is `0.6` through `1.5`; `1` is the
-normal rate. You can enter a voice ID from the selected provider even if it is
-not in the recommended list.
+Choose speech-to-text, text-to-speech, and language models first. Egma then
+loads the full voice catalog and the language, accent, emotion, speech rate,
+and speech volume support for that combination. A fixed or unsupported control
+explains why. Egma blocks saving an unknown or invalid combination.
+
+Changing a provider or model keeps the rest of your draft. Select a compatible
+voice or control yourself if the new model does not support the saved choice.
+Use **Preview voice** for a short audio sample. Preview uses the same audio path
+as a simulation, but it does not test interruptions. Start a full simulation to
+test turn timing and overlapping speech.
 
 These choices belong to your project. Saving them does not change the
 persona's behavior version or another project's settings. Defaults are saved

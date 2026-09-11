@@ -18,12 +18,13 @@ Start with **Everyday caller**, or create a custom persona when you need differe
     egma persona list
     ```
 
-    Egma includes **Everyday caller**, a patient, cooperative caller. Add the name
+    Egma includes **Everyday Caller [Male]**, **Everyday Caller [Female]**,
+    **Angry caller**, and **Spanish caller**. Add the name
     to your test's front matter:
 
     ```yaml
     personas:
-      - name: Everyday caller
+      - name: Everyday Caller [Male]
     ```
 
     Every test must name at least one persona. Adding a second persona creates a
@@ -33,10 +34,15 @@ Start with **Everyday caller**, or create a custom persona when you need differe
     Keep it when you edit the test. If two personas have the same name, use the ID
     from `egma persona list` to select the one you mean.
 
-    Selecting a persona for the first time saves its default model and voice
-    settings for your project. All tests in that project that select the persona
-    share those settings. Test files keep the persona selection; `egma pull` and
-    `egma push` do not copy model settings into the file.
+    You can also configure personas without a browser. Run `egma persona
+    capabilities --help`, then use `egma persona use`, `create`, `clone`,
+    `update`, or `preview`. `egma persona settings <Persona ID>` prints the
+    current project settings as JSON.
+
+    Selecting a persona for the first time saves its model, voice, language,
+    accent, emotion, speech rate, and speech volume for your project. All tests
+    in that project share those settings. Test files keep only the persona
+    selection; `egma pull` and `egma push` do not copy settings into the file.
   </Tab>
 </Tabs>
 
@@ -52,9 +58,9 @@ Start with **Everyday caller**, or create a custom persona when you need differe
     3. Write a **Personality** that describes how the caller acts. For example:
        `Answers briefly, asks for the earliest appointment, and asks the agent to
        get to the point if it repeats a question. Remains polite.`
-    4. Choose the **Language** and review the language, speech-to-text, and
-       text-to-speech models. Use the supplied choices, then set the voice and
-       speech rate if the test needs them.
+    4. Choose speech-to-text, text-to-speech, and language models. Then choose
+       the language, voice, accent, emotion, speech rate, and speech volume that
+       the selected providers support.
     5. Select **Create persona**, run `egma persona list`, and add the persona to
        your test.
 
