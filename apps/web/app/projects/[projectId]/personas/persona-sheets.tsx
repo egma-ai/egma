@@ -101,7 +101,6 @@ function behaviorReads(
     ...(description === null ? [] : [{ label: "Description", value: description }]),
     { label: "Identity name", value: behavior.identityName },
     { label: "Personality", value: behavior.personality },
-    { label: "Language", value: behavior.language },
   ];
 }
 
@@ -193,7 +192,7 @@ export function CreatePersonaSheet({
   const [behavior, setBehavior] = useState<BehaviorDraft>(BLANK_BEHAVIOR);
   const [models, setModels] = useState<ModelsDraft | null>(null);
   const [saving, setSaving] = useState(false);
-  const [settingsValid, setSettingsValid] = useState(false);
+  const [settingsValid, setSettingsValid] = useState(true);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
 
   const choices = form?.status === "ready" ? form.value : null;
@@ -525,7 +524,7 @@ export function PersonaSheet({
   const [held, setHeld] = useState<Draft | null>(null);
   const [editing, setEditing] = useState(startEditing);
   const [saving, setSaving] = useState(false);
-  const [settingsValid, setSettingsValid] = useState(false);
+  const [settingsValid, setSettingsValid] = useState(true);
   const [saved, setSaved] = useState(false);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
 

@@ -151,24 +151,6 @@ export function BehaviorFields({
             }
           />
         </Field>
-
-        <Field
-          label="Language*"
-          htmlFor={`${prefix}-language`}
-          hint="A BCP 47 tag, such as en-US."
-        >
-          <Input
-            id={`${prefix}-language`}
-            value={draft.language}
-            disabled={disabled}
-            aria-required="true"
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(event) =>
-              onChange({ ...draft, language: event.target.value })
-            }
-          />
-        </Field>
       </div>
     </SheetSection>
   );
@@ -262,7 +244,7 @@ export function ModelFields({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewedDraft, setPreviewedDraft] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const request = useRef<AbortController | null>(null);
+  const request = useRef(0);
   const previewRequest = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -271,9 +253,8 @@ export function ModelFields({
   }, [draft]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    request.current?.abort();
-    request.current = controller;
+    const turn = request.current + 1;
+    request.current = turn;
     setCapabilities(null);
     setCapabilityError(null);
     void platformAnswer(getPersonaCapabilities({
@@ -281,12 +262,12 @@ export function ModelFields({
       ttsProvider: draft.ttsProvider, ttsModel: draft.ttsModel,
       sttProvider: draft.sttProvider, sttModel: draft.sttModel,
       language: draft.language, voiceId: draft.voiceId,
-    }, { client: platformClient, signal: controller.signal })).then((answer) => {
-      if (controller.signal.aborted) return;
+    }, { client: platformClient })).then((answer) => {
+      if (request.current !== turn) return;
       if (answer.status === "ready") setCapabilities(answer.value);
       else if (answer.status !== "signed-out") setCapabilityError(answer.refusal.message);
     });
-    return () => controller.abort();
+    return undefined;
   }, [projectId, draft.ttsProvider, draft.ttsModel, draft.sttProvider, draft.sttModel, draft.language, draft.voiceId]);
 
   const voices = useMemo(() => {
@@ -300,7 +281,9 @@ export function ModelFields({
   }, [capabilities, voiceSearch, voiceType]);
   const states = capabilities === null ? [] : [capabilities.language, capabilities.accent, capabilities.emotion, capabilities.speed, capabilities.speechVolume, capabilities.voices];
   const valid = capabilities !== null && states.every((state) => state.status !== "unsupported" && state.status !== "unknown");
-  useEffect(() => onValidityChange?.(valid), [valid, onValidityChange]);
+  useEffect(() => {
+    if (capabilities !== null || capabilityError !== null) onValidityChange?.(valid);
+  }, [valid, capabilities, capabilityError, onValidityChange]);
 
   async function preview(): Promise<void> {
     if (!valid || previewing) return;
@@ -356,19 +339,19 @@ export function ModelFields({
         <EngineField prefix={prefix} job="llm" label="Language model" selection={{ provider: draft.llmProvider, model: draft.llmModel }} form={form} disabled={disabled} onSelect={(entry) => onChange({ ...draft, llmProvider: entry.provider, llmModel: entry.model })} />
         {capabilityError === null ? null : <p role="alert" className="m-0 text-sm text-failure">{capabilityError}</p>}
         <Field label="Language*" htmlFor={`${prefix}-language`}>
-          <Select id={`${prefix}-language`} value={draft.language} disabled={disabled || capabilities?.language.status === "fixed"} onChange={(event) => onChange({ ...draft, language: event.target.value })}>
+          <Select id={`${prefix}-language`} value={draft.language} aria-required="true" disabled={disabled || capabilities?.language.status === "fixed"} onChange={(event) => onChange({ ...draft, language: event.target.value })}>
             {(capabilities?.language.choices ?? [draft.language]).map((value) => <option key={value} value={value}>{value}</option>)}
           </Select>
         </Field>
         {capabilities === null ? <Note>Loading voice capabilities…</Note> : stateNote("Language", capabilities.language)}
         <Field label="Emotion*" htmlFor={`${prefix}-emotion`}>
-          <Select id={`${prefix}-emotion`} value={draft.emotion} disabled={disabled || capabilities?.emotion.status !== "supported"} onChange={(event) => onChange({ ...draft, emotion: event.target.value as ModelsDraft["emotion"] })}>
+          <Select id={`${prefix}-emotion`} value={draft.emotion} aria-required="true" disabled={disabled || capabilities?.emotion.status !== "supported"} onChange={(event) => onChange({ ...draft, emotion: event.target.value as ModelsDraft["emotion"] })}>
             {(capabilities?.emotion.choices ?? [draft.emotion]).map((value) => <option key={value} value={value}>{value[0]?.toUpperCase()}{value.slice(1)}</option>)}
           </Select>
         </Field>
         {capabilities === null ? null : stateNote("Emotion", capabilities.emotion)}
         <Field label="Accent*" htmlFor={`${prefix}-accent`}>
-          <Select id={`${prefix}-accent`} value={draft.accent} disabled={disabled || capabilities?.accent.status !== "supported"} onChange={(event) => onChange({ ...draft, accent: event.target.value })}>
+          <Select id={`${prefix}-accent`} value={draft.accent} aria-required="true" disabled={disabled || capabilities?.accent.status !== "supported"} onChange={(event) => onChange({ ...draft, accent: event.target.value })}>
             {(capabilities?.accent.choices ?? [draft.accent]).map((value) => <option key={value} value={value}>{value}</option>)}
           </Select>
         </Field>
@@ -396,7 +379,7 @@ export function ModelFields({
 
         <Field label="Find a voice" htmlFor={`${prefix}-voice-search`}><Input id={`${prefix}-voice-search`} value={voiceSearch} disabled={disabled} placeholder="Search the full voice catalog" onChange={(event) => setVoiceSearch(event.target.value)} /></Field>
         <Field label="Voice type" htmlFor={`${prefix}-voice-type`}><Select id={`${prefix}-voice-type`} value={voiceType} disabled={disabled} onChange={(event) => setVoiceType(event.target.value)}><option value="all">All</option><option value="male">Male</option><option value="female">Female</option></Select></Field>
-        <Field label="Voice*" htmlFor={`${prefix}-tts-voice`}><Select id={`${prefix}-tts-voice`} value={draft.voiceId} disabled={disabled || capabilities?.voices.status !== "supported"} onChange={(event) => onChange({ ...draft, voiceId: event.target.value })}>{voices.some((voice) => voice.id === draft.voiceId) ? null : <option value={draft.voiceId}>{draft.voiceId}</option>}{voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name} · {voice.presentation === "unknown" ? "Type unknown" : voice.presentation}</option>)}</Select></Field>
+        <Field label="Voice*" htmlFor={`${prefix}-tts-voice`}><Select id={`${prefix}-tts-voice`} value={draft.voiceId} aria-required="true" disabled={disabled || capabilities?.voices.status !== "supported"} onChange={(event) => onChange({ ...draft, voiceId: event.target.value })}>{voices.some((voice) => voice.id === draft.voiceId) ? null : <option value={draft.voiceId}>{draft.voiceId}</option>}{voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name} · {voice.presentation === "unknown" ? "Type unknown" : voice.presentation}</option>)}</Select></Field>
         {capabilities === null ? null : stateNote("Voice", capabilities.voices)}
         {previewError === null ? null : <p role="alert" className="m-0 text-sm text-failure">{previewError}</p>}
         <Button type="button" variant="secondary" disabled={disabled || !valid || previewing} busy={previewing} onClick={() => void preview()}>{previewing ? "Generating preview…" : "Preview voice"}</Button>

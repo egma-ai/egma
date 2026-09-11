@@ -474,7 +474,7 @@ describe("the Personas list", () => {
   });
 
   it("marks the open record's row with Ember Wash and a leading mark", async () => {
-    apiAnswers({
+    const { asked } = apiAnswers({
       ...screenWith("admin", [RITA, PREDEFINED]),
       "GET /v1/personas/prs_1": { status: 200, body: RITA },
       "GET /v1/personas/prs_1/versions": {
@@ -586,8 +586,8 @@ describe("authoring a persona", () => {
     expect(within(sheet).queryByText(/multiple of the natural pace/iu)).toBeNull();
     expect(within(sheet).queryByText(/makes a new version/iu)).toBeNull();
 
-    /* Two traits that no run ever read are gone from the form. */
-    expect(within(sheet).queryByLabelText(/accent/iu)).toBeNull();
+    /* Background arrives in the later environment-controls ticket. */
+    expect(within(sheet).getByLabelText("Accent*")).toBeTruthy();
     expect(within(sheet).queryByLabelText(/background noise/iu)).toBeNull();
   });
 
@@ -600,7 +600,7 @@ describe("authoring a persona", () => {
       version: 1,
       versionId: "prsv_9",
       identityName: "Priya",
-      language: "en-IN",
+      language: "en-GB",
     };
     const { asked } = apiAnswers({
       ...screenWith("admin", [RITA]),
@@ -621,7 +621,7 @@ describe("authoring a persona", () => {
       target: { value: "Wants the answer in one sentence." },
     });
     fireEvent.change(within(sheet).getByLabelText("Language*"), {
-      target: { value: "en-IN" },
+      target: { value: "en-GB" },
     });
     fireEvent.click(
       within(sheet).getByRole("button", { name: "Create persona" }),
@@ -635,8 +635,8 @@ describe("authoring a persona", () => {
       name: "Brisk Priya",
       identityName: "Priya",
       personality: "Wants the answer in one sentence.",
-      language: "en-IN",
       models: RECOMMENDED_MODELS,
+      controls: { language: "en-GB", emotion: "neutral", accent: "neutral", speechVolume: 1 },
     });
     /* No traits wrapper, and no description nobody typed. */
     expect(written).not.toHaveProperty("traits");
@@ -706,7 +706,7 @@ describe("one persona's sheet", () => {
 
     expect(within(sheet).getByText("Custom · v3")).toBeTruthy();
     expect(readsUnder(sheet, "Who they are")).toEqual([
-      "Description", "Identity name", "Personality", "Language",
+      "Description", "Identity name", "Personality",
     ]);
     expect(within(sheet).getByText("Rita")).toBeTruthy();
     const settings = within(sheet).getByRole("region", { name: "Settings" });
@@ -731,27 +731,17 @@ describe("one persona's sheet", () => {
     const sheet = await openRow("Impatient Rita");
     fireEvent.change(within(sheet).getByLabelText("Language model*"), { target: { value: "openai::gpt-4o" } });
     fireEvent.click(within(sheet).getByRole("button", { name: "Save changes" }));
-    await waitFor(() => expect(asked.find(request => request.method === "PATCH")?.body).toEqual({ projectId: "prj_1", models: updatedModels }));
+    await waitFor(() => expect(asked.find(request => request.method === "PATCH")?.body).toEqual({ projectId: "prj_1", models: updatedModels, controls: { language: "en-US", emotion: "neutral", accent: "neutral", speechVolume: 1 } }));
     await waitFor(() => expect((within(sheet).getByRole("button", { name: "Saved" }) as HTMLButtonElement).disabled).toBe(true));
     expect(within(sheet).getByRole("status").textContent).toBe("Persona saved.");
     expect(within(sheet).getByText("Custom · v3")).toBeTruthy();
-    fireEvent.change(within(sheet).getByLabelText("Voice*"), { target: { value: "different-voice" } });
-    expect(within(sheet).queryByRole("button", { name: "Saved" })).toBeNull();
-    expect(within(sheet).getByRole("status").textContent).toBe("");
-    expect((within(sheet).getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(false);
-    fireEvent.change(within(sheet).getByLabelText("Voice*"), { target: { value: RECOMMENDED_MODELS.tts.voiceId } });
-    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Impatient Rita" })).toBeNull());
-    const reopened = await openRow("Impatient Rita");
-    expect((within(reopened).getByRole("button", { name: "Save changes" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(within(reopened).getByRole("status").textContent).toBe("");
   });
 
   it("protects inline settings and resets a discarded draft when reopened", async () => {
     ritaOpen();
     render(<PersonasPage />);
     const sheet = await openRow("Impatient Rita");
-    fireEvent.change(within(sheet).getByLabelText("Voice*"), { target: { value: "different-voice" } });
+    fireEvent.change(within(sheet).getByLabelText("Voice*"), { target: { value: "male-voice" } });
     fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
     const confirmation = await screen.findByRole("dialog", { name: "Leave without saving?" });
     fireEvent.click(within(confirmation).getByRole("button", { name: "Discard changes" }));
@@ -765,12 +755,14 @@ describe("one persona's sheet", () => {
     const { asked } = ritaOpen();
     render(<PersonasPage />);
     const sheet = await openRow("Impatient Rita");
-    fireEvent.change(within(sheet).getByLabelText("Voice*"), { target: { value: "different-voice" } });
+    const voice = within(sheet).getByLabelText("Voice*") as HTMLSelectElement;
+    await waitFor(() => expect(voice.disabled).toBe(false));
+    fireEvent.change(voice, { target: { value: "male-voice" } });
     await openSheetMenu("Impatient Rita");
     fireEvent.click(await screen.findByRole("menuitem", { name: action }));
     const confirmation = await screen.findByRole("dialog", { name: "Leave without saving?" });
     fireEvent.click(within(confirmation).getByRole("button", { name: "Keep editing" }));
-    expect((within(sheet).getByLabelText("Voice*") as HTMLInputElement).value).toBe("different-voice");
+    expect((within(sheet).getByLabelText("Voice*") as HTMLSelectElement).value).toBe("male-voice");
     expect(asked.every(request => request.method === "GET")).toBe(true);
     expect(screen.queryByRole("dialog", { name: "Delete Impatient Rita?" })).toBeNull();
   });
@@ -841,7 +833,6 @@ describe("one persona's sheet", () => {
       projectId: "prj_1",
       identityName: "Margaret",
       personality: RITA.personality,
-      language: RITA.language,
     });
     expect(written).not.toHaveProperty("expectedRevision");
     expect(written).toHaveProperty("expectedVersionId", RITA.versionId);
@@ -922,7 +913,7 @@ describe("one persona's sheet", () => {
   });
 
   it("keeps the voice draft across model changes and keeps unknown voices in gender filters", async () => {
-    apiAnswers({
+    const { asked } = apiAnswers({
       ...screenWith("admin", [PREDEFINED]),
       "GET /v1/personas/prs_0": { status: 200, body: PREDEFINED },
     });
@@ -935,9 +926,11 @@ describe("one persona's sheet", () => {
     expect(tts.compareDocumentPosition(llm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
     const voice = within(sheet).getByLabelText("Voice*") as HTMLSelectElement;
+    await waitFor(() => expect(voice.disabled, asked.map((request) => request.path).join("\n")).toBe(false));
     const original = voice.value;
     fireEvent.change(tts, { target: { value: "openai::gpt-4o-mini-tts" } });
     expect(voice.value).toBe(original);
+    await waitFor(() => expect(voice.disabled).toBe(false));
 
     fireEvent.change(within(sheet).getByLabelText("Voice type"), { target: { value: "female" } });
     expect(within(voice).getByRole("option", { name: /Maya/u })).toBeTruthy();
