@@ -58,6 +58,15 @@ const EVERYDAY_CALLER_V2_CONTRACT = legacyPersonaParameterContract({
   },
 });
 
+const OPENAI_PERSONA_MODELS = {
+  llm: { provider: "openai", model: "gpt-4o-mini" },
+  stt: { provider: "openai", model: "gpt-4o-mini-transcribe" },
+  tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "cedar", speed: 1 },
+} as const;
+
+const everydayPersonality =
+  "Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.";
+
 /**
  * Every persona Egma provides.
  *
@@ -72,7 +81,7 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
     /**
      * Display label for this Egma-provided persona. Tests must select personas explicitly.
      */
-    name: "Everyday caller",
+    name: "Everyday Caller [Male]",
     description: "Regular conversationalist persona",
     versions: [
       {
@@ -95,6 +104,50 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
         parameterContract: EVERYDAY_CALLER_V2_CONTRACT,
         createdAt: new Date("2026-09-08T00:00:00.000Z"),
       },
+      {
+        id: "prsv_01K4R000000000000000000001",
+        version: 3,
+        identityName: "Alex Morgan",
+        personality: everydayPersonality,
+        language: null,
+        parameterContract: personaParameterContract(OPENAI_PERSONA_MODELS),
+        createdAt: new Date("2026-09-10T00:00:00.000Z"),
+      },
     ],
+  },
+  {
+    id: "prs_01K4R000000000000000000002",
+    name: "Everyday Caller [Female]",
+    description: "Regular conversationalist persona",
+    versions: [{
+      id: "prsv_01K4R000000000000000000003", version: 1,
+      identityName: "Jamie Morgan", personality: everydayPersonality, language: null,
+      parameterContract: personaParameterContract({ ...OPENAI_PERSONA_MODELS, tts: { ...OPENAI_PERSONA_MODELS.tts, voiceId: "coral" } }),
+      createdAt: new Date("2026-09-10T00:00:00.000Z"),
+    }],
+  },
+  {
+    id: "prs_01K4R000000000000000000004",
+    name: "Angry caller",
+    description: "A caller who starts upset but remains coherent",
+    versions: [{
+      id: "prsv_01K4R000000000000000000005", version: 1,
+      identityName: "Jordan Lee",
+      personality: "Starts upset about the problem, explains it directly, and expects the agent to acknowledge the concern and provide a clear resolution.",
+      language: null,
+      parameterContract: personaParameterContract(OPENAI_PERSONA_MODELS, { language: "en-US", emotion: "angry", accent: "voice_default", speechVolume: 1, executionPolicyVersion: 1 }),
+      createdAt: new Date("2026-09-10T00:00:00.000Z"),
+    }],
+  },
+  {
+    id: "prs_01K4R000000000000000000006",
+    name: "Spanish caller",
+    description: "A regular conversationalist who starts in Spanish",
+    versions: [{
+      id: "prsv_01K4R000000000000000000007", version: 1,
+      identityName: "Mateo García", personality: everydayPersonality, language: null,
+      parameterContract: personaParameterContract(OPENAI_PERSONA_MODELS, { language: "es-ES", emotion: "neutral", accent: "voice_default", speechVolume: 1, executionPolicyVersion: 1 }),
+      createdAt: new Date("2026-09-10T00:00:00.000Z"),
+    }],
   },
 ];

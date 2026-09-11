@@ -264,14 +264,25 @@ export { defaultGraderParameterValues, LLM_GRADER_PARAMETER_CONTRACT, graderMode
 export { usePersona, PersonaVersionConflictError } from "./access/personas.ts";
 export {
   defaultPersonaParameterValues,
+  legacyPersonaParameterContract,
+  PERSONA_EMOTIONS,
+  PERSONA_EXECUTION_POLICY_VERSION,
   PERSONA_PARAMETER_CONTRACT,
+  SPEECH_VOLUME_RANGE,
+  personaControlsOfParameters,
   personaParameterContract,
   personaParametersOfModels,
+  personaParametersOfSettings,
   personaModelsOfParameters,
+  personaSettingsOfParameters,
   speechProvidersOfParameters,
+  validPersonaControls,
   validatePersonaParameterContract,
   validatePersonaParameterValues,
+  type PersonaControls,
+  type PersonaEmotion,
   type PersonaParameterValues,
+  type PersonaSettings,
 } from "./persona-library/parameters.ts";
 export type { ProjectPersonaSettings } from "./access/project-personas.ts";
 

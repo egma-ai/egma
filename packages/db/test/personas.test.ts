@@ -114,7 +114,7 @@ describe("creating a persona", () => {
   it("stores behavior separately from complete project settings", async () => {
     const created = await createPersona(actingAsAcme(), rita);
     const version = await getPersonaVersion(actingAsAcme(), created.versionId);
-    expect(version).toMatchObject({ identityName: rita.identityName, personality: rita.personality, language: rita.language });
+    expect(version).toMatchObject({ identityName: rita.identityName, personality: rita.personality, language: null });
     expect(version).not.toHaveProperty("models");
     expect(created.settings?.models).toEqual(RECOMMENDED_PERSONA_MODELS);
   });
@@ -668,7 +668,7 @@ describe("stored core and project settings validation", () => {
   });
   it("refuses invalid project values written around the module", async () => {
     const created = await createPersona(actingAsAcme(), rita);
-    await expect(database.sql(`update project_persona set parameter_values = jsonb_set(parameter_values, '{tts_speed}', '1.9') where persona_definition_id = $1`, [created.id])).rejects.toMatchObject({ code: POSTGRES_ERROR.checkViolation });
+    await expect(database.sql(`update project_persona set parameter_values = jsonb_set(parameter_values, '{tts_speed}', '4.1') where persona_definition_id = $1`, [created.id])).rejects.toMatchObject({ code: POSTGRES_ERROR.checkViolation });
   });
 });
 

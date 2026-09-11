@@ -5,13 +5,14 @@ import {
   type GraderParameter,
   type GraderParameterValues,
 } from "../grader-library/parameters.ts";
-import { RECOMMENDED_PERSONA_MODELS, SPEED_RANGE, validPersonaModels, type PersonaModels } from "../models/selections.ts";
+import { RECOMMENDED_PERSONA_MODELS, validPersonaModels, type PersonaModels } from "../models/selections.ts";
 import type { ModelProvider } from "../models/catalog.ts";
 
 export const PERSONA_EMOTIONS = ["neutral", "happy", "angry", "frustrated", "sad", "anxious"] as const;
 export type PersonaEmotion = (typeof PERSONA_EMOTIONS)[number];
 export const SPEECH_VOLUME_RANGE = { quietest: 0.5, loudest: 1.5 } as const;
 export const PERSONA_EXECUTION_POLICY_VERSION = 1 as const;
+const LEGACY_SPEED_RANGE = { slowest: 0.6, fastest: 1.5 } as const;
 
 export type PersonaControls = {
   readonly language: string;
@@ -46,8 +47,8 @@ export function legacyPersonaParameterContract(models: PersonaModels = RECOMMEND
     key, label: labels[key] ?? key,
     valueType: key === "tts_speed" ? "number" : "string",
     defaultValue: value as string | number, unit: null,
-    minimum: key === "tts_speed" ? SPEED_RANGE.slowest : null,
-    maximum: key === "tts_speed" ? SPEED_RANGE.fastest : null,
+    minimum: key === "tts_speed" ? LEGACY_SPEED_RANGE.slowest : null,
+    maximum: key === "tts_speed" ? LEGACY_SPEED_RANGE.fastest : null,
   }));
 }
 
@@ -112,8 +113,13 @@ export function personaParameterContract(
   controls: PersonaControls = { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, executionPolicyVersion: PERSONA_EXECUTION_POLICY_VERSION },
 ): readonly GraderParameter[] {
   const checked = validPersonaControls(controls);
+  const modelFields = legacyPersonaParameterContract(models).map((field) =>
+    field.key === "tts_speed"
+      ? { ...field, minimum: 0.25, maximum: 4 }
+      : field
+  );
   return [
-    ...legacyPersonaParameterContract(models),
+    ...modelFields,
     { key: "language", label: "Language", valueType: "string", defaultValue: checked.language, unit: null, minimum: null, maximum: null },
     { key: "emotion", label: "Emotion", valueType: "string", defaultValue: checked.emotion, unit: null, minimum: null, maximum: null },
     { key: "accent", label: "Accent", valueType: "string", defaultValue: checked.accent, unit: null, minimum: null, maximum: null },
@@ -127,12 +133,21 @@ const LEGACY_PERSONA_PARAMETER_CONTRACT = legacyPersonaParameterContract();
 
 export function validatePersonaParameterContract(value: unknown): readonly GraderParameter[] {
   const contract = validateGraderParameterContract(value);
-  const keys = new Set(contract.map((field) => field.key));
-  const isLegacy = contract.length === LEGACY_PERSONA_PARAMETER_CONTRACT.length && LEGACY_PERSONA_PARAMETER_CONTRACT.every((field) => keys.has(field.key));
-  const isCurrent = contract.length === PERSONA_PARAMETER_CONTRACT.length && PERSONA_PARAMETER_CONTRACT.every((field) => keys.has(field.key));
+  const fields = new Map(contract.map((field) => [field.key, field]));
+  const declares = (required: readonly GraderParameter[]) =>
+    contract.length === required.length &&
+    required.every(
+      (field) => fields.get(field.key)?.valueType === field.valueType,
+    );
+  const isLegacy = declares(LEGACY_PERSONA_PARAMETER_CONTRACT);
+  const isCurrent = declares(PERSONA_PARAMETER_CONTRACT);
   if (!isLegacy && !isCurrent) throw new TypeError("persona parameter contract must declare one complete supported settings version");
   const defaults = defaultGraderParameterValues(contract);
-  personaModelsOfParameters(defaults);
+  for (const key of ["llm_provider", "llm_model", "stt_provider", "stt_model", "tts_provider", "tts_model", "tts_voice_id"] as const) {
+    if (typeof defaults[key] !== "string" || defaults[key].trim() === "") {
+      throw new TypeError(`persona parameter ${key} must default to nonempty text`);
+    }
+  }
   if (isCurrent) personaControlsOfParameters(defaults);
   return contract;
 }
@@ -140,7 +155,11 @@ export function validatePersonaParameterContract(value: unknown): readonly Grade
 export function validatePersonaParameterValues(contract: unknown, values: unknown): PersonaParameterValues {
   const checkedContract = validatePersonaParameterContract(contract);
   const checked = validateGraderParameterValues(checkedContract, values);
-  personaModelsOfParameters(checked);
+  for (const key of ["llm_provider", "llm_model", "stt_provider", "stt_model", "tts_provider", "tts_model", "tts_voice_id"] as const) {
+    if (typeof checked[key] !== "string" || checked[key].trim() === "") {
+      throw new TypeError(`persona parameter ${key} must be nonempty text`);
+    }
+  }
   if (checkedContract.some((field) => field.key === "language")) personaControlsOfParameters(checked);
   return checked;
 }
