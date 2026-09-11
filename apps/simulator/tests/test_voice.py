@@ -20,8 +20,14 @@ from conftest import (
     speech_in_the_recording,
 )
 from pipecat.audio.vad.vad_analyzer import VADState
-from pipecat.frames.frames import TextFrame
-from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.frames.frames import (
+    InterruptionFrame,
+    TextFrame,
+    TTSAudioRawFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from egma_simulator import conductor as conductor_module
 from egma_simulator.blob import FilesystemBlobStore
@@ -1235,6 +1241,28 @@ async def test_frequent_interruption_is_audible_over_continuous_agent_speech(
         return await original_reply(self, context)
 
     monkeypatch.setattr(Persona, "reply_to", count_deliberate)
+
+    async def four_one_second_frames(self: ScriptedTTS, _text: str) -> None:
+        await self.push_frame(TTSStartedFrame())
+        one_second = b"\x01\x00" * self.sample_rate_hz
+        for _ in range(4):
+            await self.push_frame(TTSAudioRawFrame(one_second, self.sample_rate_hz, 1))
+        await self.push_frame(TTSStoppedFrame())
+
+    monkeypatch.setattr(ScriptedTTS, "_speak", four_one_second_frames)
+    upstream_cancellations = 0
+    original_tts_process = ScriptedTTS.process_frame
+
+    async def observe_tts_cancel(self: ScriptedTTS, frame, direction) -> None:
+        nonlocal upstream_cancellations
+        if (
+            isinstance(frame, InterruptionFrame)
+            and direction == FrameDirection.UPSTREAM
+        ):
+            upstream_cancellations += 1
+        await original_tts_process(self, frame, direction)
+
+    monkeypatch.setattr(ScriptedTTS, "process_frame", observe_tts_cancel)
     spec = spec_for(
         scenario=f"{long_interruption} Then answer the remaining question.",
         greeting=long_greeting,
@@ -1260,8 +1288,9 @@ async def test_frequent_interruption_is_audible_over_continuous_agent_speech(
     agent = next(span for span in observed.spans if span[0] == "agent")
     assert persona[2] < agent[3] and agent[2] < persona[3]
     assert persona[3] - persona[2] <= 3_000_000_000
-    assert persona[1] == "[deliberate interruption audio truncated at three seconds]"
+    assert persona[1] == ""
     assert deliberate_requests == 1
+    assert upstream_cancellations == 1
 
     audio = observed.assembled.audio
     assert audio is not None
@@ -1326,6 +1355,50 @@ async def test_agent_stop_before_delayed_interruption_playout_yields_to_normal_r
     # Each continuous agent segment gets at most one attempt. The first canceled
     # attempt did not create a delivered-interruption cooldown for the next segment.
     assert deliberate_requests == 2
+
+
+async def test_failed_deliberate_model_request_does_not_steal_normal_reply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    original_reply = Persona.reply_to
+    attempts = 0
+
+    async def fail_deliberate(self: Persona, context):
+        nonlocal attempts
+        if any(
+            "Interrupt now" in message.get("content", "")
+            for message in context.get_messages()
+        ):
+            attempts += 1
+            raise RuntimeError("interruption request failed")
+        return await original_reply(self, context)
+
+    monkeypatch.setattr(Persona, "reply_to", fail_deliberate)
+    spec = spec_for(
+        scenario="This normal reply still belongs to the completed agent turn.",
+        greeting="A long enough agent statement to trigger one failed interruption.",
+        replies=["Thanks."],
+        max_turns=3,
+    )
+    assembled = assemble(
+        spec,
+        blobs=FilesystemBlobStore(tmp_path),
+        speech=SCRIPTED_PAIR,
+        parameters=ConductParameters(interruption_level="frequent"),
+    )
+    conductor = assembled.conductor
+    assert conductor is not None
+    delays = iter((0.1, 1.0))
+    conductor._random.uniform = lambda _low, _high: next(delays)
+
+    observed = await observe(
+        conductor, assembled, spec, controls=ConversationControls()
+    )
+
+    assert attempts == 1
+    assert [turn for turn in observed.turns if turn[0] == "human"] == [
+        ("human", "This normal reply still belongs to the completed agent turn.")
+    ]
 
 
 # -- What the legs are, and whose voice --------------------------------------
@@ -1820,9 +1893,7 @@ async def test_openai_tts_auth_failure_survives_the_real_pipeline(
         assert len(requests) == 1
         assert requests[0][0] == "Bearer test-customer-speech-key"
         assert requests[0][1]["model"] == "tts-1"
-        expected_voice = (
-            {"id": voice_id} if voice_id.startswith("voice_") else voice_id
-        )
+        expected_voice = {"id": voice_id} if voice_id.startswith("voice_") else voice_id
         assert requests[0][1]["voice"] == expected_voice
         assert "language" not in requests[0][1]
         assert "instructions" not in requests[0][1]

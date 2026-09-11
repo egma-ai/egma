@@ -23,6 +23,7 @@ from .client import ClaimedSpec, ClaimFailure, ControlPlaneClient, HeartbeatFail
 from .config import MediaSettings, SimulatorConfig
 from .contract import ContractViolation
 from .conversation import Conducted, ConversationControls, conduct
+from .conductor import InterruptionEvidence
 from .model import build_model_client
 from .persona import Persona
 from .pipeline import Assembled, assemble
@@ -313,6 +314,8 @@ class RunningSimulation:
                         controls=self._controls,
                         name=f"sim:{self.simulation_id}",
                         on_utterance=self._on_utterance,
+                        on_partial_utterance=self._on_partial_utterance,
+                        on_interruption=self._on_interruption,
                         on_measured=self._on_measured,
                         on_answered=self._on_answered,
                         on_provider_usage=self._on_provider_usage,
@@ -511,6 +514,25 @@ class RunningSimulation:
             began_unix_nano=began_unix_nano,
             ended_unix_nano=ended_unix_nano,
         )
+
+    async def _on_partial_utterance(
+        self, speaker: str, began_unix_nano: int, ended_unix_nano: int
+    ) -> None:
+        self._spans.spoken_turn(
+            speaker,
+            "",
+            began_unix_nano=began_unix_nano,
+            ended_unix_nano=ended_unix_nano,
+            platform_notes=(
+                "Speech was delivered, but exact words are unavailable because "
+                "audio was truncated at the three-second interruption cap.",
+            ),
+        )
+        self._reporter.turn_count += 1
+
+    def _on_interruption(self, evidence: InterruptionEvidence) -> None:
+        """Keep interruption lifecycle evidence on the simulation trace."""
+        self._spans.interruption(evidence)
 
     async def _on_answered(self) -> None:
         """Flush after each complete agent answer, including tool-only answers.
