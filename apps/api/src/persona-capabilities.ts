@@ -247,6 +247,13 @@ export function resolvePersonaCapabilities(
 
 export type CartesiaVoiceFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
+export class CartesiaVoiceDiscoveryUnavailableError extends Error {
+  constructor() {
+    super("Cartesia voice discovery is temporarily unavailable.");
+    this.name = "CartesiaVoiceDiscoveryUnavailableError";
+  }
+}
+
 type CartesiaVoicePage = {
   readonly data?: readonly Record<string, unknown>[];
   readonly has_more?: boolean;
@@ -272,10 +279,18 @@ export async function discoverCartesiaVoices(
     url.searchParams.set("limit", "100");
     url.searchParams.append("expand[]", "preview_file_url");
     if (cursor !== undefined) url.searchParams.set("starting_after", cursor);
-    const response = await fetcher(url, {
-      signal: overallSignal,
-      headers: { Authorization: `Bearer ${apiKey}`, "Cartesia-Version": "2026-08-14" },
-    });
+    let response: Response;
+    try {
+      response = await fetcher(url, {
+        signal: overallSignal,
+        headers: { Authorization: `Bearer ${apiKey}`, "Cartesia-Version": "2026-08-14" },
+      });
+    } catch {
+      throw new CartesiaVoiceDiscoveryUnavailableError();
+    }
+    if (response.status === 429 || response.status >= 500) {
+      throw new CartesiaVoiceDiscoveryUnavailableError();
+    }
     if (!response.ok) throw new Error(`Cartesia voice discovery failed with status ${response.status}.`);
     const page = await response.json() as CartesiaVoicePage;
     for (const raw of page.data ?? []) {

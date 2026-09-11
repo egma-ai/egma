@@ -49,7 +49,7 @@ import { invalid, notTheService } from "../http/refusals.ts";
 import { mockToolBase } from "./mock-endpoint.ts";
 import { platformEvent, safeExceptionType } from "../platform-log.ts";
 import { DaytonaAssignmentUncertainError } from "../voice-fleet-daytona.ts";
-import { discoverCartesiaVoices, OPENAI_STANDARD_VOICES, personaCapabilityRefusal, resolvePersonaCapabilities } from "../persona-capabilities.ts";
+import { CartesiaVoiceDiscoveryUnavailableError, discoverCartesiaVoices, OPENAI_STANDARD_VOICES, personaCapabilityRefusal, resolvePersonaCapabilities } from "../persona-capabilities.ts";
 
 /**
  * Internal simulation claims require the deployment service token and bypass
@@ -619,6 +619,12 @@ async function assembledSpec(
       deploymentSecretEnvironment,
     );
   } catch (fault) {
+    if (fault instanceof CartesiaVoiceDiscoveryUnavailableError) {
+      return {
+        retryable: "Cartesia voice discovery is temporarily unavailable",
+        deferredBy: "provider",
+      };
+    }
     if (fault instanceof PersonaCapabilityError) return { unbuildable: fault.message };
     if (fault instanceof ProviderKeyUnavailableError)
       return { unbuildable: fault.message, providerKeyUnavailable: true };

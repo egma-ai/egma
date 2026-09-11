@@ -1568,6 +1568,59 @@ describe("one source of execution truth", () => {
     expect(row?.endingReason).toBe("dispatch_failed");
   });
 
+  it.each([429, 503])(
+    "requeues a Cartesia claim when voice discovery returns %s",
+    async (status) => {
+      const { ada, key, connectionId, versionId } =
+        await aRealtimeVoiceCustomerReadyToRun(
+          `claims_cartesia_discovery_${status}`,
+        );
+      const { simulationId } = await aQueuedRun(key, connectionId, versionId);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response("temporarily unavailable", { status })),
+      );
+
+      const answered = await claim(api.config.simulatorServiceToken, {
+        claimant: "sim-under-test",
+        capacity: 1,
+        wait_seconds: 0,
+        contract_versions: [5, 6],
+      });
+
+      expect(answered.statusCode).toBe(200);
+      expect(answered.body.specs).toEqual([]);
+      expect(await getSimulation(contextFor(ada, "member"), simulationId)).toMatchObject({
+        status: "queued",
+        endingReason: null,
+      });
+    },
+  );
+
+  it("fails a Cartesia claim when discovery confirms the pinned voice is absent", async () => {
+    const { ada, key, connectionId, versionId } =
+      await aRealtimeVoiceCustomerReadyToRun("claims_cartesia_voice_deleted");
+    const { simulationId } = await aQueuedRun(key, connectionId, versionId);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ data: [], has_more: false }), { status: 200 })),
+    );
+
+    const answered = await claim(api.config.simulatorServiceToken, {
+      claimant: "sim-under-test",
+      capacity: 1,
+      wait_seconds: 0,
+      contract_versions: [5, 6],
+    });
+
+    expect(answered.statusCode).toBe(200);
+    expect(answered.body.specs).toEqual([]);
+    expect(await getSimulation(contextFor(ada, "member"), simulationId)).toMatchObject({
+      status: "failed",
+      endingReason: "dispatch_failed",
+    });
+  });
+
   it("keeps version 6 work queued for a worker that only reads version 5", async () => {
     const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
       "claims_contract_cutover",
