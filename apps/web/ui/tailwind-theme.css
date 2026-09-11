@@ -730,11 +730,13 @@
    * exclusion: a button reached by keyboard fires without moving.
    */
   @media (hover: hover) and (pointer: fine) {
-    [data-slot="button"] {
+    [data-slot="button"],
+    [data-slot="persona-chip-remove"] {
       transition: transform var(--duration-press) var(--ease-out);
     }
 
-    [data-slot="button"]:active:not(:focus-visible):not(:disabled) {
+    [data-slot="button"]:active:not(:focus-visible):not(:disabled),
+    [data-slot="persona-chip-remove"]:active:not(:focus-visible):not(:disabled) {
       transform: scale(0.97);
     }
   }
@@ -996,6 +998,32 @@
 
   [data-preview="reduced-motion"] [data-slot="retell-account"],
   [data-preview="reduced-motion"] [data-slot="mock-tools-arrival"] {
+    animation: egma-fade-in var(--duration-hover) linear;
+  }
+
+  /*
+   * A persona chip somebody just chose, and the crosses a woken Personas cell
+   * grows on the chips already there.
+   *
+   * Both scale up from the place they appear in, on the popover pair: they are
+   * small anchored surfaces arriving where the eye already is. A chip the row
+   * already held carries no `data-arrived`, so nothing flutters on a page load
+   * or when a cell is woken.
+   */
+  [data-slot="persona-chip"][data-arrived],
+  [data-slot="persona-chip-remove"] {
+    animation: egma-anchored-in var(--duration-popover-in) var(--ease-out);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-slot="persona-chip"][data-arrived],
+    [data-slot="persona-chip-remove"] {
+      animation: egma-fade-in var(--duration-hover) linear;
+    }
+  }
+
+  [data-preview="reduced-motion"] [data-slot="persona-chip"][data-arrived],
+  [data-preview="reduced-motion"] [data-slot="persona-chip-remove"] {
     animation: egma-fade-in var(--duration-hover) linear;
   }
 

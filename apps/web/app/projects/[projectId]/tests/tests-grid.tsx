@@ -1,5 +1,6 @@
 "use client";
 
+import { XIcon } from "lucide-react";
 import {
   Fragment,
   useCallback,
@@ -17,6 +18,7 @@ import {
   updateTest,
 } from "@egma/platform-api/client";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -169,9 +171,14 @@ const COLUMNS: readonly {
     width: "24%",
     required: true,
   },
-  { field: "personas", header: "Personas", width: "12%", required: true },
-  { field: "mockTools", header: "Mock tools", width: "15%", required: false },
-  { field: "env", header: "Env", width: "15%", required: false },
+  /*
+   * Wide enough for a persona's name to stand on one chip: at 12% every
+   * chip truncated to its first word. The two JSON columns lent the width;
+   * they mostly read `None`.
+   */
+  { field: "personas", header: "Personas", width: "18%", required: true },
+  { field: "mockTools", header: "Mock tools", width: "12%", required: false },
+  { field: "env", header: "Env", width: "12%", required: false },
 ];
 
 /**
@@ -423,17 +430,22 @@ function PersonaPicker({
       <PopoverTrigger asChild>
         <button
           className={ADD_LINE}
+          /*
+           * Marked, because the chips above take the caret back here when a
+           * removal leaves no cross to hold it. The grid's own markers are
+           * plain data attributes; `data-slot` belongs to the primitive.
+           */
+          data-persona-add=""
           type="button"
           /* The cell owns its own caret; opening must not move it first. */
           onMouseDown={(event) => event.preventDefault()}
         >
           {/*
-           * A cell that already names somebody opens a panel that both adds and
-           * removes, so the trigger says editing rather than adding. An empty
-           * one — the entry row, before anybody has been named — keeps the
-           * grid's own add line, because adding is all it can do.
+           * The panel adds, and the chips above remove, so the trigger says
+           * the one thing it does — on a cell that names nobody and on a cell
+           * that already names three.
            */}
-          {chosen.length === 0 ? "+ Add a persona" : "Edit personas"}
+          + Add a persona
         </button>
       </PopoverTrigger>
       <PopoverContent
@@ -459,12 +471,8 @@ function PersonaPicker({
   );
 }
 
-/** Why the only persona a test names cannot be taken off it. */
-const LAST_PERSONA = "A test needs at least one persona";
-
 /**
- * What the open picker holds: who is on the test, the search, the people, and
- * the way out.
+ * What the open picker holds: the search, the people, and the way out.
  *
  * It is its own component so that the read below runs when a panel opens
  * rather than when the grid draws, which is the difference between one request
@@ -488,21 +496,6 @@ function PersonaChoices({
   const [refused, setRefused] = useState<string | null>(null);
   /** Whether egma holds more than this picker read. Said out loud if so. */
   const [truncated, setTruncated] = useState(false);
-  const panel = useRef<HTMLDivElement>(null);
-  const said = useId();
-
-  /*
-   * **Who the test names now, built from the row rather than from the list
-   * below.** The list holds the project's available personas, and a test can
-   * name one the project has since deleted — which is exactly the test that
-   * cannot be saved again until that persona comes off it. Reading the row
-   * puts the deleted one on screen, with its own way out.
-   */
-  const onTest: readonly Named[] = chosen.map(
-    (id) => known.get(id) ?? { id, name: id },
-  );
-  /** The last persona standing stays: a test says who calls. */
-  const onlyOne = onTest.length === 1;
 
   /*
    * **Every persona the project holds, not the first page of them.**
@@ -573,63 +566,8 @@ function PersonaChoices({
     onChange(next, named);
   }
 
-  /**
-   * Take one persona off the test, and hold the caret inside the open panel.
-   *
-   * The row that was pressed is about to leave. Radix reads focus falling to
-   * the body as focus leaving the panel, so the caret goes to the search
-   * field, which outlives every row here.
-   */
-  function remove(one: Named): void {
-    toggle(one);
-    panel.current
-      ?.querySelector<HTMLInputElement>('[data-slot="command-input"]')
-      ?.focus();
-  }
-
   return (
-    <div className="flex flex-col" ref={panel}>
-      {onTest.length === 0 ? null : (
-        <div className="border-b border-border">
-          <p className="m-0 px-2.5 pt-2 pb-1 text-sm text-faint" id={said}>
-            On this test
-          </p>
-          {/* Bounded and scrolling, as the list below it is: a test may name
-              more callers than a panel can hold. */}
-          <ul
-            className="m-0 max-h-40 list-none overflow-y-auto p-0"
-            aria-labelledby={said}
-          >
-            {onTest.map((one) => (
-              <li
-                className="flex flex-wrap items-center gap-x-2 px-2.5 pb-1"
-                key={one.id}
-              >
-                <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                  {one.name}
-                  {one.archivedAt === null || one.archivedAt === undefined ? null : (
-                    // The test still names somebody the project has deleted.
-                    // Saying so is what makes the Remove beside it make sense.
-                    <span className="text-faint"> (deleted)</span>
-                  )}
-                </span>
-                <Button
-                  aria-label={`Remove ${one.name}`}
-                  className="px-0"
-                  disabled={onlyOne}
-                  onClick={() => remove(one)}
-                  size="sm"
-                  type="button"
-                  variant="link"
-                  {...(onlyOne ? { why: LAST_PERSONA } : {})}
-                >
-                  Remove
-                </Button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+    <>
       {/*
        * **`label` names the search field, not the list, and that is `cmdk`'s
        * doing rather than a choice made here.** It renders the prop into a
@@ -711,7 +649,7 @@ function PersonaChoices({
           </button>
         </div>
       </Command>
-    </div>
+    </>
   );
 }
 /**
@@ -834,12 +772,148 @@ function BehaviorLines({
   );
 }
 
-/** The names a Personas cell shows, in the order they were authored. */
-function personaNames(
-  ids: readonly string[],
-  known: ReadonlyMap<string, Named>,
-): string {
-  return ids.map((id) => known.get(id)?.name ?? id).join(", ");
+/**
+ * The personas a cell names, as chips in the order the test names them.
+ *
+ * A woken cell grows a cross on each chip, and pressing one is the whole of
+ * taking that persona off: removal was a hunt through the picker before, which
+ * is a long way round for the commonest edit a Personas cell has.
+ */
+function PersonaChips({
+  ids,
+  known,
+  stored,
+  removable,
+  onRemove,
+}: {
+  readonly ids: readonly string[];
+  readonly known: ReadonlyMap<string, Named>;
+  /** The personas the row already holds, so only a new chip arrives. */
+  readonly stored: readonly string[];
+  /** Whether each chip carries a cross, which is what takes it off. */
+  readonly removable: boolean;
+  readonly onRemove: (id: string) => void;
+}) {
+  const crosses = useRef<(HTMLButtonElement | null)[]>([]);
+  /** The cell around the chips, held while the list stands. */
+  const around = useRef<HTMLElement | null>(null);
+  /**
+   * Which cross the caret is owed, and it is always one that just moved.
+   *
+   * The cross that was pressed is about to leave. Holding the index rather
+   * than an element is what lets the caret land on the chip that took its
+   * place, or on the one above when the last chip went.
+   */
+  const [caretAt, setCaretAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (caretAt === null) return;
+    const cross = crosses.current[caretAt];
+    setCaretAt(null);
+    if (cross !== null && cross !== undefined) {
+      cross.focus();
+      return;
+    }
+    /*
+     * Nothing left to hold the caret: the last persona on a stored test keeps
+     * no cross, and an emptied entry row has no chip at all. The add line is
+     * the cell's other way in, and the caret has to stay inside the cell —
+     * dropped to the body it blurs the cell, and a blur is a commit.
+     */
+    around.current?.querySelector<HTMLButtonElement>("[data-persona-add]")?.focus();
+  }, [caretAt, ids]);
+
+  if (ids.length === 0) return null;
+
+  return (
+    <ul
+      aria-label="Personas"
+      className="m-0 flex list-none flex-wrap gap-1 p-0"
+      ref={(node) => {
+        if (node !== null) around.current = node.parentElement;
+      }}
+    >
+      {ids.map((id, at) => {
+        const one = known.get(id);
+        const name = one?.name ?? id;
+        return (
+          <Badge
+            asChild
+            className={cn(
+              /* A persona's name is the record's name, not a state word. */
+              "max-w-full text-foreground",
+              /*
+               * On a coarse pointer the cross grows to the tap target, so the
+               * chip grows with it and lets the name wrap rather than truncate.
+               */
+              removable && "gap-1 pointer-coarse:h-auto pointer-coarse:min-h-(--tap-target)",
+            )}
+            key={id}
+            shape="count"
+            variant="neutral"
+          >
+            <li
+              data-slot="persona-chip"
+              /* A chip the row already holds is simply there; a just-chosen
+                 one arrives, which is what the theme's rule animates. */
+              {...(stored.includes(id) ? {} : { "data-arrived": "" })}
+            >
+              <span
+                className={cn(
+                  "min-w-0 truncate",
+                  removable && "pointer-coarse:whitespace-normal",
+                )}
+              >
+                {name}
+                {typeof one?.archivedAt === "string" ? (
+                  // The test still names somebody the project has deleted.
+                  // Saying so is what makes the cross beside it make sense.
+                  <span className="text-faint"> (deleted)</span>
+                ) : null}
+              </span>
+              {removable ? (
+                <button
+                  aria-label={`Remove ${name}`}
+                  className={cn(
+                    "inline-flex size-4 shrink-0 cursor-pointer items-center justify-center",
+                    "border-0 bg-transparent p-0 text-muted-foreground",
+                    /* Half of the chip's own side padding, so the cross sits
+                       inside the edge rather than a word's width from it. */
+                    "-mr-1",
+                    "transition-[color] duration-(--duration-hover) ease-out",
+                    /* Ember under a pointer, as a cell link and the add line are. */
+                    "pointer-hover:text-primary motion-reduce:transition-none",
+                    /* The tap target's height, as the Button keeps it; the
+                       width stays modest so the name keeps its room. */
+                    "pointer-coarse:h-(--tap-target) pointer-coarse:w-8",
+                  )}
+                  data-slot="persona-chip-remove"
+                  /* The cell owns its own caret; a press here must not move it. */
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    /*
+                     * The chip leaves on the press and nothing fades it out:
+                     * a removal is a many-times-a-day edit, and a ghost chip
+                     * would still have to be answered for if the draft it
+                     * belongs to is reverted or refused.
+                     */
+                    setCaretAt(at === ids.length - 1 ? Math.max(at - 1, 0) : at);
+                    onRemove(id);
+                  }}
+                  ref={(node) => {
+                    crosses.current[at] = node;
+                  }}
+                  type="button"
+                >
+                  <XIcon aria-hidden="true" className="size-3" />
+                </button>
+              ) : null}
+            </li>
+          </Badge>
+        );
+      })}
+    </ul>
+  );
 }
 
 /**
@@ -853,6 +927,7 @@ function CellBody({
   woken,
   draft,
   known,
+  stored,
   projectId,
   owner,
   picking,
@@ -867,6 +942,8 @@ function CellBody({
   readonly woken: boolean;
   readonly draft: Draft;
   readonly known: ReadonlyMap<string, Named>;
+  /** The personas the stored row names, which the draft may have moved past. */
+  readonly stored: readonly string[];
   readonly projectId: string;
   /** This row's test id, which is what its picking is held under. */
   readonly owner: string;
@@ -957,7 +1034,7 @@ function CellBody({
 
   return (
     <div
-      className="relative flex flex-col gap-0.5"
+      className="relative flex min-w-0 flex-col gap-0.5"
       onKeyDown={(event) => {
         if (!woken || event.key !== "Escape") return;
         event.preventDefault();
@@ -965,9 +1042,27 @@ function CellBody({
         onCancel();
       }}
     >
-      <span className={cn(TEXT, VIEW_TEXT)}>
-        {personaNames(draft.personas, known)}
-      </span>
+      {/*
+       * The same list in both states, in the same place, so waking the cell
+       * grows the crosses on the chips that are already there rather than
+       * drawing the chips again.
+       */}
+      <PersonaChips
+        ids={draft.personas}
+        known={known}
+        stored={stored}
+        /*
+         * A test says who calls, so the one persona it has left keeps no
+         * cross. Unticking that persona in the picker is what says why.
+         */
+        removable={woken && draft.personas.length > 1}
+        onRemove={(id) =>
+          onChange({
+            ...draft,
+            personas: draft.personas.filter((one) => one !== id),
+          })
+        }
+      />
       {woken ? (
         <PersonaPicker
           projectId={projectId}
@@ -1812,6 +1907,7 @@ export function TestsGrid(props: GridProps) {
             woken={woken}
             draft={draft}
             known={known}
+            stored={test.personas.map((persona) => persona.id)}
             projectId={projectId}
             owner={test.id}
             picking={woken && picking === test.id}
@@ -1948,8 +2044,24 @@ export function TestsGrid(props: GridProps) {
               onCancel={askToDiscard}
             />
           ) : (
-            <div className="relative flex flex-col gap-0.5">
-              <span className={TEXT}>{personaNames(entry.personas, known)}</span>
+            <div className="relative flex min-w-0 flex-col gap-0.5">
+              <PersonaChips
+                ids={entry.personas}
+                known={known}
+                /* Nothing here is written yet: every chip is one just chosen. */
+                stored={[]}
+                /*
+                 * Every chip here can go. The row is not a test yet, and its
+                 * own Save is what says it needs one persona.
+                 */
+                removable
+                onRemove={(id) =>
+                  setEntry({
+                    ...entry,
+                    personas: entry.personas.filter((one) => one !== id),
+                  })
+                }
+              />
               <PersonaPicker
                 projectId={projectId}
                 chosen={entry.personas}
