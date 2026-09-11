@@ -103,7 +103,12 @@ async def _run(config: SimulatorConfig) -> None:
         from .preview import start_preview_server
 
         preview_runner = await start_preview_server(
-            service_token=config.service_token, port=int(preview_port)
+            service_token=config.service_token,
+            usage_callback_url=(
+                f"{config.control_plane_url}/internal/persona-preview-usage"
+            ),
+            secrets=registry,
+            port=int(preview_port),
         )
 
     service = SimulatorService(config, secrets=registry)

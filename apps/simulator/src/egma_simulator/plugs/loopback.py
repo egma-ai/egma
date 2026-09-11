@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..background import BackgroundSound
 from ..media import VoiceMedia
 from ..media.scripted_transport import ScriptedTransport
 from . import PlugError
@@ -37,12 +38,17 @@ class LoopbackCounterpart:
         job_dispatch_metadata: object = None,
         mock_tools: object = None,
         media: object = None,
+        background: BackgroundSound | None = None,
     ) -> None:
         # There is no platform here to keep versions, render variables or
         # dispatch a worker: the counterpart is this process talking to
         # itself.
         del access_variant, credentials, simulation_id, mock_tools, media
         del agent_version, dynamic_variables, job_dispatch_metadata
+        if background is not None and background.sound_id != "none":
+            raise PlugError(
+                "the scripted loopback transport cannot carry background sound"
+            )
         if modality != "voice":
             raise PlugError(
                 f"the loopback counterpart speaks voice only; a {modality!r} "

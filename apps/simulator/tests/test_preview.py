@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import wave
+from types import SimpleNamespace
 
 import aiohttp
+import pytest
 from aiohttp import web
+from pipecat.frames.frames import Frame, TextFrame, TTSAudioRawFrame
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from egma_simulator import preview as preview_module
 from egma_simulator.model import PersonaReply
 from egma_simulator.preview import preview_app, render_preview
+from egma_simulator.redaction import REDACTED, SecretRegistry
 from egma_simulator.speech import decode_speech, peak_level
 from egma_simulator.usage import CLIENT_MEASURED, ProviderUsage
 
@@ -17,6 +23,7 @@ from egma_simulator.usage import CLIENT_MEASURED, ProviderUsage
 def request_body(*, gain: float = 1.0) -> dict:
     return {
         "requestId": "preview-1",
+        "usageSettlementToken": "settlement-token",
         "text": "Hola",
         "models": {
             "llm": {
@@ -32,7 +39,7 @@ def request_body(*, gain: float = 1.0) -> dict:
                 "voiceId": "plain",
                 "speed": 1,
                 "key": None,
-            }
+            },
         },
         "controls": {
             "language": "es-MX",
@@ -75,6 +82,7 @@ async def test_preview_uses_the_runtime_tts_and_gain_path(monkeypatch):
     use_preview_model(monkeypatch)
     normal = await render_preview(request_body())
     quiet = await render_preview(request_body(gain=0.5))
+
     def pcm(result: dict) -> bytes:
         with wave.open(io.BytesIO(base64.b64decode(result["audioBase64"]))) as audio:
             return audio.readframes(audio.getnframes())
@@ -92,6 +100,38 @@ async def test_preview_uses_the_runtime_tts_and_gain_path(monkeypatch):
     prompt = PreviewModel.contexts[0].get_messages()[0]["content"]
     assert "Write it in es-MX" in prompt
     assert "Use happy wording" in prompt
+
+
+async def test_slow_preview_is_cleanly_capped_at_ten_seconds(monkeypatch):
+    use_preview_model(monkeypatch)
+
+    class SlowPreviewTTS(FrameProcessor):
+        async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+            await super().process_frame(frame, direction)
+            if isinstance(frame, TextFrame):
+                await self.push_frame(
+                    TTSAudioRawFrame(
+                        bytes([1, 0]) * (24_000 * 12),
+                        sample_rate=24_000,
+                        num_channels=1,
+                    )
+                )
+            await self.push_frame(frame, direction)
+
+    async def close() -> None:
+        return None
+
+    monkeypatch.setattr(
+        preview_module,
+        "build_legs",
+        lambda *_args, **_kwargs: SimpleNamespace(tts=SlowPreviewTTS(), aclose=close),
+    )
+    body = request_body()
+    body["models"]["tts"]["speed"] = 0.25
+    result = await render_preview(body)
+
+    with wave.open(io.BytesIO(base64.b64decode(result["audioBase64"]))) as audio:
+        assert audio.getnframes() == 24_000 * 10
 
 
 async def test_preview_endpoint_requires_the_service_token(
@@ -116,3 +156,107 @@ async def test_preview_endpoint_requires_the_service_token(
         assert accepted.status == 200
     finally:
         await runner.cleanup()
+
+
+async def test_preview_settles_usage_at_the_configured_control_plane(
+    unused_tcp_port_factory, monkeypatch
+):
+    use_preview_model(monkeypatch)
+    callback_port = unused_tcp_port_factory()
+    preview_port = unused_tcp_port_factory()
+    deliveries: list[tuple[str, dict]] = []
+
+    async def settle(request: web.Request) -> web.Response:
+        deliveries.append(
+            (request.headers.get("Authorization", ""), await request.json())
+        )
+        if len(deliveries) == 1:
+            raise web.HTTPInternalServerError()
+        raise web.HTTPNoContent()
+
+    callback_app = web.Application()
+    callback_app.router.add_post("/internal/persona-preview-usage", settle)
+    callback_runner = web.AppRunner(callback_app)
+    await callback_runner.setup()
+    await web.TCPSite(callback_runner, "127.0.0.1", callback_port).start()
+
+    secrets = SecretRegistry()
+    runner = web.AppRunner(
+        preview_app(
+            service_token="internal-secret",
+            usage_callback_url=(
+                f"http://127.0.0.1:{callback_port}/internal/persona-preview-usage"
+            ),
+            secrets=secrets,
+        )
+    )
+    await runner.setup()
+    await web.TCPSite(runner, "127.0.0.1", preview_port).start()
+    body = request_body()
+    body["usageCallbackUrl"] = "https://attacker.invalid/collect"
+    try:
+        async with aiohttp.ClientSession() as session:
+            response = await session.post(
+                f"http://127.0.0.1:{preview_port}/internal/persona-preview",
+                headers={"Authorization": "Bearer internal-secret"},
+                json=body,
+            )
+        assert response.status == 200
+    finally:
+        await runner.cleanup()
+        await callback_runner.cleanup()
+
+    assert [event[1]["usageIndex"] for event in deliveries] == [0, 0, 1]
+    assert deliveries[0] == deliveries[1]
+    assert {authorization for authorization, _body in deliveries} == {
+        "Bearer internal-secret"
+    }
+    assert all(event[1]["token"] == "settlement-token" for event in deliveries)
+    assert secrets.redact("model-key settlement-token") == f"{REDACTED} {REDACTED}"
+
+
+async def test_measured_llm_usage_settles_before_a_render_failure(monkeypatch):
+    use_preview_model(monkeypatch)
+    settled: list[tuple[int, ProviderUsage]] = []
+
+    async def settle(index: int, usage: ProviderUsage) -> None:
+        settled.append((index, usage))
+
+    def fail_after_llm(*_args, **_kwargs):
+        raise RuntimeError("TTS construction failed")
+
+    monkeypatch.setattr(preview_module, "build_legs", fail_after_llm)
+    body = request_body()
+    body["_settle"] = settle
+    with pytest.raises(RuntimeError, match="TTS construction failed"):
+        await render_preview(body)
+
+    assert [(index, usage.quantities) for index, usage in settled] == [
+        (0, {"output_tokens": 2})
+    ]
+
+
+async def test_bounded_settlement_survives_client_task_cancellation():
+    started = asyncio.Event()
+    release = asyncio.Event()
+    delivered: list[int] = []
+
+    async def settle(index: int, _usage: ProviderUsage) -> None:
+        started.set()
+        await release.wait()
+        delivered.append(index)
+
+    usage = ProviderUsage(
+        provider="openai",
+        model="preview-model",
+        operation="openai_chat_completions",
+        measurement=CLIENT_MEASURED,
+        quantities={"output_tokens": 2},
+    )
+    task = asyncio.create_task(preview_module._settle_shielded(settle, 0, usage))
+    await started.wait()
+    task.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert delivered == [0]

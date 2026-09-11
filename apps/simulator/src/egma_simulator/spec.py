@@ -44,6 +44,8 @@ class PersonaParameters:
     emotion: str = "neutral"
     accent: str = "voice_default"
     speech_volume: float = 1.0
+    background_sound_id: str = "none"
+    background_volume: float = 0.0631
     execution_policy_version: int = 1
 
     @classmethod
@@ -63,6 +65,8 @@ class PersonaParameters:
             emotion=parameters["emotion"],
             accent=parameters["accent"],
             speech_volume=float(parameters["speech_volume"]),
+            background_sound_id=parameters.get("background_sound_id", "none"),
+            background_volume=float(parameters.get("background_volume", 0.0631)),
             execution_policy_version=int(parameters["execution_policy_version"]),
         )
 

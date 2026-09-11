@@ -57,10 +57,11 @@ def cartesia_voice(speed: float = 1.1) -> PersonaVoice:
 
 
 def test_cartesia_speed_range_matches_the_simulation_contract():
-    assert CARTESIA_SPEED_RANGE == CONTRACT_TTS_SPEED_RANGE
+    assert CONTRACT_TTS_SPEED_RANGE == (0.25, 4)
+    assert CARTESIA_SPEED_RANGE == (0.6, 1.5)
 
 
-@pytest.mark.parametrize("speed", CONTRACT_TTS_SPEED_RANGE)
+@pytest.mark.parametrize("speed", CARTESIA_SPEED_RANGE)
 def test_cartesia_receives_the_pinned_model_voice_and_speed(
     monkeypatch: pytest.MonkeyPatch,
     speed: float,
@@ -415,7 +416,8 @@ async def test_live_transcribe_uses_the_plural_languages_request():
             stt="openai_realtime",
             stt_key=A_KEY,
             stt_model="gpt-live-transcribe",
-        )
+        ),
+        language="es-MX",
     )
     service = leg  # The adapter deliberately returns the real Pipecat service.
     sent: list[dict[str, Any]] = []
@@ -429,7 +431,7 @@ async def test_live_transcribe_uses_the_plural_languages_request():
     transcription = sent[0]["session"]["audio"]["input"]["transcription"]
     assert transcription == {
         "model": "gpt-live-transcribe",
-        "languages": ["en"],
+        "languages": ["es"],
     }
     assert "language" not in transcription
 

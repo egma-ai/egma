@@ -102,6 +102,11 @@ def spec_contract_version() -> int:
     return version
 
 
+def supported_spec_contract_versions() -> tuple[int, ...]:
+    """Every work-order version this worker can parse, newest first."""
+    return tuple(sorted(SPEC_SCHEMA_FILENAMES, reverse=True))
+
+
 SCHEMA_OF = {
     "spec": SPEC_SCHEMA_FILENAME,
     "report": REPORT_SCHEMA_FILENAME,

@@ -32,6 +32,7 @@ from pipecat.frames.frames import (
     StartFrame,
     TextFrame,
     TranscriptionFrame,
+    TTSAudioRawFrame,
     TTSStoppedFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
@@ -972,7 +973,7 @@ class _Timeline(FrameProcessor):
             self.started.set()
         elif isinstance(frame, InputAudioRawFrame):
             self._media.input_recorded(frame)
-        elif isinstance(frame, OutputAudioRawFrame):
+        elif isinstance(frame, TTSAudioRawFrame):
             self._conductor.persona_audio(
                 frame, recorded_until=self._recorder.bot_position
             )

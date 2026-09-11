@@ -752,11 +752,12 @@ def _cartesia_ears(
             "the cartesia_manual listening leg was chosen without a model"
         )
 
+    settings = {"model": providers.stt_model}
+    if language is not None:
+        settings["language"] = language
     leg = CartesiaSTTService(
         api_key=providers.stt_key,
-        settings=CartesiaSTTService.Settings(
-            model=providers.stt_model, language=language
-        ),
+        settings=CartesiaSTTService.Settings(**settings),
     )
     opened = _connection_opened_by(leg)
 
@@ -979,10 +980,7 @@ def _openai_realtime_ears(
 
             transcription: dict[str, object] = {
                 "model": self._settings.model,
-                # Egma does not yet carry persona language into speech legs.
-                # Preserve the existing English behavior in the field this
-                # model accepts. Language capability is separate catalog work.
-                "languages": ["en"],
+                "languages": [_openai_transcription_language(self._settings.language)],
             }
             if self._settings.prompt:
                 transcription["prompt"] = self._settings.prompt
@@ -1025,7 +1023,10 @@ def _openai_realtime_ears(
         # ends without moving anything in this repository.
         turn_detection=False,
         settings=OpenAIRealtimeSTTService.Settings(
-            model=providers.stt_model, language=language
+            **{
+                "model": providers.stt_model,
+                **({} if language is None else {"language": language}),
+            }
         ),
     )
 
@@ -1054,3 +1055,11 @@ def _openai_realtime_ears(
             await asyncio.sleep(0.05)
 
     return leg, connected
+
+
+def _openai_transcription_language(language: str | None) -> str:
+    """Convert a selected locale to OpenAI's accepted ISO-639 language code."""
+    code = (language or "en").strip().replace("_", "-").split("-", 1)[0].lower()
+    if not code:
+        raise SpeechFault("the selected transcription language is empty")
+    return code

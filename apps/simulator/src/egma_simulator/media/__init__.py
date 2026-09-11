@@ -221,7 +221,9 @@ class VoiceMedia:
 class MediaBackend(Protocol):
     """One outbound call, from opening the way in to hanging up."""
 
-    async def create_transport(self) -> VoiceMedia: ...
+    async def create_transport(
+        self, *, audio_out_mixer: object = None
+    ) -> VoiceMedia: ...
 
     async def dial(self, number: str) -> None: ...
 

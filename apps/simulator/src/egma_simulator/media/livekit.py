@@ -68,7 +68,7 @@ class LiveKitBackend:
         """The room this call is conducted in — one room, one call."""
         return self._room_name
 
-    async def create_transport(self) -> VoiceMedia:
+    async def create_transport(self, *, audio_out_mixer: object = None) -> VoiceMedia:
         """Build the room transport for the conductor's Pipecat pipeline."""
         self._room = JoinedRoom(
             url=self._settings.livekit_url,
@@ -81,7 +81,9 @@ class LiveKitBackend:
             room_name=self._room_name,
             quotable=self._quotable,
         )
-        return self._room.create_transport()
+        if audio_out_mixer is None:
+            return self._room.create_transport()
+        return self._room.create_transport(audio_out_mixer=audio_out_mixer)
 
     async def dial(self, number: str) -> None:
         """Ask LiveKit to place the call. Returns as soon as it is away."""
