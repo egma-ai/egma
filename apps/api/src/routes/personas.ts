@@ -75,9 +75,9 @@ type Query = {
 
 const voiceCache = new Map<string, { expires: number; voices: readonly PersonaVoice[] }>();
 
-function requestSignal(request: { raw: { once(event: "close", listener: () => void): unknown } }): AbortSignal {
+function requestSignal(request: { raw: { once(event: "aborted", listener: () => void): unknown } }): AbortSignal {
   const controller = new AbortController();
-  request.raw.once("close", () => controller.abort());
+  request.raw.once("aborted", () => controller.abort());
   return controller.signal;
 }
 
@@ -386,7 +386,12 @@ export async function personaRoutes(
       const cached = query.refresh === true ? undefined : voiceCache.get(cacheKey);
       if (cached !== undefined && cached.expires > Date.now()) voices = cached.voices;
       else {
-        voices = await discoverCartesiaVoices(customer.key, fetch, requestSignal(request));
+        try {
+          voices = await discoverCartesiaVoices(customer.key, fetch, requestSignal(request));
+        } catch {
+          const unresolved = resolvePersonaCapabilities(selection);
+          return reply.send({ ...unresolved, voices: { status: "unknown", reason: "Cartesia voice discovery could not be loaded. Try refresh again." } });
+        }
         voiceCache.set(cacheKey, { voices, expires: Date.now() + 5 * 60_000 });
       }
     }
@@ -412,12 +417,17 @@ export async function personaRoutes(
     for (const [field, capability] of Object.entries(capabilities)) {
       if (capability.status === "unsupported") return sendRefusal(reply, "unprocessable", `${field}: ${capability.reason ?? "unsupported"}`);
     }
-    const rendered = await renderPersonaPreview(options.preview, {
-      requestId: request.id,
-      text: previewText(controls.language, controls.emotion),
-      models: { tts: { provider: models.tts.provider, model: models.tts.model, adapter: tts.adapter, voiceId: models.tts.voiceId, speed: models.tts.speed, key: credential.key, fundingReceipt: null } },
-      controls,
-    }, requestSignal(request));
+    let rendered;
+    try {
+      rendered = await renderPersonaPreview(options.preview, {
+        requestId: request.id,
+        text: previewText(controls.language, controls.emotion),
+        models: { tts: { provider: models.tts.provider, model: models.tts.model, adapter: tts.adapter, voiceId: models.tts.voiceId, speed: models.tts.speed, key: credential.key, fundingReceipt: null } },
+        controls,
+      }, requestSignal(request));
+    } catch {
+      return sendRefusal(reply, "unprocessable", "Preview audio could not be generated with the selected voice and settings. Check provider access, then try again.");
+    }
     const customOpenAiVoice = models.tts.provider === "openai" && !resolvePersonaCapabilities({ ttsProvider: models.tts.provider, ttsModel: models.tts.model, sttProvider: models.stt.provider, sttModel: models.stt.model }).voices.choices?.some((voice) => voice.id === models.tts.voiceId);
     const proof = customOpenAiVoice ? createVoiceAccessProof({ organizationId: auth.organizationId, provider: models.tts.provider, credentialRevision: credential.credentialRef, model: models.tts.model, voiceId: models.tts.voiceId }, options.proofSecret) : undefined;
     return reply.send({ audioBase64: rendered.audioBase64, contentType: rendered.contentType, ...(proof === undefined ? {} : { voiceAccessProof: proof.proof }), expiresAt: proof?.expiresAt.toISOString() ?? null, interruptionNotice: "Preview demonstrates voice and sound settings. Test interruptions in a simulation." });
