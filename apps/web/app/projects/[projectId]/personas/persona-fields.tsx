@@ -279,8 +279,23 @@ export function ModelFields({
       return matchesType && (query === "" || `${voice.name} ${voice.id}`.toLowerCase().includes(query));
     });
   }, [capabilities, voiceSearch, voiceType]);
-  const states = capabilities === null ? [] : [capabilities.language, capabilities.accent, capabilities.emotion, capabilities.speed, capabilities.speechVolume, capabilities.voices];
-  const valid = capabilities !== null && states.every((state) => state.status !== "unknown");
+  function accepts(state: { status: string; choices?: readonly (string | number)[]; value?: string | number; range?: { minimum: number; maximum: number } }, value: string | number, unsupportedValue: string | number): boolean {
+    if (state.status === "unknown") return false;
+    if (state.status === "fixed") return value === state.value;
+    if (state.status === "unsupported") return value === unsupportedValue;
+    if (state.choices !== undefined) return state.choices.includes(value);
+    if (state.range !== undefined) return typeof value === "number" && value >= state.range.minimum && value <= state.range.maximum;
+    return true;
+  }
+  const valid = capabilities !== null
+    && accepts(capabilities.language, draft.language, "en-US")
+    && accepts(capabilities.accent, draft.accent, "neutral")
+    && accepts(capabilities.emotion, draft.emotion, "neutral")
+    && accepts(capabilities.speed, Number(draft.speed), 1)
+    && accepts(capabilities.speechVolume, Number(draft.speechVolume), 1)
+    && (capabilities.voices.status === "supported"
+      ? (capabilities.voices.choices ?? []).some((voice) => voice.id === draft.voiceId)
+      : capabilities.voices.status === "fixed" && capabilities.voices.value?.id === draft.voiceId);
   useEffect(() => {
     if (capabilities !== null || capabilityError !== null) onValidityChange?.(valid);
   }, [valid, capabilities, capabilityError, onValidityChange]);
