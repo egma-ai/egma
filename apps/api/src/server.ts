@@ -519,6 +519,10 @@ export function buildApi(options: ServerOptions): Api {
     baseUrl: config.baseUrl,
     carrierRoute: config.carrierRoute,
     blob: config.blob,
+    providerCredentials: config.providerCredentials,
+    simulatorServiceToken: config.simulatorServiceToken,
+    simulatorPreviewUrl: config.simulatorPreviewUrl,
+    proofSecret: config.authSecret,
     ...(options.wakeVoiceFleet === undefined
       ? {}
       : { wakeVoiceFleet: options.wakeVoiceFleet }),

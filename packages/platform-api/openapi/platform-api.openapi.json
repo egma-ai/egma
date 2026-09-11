@@ -11450,7 +11450,7 @@
                           },
                           "speed": {
                             "type": "number",
-                            "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                            "description": "Provider-supported speech rate. Read the selected combination's capability range."
                           }
                         },
                         "required": [
@@ -11468,6 +11468,45 @@
                       "tts"
                     ],
                     "additionalProperties": false
+                  },
+                  "controls": {
+                    "type": "object",
+                    "properties": {
+                      "language": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "emotion": {
+                        "type": "string",
+                        "enum": [
+                          "neutral",
+                          "happy",
+                          "angry",
+                          "frustrated",
+                          "sad",
+                          "anxious"
+                        ]
+                      },
+                      "accent": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "speechVolume": {
+                        "type": "number",
+                        "minimum": 0.5,
+                        "maximum": 1.5
+                      }
+                    },
+                    "required": [
+                      "language",
+                      "emotion",
+                      "accent",
+                      "speechVolume"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "voiceAccessProof": {
+                    "type": "string"
                   }
                 },
                 "additionalProperties": false
@@ -11670,7 +11709,7 @@
                                     },
                                     "speed": {
                                       "type": "number",
-                                      "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                                      "description": "Provider-supported speech rate. Read the selected combination's capability range."
                                     }
                                   },
                                   "required": [
@@ -12129,7 +12168,7 @@
                                           },
                                           "speed": {
                                             "type": "number",
-                                            "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                                            "description": "Provider-supported speech rate. Read the selected combination's capability range."
                                           }
                                         },
                                         "required": [
@@ -12445,7 +12484,7 @@
                           },
                           "speed": {
                             "type": "number",
-                            "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                            "description": "Provider-supported speech rate. Read the selected combination's capability range."
                           }
                         },
                         "required": [
@@ -12490,19 +12529,13 @@
                         "type": "number",
                         "minimum": 0.5,
                         "maximum": 1.5
-                      },
-                      "executionPolicyVersion": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "readOnly": true
                       }
                     },
                     "required": [
                       "language",
                       "emotion",
                       "accent",
-                      "speechVolume",
-                      "executionPolicyVersion"
+                      "speechVolume"
                     ],
                     "additionalProperties": false
                   },
@@ -12739,7 +12772,7 @@
                                     },
                                     "speed": {
                                       "type": "number",
-                                      "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                                      "description": "Provider-supported speech rate. Read the selected combination's capability range."
                                     }
                                   },
                                   "required": [
@@ -13079,7 +13112,7 @@
                             },
                             "speed": {
                               "type": "number",
-                              "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                              "description": "Provider-supported speech rate. Read the selected combination's capability range."
                             }
                           },
                           "required": [
@@ -13097,28 +13130,11 @@
                         "tts"
                       ],
                       "additionalProperties": false
-                    },
-                    "speedRange": {
-                      "type": "object",
-                      "properties": {
-                        "slowest": {
-                          "type": "number"
-                        },
-                        "fastest": {
-                          "type": "number"
-                        }
-                      },
-                      "required": [
-                        "slowest",
-                        "fastest"
-                      ],
-                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "modelCatalog",
-                    "recommendedModels",
-                    "speedRange"
+                    "recommendedModels"
                   ],
                   "additionalProperties": false
                 }
@@ -13842,7 +13858,7 @@
                           },
                           "speed": {
                             "type": "number",
-                            "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                            "description": "Provider-supported speech rate. Read the selected combination's capability range."
                           }
                         },
                         "required": [
@@ -13887,19 +13903,13 @@
                         "type": "number",
                         "minimum": 0.5,
                         "maximum": 1.5
-                      },
-                      "executionPolicyVersion": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "readOnly": true
                       }
                     },
                     "required": [
                       "language",
                       "emotion",
                       "accent",
-                      "speechVolume",
-                      "executionPolicyVersion"
+                      "speechVolume"
                     ],
                     "additionalProperties": false
                   },
@@ -14273,7 +14283,7 @@
                                     },
                                     "speed": {
                                       "type": "number",
-                                      "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                                      "description": "Provider-supported speech rate. Read the selected combination's capability range."
                                     }
                                   },
                                   "required": [
@@ -14588,7 +14598,7 @@
                           },
                           "speed": {
                             "type": "number",
-                            "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                            "description": "Provider-supported speech rate. Read the selected combination's capability range."
                           }
                         },
                         "required": [
@@ -14633,19 +14643,13 @@
                         "type": "number",
                         "minimum": 0.5,
                         "maximum": 1.5
-                      },
-                      "executionPolicyVersion": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "readOnly": true
                       }
                     },
                     "required": [
                       "language",
                       "emotion",
                       "accent",
-                      "speechVolume",
-                      "executionPolicyVersion"
+                      "speechVolume"
                     ],
                     "additionalProperties": false
                   },
@@ -14655,7 +14659,7 @@
                   "expectedVersionId": {
                     "type": "string",
                     "minLength": 1,
-                    "description": "The current versionId from Get a persona. Required when editing identityName, personality, or language. A stale value returns 409 version_conflict."
+                    "description": "The current versionId from Get a persona. Required when editing identityName or personality. A stale value returns 409 version_conflict."
                   }
                 },
                 "additionalProperties": false
@@ -14858,7 +14862,7 @@
                                     },
                                     "speed": {
                                       "type": "number",
-                                      "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                                      "description": "Provider-supported speech rate. Read the selected combination's capability range."
                                     }
                                   },
                                   "required": [
@@ -16086,7 +16090,7 @@
                                     },
                                     "speed": {
                                       "type": "number",
-                                      "description": "Speech rate from 0.6 through 1.5. Use 1 for the normal rate."
+                                      "description": "Provider-supported speech rate. Read the selected combination's capability range."
                                     }
                                   },
                                   "required": [

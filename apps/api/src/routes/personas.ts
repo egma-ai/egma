@@ -12,18 +12,23 @@ import {
   NotPermittedError,
   permits,
   PROVIDER_CATALOG,
+  catalogEntry,
+  isModelProvider,
   EgmaProvidedPersonaError,
   ProjectOutsideOrganizationError,
   RECOMMENDED_PERSONA_MODELS,
-  SPEED_RANGE,
+  personaControlsOfParameters,
+  resolveProviderKeyForAuthoring,
   testsUsingPersona,
   UnprocessableInputError,
   validPersonaModels,
+  validPersonaControls,
   WriteAbortedError,
   type AuthContext,
   type Persona,
   type PersonaVersion,
 } from "@egma/db";
+import { credentialFor, type ProviderCredentialSource } from "@egma/provider-credentials";
 import { isId } from "@egma/ids";
 import { personaOperations } from "@egma/platform-api/contract";
 import type { FastifyInstance, FastifyReply } from "fastify";
@@ -35,6 +40,9 @@ import type { RateLimit } from "../http/rate-limit.ts";
 import { given, text } from "../http/reading.ts";
 import { registerPlatformOperation } from "../http/platform-operation.ts";
 import { sendRefusal } from "../http/refusals.ts";
+import { discoverCartesiaVoices, resolvePersonaCapabilities, type PersonaVoice } from "../persona-capabilities.ts";
+import { renderPersonaPreview, type PreviewReach } from "../persona-preview.ts";
+import { createVoiceAccessProof } from "../persona-voice-proof.ts";
 
 /**
  * Project persona routes expose Egma-provided and Custom definitions.
@@ -49,6 +57,9 @@ import { sendRefusal } from "../http/refusals.ts";
 export type PersonaRoutesOptions = {
   readonly provider: SessionIdentityProvider;
   readonly rateLimit: RateLimit;
+  readonly providerCredentials: ProviderCredentialSource;
+  readonly preview: PreviewReach;
+  readonly proofSecret: string;
 };
 
 type Body = Record<string, unknown>;
@@ -57,7 +68,36 @@ type Query = {
   readonly projectId?: string;
   readonly pageToken?: string;
   readonly search?: string;
+  readonly ttsProvider?: string; readonly ttsModel?: string;
+  readonly sttProvider?: string; readonly sttModel?: string;
+  readonly language?: string; readonly voiceId?: string; readonly refresh?: boolean;
 };
+
+const voiceCache = new Map<string, { expires: number; voices: readonly PersonaVoice[] }>();
+
+function requestSignal(request: { raw: { once(event: "close", listener: () => void): unknown } }): AbortSignal {
+  const controller = new AbortController();
+  request.raw.once("close", () => controller.abort());
+  return controller.signal;
+}
+
+function previewText(language: string, _emotion: string): string {
+  const samples: Readonly<Record<string, string>> = {
+    es: "Hola. Esta es una breve muestra neutral de mi voz para comprobar la configuración seleccionada.",
+    fr: "Bonjour. Voici un court aperçu neutre de ma voix avec les réglages sélectionnés.",
+    de: "Hallo. Dies ist eine kurze neutrale Vorschau meiner Stimme mit den gewählten Einstellungen.",
+  };
+  const base = samples[language.toLowerCase().split("-")[0] ?? ""] ?? "Hello. This is a short, neutral preview of my voice with the selected settings.";
+  return base;
+}
+
+async function authoringCredential(options: PersonaRoutesOptions, auth: AuthContext, provider: string) {
+  if (!isModelProvider(provider)) return undefined;
+  const customer = await resolveProviderKeyForAuthoring(auth, provider);
+  if (customer !== undefined) return customer;
+  const key = credentialFor(await options.providerCredentials.load(), provider);
+  return { key, credentialRef: "deployment" };
+}
 
 /* ---------------------------------------------------------------- refusals */
 
@@ -203,7 +243,7 @@ function describedPersona(one: Persona): Record<string, unknown> {
     personality: one.personality,
     language: one.language,
     parameterContract: one.parameterContract,
-    settings: one.settings === null ? null : { id: one.settings.id, models: one.settings.models, createdAt: one.settings.createdAt.toISOString(), updatedAt: one.settings.updatedAt.toISOString() },
+    settings: one.settings === null ? null : { id: one.settings.id, models: one.settings.models, controls: personaControlsOfParameters(one.settings.parameterValues), createdAt: one.settings.createdAt.toISOString(), updatedAt: one.settings.updatedAt.toISOString() },
     owner: one.owner,
     archivedAt: one.archivedAt?.toISOString() ?? null,
     createdAt: one.createdAt.toISOString(),
@@ -321,8 +361,66 @@ export async function personaRoutes(
           : {}),
       })),
       recommendedModels: RECOMMENDED_PERSONA_MODELS,
-      speedRange: SPEED_RANGE,
     });
+  });
+
+  registerPlatformOperation(app, personaOperations.getPersonaCapabilities, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const query = (request.query ?? {}) as Query;
+    const acting = await projectFor(auth, given(query.projectId));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+    const selection = {
+      ttsProvider: text(query.ttsProvider), ttsModel: text(query.ttsModel),
+      sttProvider: text(query.sttProvider), sttModel: text(query.sttModel),
+      ...(given(text(query.language)) === undefined ? {} : { language: text(query.language) }),
+      ...(given(text(query.voiceId)) === undefined ? {} : { voiceId: text(query.voiceId) }),
+    };
+    let voices: readonly PersonaVoice[] = [];
+    if (selection.ttsProvider === "cartesia") {
+      const customer = await resolveProviderKeyForAuthoring(acting.auth, "cartesia");
+      if (customer === undefined) {
+        const unresolved = resolvePersonaCapabilities(selection);
+        return reply.send({ ...unresolved, voices: { status: "unknown", reason: "Add an organization Cartesia key to discover account voices. Deployment-account private voices are never shown." } });
+      }
+      const cacheKey = `${auth.organizationId}:cartesia:${customer.credentialRef}`;
+      const cached = query.refresh === true ? undefined : voiceCache.get(cacheKey);
+      if (cached !== undefined && cached.expires > Date.now()) voices = cached.voices;
+      else {
+        voices = await discoverCartesiaVoices(customer.key, fetch, requestSignal(request));
+        voiceCache.set(cacheKey, { voices, expires: Date.now() + 5 * 60_000 });
+      }
+    }
+    return reply.send(resolvePersonaCapabilities(selection, voices));
+  });
+
+  registerPlatformOperation(app, personaOperations.previewPersona, async (request, reply) => {
+    const { auth } = requesterOf(request);
+    const body = (request.body ?? {}) as Body;
+    const acting = await projectFor(auth, given(text(body.projectId)));
+    if ("refusal" in acting) return refuseActing(reply, acting);
+    const models = validPersonaModels(body.models);
+    const controls = validPersonaControls({ ...(body.controls as object), executionPolicyVersion: 1 });
+    const credential = await authoringCredential(options, acting.auth, models.tts.provider);
+    if (credential === undefined) return sendRefusal(reply, "unprocessable", "The selected text-to-speech provider is not available.");
+    const tts = catalogEntry("tts", models.tts.provider, models.tts.model);
+    if (tts === undefined) return sendRefusal(reply, "unprocessable", "The selected text-to-speech model is not available.");
+    const capabilities = resolvePersonaCapabilities({
+      ttsProvider: models.tts.provider, ttsModel: models.tts.model,
+      sttProvider: models.stt.provider, sttModel: models.stt.model,
+      language: controls.language, voiceId: models.tts.voiceId,
+    });
+    for (const [field, capability] of Object.entries(capabilities)) {
+      if (capability.status === "unsupported") return sendRefusal(reply, "unprocessable", `${field}: ${capability.reason ?? "unsupported"}`);
+    }
+    const rendered = await renderPersonaPreview(options.preview, {
+      requestId: request.id,
+      text: previewText(controls.language, controls.emotion),
+      models: { tts: { provider: models.tts.provider, model: models.tts.model, adapter: tts.adapter, voiceId: models.tts.voiceId, speed: models.tts.speed, key: credential.key, fundingReceipt: null } },
+      controls,
+    }, requestSignal(request));
+    const customOpenAiVoice = models.tts.provider === "openai" && !resolvePersonaCapabilities({ ttsProvider: models.tts.provider, ttsModel: models.tts.model, sttProvider: models.stt.provider, sttModel: models.stt.model }).voices.choices?.some((voice) => voice.id === models.tts.voiceId);
+    const proof = customOpenAiVoice ? createVoiceAccessProof({ organizationId: auth.organizationId, provider: models.tts.provider, credentialRevision: credential.credentialRef, model: models.tts.model, voiceId: models.tts.voiceId }, options.proofSecret) : undefined;
+    return reply.send({ audioBase64: rendered.audioBase64, contentType: rendered.contentType, ...(proof === undefined ? {} : { voiceAccessProof: proof.proof }), expiresAt: proof?.expiresAt.toISOString() ?? null, interruptionNotice: "Preview demonstrates voice and sound settings. Test interruptions in a simulation." });
   });
 
   /**

@@ -21,29 +21,32 @@ describe("persona capability resolution", () => {
       "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova",
       "sage", "shimmer", "verse", "marin", "cedar",
     ]);
-    expect(OPENAI_STANDARD_VOICES.every((voice) => voice.presentation === "unknown")).toBe(true);
+    expect(OPENAI_STANDARD_VOICES.find((voice) => voice.id === "cedar")?.presentation).toBe("male");
+    expect(OPENAI_STANDARD_VOICES.find((voice) => voice.id === "coral")?.presentation).toBe("female");
+    expect(OPENAI_STANDARD_VOICES.find((voice) => voice.id === "alloy")?.presentation).toBe("unknown");
   });
 
   it("fixes instruction-only controls for legacy OpenAI TTS", () => {
     const result = resolvePersonaCapabilities({ ...selection, ttsModel: "tts-1" });
     expect(result.emotion).toMatchObject({ status: "fixed", value: "neutral" });
     expect(result.accent).toMatchObject({ status: "fixed", value: "voice_default" });
-    expect(result.speed.range).toEqual({ minimum: 0.6, maximum: 1.5, step: 0.1 });
+    expect(result.speed.range).toEqual({ minimum: 0.25, maximum: 4, step: 0.05 });
+    expect(result.voices.choices?.map((voice) => voice.id)).toEqual(["alloy", "echo", "fable", "onyx", "nova", "shimmer"]);
   });
 
   it("distinguishes unknown catalog metadata from unsupported models", () => {
-    expect(resolvePersonaCapabilities(selection).language.status).toBe("unknown");
+    expect(resolvePersonaCapabilities(selection).language).toMatchObject({ status: "supported" });
     expect(resolvePersonaCapabilities({ ...selection, ttsModel: "missing" }).language.status).toBe("unsupported");
   });
 
   it("returns Cartesia voice language and accent without locale inference", () => {
     const result = resolvePersonaCapabilities(
-      { ...selection, ttsProvider: "cartesia", ttsModel: "sonic-3.5", voiceId: "voice-a" },
+      { ...selection, ttsProvider: "cartesia", ttsModel: "sonic-preview", voiceId: "voice-a", language: "en-GB" },
       [{ id: "voice-a", name: "A", source: "account", presentation: "female", languages: ["en-GB"], accents: ["GB"] }],
     );
     expect(result.language).toEqual({ status: "supported", choices: ["en-GB"] });
     expect(result.accent).toEqual({ status: "supported", choices: ["voice_default", "GB"] });
-    expect(result.speed).toMatchObject({ status: "fixed", value: 1 });
+    expect(result.speed).toMatchObject({ status: "supported" });
   });
 });
 
@@ -52,7 +55,7 @@ describe("Cartesia discovery", () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
         data: [{ id: "public", name: "Public", is_owner: false, gender: "masculine", language: "en", country: "US" }],
-        has_more: true, next_page: "public",
+        has_more: true, next_page: "deprecated-cursor",
       })))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         data: [{ id: "private", name: "Private", is_owner: true, gender: "feminine", language: "es_ES" }],

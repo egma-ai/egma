@@ -76,7 +76,7 @@ const speechSelection = {
     },
     speed: {
       type: "number",
-      description: "Speech rate from 0.6 through 1.5. Use 1 for the normal rate.",
+      description: "Provider-supported speech rate. Read the selected combination's capability range.",
     },
   },
   required: [...modelSelection.required, "voiceId", "speed"],
@@ -105,6 +105,18 @@ const personaControls = {
     executionPolicyVersion: { type: "integer", minimum: 1, readOnly: true },
   },
   required: ["language", "emotion", "accent", "speechVolume", "executionPolicyVersion"],
+  additionalProperties: false,
+} as const;
+
+const personaControlsInput = {
+  type: "object",
+  properties: {
+    language: personaControls.properties.language,
+    emotion: personaControls.properties.emotion,
+    accent: personaControls.properties.accent,
+    speechVolume: personaControls.properties.speechVolume,
+  },
+  required: ["language", "emotion", "accent", "speechVolume"],
   additionalProperties: false,
 } as const;
 
@@ -213,17 +225,8 @@ const personaForm = {
   properties: {
     modelCatalog: arrayOf(modelCatalogEntry),
     recommendedModels: personaModels,
-    speedRange: {
-      type: "object",
-      properties: {
-        slowest: { type: "number" },
-        fastest: { type: "number" },
-      },
-      required: ["slowest", "fastest"],
-      additionalProperties: false,
-    },
   },
-  required: ["modelCatalog", "recommendedModels", "speedRange"],
+  required: ["modelCatalog", "recommendedModels"],
   additionalProperties: false,
 } as const;
 
@@ -256,7 +259,7 @@ const personaCapabilities = {
 
 const previewBody = {
   type: "object", properties: {
-    projectId: stringIdSchema, models: personaModels, controls: personaControls,
+    projectId: stringIdSchema, models: personaModels, controls: personaControlsInput,
     voiceAccessProof: { type: "string", description: "A prior short-lived proof for an existing provider voice ID." },
   }, required: ["models", "controls"], additionalProperties: false,
 } as const;
@@ -298,7 +301,7 @@ const createPersonaBody = {
     identityName: behavior.identityName,
     personality: behavior.personality,
     models: personaModels,
-    controls: personaControls,
+    controls: personaControlsInput,
     voiceAccessProof: { type: "string" },
   },
   required: ["name", "identityName", "personality"],
@@ -329,7 +332,7 @@ const updatePersonaBody = {
     description: nullable({ type: "string" }),
     expectedVersionId: {
       ...stringIdSchema,
-      description: "The current versionId from Get a persona. Required when editing identityName, personality, or language. A stale value returns 409 version_conflict.",
+      description: "The current versionId from Get a persona. Required when editing identityName or personality. A stale value returns 409 version_conflict.",
     },
   },
   additionalProperties: false,
@@ -359,7 +362,7 @@ export const personaOperations = {
   usePersona: defineOperation({
     operationId: "usePersona", method: "POST", path: "/v1/personas/{personaId}/use", summary: "Use a persona", tag: "Personas", security: "credentialed",
     description: "Save this project's first model settings for the persona. Omit models to use its declared defaults. Repeated use returns the existing settings; use Update a persona to change them.",
-    request: { params: personaParams, body: { type: "object", properties: { projectId: stringIdSchema, models: personaModels }, additionalProperties: false }, bodyRequired: false },
+    request: { params: personaParams, body: { type: "object", properties: { projectId: stringIdSchema, models: personaModels, controls: personaControlsInput, voiceAccessProof: { type: "string" } }, additionalProperties: false }, bodyRequired: false },
     responses: { 200: { description: "The persona with its saved project settings.", schema: persona }, ...writeRefusals },
   }),
   listPersonas: defineOperation({

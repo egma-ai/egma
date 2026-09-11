@@ -3144,11 +3144,18 @@ export type UsePersonaData = {
                  */
                 voiceId: string;
                 /**
-                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                 * Provider-supported speech rate. Read the selected combination's capability range.
                  */
                 speed: number;
             };
         };
+        controls?: {
+            language: string;
+            emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
+            accent: string;
+            speechVolume: number;
+        };
+        voiceAccessProof?: string;
     };
     path: {
         personaId: string;
@@ -3247,7 +3254,7 @@ export type UsePersonaResponses = {
                      */
                     voiceId: string;
                     /**
-                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     * Provider-supported speech rate. Read the selected combination's capability range.
                      */
                     speed: number;
                 };
@@ -3369,7 +3376,7 @@ export type ListPersonasResponses = {
                          */
                         voiceId: string;
                         /**
-                         * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                         * Provider-supported speech rate. Read the selected combination's capability range.
                          */
                         speed: number;
                     };
@@ -3431,7 +3438,7 @@ export type CreatePersonaData = {
                  */
                 voiceId: string;
                 /**
-                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                 * Provider-supported speech rate. Read the selected combination's capability range.
                  */
                 speed: number;
             };
@@ -3441,7 +3448,6 @@ export type CreatePersonaData = {
             emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
             accent: string;
             speechVolume: number;
-            readonly executionPolicyVersion: number;
         };
         voiceAccessProof?: string;
     };
@@ -3540,7 +3546,7 @@ export type CreatePersonaResponses = {
                      */
                     voiceId: string;
                     /**
-                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     * Provider-supported speech rate. Read the selected combination's capability range.
                      */
                     speed: number;
                 };
@@ -3635,14 +3641,10 @@ export type GetPersonaFormResponses = {
                  */
                 voiceId: string;
                 /**
-                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                 * Provider-supported speech rate. Read the selected combination's capability range.
                  */
                 speed: number;
             };
-        };
-        speedRange: {
-            slowest: number;
-            fastest: number;
         };
     };
 };
@@ -3807,7 +3809,7 @@ export type PreviewPersonaData = {
                  */
                 voiceId: string;
                 /**
-                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                 * Provider-supported speech rate. Read the selected combination's capability range.
                  */
                 speed: number;
             };
@@ -3817,7 +3819,6 @@ export type PreviewPersonaData = {
             emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
             accent: string;
             speechVolume: number;
-            readonly executionPolicyVersion: number;
         };
         /**
          * A prior short-lived proof for an existing provider voice ID.
@@ -4027,7 +4028,7 @@ export type GetPersonaResponses = {
                      */
                     voiceId: string;
                     /**
-                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     * Provider-supported speech rate. Read the selected combination's capability range.
                      */
                     speed: number;
                 };
@@ -4087,7 +4088,7 @@ export type UpdatePersonaData = {
                  */
                 voiceId: string;
                 /**
-                 * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                 * Provider-supported speech rate. Read the selected combination's capability range.
                  */
                 speed: number;
             };
@@ -4097,11 +4098,10 @@ export type UpdatePersonaData = {
             emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
             accent: string;
             speechVolume: number;
-            readonly executionPolicyVersion: number;
         };
         voiceAccessProof?: string;
         /**
-         * The current versionId from Get a persona. Required when editing identityName, personality, or language. A stale value returns 409 version_conflict.
+         * The current versionId from Get a persona. Required when editing identityName or personality. A stale value returns 409 version_conflict.
          */
         expectedVersionId?: string;
     };
@@ -4202,7 +4202,7 @@ export type UpdatePersonaResponses = {
                      */
                     voiceId: string;
                     /**
-                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     * Provider-supported speech rate. Read the selected combination's capability range.
                      */
                     speed: number;
                 };
@@ -4535,7 +4535,7 @@ export type ForkPersonaResponses = {
                      */
                     voiceId: string;
                     /**
-                     * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+                     * Provider-supported speech rate. Read the selected combination's capability range.
                      */
                     speed: number;
                 };

@@ -34,6 +34,10 @@ export type PlatformApiRoutesOptions = {
   readonly retellFetch?: RetellFetch | undefined;
   readonly retellReach?: RetellReach | undefined;
   readonly wakeVoiceFleet?: (() => void) | undefined;
+  readonly providerCredentials: Config["providerCredentials"];
+  readonly simulatorServiceToken: string;
+  readonly simulatorPreviewUrl: string;
+  readonly proofSecret: string;
 };
 
 type ValidationIssue = {
@@ -110,7 +114,12 @@ export async function platformApiRoutes(
   void app.register(organizationRoutes, credentialed);
   void app.register(providerKeyRoutes, credentialed);
   void app.register(projectRoutes, credentialed);
-  void app.register(personaRoutes, credentialed);
+  void app.register(personaRoutes, {
+    ...credentialed,
+    providerCredentials: options.providerCredentials,
+    preview: { url: options.simulatorPreviewUrl, serviceToken: options.simulatorServiceToken },
+    proofSecret: options.proofSecret,
+  });
   void app.register(testSuiteRoutes, credentialed);
   void app.register(testRoutes, credentialed);
   void app.register(repositoryRoutes, credentialed);

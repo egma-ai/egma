@@ -1256,16 +1256,25 @@ export const usePersona = <ThrowOnError extends boolean = false>(parameters: {
              */
             voiceId: string;
             /**
-             * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+             * Provider-supported speech rate. Read the selected combination's capability range.
              */
             speed: number;
         };
     };
+    controls?: {
+        language: string;
+        emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
+        accent: string;
+        speechVolume: number;
+    };
+    voiceAccessProof?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<UsePersonaResponses, UsePersonaErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'path', key: 'personaId' },
                 { in: 'body', key: 'projectId' },
-                { in: 'body', key: 'models' }
+                { in: 'body', key: 'models' },
+                { in: 'body', key: 'controls' },
+                { in: 'body', key: 'voiceAccessProof' }
             ] }]);
     return (options?.client ?? client).post<UsePersonaResponses, UsePersonaErrors, ThrowOnError>({
         security: [{ scheme: 'bearer', type: 'http' }, {
@@ -1337,7 +1346,7 @@ export const createPersona = <ThrowOnError extends boolean = false>(parameters: 
              */
             voiceId: string;
             /**
-             * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+             * Provider-supported speech rate. Read the selected combination's capability range.
              */
             speed: number;
         };
@@ -1347,7 +1356,6 @@ export const createPersona = <ThrowOnError extends boolean = false>(parameters: 
         emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
         accent: string;
         speechVolume: number;
-        readonly executionPolicyVersion: number;
     };
     voiceAccessProof?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<CreatePersonaResponses, CreatePersonaErrors, ThrowOnError> => {
@@ -1460,7 +1468,7 @@ export const previewPersona = <ThrowOnError extends boolean = false>(parameters:
              */
             voiceId: string;
             /**
-             * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+             * Provider-supported speech rate. Read the selected combination's capability range.
              */
             speed: number;
         };
@@ -1470,7 +1478,6 @@ export const previewPersona = <ThrowOnError extends boolean = false>(parameters:
         emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
         accent: string;
         speechVolume: number;
-        readonly executionPolicyVersion: number;
     };
     voiceAccessProof?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<PreviewPersonaResponses, PreviewPersonaErrors, ThrowOnError> => {
@@ -1568,7 +1575,7 @@ export const updatePersona = <ThrowOnError extends boolean = false>(parameters: 
              */
             voiceId: string;
             /**
-             * Speech rate from 0.6 through 1.5. Use 1 for the normal rate.
+             * Provider-supported speech rate. Read the selected combination's capability range.
              */
             speed: number;
         };
@@ -1578,7 +1585,6 @@ export const updatePersona = <ThrowOnError extends boolean = false>(parameters: 
         emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
         accent: string;
         speechVolume: number;
-        readonly executionPolicyVersion: number;
     };
     voiceAccessProof?: string;
     expectedVersionId?: string;
