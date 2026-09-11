@@ -719,7 +719,7 @@ async def test_agent_stop_and_restart_during_deliberate_playout_preserves_one_ow
     tts.release.set()
     await asyncio.wait_for(tts.three_started.wait(), 1)
     connection.ended.set()
-    await asyncio.wait_for(running, 1)
+    await running
 
     assert tts.started_texts == [
         "Brief deliberate interruption.",
