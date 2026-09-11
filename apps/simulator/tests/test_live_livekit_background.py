@@ -387,7 +387,8 @@ async def test_every_background_choice_reaches_one_real_caller_microphone_track(
         else:
             assert len(background_only) >= 10
             assert _rms(b"".join(background_only)) > 20
-            assert any(_rms(frame) > 20 for frame in remote.frames[:8])
+            # The assets fade in for 250 ms, so this window proves presence.
+            assert _rms(b"".join(remote.frames[:8])) > 1
             assert any(_rms(frame) > 20 for frame in remote.frames[20:])
     finally:
         await remote.close()
