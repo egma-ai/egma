@@ -274,13 +274,13 @@ export async function discoverCartesiaVoices(
       voices.push({
         id: raw.id,
         name: raw.name,
-        source: raw.is_owner === true ? "account" : "standard",
+        source: raw.access === "private" || raw.visibility === "owner" || raw.is_owner === true ? "account" : "standard",
         presentation,
         languages: locales.length > 0 ? locales : language === undefined ? [] : [language],
         accents,
         ...(raw.is_pro === true ? { isProfessional: true } : {}),
         ...(modelIds.length === 0 ? {} : { modelIds }),
-        ...(raw.is_public === true ? { publiclyAccessible: true } : {}),
+        ...(raw.access === "public" && raw.visibility === "all" ? { publiclyAccessible: true } : {}),
       });
     }
     cursor = page.has_more === true ? voices.at(-1)?.id : undefined;

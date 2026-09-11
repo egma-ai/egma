@@ -33,6 +33,7 @@ import {
   type PendingObjectStore,
 } from "@egma/ingestion";
 import type { BillingRoutes, BillingWebhookRoutes } from "./billing.ts";
+import { registerPersonaPreviewSettlement } from "./persona-preview-settlement.ts";
 import { claimRoutes } from "./routes/claims.ts";
 import { deviceRoutes } from "./routes/device.ts";
 import { heartbeatRoutes } from "./routes/heartbeats.ts";
@@ -510,6 +511,7 @@ export function buildApi(options: ServerOptions): Api {
   }
 
   // Every customer-managed resource is registered through this one boundary.
+  registerPersonaPreviewSettlement(app, { serviceToken: config.simulatorServiceToken, secret: config.authSecret });
   // It is the same explicit operation set that produces OpenAPI and the
   // generated TypeScript client. The separate protocols below do not enter it.
   void app.register(platformApiRoutes, {

@@ -62,11 +62,11 @@ describe("Cartesia discovery", () => {
   it("reads all pages and retains owned voices", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        data: [{ id: "public", name: "Public", is_owner: false, is_public: true, gender: "masculine", language: "en", country: "US", accents: [{ accent: "general-american", locale: "en-US", is_native: true }, { accent: "hindi", locale: "hi-IN", is_native: false }] }],
+        data: [{ id: "public", name: "Public", access: "public", visibility: "all", gender: "masculine", language: "en", country: "US", accents: [{ accent: "general-american", locale: "en-US", is_native: true }, { accent: "hindi", locale: "hi-IN", is_native: false }] }],
         has_more: true, next_page: "deprecated-cursor",
       })))
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        data: [{ id: "private", name: "Private", is_owner: true, gender: "feminine", language: "es_ES" }],
+        data: [{ id: "private", name: "Private", access: "private", visibility: "owner", gender: "feminine", language: "es_ES" }],
         has_more: false, next_page: null,
       })));
 

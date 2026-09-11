@@ -24,8 +24,6 @@ import {
   validPersonaModels,
   validPersonaControls,
   billing,
-  recordPersonaPreviewUsage,
-  type NewUsageRecord,
   WriteAbortedError,
   type AuthContext,
   type Persona,
@@ -47,6 +45,7 @@ import { sendRefusal } from "../http/refusals.ts";
 import { discoverCartesiaVoices, personaCapabilityRefusal, resolvePersonaCapabilities, type PersonaVoice } from "../persona-capabilities.ts";
 import { renderPersonaPreview, type PreviewReach } from "../persona-preview.ts";
 import { createVoiceAccessProof, verifiesVoiceAccessProof } from "../persona-voice-proof.ts";
+import { createPreviewSettlementToken } from "../persona-preview-settlement.ts";
 
 /**
  * Project persona routes expose Egma-provided and Custom definitions.
@@ -64,6 +63,7 @@ export type PersonaRoutesOptions = {
   readonly providerCredentials: ProviderCredentialSource;
   readonly preview: PreviewReach;
   readonly proofSecret: string;
+  readonly previewUsageCallbackUrl: string;
 };
 
 type Body = Record<string, unknown>;
@@ -93,30 +93,6 @@ async function authoringCredential(options: PersonaRoutesOptions, auth: AuthCont
   return { key, credentialRef: `deployment:${createHash("sha256").update(key).digest("hex")}`, paymentSource: "platform" as const };
 }
 
-function previewUsageRecords(
-  usage: readonly Readonly<Record<string, unknown>>[], previewId: string,
-  credentials: ReadonlyMap<string, { credentialRef: string; paymentSource: "customer" | "platform" }>,
-): readonly NewUsageRecord[] {
-  const traceId = createHash("sha256").update(`persona-preview:${previewId}`).digest("hex").slice(0, 32);
-  return usage.flatMap((item, index) => {
-    const provider = item.provider;
-    const credential = typeof provider === "string" ? credentials.get(provider) : undefined;
-    if (typeof provider !== "string" || typeof item.model !== "string" || typeof item.operation !== "string" ||
-        (item.measurement !== "provider_reported" && item.measurement !== "client_measured") ||
-        typeof item.quantities !== "object" || item.quantities === null || credential === undefined) return [];
-    return [{
-      identity: { work: "persona_preview", previewId, spanId: createHash("sha256").update(`${previewId}:${index}`).digest("hex").slice(0, 16) },
-      occurredAt: new Date(), traceId, provider, model: item.model,
-      operation: item.operation as NewUsageRecord["operation"],
-      quantities: item.quantities as NewUsageRecord["quantities"],
-      measurement: item.measurement,
-      ...(typeof item.provider_ref === "string" ? { providerRef: item.provider_ref } : {}),
-      paymentSource: credential.paymentSource, credentialRef: credential.credentialRef,
-      rawUsage: typeof item.raw === "object" && item.raw !== null ? item.raw as Readonly<Record<string, unknown>> : {},
-    }];
-  });
-}
-
 async function settingsRefusal(
   options: PersonaRoutesOptions,
   auth: AuthContext,
@@ -128,8 +104,12 @@ async function settingsRefusal(
   let voices: readonly PersonaVoice[] = [];
   if (models.tts.provider === "cartesia") {
     const customer = await resolveProviderKeyForAuthoring(auth, "cartesia");
-    if (customer === undefined) return "models.tts.voiceId: Add an organization Cartesia key to validate account voice access.";
-    try { voices = await discoverCartesiaVoices(customer.key); }
+    const credential = customer ?? await authoringCredential(options, auth, "cartesia");
+    if (credential === undefined) return "models.tts.voiceId: Cartesia is not configured.";
+    try {
+      const discovered = await discoverCartesiaVoices(credential.key);
+      voices = customer === undefined ? discovered.filter((voice) => voice.publiclyAccessible === true) : discovered;
+    }
     catch { return "models.tts.voiceId: Cartesia voice access could not be checked. Try again."; }
     if (!voices.some((voice) => voice.id === models.tts.voiceId)) return "models.tts.voiceId: The selected Cartesia voice is deleted or inaccessible.";
   }
@@ -480,9 +460,20 @@ export async function personaRoutes(
     const incompatible = await settingsRefusal(options, acting.auth, models, controls, undefined, "preview");
     if (incompatible !== undefined) return sendRefusal(reply, "unprocessable", incompatible);
     let rendered;
+    const settlementToken = createPreviewSettlementToken({
+      userId: acting.auth.userId, organizationId: acting.auth.organizationId,
+      projectId: acting.auth.projectId!, role: acting.auth.role, previewId: request.id,
+      issuedAt: Date.now(), expiresAt: Date.now() + 10 * 60_000,
+      legs: [
+        { provider: models.llm.provider, model: models.llm.model, operation: llm.adapter, paymentSource: llmCredential.paymentSource, credentialRef: llmCredential.credentialRef },
+        { provider: models.tts.provider, model: models.tts.model, operation: tts.adapter, paymentSource: credential.paymentSource, credentialRef: credential.credentialRef },
+      ],
+    }, options.proofSecret);
     try {
       rendered = await renderPersonaPreview(options.preview, {
         requestId: request.id,
+        usageCallbackUrl: options.previewUsageCallbackUrl,
+        usageSettlementToken: settlementToken,
         models: {
           llm: { provider: models.llm.provider, model: models.llm.model, adapter: llm.adapter, key: llmCredential.key, fundingReceipt: null },
           tts: { provider: models.tts.provider, model: models.tts.model, adapter: tts.adapter, voiceId: models.tts.voiceId, speed: models.tts.speed, key: credential.key, fundingReceipt: null },
@@ -492,9 +483,6 @@ export async function personaRoutes(
     } catch {
       return sendRefusal(reply, "unprocessable", "Preview audio could not be generated with the selected voice and settings. Check provider access, then try again.");
     }
-    await recordPersonaPreviewUsage(acting.auth, previewUsageRecords(rendered.usage, request.id, new Map([
-      [models.llm.provider, llmCredential], [models.tts.provider, credential],
-    ])));
     const customOpenAiVoice = models.tts.provider === "openai" && !resolvePersonaCapabilities({ ttsProvider: models.tts.provider, ttsModel: models.tts.model, sttProvider: models.stt.provider, sttModel: models.stt.model }).voices.choices?.some((voice) => voice.id === models.tts.voiceId);
     const proof = customOpenAiVoice ? createVoiceAccessProof({ organizationId: auth.organizationId, provider: models.tts.provider, credentialRevision: credential.credentialRef, model: models.tts.model, voiceId: models.tts.voiceId }, options.proofSecret) : undefined;
     return reply.send({ audioBase64: rendered.audioBase64, contentType: rendered.contentType, ...(proof === undefined ? {} : { voiceAccessProof: proof.proof }), expiresAt: proof?.expiresAt.toISOString() ?? null, interruptionNotice: "Preview demonstrates voice and sound settings. Test interruptions in a simulation." });

@@ -13,7 +13,7 @@ import {
   failSimulation,
   getPersonaVersion,
   personaModelsOfParameters,
-  personaSettingsOfParameters,
+  personaControlsOfParameters,
   validatePersonaParameterValues,
   getRun,
   getSimulationExecutionEvidence,
@@ -49,7 +49,7 @@ import { invalid, notTheService } from "../http/refusals.ts";
 import { mockToolBase } from "./mock-endpoint.ts";
 import { platformEvent, safeExceptionType } from "../platform-log.ts";
 import { DaytonaAssignmentUncertainError } from "../voice-fleet-daytona.ts";
-import { discoverCartesiaVoices, personaCapabilityRefusal, resolvePersonaCapabilities } from "../persona-capabilities.ts";
+import { discoverCartesiaVoices, OPENAI_STANDARD_VOICES, personaCapabilityRefusal, resolvePersonaCapabilities } from "../persona-capabilities.ts";
 
 /**
  * Internal simulation claims require the deployment service token and bypass
@@ -253,6 +253,12 @@ async function modelsBlock(
     const voices = models.tts.provider === "cartesia"
       ? await discoverCartesiaVoices(credentialFor(credentials, "cartesia"))
       : [];
+    if (models.tts.provider === "cartesia" && !voices.some((voice) => voice.id === models.tts.voiceId))
+      throw new PersonaCapabilityError("the pinned Cartesia voice is no longer accessible");
+    if (models.tts.provider === "openai" &&
+        !OPENAI_STANDARD_VOICES.some((voice) => voice.id === models.tts.voiceId) &&
+        customer.openai === undefined)
+      throw new PersonaCapabilityError("the pinned existing OpenAI voice requires the organization credential that proved access");
     const capabilities = resolvePersonaCapabilities({
       ttsProvider: models.tts.provider, ttsModel: models.tts.model,
       sttProvider: models.stt.provider, sttModel: models.stt.model,
@@ -593,10 +599,10 @@ async function assembledSpec(
 
   let models: Record<string, unknown>;
   const personaParameters = validatePersonaParameterValues(personaVersion.parameterContract, claim.personaParameterValues);
-  const personaSettings = Object.hasOwn(personaParameters, "execution_policy_version")
-    ? personaSettingsOfParameters(personaParameters)
+  const personaControls = Object.hasOwn(personaParameters, "execution_policy_version")
+    ? personaControlsOfParameters(personaParameters)
     : undefined;
-  const contractVersion = personaSettings === undefined ? LEGACY_CONTRACT_VERSION : CURRENT_CONTRACT_VERSION;
+  const contractVersion = personaControls === undefined ? LEGACY_CONTRACT_VERSION : CURRENT_CONTRACT_VERSION;
   if (!workerContractVersions.includes(contractVersion))
     return { retryable: `the worker does not support simulation contract version ${contractVersion}`, deferredBy: "runtime" };
   try {
@@ -609,7 +615,7 @@ async function assembledSpec(
       personaModelsOfParameters(personaParameters),
       providerCredentials,
       claim,
-      personaSettings,
+      personaControls,
       deploymentSecretEnvironment,
     );
   } catch (fault) {
@@ -669,9 +675,15 @@ async function assembledSpec(
     persona: {
       name: personaVersion.identityName,
       personality: personaVersion.personality,
-      language: personaVersion.language,
-      ...(personaSettings !== undefined
-        ? { parameters: personaSettings }
+      ...(personaVersion.language === null ? {} : { language: personaVersion.language }),
+      ...(personaControls !== undefined
+        ? { parameters: {
+            language: personaControls.language,
+            emotion: personaControls.emotion,
+            accent: personaControls.accent,
+            speech_volume: personaControls.speechVolume,
+            execution_policy_version: personaControls.executionPolicyVersion,
+          } }
         : {}),
     },
     models,

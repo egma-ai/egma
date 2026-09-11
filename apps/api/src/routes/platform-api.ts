@@ -119,6 +119,7 @@ export async function platformApiRoutes(
     providerCredentials: options.providerCredentials,
     preview: { url: options.simulatorPreviewUrl, serviceToken: options.simulatorServiceToken },
     proofSecret: options.proofSecret,
+    previewUsageCallbackUrl: `${options.baseUrl}/internal/persona-preview-usage`,
   });
   void app.register(testSuiteRoutes, credentialed);
   void app.register(testRoutes, credentialed);

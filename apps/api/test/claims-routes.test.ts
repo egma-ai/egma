@@ -174,7 +174,7 @@ async function claim(
     ...(token === undefined
       ? {}
       : { headers: { authorization: `Bearer ${token}` } }),
-    payload: { contract_versions: [5], ...body },
+    payload: { contract_versions: [5, 6], ...body },
   });
   return {
     statusCode: response.statusCode,
@@ -445,7 +445,7 @@ describe("claiming work", () => {
     // exactly what the simulator's own check will accept.
     expect(specComplaints(spec)).toEqual([]);
 
-    expect(spec.contract_version).toBe(5);
+    expect(spec.contract_version).toBe(6);
     expect(spec.simulation_id).toBe(simulationId);
     expect(
       lines
@@ -471,7 +471,7 @@ describe("claiming work", () => {
     expect(spec.persona).toEqual({
       name: NEUTRAL_PERSON.identityName,
       personality: NEUTRAL_PERSON.personality,
-      language: NEUTRAL_PERSON.language,
+      parameters: { language: NEUTRAL_PERSON.language, emotion: "neutral", accent: "voice_default", speech_volume: 1, execution_policy_version: 1 },
     });
     expect(spec.models).toEqual({
       llm: {

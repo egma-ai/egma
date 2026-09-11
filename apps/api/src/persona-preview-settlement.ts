@@ -4,7 +4,7 @@ import type { FastifyInstance } from "fastify";
 import { acceptsServiceToken } from "./auth/service-token.ts";
 
 type AllowedLeg = { provider: string; model: string; operation: string; paymentSource: "customer" | "platform"; credentialRef: string };
-type Settlement = { userId: string; organizationId: string; projectId: string; role: AuthContext["role"]; previewId: string; expiresAt: number; legs: readonly AllowedLeg[] };
+type Settlement = { userId: string; organizationId: string; projectId: string; role: AuthContext["role"]; previewId: string; issuedAt: number; expiresAt: number; legs: readonly AllowedLeg[] };
 
 const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
 export function createPreviewSettlementToken(settlement: Settlement, secret: string): string {
@@ -40,7 +40,7 @@ export function registerPersonaPreviewSettlement(app: FastifyInstance, options: 
     const traceId = createHash("sha256").update(`persona-preview:${settlement.previewId}`).digest("hex").slice(0, 32);
     const record: NewUsageRecord = {
       identity: { work: "persona_preview", previewId: settlement.previewId, spanId: createHash("sha256").update(`${settlement.previewId}:${index}`).digest("hex").slice(0, 16) },
-      occurredAt: new Date(), traceId, provider: leg.provider, model: leg.model,
+      occurredAt: new Date(settlement.issuedAt), traceId, provider: leg.provider, model: leg.model,
       operation: leg.operation as NewUsageRecord["operation"], quantities: usage.quantities as NewUsageRecord["quantities"],
       measurement: usage.measurement, ...(typeof usage.provider_ref === "string" ? { providerRef: usage.provider_ref } : {}),
       paymentSource: leg.paymentSource, credentialRef: leg.credentialRef,
