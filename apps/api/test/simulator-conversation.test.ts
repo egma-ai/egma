@@ -33,6 +33,7 @@ import {
   assertPublicEvidence,
   assertValidGrade,
   quickTunnelUrl,
+  safeSimulationDiagnostic,
   startPublicTunnel,
   startFullPathWorkers,
   stopChild,
@@ -471,10 +472,16 @@ const terminalReportCanLand = gate();
 async function call(
   method: string,
   route: string,
-  options: { key?: string; body?: unknown; cookie?: string } = {},
+  options: {
+    key?: string;
+    body?: unknown;
+    cookie?: string;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<{ status: number; body: Record<string, unknown>; setCookie: string }> {
   const response = await fetch(`${instance.origin}${route}`, {
     method,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
     headers: {
       "content-type": "application/json",
       ...(options.key === undefined
@@ -1411,13 +1418,13 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
       }> = [];
       let artifact: { file: string; sha256: string; version: string } | undefined;
       let runtime: { name: string; version: string } | undefined;
+      let simulationId: string | undefined;
       let diagnosticSimulationStatus: string | undefined;
-      let diagnosticEvidence: Record<string, unknown> | undefined;
+      let diagnosticEvidence: ReturnType<typeof safeSimulationDiagnostic> | undefined;
       let diagnosticGrade: {
         result: CurrentGrade["result"];
         score: number | null;
         passThreshold: number;
-        details: CurrentGrade["details"];
       } | undefined;
       try {
         const readyBy = Date.now() + 180_000;
@@ -1453,6 +1460,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           }
           const livekitTunnel = await startPublicTunnel(
             ready.localLivekitUrl.replace("ws://", "http://"),
+            { configurationPrefix: "TEXT" },
           );
           tunnels.push(livekitTunnel);
           await writeFile(
@@ -1461,7 +1469,9 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             { encoding: "utf8", mode: 0o600 },
           );
           const localTokenEndpoint = new URL(ready.localTokenEndpoint);
-          const tokenTunnel = await startPublicTunnel(localTokenEndpoint.origin);
+          const tokenTunnel = await startPublicTunnel(localTokenEndpoint.origin, {
+            configurationPrefix: "WEB",
+          });
           tunnels.push(tokenTunnel);
           tokenEndpoint = `${tokenTunnel.url}${localTokenEndpoint.pathname}`;
           await waitForTokenEndpoint(tokenEndpoint, tokenAuth, tokenTunnel.output);
@@ -1592,17 +1602,11 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
         });
         const simulation = (page.body.simulations as Array<{ id: string }>)[0];
         expect(simulation).toBeDefined();
-        const simulationId = simulation!.id;
+        simulationId = simulation!.id;
         const terminalStatus = await waitForTerminal(simulationId, 120_000);
         diagnosticSimulationStatus = terminalStatus;
         if (terminalStatus !== "completed") {
-          const failed = await call("GET", `/v1/simulations/${simulationId}`, { key });
-          diagnosticEvidence = failed.body;
-          throw new Error(JSON.stringify({
-            status: failed.body.status,
-            reason: failed.body.reason,
-            executionFailure: failed.body.executionFailure,
-          }));
+          throw new Error(`simulation ${simulationId} became ${terminalStatus}`);
         }
         await instance.drainEvidence();
         const grade = await gradesOn(auth, simulationId, runId, 1, 60_000);
@@ -1610,10 +1614,8 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           result: grade[0].result,
           score: grade[0].score,
           passThreshold: grade[0].graderPassThreshold,
-          details: grade[0].details,
         };
         const detail = await call("GET", `/v1/simulations/${simulationId}`, { key });
-        diagnosticEvidence = detail.body;
         expect(detail.status, JSON.stringify(detail.body)).toBe(200);
         expect(detail.body).toMatchObject({
           status: "completed",
@@ -1806,32 +1808,41 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           { encoding: "utf8", mode: 0o600 },
         );
       } catch (failure) {
+        if (simulationId !== undefined) {
+          try {
+            const detail = await call("GET", `/v1/simulations/${simulationId}`, {
+              key,
+              signal: AbortSignal.timeout(5_000),
+            });
+            if (detail.status === 200) {
+              diagnosticEvidence = safeSimulationDiagnostic(detail.body);
+            }
+          } catch {
+            // Keep the original failure when the diagnostic read is unavailable.
+          }
+        }
         await mkdir(proofDirectory, { recursive: true });
-        const diagnosticNativeHistory = await readFile(
-          path.join(providerDirectory, "native-history.json"),
-          "utf8",
-        ).catch(() => "");
-        const workerLogs = await Promise.all(
-          [
-            `${LIVE_LANGUAGE}-worker.log`,
-            "livekit.log",
-            "python-build.log",
-            "javascript-build.log",
-          ].map(async (name) =>
-            readFile(path.join(providerDirectory, name), "utf8").catch(() => "")
-          ),
-        );
-        const safeProviderLog = [
-          providerSaid,
-          fullPathWorkers?.output() ?? "",
-          ...tunnels.map((tunnel) => tunnel.output()),
-          ...workerLogs,
-          diagnosticNativeHistory === "" ? "" :
-            `native session history:\n${diagnosticNativeHistory}`,
-        ]
-          .join("\n")
-          .replaceAll(LIVE_MODEL_KEY, "[REDACTED]")
-          .replaceAll(key, "[REDACTED]");
+        const workerLogNames = [
+          `${LIVE_LANGUAGE}-worker.log`,
+          "livekit.log",
+          "python-build.log",
+          "javascript-build.log",
+        ];
+        const workerLogPresence = Object.fromEntries(await Promise.all(
+          workerLogNames.map(async (name) => [
+            name,
+            await readFile(path.join(providerDirectory, name), "utf8")
+              .then((content) => content !== "")
+              .catch(() => false),
+          ] as const),
+        ));
+        const safeProviderLog = JSON.stringify({
+          rawOutputOmitted: true,
+          providerOutputPresent: providerSaid !== "",
+          simulatorOutputPresent: (fullPathWorkers?.output() ?? "") !== "",
+          tunnelOutputPresent: tunnels.map((tunnel) => tunnel.output() !== ""),
+          workerLogPresence,
+        }, null, 2) + "\n";
         await writeFile(
           path.join(proofDirectory, `${caseId}.log`),
           safeProviderLog,
@@ -1853,8 +1864,10 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
               evidence: {
                 status: diagnosticEvidence.status,
                 reason: diagnosticEvidence.reason,
+                executionFailure: diagnosticEvidence.executionFailure,
+                transcriptTurnCounts: diagnosticEvidence.transcriptTurnCounts,
                 agentPovComplete: diagnosticEvidence.agentPovComplete,
-                transcript: diagnosticEvidence.transcript,
+                hasRecording: diagnosticEvidence.hasRecording,
               },
             }),
             ...(diagnosticGrade === undefined ? {} : { grade: diagnosticGrade }),

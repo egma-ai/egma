@@ -54,11 +54,17 @@ async def _ignore_usage(_usage: ProviderUsage) -> None:
 
 class _ConcludingBackendService(_PersonaLLMService):
     def __init__(
-        self, *, persona: Persona, end_requested: asyncio.Event, usage
+        self,
+        *,
+        persona: Persona,
+        end_requested: asyncio.Event,
+        usage,
+        conclusion_started,
     ) -> None:
         super().__init__(persona=persona)
         self._end_requested = end_requested
         self._observe_usage = usage
+        self._conclusion_started = conclusion_started
 
     async def _process_context(self, context: LLMContext) -> None:
         await super()._process_context(context)
@@ -66,8 +72,8 @@ class _ConcludingBackendService(_PersonaLLMService):
         if reply is not None and reply.usage is not None:
             await self._observe_usage(reply.usage)
 
-    async def _end_call(self, params) -> None:
-        await super()._end_call(params)
+    async def _end_call_succeeded(self) -> None:
+        await self._conclusion_started()
         self._end_requested.set()
 
 
@@ -95,7 +101,11 @@ class _ObservedLiveService(OpenAILiveLLMService):
     async def _run_client_delegation(self, delegation):
         await super()._run_client_delegation(delegation)
         if self._end_requested.is_set():
-            self._backend_final_sent(self._assistant_turn.open)
+            self._backend_final_sent()
+
+    async def conclusion_playout_target(self, evidence: _LiveEvidence) -> int:
+        async with self._assistant_turn.lock:
+            return evidence.assistant_turns_finished + int(self._assistant_turn.open)
 
     async def _handle_evt_session_started(self, evt: events.SessionStartedEvent):
         self.session_id = evt.session.id
@@ -153,6 +163,7 @@ class _LiveEvidence(FrameProcessor):
             self.position += Fraction(frame.num_frames, frame.sample_rate)
             frame.metadata[_INPUT_SOURCE_RANGE] = (start, self.position)
         elif isinstance(frame, RemoteParticipantLeftFrame):
+            frame.completed.set()
             self.agent_left.set()
         elif isinstance(frame, TTSStoppedFrame):
             await self._assistant_finished("assistant")
@@ -298,7 +309,7 @@ class LiveConductor:
         recording_rate = 0
         concluded = asyncio.Event()
         end_requested = asyncio.Event()
-        in_flight_at_conclusion = False
+        conclusion_target: int | None = None
         agent_left = asyncio.Event()
         faulted = asyncio.Event()
         fault: BaseException | None = None
@@ -319,6 +330,17 @@ class LiveConductor:
 
         try:
             media = await controls.guard(self._connection.prepare())
+
+            def transport_lost() -> PlugError:
+                return PlugError(
+                    f"the {media.transport_name} disconnected before the "
+                    "simulation ended"
+                )
+
+            async def wait_for_transport_failure() -> None:
+                await media.failed.wait()
+                raise transport_lost()
+
             opened = __import__("time").time_ns()
             ledger = _TranscriptLedger(
                 on_partial=on_partial_utterance,
@@ -333,10 +355,19 @@ class LiveConductor:
                     if on_answered is not None:
                         await on_answered()
 
-            def backend_final_sent(assistant_turn_open: bool) -> None:
-                nonlocal in_flight_at_conclusion
-                in_flight_at_conclusion = assistant_turn_open
+            evidence = _LiveEvidence(
+                agent_left=agent_left, assistant_finished=ledger.finish
+            )
+            live: _ObservedLiveService | None = None
+
+            async def conclusion_started() -> None:
+                nonlocal conclusion_target
+                assert live is not None
+                conclusion_target = await live.conclusion_playout_target(evidence)
+
+            def backend_final_sent() -> None:
                 concluded.set()
+
             backend_service = _ConcludingBackendService(
                 persona=persona,
                 end_requested=end_requested,
@@ -345,6 +376,7 @@ class LiveConductor:
                     if on_provider_usage is not None
                     else _ignore_usage
                 ),
+                conclusion_started=conclusion_started,
             )
             backend = BackendLLMWorker(
                 llm=backend_service,
@@ -367,9 +399,6 @@ class LiveConductor:
                 ),
                 end_requested=end_requested,
                 backend_final_sent=backend_final_sent,
-            )
-            evidence = _LiveEvidence(
-                agent_left=agent_left, assistant_finished=ledger.finish
             )
             recorder = _EvidenceRecorder(
                 num_channels=2, auto_start_recording=True, real_time=media.real_time
@@ -411,7 +440,9 @@ class LiveConductor:
             await runner.add_workers(worker)
             running = asyncio.create_task(runner.run(), name=f"live-pipeline:{name}")
             owned_tasks.add(running)
-            await controls.guard(self._connection.open())
+            await controls.guard(
+                self._connection.open(), agent_failed=wait_for_transport_failure()
+            )
             await worker.queue_frame(
                 LLMContextFrame(
                     LLMContext(
@@ -429,10 +460,19 @@ class LiveConductor:
             duration = asyncio.create_task(asyncio.sleep(max_duration_seconds))
             stopped = asyncio.create_task(controls.guard(asyncio.Event().wait()))
             departure = asyncio.create_task(media.ended.wait())
-            failed = asyncio.create_task(faulted.wait())
+            pipeline_failed = asyncio.create_task(faulted.wait())
+            media_failed = asyncio.create_task(media.failed.wait())
             done_call = asyncio.create_task(concluded.wait())
             turn_limit = asyncio.create_task(ledger.limit_reached.wait())
-            watchers = {duration, stopped, departure, failed, done_call, turn_limit}
+            watchers = {
+                duration,
+                stopped,
+                departure,
+                pipeline_failed,
+                media_failed,
+                done_call,
+                turn_limit,
+            }
             owned_tasks.update(watchers)
             done, pending = await asyncio.wait(
                 {*watchers, running},
@@ -444,17 +484,17 @@ class LiveConductor:
                 if error is not None:
                     raise error
                 agent_left.set()
-            if failed in done:
+            if pipeline_failed in done:
                 assert fault is not None
                 raise fault
+            if media_failed in done:
+                raise transport_lost()
             if duration in done:
                 controls.trip_duration_limit()
             if done_call in done:
-                finished_before_goodbye = evidence.assistant_turns_finished
-                if in_flight_at_conclusion:
-                    finished_before_goodbye += 1
+                assert conclusion_target is not None
                 goodbye = asyncio.create_task(
-                    evidence.wait_for_assistant_turn_after(finished_before_goodbye)
+                    evidence.wait_for_assistant_turn_after(conclusion_target)
                 )
                 owned_tasks.add(goodbye)
                 goodbye_watchers = watchers - {done_call}
@@ -468,9 +508,11 @@ class LiveConductor:
                     if error is not None:
                         raise error
                     agent_left.set()
-                if failed in goodbye_done:
+                if pipeline_failed in goodbye_done:
                     assert fault is not None
                     raise fault
+                if media_failed in goodbye_done:
+                    raise transport_lost()
                 if duration in goodbye_done:
                     controls.trip_duration_limit()
                 if goodbye in goodbye_done:

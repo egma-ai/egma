@@ -3,19 +3,33 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from types import SimpleNamespace
 
 import pytest
 from pipecat.frames.frames import OutputAudioRawFrame, SpeechOutputAudioRawFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.openai.live import events
+from pipecat.services.openai.live import llm as live_llm
+from pipecat.services.openai.live.llm import OpenAILiveLLMService
 from websockets.asyncio.server import serve
 
 from egma_simulator.contract import validate_spec
 from egma_simulator.conversation import ConversationControls
-from egma_simulator.live import LiveConductor, _TranscriptLedger
-from egma_simulator.media import PlayoutStamp, VoiceMedia
+from egma_simulator.live import (
+    LiveConductor,
+    _ConcludingBackendService,
+    _LiveEvidence,
+    _ObservedLiveService,
+    _TranscriptLedger,
+)
+from egma_simulator.media import (
+    PlayoutStamp,
+    RemoteParticipantLeftFrame,
+    VoiceMedia,
+)
 from egma_simulator.model import PersonaReply, PersonaToolCall
 from egma_simulator.persona import Persona, compose_live_prompt
+from egma_simulator.plugs import PlugError
 from egma_simulator.spec import (
     AuthoredPersona,
     LiveSelection,
@@ -139,6 +153,21 @@ async def test_live_transcript_measures_non_overlapping_agent_response() -> None
         ("turn_response_latency", 1_400_000_000, 1_650_000_000),
         ("agent_speech_duration", 1_650_000_000, 1_900_000_000),
     ]
+
+
+async def test_live_evidence_acknowledges_remote_participant_departure() -> None:
+    departed = asyncio.Event()
+    completed = asyncio.Event()
+    evidence = _LiveEvidence(
+        agent_left=departed, assistant_finished=lambda *_: asyncio.sleep(0)
+    )
+
+    await evidence.process_frame(
+        RemoteParticipantLeftFrame(completed), FrameDirection.DOWNSTREAM
+    )
+
+    assert departed.is_set()
+    assert completed.is_set()
 
 
 def test_live_duration_uses_one_cumulative_snapshot() -> None:
@@ -271,9 +300,21 @@ class _Connection:
     provider_reference = "call-controlled"
     far_end_left = False
 
-    def __init__(self, ended: asyncio.Event) -> None:
+    def __init__(
+        self,
+        ended: asyncio.Event,
+        *,
+        block_open: bool = False,
+        failed: asyncio.Event | None = None,
+        transport_name: str = "voice transport",
+    ) -> None:
         self.ended = ended
+        self.block_open = block_open
+        self.failed = failed or asyncio.Event()
+        self.transport_name = transport_name
         self.closed = False
+        self.open_started = asyncio.Event()
+        self.release_open = asyncio.Event()
         self.output_observed = asyncio.Event()
         self.output_stopped = asyncio.Event()
 
@@ -285,10 +326,14 @@ class _Connection:
                 _OutputObserved(self.output_observed, self.output_stopped),
             ),
             ended=self.ended,
+            failed=self.failed,
+            transport_name=self.transport_name,
         )
 
     async def open(self) -> None:
-        return None
+        self.open_started.set()
+        if self.block_open:
+            await self.release_open.wait()
 
     async def close(self) -> None:
         self.closed = True
@@ -542,12 +587,24 @@ async def test_live_conductor_cancels_both_workers_without_false_transcript() ->
     ],
 )
 async def test_live_conductor_waits_for_concluding_goodbye_playout(
-    max_turns: int, cancel_goodbye: bool, filler: bool, expected_ending: str
+    max_turns: int,
+    cancel_goodbye: bool,
+    filler: bool,
+    expected_ending: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ended = asyncio.Event()
     output_observed: asyncio.Event | None = None
     close_seen = asyncio.Event()
     controls = ConversationControls()
+    observed_targets = []
+    original_wait = _LiveEvidence.wait_for_assistant_turn_after
+
+    async def observe_target(self, count: int) -> None:
+        observed_targets.append(count)
+        await original_wait(self, count)
+
+    monkeypatch.setattr(_LiveEvidence, "wait_for_assistant_turn_after", observe_target)
 
     async def provider(socket) -> None:
         await socket.recv()
@@ -666,6 +723,7 @@ async def test_live_conductor_waits_for_concluding_goodbye_playout(
         )
 
     assert result.ending == expected_ending
+    assert observed_targets == [1 if filler else 0]
     if not cancel_goodbye:
         assert close_seen.is_set()
     if cancel_goodbye:
@@ -677,6 +735,410 @@ async def test_live_conductor_waits_for_concluding_goodbye_playout(
             else ["Thanks, goodbye."]
         )
         assert [turn[1] for turn in turns] == expected_texts
+
+
+async def test_live_end_call_waits_for_conclusion_capture_before_completing() -> None:
+    capture_started = asyncio.Event()
+    capture_lock = asyncio.Lock()
+    end_requested = asyncio.Event()
+    done = asyncio.Event()
+    model = _BackendModel(concluded=True)
+    callback_results = []
+
+    async def capture_conclusion() -> None:
+        capture_started.set()
+        async with capture_lock:
+            return None
+
+    async def result_callback(result, *, properties) -> None:
+        callback_results.append((result, properties.run_llm))
+
+    service = _ConcludingBackendService(
+        persona=Persona(
+            authored=authored(), scenario_instructions="Conclude.", model=model
+        ),
+        end_requested=end_requested,
+        usage=lambda *_: asyncio.sleep(0),
+        conclusion_started=capture_conclusion,
+    )
+    service._function_call_done = done
+    await capture_lock.acquire()
+    call = asyncio.create_task(
+        service._end_call(
+            SimpleNamespace(arguments={}, result_callback=result_callback)
+        )
+    )
+    try:
+        await asyncio.wait_for(capture_started.wait(), timeout=1)
+        completed_before_capture = done.is_set()
+        ended_before_capture = end_requested.is_set()
+    finally:
+        capture_lock.release()
+        await asyncio.wait_for(call, timeout=1)
+    assert callback_results == [({"ended": True}, False)]
+    assert not completed_before_capture, (
+        "backend completion overtook conclusion capture"
+    )
+    assert not ended_before_capture
+    assert done.is_set()
+    assert end_requested.is_set()
+
+
+@pytest.mark.parametrize(
+    ("assistant_turns_finished", "assistant_turn_open", "expected_target"),
+    [(3, False, 3), (3, True, 4)],
+)
+async def test_live_conclusion_target_counts_an_open_assistant_turn(
+    assistant_turns_finished: int,
+    assistant_turn_open: bool,
+    expected_target: int,
+) -> None:
+    evidence = _LiveEvidence(
+        agent_left=asyncio.Event(), assistant_finished=lambda *_: asyncio.sleep(0)
+    )
+    evidence.assistant_turns_finished = assistant_turns_finished
+    live = object.__new__(_ObservedLiveService)
+    live._assistant_turn = SimpleNamespace(
+        lock=asyncio.Lock(), open=assistant_turn_open
+    )
+
+    target = await live.conclusion_playout_target(evidence)
+
+    assert target == expected_target
+
+
+async def test_live_conclusion_target_waits_for_a_closing_assistant_turn() -> None:
+    evidence = _LiveEvidence(
+        agent_left=asyncio.Event(), assistant_finished=lambda *_: asyncio.sleep(0)
+    )
+    evidence.assistant_turns_finished = 3
+
+    class ClosingTurnLock:
+        entered = False
+
+        async def __aenter__(self):
+            self.entered = True
+            evidence.assistant_turns_finished = 4
+
+        async def __aexit__(self, *_args):
+            return None
+
+    lock = ClosingTurnLock()
+    live = object.__new__(_ObservedLiveService)
+    live._assistant_turn = SimpleNamespace(lock=lock, open=False)
+
+    target = await live.conclusion_playout_target(evidence)
+
+    assert lock.entered
+    assert target == 4
+
+
+@pytest.mark.parametrize("filler", [False, True])
+async def test_live_conclusion_keeps_end_call_baseline_through_final_delegation(
+    filler: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ended = asyncio.Event()
+    final_append_blocked = asyncio.Event()
+    goodbye_finished = asyncio.Event()
+    observed_targets = []
+    connection: _Connection | None = None
+    original_send = OpenAILiveLLMService.send_client_event
+    original_wait = _LiveEvidence.wait_for_assistant_turn_after
+
+    if not filler:
+        monkeypatch.setattr(live_llm, "TURN_GAP_SECS", 0)
+
+    async def block_final_append(self, event) -> None:
+        await original_send(self, event)
+        if (
+            isinstance(event, events.ContextAppendEvent)
+            and event.delegation_id == "baseline_delegation"
+        ):
+            final_append_blocked.set()
+            await goodbye_finished.wait()
+
+    async def observe_target(self, count: int) -> None:
+        observed_targets.append(count)
+        expected = 1 if filler else 0
+        if count != expected:
+            ended.set()
+        await original_wait(self, count)
+
+    monkeypatch.setattr(OpenAILiveLLMService, "send_client_event", block_final_append)
+    monkeypatch.setattr(_LiveEvidence, "wait_for_assistant_turn_after", observe_target)
+
+    async def provider(socket) -> None:
+        await socket.recv()
+        await socket.send(
+            json.dumps(
+                {
+                    "type": "session.started",
+                    "session": {"id": "live_baseline", "status": "active"},
+                }
+            )
+        )
+        if filler:
+            await socket.send(
+                json.dumps(
+                    {
+                        "type": "session.output_transcript.delta",
+                        "delta": "Let me think.",
+                        "start_ms": 0,
+                        "end_ms": 250,
+                    }
+                )
+            )
+        await socket.send(
+            json.dumps(
+                {
+                    "type": "session.delegation.created",
+                    "delegation": {
+                        "id": "baseline_delegation",
+                        "type": "delegation",
+                        "target": "client",
+                    },
+                }
+            )
+        )
+        await final_append_blocked.wait()
+        assert connection is not None
+        if filler:
+            await connection.output_stopped.wait()
+            connection.output_stopped.clear()
+        await socket.send(
+            json.dumps(
+                {
+                    "type": "session.output_transcript.delta",
+                    "delta": "Thanks, goodbye.",
+                    "start_ms": 300,
+                    "end_ms": 700,
+                }
+            )
+        )
+        await connection.output_stopped.wait()
+        goodbye_finished.set()
+        async for raw in socket:
+            if json.loads(raw)["type"] == "session.close":
+                await socket.send(
+                    json.dumps({"type": "session.closed", "reason": "client_close"})
+                )
+                return
+
+    async with serve(provider, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        connection = _Connection(ended)
+        model = _BackendModel(concluded=True)
+        conductor = LiveConductor(
+            connection=connection,
+            selection=LiveSelection(
+                provider="openai",
+                model="gpt-live-1",
+                adapter="openai_live",
+                voice_id="marin",
+                key="controlled-key",
+            ),
+            backend_model=model,
+            blobs=_Blobs(),
+            recording_key="sim/baseline.wav",
+            speech_volume=1,
+            _base_url=f"ws://127.0.0.1:{port}",
+        )
+        result = await conductor.conduct(
+            persona=Persona(
+                authored=authored(),
+                scenario_instructions="Conclude after one answer.",
+                model=model,
+            ),
+            max_turns=8,
+            max_duration_seconds=10,
+            controls=ConversationControls(),
+            name="controlled-baseline",
+            on_utterance=lambda *_: asyncio.sleep(0),
+            on_measured=lambda *_: asyncio.sleep(0),
+        )
+
+    assert result.ending == "persona_concluded"
+    assert observed_targets == [1 if filler else 0]
+
+
+async def test_live_conductor_reports_media_failure_while_open_is_blocked() -> None:
+    ended = asyncio.Event()
+    failed = asyncio.Event()
+    failed.set()
+
+    async def provider(socket) -> None:
+        await socket.recv()
+        await socket.send(
+            json.dumps(
+                {
+                    "type": "session.started",
+                    "session": {"id": "live_open_failed", "status": "active"},
+                }
+            )
+        )
+        async for raw in socket:
+            if json.loads(raw)["type"] == "session.close":
+                await socket.send(
+                    json.dumps({"type": "session.closed", "reason": "client_close"})
+                )
+                return
+
+    async with serve(provider, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        connection = _Connection(
+            ended,
+            block_open=True,
+            failed=failed,
+            transport_name="controlled media",
+        )
+        model = _BackendModel()
+        conductor = LiveConductor(
+            connection=connection,
+            selection=LiveSelection(
+                provider="openai",
+                model="gpt-live-1",
+                adapter="openai_live",
+                voice_id="marin",
+                key="controlled-key",
+            ),
+            backend_model=model,
+            blobs=_Blobs(),
+            recording_key="sim/open-failed.wav",
+            speech_volume=1,
+            _base_url=f"ws://127.0.0.1:{port}",
+        )
+        conducting = asyncio.create_task(
+            conductor.conduct(
+                persona=Persona(
+                    authored=authored(),
+                    scenario_instructions="Ask one question.",
+                    model=model,
+                ),
+                max_turns=8,
+                max_duration_seconds=10,
+                controls=ConversationControls(),
+                name="controlled-open-failure",
+                on_utterance=lambda *_: asyncio.sleep(0),
+                on_measured=lambda *_: asyncio.sleep(0),
+            )
+        )
+        await connection.open_started.wait()
+        failed.clear()
+        ended.set()
+        connection.release_open.set()
+        with pytest.raises(PlugError) as lost:
+            await conducting
+
+    assert str(lost.value) == (
+        "the controlled media disconnected before the simulation ended"
+    )
+    assert connection.closed
+
+
+@pytest.mark.parametrize("during_goodbye", [False, True])
+async def test_live_conductor_reports_media_failure(
+    during_goodbye: bool,
+) -> None:
+    ended = asyncio.Event()
+    failed = asyncio.Event()
+    connection: _Connection | None = None
+
+    async def provider(socket) -> None:
+        await socket.recv()
+        await socket.send(
+            json.dumps(
+                {
+                    "type": "session.started",
+                    "session": {"id": "live_media_failed", "status": "active"},
+                }
+            )
+        )
+        if during_goodbye:
+            await socket.send(
+                json.dumps(
+                    {
+                        "type": "session.delegation.created",
+                        "delegation": {
+                            "id": "failed_delegation",
+                            "type": "delegation",
+                            "target": "client",
+                        },
+                    }
+                )
+            )
+            while True:
+                message = json.loads(await socket.recv())
+                if message.get("delegation_id") == "failed_delegation":
+                    break
+            await socket.send(
+                json.dumps(
+                    {
+                        "type": "session.output_transcript.delta",
+                        "delta": "Goodbye.",
+                        "start_ms": 0,
+                        "end_ms": 250,
+                    }
+                )
+            )
+            await socket.send(
+                json.dumps(
+                    {
+                        "type": "session.output_audio.delta",
+                        "delta": base64.b64encode(b"\xe8\x03" * 240).decode(),
+                    }
+                )
+            )
+            assert connection is not None
+            await connection.output_observed.wait()
+        failed.set()
+        ended.set()
+        async for raw in socket:
+            if json.loads(raw)["type"] == "session.close":
+                await socket.send(
+                    json.dumps({"type": "session.closed", "reason": "client_close"})
+                )
+                return
+
+    async with serve(provider, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        connection = _Connection(
+            ended, failed=failed, transport_name="controlled media"
+        )
+        model = _BackendModel(concluded=during_goodbye)
+        conductor = LiveConductor(
+            connection=connection,
+            selection=LiveSelection(
+                provider="openai",
+                model="gpt-live-1",
+                adapter="openai_live",
+                voice_id="marin",
+                key="controlled-key",
+            ),
+            backend_model=model,
+            blobs=_Blobs(),
+            recording_key="sim/media-failed.wav",
+            speech_volume=1,
+            _base_url=f"ws://127.0.0.1:{port}",
+        )
+        with pytest.raises(PlugError) as lost:
+            await conductor.conduct(
+                persona=Persona(
+                    authored=authored(),
+                    scenario_instructions="Conclude when asked.",
+                    model=model,
+                ),
+                max_turns=8,
+                max_duration_seconds=10,
+                controls=ConversationControls(),
+                name="controlled-media-failure",
+                on_utterance=lambda *_: asyncio.sleep(0),
+                on_measured=lambda *_: asyncio.sleep(0),
+            )
+
+    assert str(lost.value) == (
+        "the controlled media disconnected before the simulation ended"
+    )
+    assert connection.closed
 
 
 async def test_live_conductor_cleans_up_after_provider_failure() -> None:

@@ -762,11 +762,16 @@ class _PersonaLLMService(LLMService):
                 {"ended": True},
                 properties=FunctionCallResultProperties(run_llm=False),
             )
+            await self._end_call_succeeded()
         except Exception as fault:
             self._function_call_failure = fault
             raise
         finally:
             done.set()
+
+    async def _end_call_succeeded(self) -> None:
+        """Finish conclusion bookkeeping before releasing the backend reply."""
+        return None
 
     async def _execute_tool_calls(
         self, reply: PersonaReply, context: LLMContext
