@@ -47,8 +47,12 @@ async function checkLink(link, from) {
 const themedAssets = (value) => typeof value === 'string'
   ? [value]
   : [value?.light, value?.dark].filter(Boolean);
-for (const asset of themedAssets(config.logo)) await checkLink(asset, 'docs.json logo');
-for (const asset of themedAssets(config.favicon)) await checkLink(asset, 'docs.json favicon');
+async function checkConfiguredAsset(asset, from) {
+  assert(asset.startsWith('/') && !asset.startsWith('//'), `Configured asset path must start with / in ${from}: ${asset}`);
+  await checkLink(asset, from);
+}
+for (const asset of themedAssets(config.logo)) await checkConfiguredAsset(asset, 'docs.json logo');
+for (const asset of themedAssets(config.favicon)) await checkConfiguredAsset(asset, 'docs.json favicon');
 for (const [source, destination] of redirects) {
   assert(!pages.includes(source.slice(1)), `Redirect shadows a page: ${source}`);
   await checkLink(destination, 'redirect');
