@@ -40,7 +40,7 @@ from .conductor import (
 from .conversation import ConversationControls
 from .media import VoiceMedia
 from .model import ModelClient
-from .persona import OPENING_NUDGE, Persona, compose_live_prompt
+from .persona import OPENING_NUDGE, Persona
 from .plugs import PlugError, VoiceConnection
 from .recording import AudioFacts, dual_channel_wav
 from .spec import LiveSelection
@@ -356,7 +356,7 @@ class LiveConductor:
                 settings=OpenAILiveLLMService.Settings(
                     model=self._selection.model,
                     voice=self._selection.voice_id,
-                    system_instruction=compose_live_prompt(persona.authored),
+                    system_instruction=persona.live_prompt(),
                 ),
                 delegation=OpenAILiveLLMService.ClientDelegation(backend=backend),
                 transcript=ledger.observe,
@@ -418,7 +418,7 @@ class LiveConductor:
                         messages=[
                             {
                                 "role": "system",
-                                "content": compose_live_prompt(persona.authored),
+                                "content": persona.live_prompt(),
                             },
                             {"role": "developer", "content": OPENING_NUDGE},
                         ]

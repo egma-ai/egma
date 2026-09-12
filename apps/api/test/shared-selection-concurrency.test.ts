@@ -39,13 +39,24 @@ it.sequential.each(["grader", "persona"] as const)("selects a coherent run after
     expect(response.statusCode, response.body).toBeLessThan(300);
     return response.json();
   }
+  const fixtureIds = kind === "grader" ? {
+    persona: "prs_01M0E4EVJ6ECGVJEA4NSBTC0ZA",
+    personaVersion: "prsv_01M0E4J0BBE1FVDVTZ1BSS5CZA",
+    updatedPersonaVersion: "prsv_01M0E4J0BBE1FVDVTZ1BSS5CYA",
+    grader: "grl_01M01MH8KAE8ZB19B0YJ7Z7EZA",
+  } : {
+    persona: "prs_01M0E4EVJ6ECGVJEA4NSBTC0ZB",
+    personaVersion: "prsv_01M0E4J0BBE1FVDVTZ1BSS5CZB",
+    updatedPersonaVersion: "prsv_01M0E4J0BBE1FVDVTZ1BSS5CYB",
+    grader: "grl_01M01MH8KAE8ZB19B0YJ7Z7EZB",
+  };
   const persona = PERSONA_LIBRARY_CATALOG[0]!;
   const personaCore = persona.versions.at(-1)!;
   const isolatedPersona = {
     ...persona,
-    id: "prs_01M0E4EVJ6ECGVJEA4NSBTC0ZZ",
+    id: fixtureIds.persona,
     name: "Concurrency proof caller",
-    versions: [{ ...personaCore, id: "prsv_01M0E4J0BBE1FVDVTZ1BSS5CZZ", version: 1 }],
+    versions: [{ ...personaCore, id: fixtureIds.personaVersion, version: 1 }],
   };
   await seedPersonaLibrary([isolatedPersona]);
   await request("POST", `/v1/personas/${isolatedPersona.id}/use`, { projectId: who.projectId });
@@ -59,7 +70,7 @@ it.sequential.each(["grader", "persona"] as const)("selects a coherent run after
     },
   });
   const grader = GRADER_DEFINITION_CATALOG.find((one) => one.id === PREDEFINED_GRADERS.expectedBehaviors)!;
-  const isolatedGrader = { ...grader, id: "grl_01M01MH8KAE8ZB19B0YJ7Z7EZZ", name: "concurrency_proof" };
+  const isolatedGrader = { ...grader, id: fixtureIds.grader, name: "concurrency_proof" };
   await reconcileGraderCatalog([isolatedGrader]);
   const projectGrader = await request("POST", `/v1/grader-library/${isolatedGrader.id}/use`, {
     scope: { simulations: [{ kind: "all" }], production: null },
@@ -72,7 +83,7 @@ it.sequential.each(["grader", "persona"] as const)("selects a coherent run after
     agentPlatform: "livekit", connectionType: "livekit_room", accessVariant: "livekit_room.project_credentials", modality: "voice",
     config: { url: "wss://example.livekit.cloud", agentName: "support" }, credentials: { apiKey: "livekit-key-A1B2C3D4WXYZ", apiSecret: "livekit-secret-E5F6G7H8QRST" },
   } });
-  const updatedPersonaVersionId = "prsv_01M0E4J0BBE1FVDVTZ1BSS5CYZ";
+  const updatedPersonaVersionId = fixtureIds.updatedPersonaVersion;
   const gate = await openSingleConnection(api.database.url);
   await gate.sql("begin");
   const { rows } = await gate.sql<{ pid: number }>("select pg_backend_pid() as pid");

@@ -43,7 +43,7 @@ def authored(**changes) -> AuthoredPersona:
 
 
 def test_live_prompt_keeps_conversation_controls_and_delegates_scenario() -> None:
-    prompt = compose_live_prompt(authored())
+    prompt = compose_live_prompt(authored(), "Ask to move the appointment to Thursday.")
 
     assert "Mara" in prompt
     assert "Careful and direct" in prompt
@@ -52,9 +52,12 @@ def test_live_prompt_keeps_conversation_controls_and_delegates_scenario() -> Non
     assert "irish accent" in prompt
     assert "Wait quietly" in prompt
     assert "Do not overlap" in prompt
+    assert "Ask to move the appointment to Thursday." in prompt
     assert "Delegate decisions about the situation" in prompt
 
-    fast_prompt = compose_live_prompt(authored(speech_speed="fast", tts_speed=1.5))
+    fast_prompt = compose_live_prompt(
+        authored(speech_speed="fast", tts_speed=1.5), "Ask about an appointment."
+    )
     assert "about 1.5x" in fast_prompt
 
 

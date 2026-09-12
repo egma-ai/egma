@@ -463,6 +463,15 @@ jobs:
             exit 1
           fi
 
+      - name: Install the public tunnel client
+        if: ${{ matrix.access == 'customer_token_endpoint' }}
+        run: |
+          curl --fail --silent --show-error --location \
+            --output /tmp/cloudflared.deb \
+            https://github.com/cloudflare/cloudflared/releases/download/2025.7.0/cloudflared-linux-amd64.deb
+          echo 'a65ceb838f1deb941f7ea9101ff54eaba04179135fd562456a59ea293479e113  /tmp/cloudflared.deb' | sha256sum --check --strict
+          sudo dpkg --install /tmp/cloudflared.deb
+
       - name: Report the browser
         run: google-chrome --version
 

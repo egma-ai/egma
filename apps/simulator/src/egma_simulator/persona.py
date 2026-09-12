@@ -70,6 +70,10 @@ are a simulator or an AI.
 - {pace_instruction}
 - {interruption_instruction}
 
+# Situation
+
+{scenario}
+
 # Delegation
 
 Delegate decisions about the situation, next action, tool use, and whether the
@@ -78,7 +82,7 @@ complete, say a brief natural goodbye before the session ends.
 """
 
 
-def compose_live_prompt(authored: AuthoredPersona) -> str:
+def compose_live_prompt(authored: AuthoredPersona, scenario_instructions: str) -> str:
     """Conversation-only instructions for GPT Live's continuous voice layer."""
     parameters = authored.parameters
     speed = "normal" if parameters is None else getattr(parameters, "speech_speed", "normal")
@@ -105,6 +109,7 @@ def compose_live_prompt(authored: AuthoredPersona) -> str:
     return _LIVE_PROMPT_FRAME.format(
         name=authored.name,
         personality=authored.personality,
+        scenario=scenario_instructions,
         language=authored.language,
         emotion="neutral" if parameters is None else parameters.emotion,
         accent_instruction=accent_instruction,
@@ -160,12 +165,17 @@ class Persona:
         model: ModelClient,
     ) -> None:
         self._authored = authored
+        self._scenario_instructions = scenario_instructions
         self._system_prompt = compose_system_prompt(authored, scenario_instructions)
         self._model = model
 
     @property
     def authored(self) -> AuthoredPersona:
         return self._authored
+
+    def live_prompt(self) -> str:
+        """The continuous voice prompt, including this test's situation."""
+        return compose_live_prompt(self._authored, self._scenario_instructions)
 
     @property
     def model_name(self) -> str:

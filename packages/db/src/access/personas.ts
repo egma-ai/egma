@@ -775,11 +775,7 @@ export async function editPersona(
           : changes.language ?? current.language,
       });
       const coreChanged = !sameBehavior(current, asked);
-      const legacyUpgrade =
-        (askedModels !== undefined || askedSettings !== undefined) &&
-        !current.parameterContract.some(
-          (field) => field.key === "speech_speed",
-        );
+      let legacyUpgrade = false;
       let nextContract = current.parameterContract;
       let settingsUpdate:
         | { id: string; parameterValues: PersonaParameterValues; parameterContract: readonly GraderParameter[] }
@@ -799,6 +795,9 @@ export async function editPersona(
           undefined,
           true,
         );
+        legacyUpgrade = !settings.parameterContract.some(
+          (field) => field.key === "speech_speed",
+        );
         if (!legacyUpgrade) {
           const existingControls = personaControlsOfParameters(settings.parameterValues);
           const selectedModels = askedModels === undefined || askedModels.mode === "live"
@@ -813,37 +812,30 @@ export async function editPersona(
             settingsUpdate = { id: settings.id, parameterValues: selectedValues, parameterContract: selectedContract };
           }
         } else {
-        const candidateBeforeSpeed = legacyUpgrade
-          ? askedSettings ?? {
-              ...defaultPersonaParameterValues(
-                personaParameterContract(askedModels),
-              ),
-              ...settings.parameterValues,
-              ...(current.language === null
-                ? {}
-                : { language: current.language }),
-              ...personaModelParameterValues(askedModels!),
-            }
-          : askedSettings ?? {
-              ...settings.parameterValues,
-              ...personaModelParameterValues(askedModels!),
-            };
-        const requestedSpeechSpeed = personaSpeechSpeedOfTarget(Number(candidateBeforeSpeed.tts_speed));
-        const candidate = nextContract.some((field) => field.key === "speech_speed")
-          ? { ...candidateBeforeSpeed, speech_speed: requestedSpeechSpeed, tts_speed: PERSONA_SPEECH_SPEED_TARGETS[requestedSpeechSpeed], interruption_level: candidateBeforeSpeed.interruption_level === "off" ? "none" : candidateBeforeSpeed.interruption_level, execution_policy_version: 2 }
-          : candidateBeforeSpeed;
-        if (legacyUpgrade) {
+          const candidateBeforeSpeed = askedSettings ?? {
+            ...defaultPersonaParameterValues(
+              personaParameterContract(askedModels),
+            ),
+            ...settings.parameterValues,
+            ...(current.language === null
+              ? {}
+              : { language: current.language }),
+            ...personaModelParameterValues(askedModels!),
+          };
+          const requestedSpeechSpeed = personaSpeechSpeedOfTarget(Number(candidateBeforeSpeed.tts_speed));
+          const candidate = nextContract.some((field) => field.key === "speech_speed")
+            ? { ...candidateBeforeSpeed, speech_speed: requestedSpeechSpeed, tts_speed: PERSONA_SPEECH_SPEED_TARGETS[requestedSpeechSpeed], interruption_level: candidateBeforeSpeed.interruption_level === "off" ? "none" : candidateBeforeSpeed.interruption_level, execution_policy_version: 2 }
+            : candidateBeforeSpeed;
           nextContract = personaParameterContract(
             personaModelsOfParameters(candidate),
             personaControlsOfParameters(candidate),
           );
-        }
-        const values = validatePersonaParameterValues(nextContract, candidate);
-        if (
-          JSON.stringify(settings.parameterValues) !== JSON.stringify(values)
-        ) {
-          settingsUpdate = { id: settings.id, parameterValues: values, parameterContract: nextContract };
-        }
+          const values = validatePersonaParameterValues(nextContract, candidate);
+          if (
+            JSON.stringify(settings.parameterValues) !== JSON.stringify(values)
+          ) {
+            settingsUpdate = { id: settings.id, parameterValues: values, parameterContract: nextContract };
+          }
         }
       }
       let versionId = current.id;
