@@ -30,35 +30,40 @@ type NamedTunnelSettings = {
 
 export function namedTunnelSettings(
   env: NodeJS.ProcessEnv = process.env,
+  configurationPrefix?: string,
 ): NamedTunnelSettings | undefined {
+  const variablePrefix = configurationPrefix === undefined
+    ? "SIMULATION_E2E_TUNNEL"
+    : `SIMULATION_E2E_TUNNEL_${configurationPrefix}`;
   const values = {
-    id: env["SIMULATION_E2E_TUNNEL_ID"]?.trim() ?? "",
-    url: env["SIMULATION_E2E_TUNNEL_URL"]?.trim() ?? "",
-    credentialsFile: env["SIMULATION_E2E_TUNNEL_CREDENTIALS_FILE"]?.trim() ?? "",
+    id: env[`${variablePrefix}_ID`]?.trim() ?? "",
+    url: env[`${variablePrefix}_URL`]?.trim() ?? "",
+    credentialsFile: env[`${variablePrefix}_CREDENTIALS_FILE`]?.trim() ?? "",
   };
   const configured = Object.values(values).filter((value) => value !== "").length;
   if (configured === 0) return undefined;
   if (configured !== 3) {
     throw new Error(
-      "a named simulation tunnel requires SIMULATION_E2E_TUNNEL_ID, " +
-      "SIMULATION_E2E_TUNNEL_URL, and SIMULATION_E2E_TUNNEL_CREDENTIALS_FILE",
+      `a named simulation tunnel requires ${variablePrefix}_ID, ` +
+      `${variablePrefix}_URL, and ${variablePrefix}_CREDENTIALS_FILE`,
     );
   }
   let address: URL;
   try {
     address = new URL(values.url);
   } catch {
-    throw new Error("SIMULATION_E2E_TUNNEL_URL must be an HTTPS origin");
+    throw new Error(`${variablePrefix}_URL must be an HTTPS origin`);
   }
   if (address.protocol !== "https:" || address.pathname !== "/" ||
       address.search !== "" || address.hash !== "" ||
       address.username !== "" || address.password !== "") {
-    throw new Error("SIMULATION_E2E_TUNNEL_URL must be an HTTPS origin");
+    throw new Error(`${variablePrefix}_URL must be an HTTPS origin`);
   }
   return { ...values, url: address.origin };
 }
 
 export async function startPublicTunnel(localUrl: string, dependencies: {
+  readonly configurationPrefix?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly launch?: TunnelLaunch;
   readonly now?: () => number;
@@ -69,7 +74,7 @@ export async function startPublicTunnel(localUrl: string, dependencies: {
   output: () => string;
 }> {
   const env = dependencies.env ?? process.env;
-  const named = namedTunnelSettings(env);
+  const named = namedTunnelSettings(env, dependencies.configurationPrefix);
   const launch = dependencies.launch ?? ((command, arguments_, options) =>
     spawn(command, arguments_, options));
   const pause = dependencies.pause ?? ((milliseconds) =>
@@ -288,6 +293,44 @@ export function startFullPathWorkers(options: {
       await grader.finished;
       await stopped;
     },
+  };
+}
+
+export type SafeSimulationDiagnostic = {
+  readonly status: string;
+  readonly reason: string | null;
+  readonly executionFailure: string | null;
+  readonly transcriptTurnCounts: {
+    readonly agent: number;
+    readonly persona: number;
+  };
+  readonly agentPovComplete: boolean;
+  readonly hasRecording: boolean;
+};
+
+/** Select failure evidence that is safe to write to a CI artifact. */
+export function safeSimulationDiagnostic(
+  body: Record<string, unknown>,
+): SafeSimulationDiagnostic {
+  const transcript = typeof body.transcript === "object" && body.transcript !== null
+    ? body.transcript as { readonly turns?: unknown }
+    : undefined;
+  const turns = Array.isArray(transcript?.turns) ? transcript.turns : [];
+  const transcriptTurnCounts = { agent: 0, persona: 0 };
+  for (const turn of turns) {
+    if (typeof turn !== "object" || turn === null) continue;
+    const pov = (turn as { readonly pov?: unknown }).pov;
+    if (pov === "agent" || pov === "persona") transcriptTurnCounts[pov] += 1;
+  }
+  return {
+    status: typeof body.status === "string" ? body.status : "unknown",
+    reason: typeof body.reason === "string" ? body.reason : null,
+    executionFailure: typeof body.executionFailure === "string"
+      ? body.executionFailure
+      : null,
+    transcriptTurnCounts,
+    agentPovComplete: body.agentPovComplete === true,
+    hasRecording: body.hasRecording === true,
   };
 }
 

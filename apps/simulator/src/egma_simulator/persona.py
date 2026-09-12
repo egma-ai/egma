@@ -55,6 +55,68 @@ Your name is {name}. Give that name when the agent asks who is calling, and use 
 - When your goal is concluded and nothing further is needed, say a brief goodbye and end your reply with the `end_call` tool
 """
 
+_LIVE_PROMPT_FRAME = """\
+# Role
+
+You are {name}, a human caller speaking with a voice agent. Never say that you
+are a simulator or an AI.
+
+# Conversation style
+
+- Your personality is: {personality}
+- Speak in {language}.
+- Keep a consistent {emotion} emotional delivery.
+- {accent_instruction}
+- {pace_instruction}
+- {interruption_instruction}
+
+# Situation
+
+{scenario}
+
+# Delegation
+
+Delegate decisions about the situation, next action, tool use, and whether the
+goal is complete to the backend. Follow its result. When it says the goal is
+complete, say a brief natural goodbye before the session ends.
+"""
+
+
+def compose_live_prompt(authored: AuthoredPersona, scenario_instructions: str) -> str:
+    """Conversation-only instructions for GPT Live's continuous voice layer."""
+    parameters = authored.parameters
+    speed = "normal" if parameters is None else getattr(parameters, "speech_speed", "normal")
+    interruption = (
+        "none" if parameters is None else parameters.interruption_level
+    )
+    pace = {
+        "slow": "Speak slowly, aiming for about 0.8x the normal conversational pace.",
+        "normal": "Speak at about 1.0x the normal conversational pace.",
+        "fast": "Speak quickly and clearly, aiming for about 1.5x the normal conversational pace.",
+    }[speed]
+    interruptions = {
+        "off": "Wait quietly while the agent speaks. Do not overlap it or make listening sounds.",
+        "none": "Wait quietly while the agent speaks. Do not overlap it or make listening sounds.",
+        "occasional": "Occasionally interrupt when a human with this personality naturally would.",
+        "frequent": "Interrupt readily and frequently when it fits the conversation.",
+    }[interruption]
+    accent = "voice_default" if parameters is None else parameters.accent
+    accent_instruction = (
+        "Use the selected voice's natural accent."
+        if accent == "voice_default"
+        else f"Speak with a {accent} accent."
+    )
+    return _LIVE_PROMPT_FRAME.format(
+        name=authored.name,
+        personality=authored.personality,
+        scenario=scenario_instructions,
+        language=authored.language,
+        emotion="neutral" if parameters is None else parameters.emotion,
+        accent_instruction=accent_instruction,
+        pace_instruction=pace,
+        interruption_instruction=interruptions,
+    )
+
 
 def compose_system_prompt(authored: AuthoredPersona, scenario_instructions: str) -> str:
     """The exact platform prompt, filled from the claimed persona and test."""
@@ -102,8 +164,18 @@ class Persona:
         scenario_instructions: str,
         model: ModelClient,
     ) -> None:
+        self._authored = authored
+        self._scenario_instructions = scenario_instructions
         self._system_prompt = compose_system_prompt(authored, scenario_instructions)
         self._model = model
+
+    @property
+    def authored(self) -> AuthoredPersona:
+        return self._authored
+
+    def live_prompt(self) -> str:
+        """The continuous voice prompt, including this test's situation."""
+        return compose_live_prompt(self._authored, self._scenario_instructions)
 
     @property
     def model_name(self) -> str:

@@ -89,6 +89,7 @@ function schemaLiterals(node: unknown): string[] {
 }
 
 function modelsUsing(entry: ProviderCatalogEntry): PersonaModels {
+  if (entry.job === "live") return { mode: "live", llm: RECOMMENDED_PERSONA_MODELS.llm, live: { provider: "openai", model: "gpt-live-1", adapter: "openai_live", voiceId: entry.recommendedVoiceId ?? "alloy" } };
   if (entry.job === "llm") {
     return {
       ...RECOMMENDED_PERSONA_MODELS,
@@ -118,6 +119,24 @@ function modelsUsing(entry: ProviderCatalogEntry): PersonaModels {
 
 function contractSpecUsing(entry: ProviderCatalogEntry): Record<string, unknown> {
   const candidate = structuredClone(validVoiceSpec);
+  if (entry.job === "live") {
+    candidate.contract_version = 7;
+    candidate.modality = "voice";
+    const persona = candidate.persona as { parameters: Record<string, unknown> };
+    persona.parameters = {
+      ...persona.parameters,
+      speech_speed: "normal",
+      tts_speed: 1,
+      interruption_level: "none",
+      execution_policy_version: 2,
+    };
+    candidate.models = {
+      mode: "live",
+      llm: (candidate.models as Record<string, unknown>).llm,
+      live: { provider: entry.provider, model: entry.model, adapter: entry.adapter, voice_id: entry.recommendedVoiceId ?? "alloy", key: "env:EGMA_OPENAI_API_KEY" },
+    };
+    return candidate;
+  }
   const selections = candidate.models as Record<
     "llm" | "stt" | "tts",
     Record<string, unknown>
@@ -143,7 +162,9 @@ describe("one executable model catalog", () => {
     ).toEqual([...PROVIDER_ACCOUNTS].sort());
 
     for (const entry of PROVIDER_CATALOG) {
-      expect(validPersonaModels(modelsUsing(entry))[entry.job]).toMatchObject({
+      const selectedModels = validPersonaModels(modelsUsing(entry));
+      const selected = entry.job === "live" && selectedModels.mode === "live" ? selectedModels.live : entry.job !== "live" && selectedModels.mode === "separate" ? selectedModels[entry.job] : undefined;
+      expect(selected).toMatchObject({
         provider: entry.provider,
         model: entry.model,
       });

@@ -1032,7 +1032,7 @@ describe("what a version-pinned run's landing records", () => {
       method: "POST",
       url: CLAIMS_PATH,
       headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
-      payload: { claimant: "sim-under-test", capacity: 1, contract_versions: [5, 6] },
+      payload: { claimant: "sim-under-test", capacity: 1, contract_versions: [5, 6, 7] },
     });
     const simulationId = String(
       (claimed.json() as { specs: { simulation_id: string }[] }).specs[0]
@@ -1129,7 +1129,7 @@ describe("the work order a version-pinned run hands over", () => {
       method: "POST",
       url: CLAIMS_PATH,
       headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
-      payload: { claimant: "simulator-blue-1", capacity: 5, contract_versions: [5, 6] },
+      payload: { claimant: "simulator-blue-1", capacity: 5, contract_versions: [5, 6, 7] },
     });
     expect(claimed.statusCode).toBe(200);
     const specs = (claimed.json() as { specs: Record<string, unknown>[] }).specs;
@@ -1203,7 +1203,7 @@ describe("the work order a version-pinned run hands over", () => {
       method: "POST",
       url: CLAIMS_PATH,
       headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` },
-      payload: { claimant: "simulator-blue-1", capacity: 5, contract_versions: [5, 6] },
+      payload: { claimant: "simulator-blue-1", capacity: 5, contract_versions: [5, 6, 7] },
     });
     const spec = (claimed.json() as { specs: Record<string, unknown>[] })
       .specs[0] as Record<string, unknown>;

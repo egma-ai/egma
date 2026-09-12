@@ -296,6 +296,7 @@ describe("forking a persona", () => {
         backgroundSoundId: "rain-v1",
         backgroundVolume: 0.04,
         interruptionLevel: "occasional",
+        speechSpeed: "normal",
         executionPolicyVersion: 1,
       },
     });
@@ -303,7 +304,7 @@ describe("forking a persona", () => {
     const fork = await forkPersona(actingIn(acme.forking), configured.id);
 
     expect(fork?.settings?.parameterValues).toEqual(configured.settings?.parameterValues);
-    expect(fork?.settings?.models.tts).toMatchObject({ voiceId: "alloy", speed: 1.25 });
+    expect(fork?.settings?.models).toMatchObject({ tts: { voiceId: "alloy", speed: 1 } });
   });
 
   it("returns nothing for a persona the caller could not have fetched", async () => {

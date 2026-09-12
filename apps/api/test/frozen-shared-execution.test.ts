@@ -68,8 +68,8 @@ it("freezes shared grader and persona selections together while later work recei
     return response.json();
   }
   const projects = [
-    { projectId: who.projectId, model: "gpt-4o-mini", speed: 0.85, voice: "alloy" },
-    { projectId: second.id, model: "gpt-5.6-terra", speed: 1.2, voice: "coral" },
+    { projectId: who.projectId, model: "gpt-4o-mini", speed: 0.85, resolvedSpeed: 0.8, voice: "alloy", live: false },
+    { projectId: second.id, model: "gpt-5.6-terra", speed: 1, resolvedSpeed: 1, voice: "marin", live: true },
   ];
   const prepared = [];
   for (const [index, project] of projects.entries()) {
@@ -77,8 +77,11 @@ it("freezes shared grader and persona selections together while later work recei
     const listed = await request(projectId, "GET", "/v1/graders");
     const projectGraderId = listed.graders.find((one: { graderDefinitionId: string }) => one.graderDefinitionId === grader.id).id as string;
     await request(projectId, "PATCH", `/v1/graders/${projectGraderId}`, { settings: { llm_provider: "openai", llm_model: model }, passThreshold: index === 0 ? 0.7 : 0.9 });
-    const used = await request(projectId, "POST", `/v1/personas/${persona.id}/use`, { projectId, models: {
-      llm: { provider: "openai", model },
+    const used = await request(projectId, "POST", `/v1/personas/${persona.id}/use`, { projectId, models: project.live ? {
+      mode: "live", llm: { provider: "openai", model },
+      live: { provider: "openai", model: "gpt-live-1", adapter: "openai_live", voiceId: voice },
+    } : {
+      mode: "separate", llm: { provider: "openai", model },
       stt: { provider: "deepgram", model: "nova-3-general" },
       tts: { provider: "openai", model: "tts-1", voiceId: voice, speed },
     } });
@@ -112,6 +115,11 @@ it("freezes shared grader and persona selections together while later work recei
     return { runId: run.id as string, simulationId: page.simulations[0].id as string };
   }
   const oldRuns = [await launch(first), await launch(secondProject)];
+  const frozenPersonaContract = async () => (await api.database.sql<{ parameter_contract: Array<{ key: string }> }>(
+    "select persona_parameter_contract as parameter_contract from simulation where id = $1",
+    [oldRuns[0]!.simulationId],
+  )).rows[0]!.parameter_contract;
+  expect((await frozenPersonaContract()).map((field) => field.key)).toContain("speech_mode");
   const oldPlan = await getGradingPlan(firstAuth, oldRuns[0]!.runId);
   expect(oldPlan).not.toHaveProperty("state");
   expect(oldPlan?.groups[0]?.items).toEqual(expect.arrayContaining([expect.objectContaining({
@@ -130,10 +138,13 @@ it("freezes shared grader and persona selections together while later work recei
   expect(graderPublications.flatMap((one) => one.definitions)).toEqual([{ id: grader.id, name: grader.name, version: 2 }]);
   const personaPublications = await Promise.all([seedPersonaLibrary([updatedPersona]), seedPersonaLibrary([updatedPersona])]);
   expect(personaPublications.flat()).toEqual([{ id: persona.id, name: persona.name, version: releasedPersona.version, versionId: releasedPersona.id }]);
+  expect((await frozenPersonaContract()).map((field) => field.key)).toContain("speech_mode");
 
   for (const project of prepared) {
     const current = await request(project.projectId, "GET", `/v1/personas/${persona.id}`);
-    expect(current).toMatchObject({ version: releasedPersona.version, settings: { id: project.personaSettingsId, models: { llm: { model: project.model }, tts: { speed: project.speed, voiceId: project.voice } } } });
+    expect(current).toMatchObject({ version: releasedPersona.version, settings: { id: project.personaSettingsId, models: project.live
+      ? { mode: "live", llm: { model: project.model }, live: { voiceId: project.voice } }
+      : { mode: "separate", llm: { model: project.model }, tts: { speed: project.resolvedSpeed, voiceId: project.voice } } } });
     const policy = await request(project.projectId, "GET", "/v1/graders");
     expect(policy.graders).toEqual(expect.arrayContaining([expect.objectContaining({ id: project.projectGraderId, settings: { llm_provider: "openai", llm_model: project.model } })]));
   }
@@ -143,10 +154,18 @@ it("freezes shared grader and persona selections together while later work recei
 
   await request(first.projectId, "PATCH", `/v1/graders/${first.projectGraderId}`, { settings: { llm_provider: "openai", llm_model: "gpt-5.6-terra" }, passThreshold: 0.95 });
   await request(first.projectId, "PATCH", `/v1/personas/${persona.id}`, { projectId: first.projectId, models: {
+    mode: "separate",
     llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "openai", model: "gpt-live-transcribe" },
-    tts: { provider: "cartesia", model: "sonic-3.5", voiceId: "later-project-voice", speed: 1.3 },
+    tts: { provider: "cartesia", model: "sonic-3.5", voiceId: "later-project-voice" },
   } });
-  const claim = await api.app.inject({ method: "POST", url: CLAIMS_PATH, headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` }, payload: { contract_versions: [5, 6], claimant: "after-shared-release", capacity: 2, wait_seconds: 0 } });
+  await expect(api.database.sql(
+    `update simulation
+        set persona_parameter_values = persona_parameter_values,
+            persona_parameter_contract = persona_parameter_contract
+      where id = $1`,
+    [oldRuns[0]!.simulationId],
+  )).resolves.toMatchObject({ rowCount: 1 });
+  const claim = await api.app.inject({ method: "POST", url: CLAIMS_PATH, headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` }, payload: { contract_versions: [5, 6, 7], claimant: "after-shared-release", capacity: 2, wait_seconds: 0 } });
   expect(claim.statusCode, claim.body).toBe(200);
   const specs = claim.json().specs as { simulation_id: string; persona: unknown; models: unknown }[];
   expect(specs).toHaveLength(2);
@@ -154,7 +173,9 @@ it("freezes shared grader and persona selections together while later work recei
     const project = prepared[index]!;
     const spec = specs.find((one) => one.simulation_id === oldRun.simulationId)!;
     expect(spec.persona).toMatchObject({ personality: originalPersona.personality });
-    expect(spec.models).toMatchObject({ llm: { provider: "openai", model: project.model }, stt: { provider: "deepgram", model: "nova-3-general" }, tts: { provider: "openai", model: "tts-1", voice_id: project.voice, speed: project.speed } });
+    expect(spec.models).toMatchObject(project.live
+      ? { mode: "live", llm: { provider: "openai", model: project.model }, live: { provider: "openai", model: "gpt-live-1", adapter: "openai_live", voice_id: project.voice } }
+      : { mode: "separate", llm: { provider: "openai", model: project.model }, stt: { provider: "deepgram", model: "nova-3-general" }, tts: { provider: "openai", model: "tts-1", voice_id: project.voice, speed: project.resolvedSpeed } });
     const auth = { ...firstAuth, projectId: project.projectId };
     await completeWithEvidence(auth, oldRun.runId, oldRun.simulationId, project, "after-shared-release");
   }
@@ -183,9 +204,9 @@ it("freezes shared grader and persona selections together while later work recei
   const laterPlan = await getGradingPlan(firstAuth, later.runId);
   expect(laterPlan?.groups[0]?.items).toEqual(expect.arrayContaining([expect.objectContaining({ graderDefinitionVersion: 2, projectGraderId: first.projectGraderId, passThreshold: 0.95, parameterValues: { llm_provider: "openai", llm_model: "gpt-5.6-terra" }, definition: expect.objectContaining({ prompt: updatedGrader.prompt }) })]));
   expect(await getSimulation(firstAuth, later.simulationId)).toMatchObject({ personaVersionId: releasedPersona.id });
-  const laterClaim = await api.app.inject({ method: "POST", url: CLAIMS_PATH, headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` }, payload: { contract_versions: [5, 6], claimant: "later-release", capacity: 1, wait_seconds: 0 } });
+  const laterClaim = await api.app.inject({ method: "POST", url: CLAIMS_PATH, headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` }, payload: { contract_versions: [5, 6, 7], claimant: "later-release", capacity: 1, wait_seconds: 0 } });
   expect(laterClaim.statusCode, laterClaim.body).toBe(200);
-  expect(laterClaim.json().specs).toMatchObject([{ simulation_id: later.simulationId, persona: { personality: releasedPersona.personality }, models: { llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "openai", model: "gpt-live-transcribe" }, tts: { provider: "cartesia", model: "sonic-3.5", voice_id: "later-project-voice", speed: 1.3 } } }]);
+  expect(laterClaim.json().specs).toMatchObject([{ simulation_id: later.simulationId, persona: { personality: releasedPersona.personality }, models: { llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "openai", model: "gpt-live-transcribe" }, tts: { provider: "cartesia", model: "sonic-3.5", voice_id: "later-project-voice", speed: first.resolvedSpeed } } }]);
   const detail = await request(first.projectId, "GET", `/v1/simulations/${oldRuns[0]!.simulationId}`);
   expect(detail.gradingPlan).not.toHaveProperty("state");
   expect(detail.grades).toEqual(expect.arrayContaining([expect.objectContaining({ projectGraderId: first.projectGraderId, parameterValues: { llm_provider: "openai", llm_model: first.model } })]));

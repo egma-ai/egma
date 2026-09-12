@@ -14,7 +14,9 @@ from .background import BackgroundSound
 from .blob import BlobStore
 from .conductor import DEFAULT_CONDUCT, ConductParameters, VoiceConductor
 from .config import MediaSettings
+from .live import LiveConductor
 from .mock_tools import MockToolSeam, ReportedToolCall
+from .model import ModelClient
 from .plugs import ConnectionPlug, PlugError, VoiceConnection, plug_for
 from .recording import RECORDING_NAME, AudioFacts
 from .spec import SimulationSpec
@@ -35,7 +37,7 @@ class Assembled:
     plug: ConnectionPlug | None = None
     """Text in, text out — the conversation loop's whole view of a platform."""
 
-    conductor: VoiceConductor | None = None
+    conductor: VoiceConductor | LiveConductor | None = None
     """The Pipecat pipeline conducting a full-duplex voice simulation."""
 
     mock_tools: MockToolSeam = field(default_factory=MockToolSeam)
@@ -64,13 +66,14 @@ def assemble(
     spec: SimulationSpec,
     *,
     blobs: BlobStore,
-    speech: SpeechProviders,
+    speech: SpeechProviders | None,
+    backend_model: ModelClient | None = None,
     media: MediaSettings | None = None,
     parameters: ConductParameters | None = None,
     on_provider_reference: Callable[[str], Awaitable[None]] | None = None,
 ) -> Assembled:
     """Validate and assemble one simulation without dialing or starting its pipeline.
-    speech contains the pinned persona STT/TTS selection, required even for chat.
+    speech contains the pinned persona STT/TTS selection for separate speech mode.
     media contains the resolved deployment bridge and carrier; a phone adapter
     rejects None, while non-phone simulations do not need it.
     """
@@ -122,6 +125,23 @@ def assemble(
             f"the adapter for connection type {spec.connection_type!r} speaks "
             "voice but is not a Pipecat voice connection, so nothing can conduct it"
         )
+    if spec.models.mode == "live":
+        if spec.models.live is None or backend_model is None:
+            raise PlugError("the GPT Live work order has no executable model selection")
+        volume = 1.0 if persona_parameters is None else persona_parameters.speech_volume
+        return Assembled(
+            conductor=LiveConductor(
+                connection=plug,
+                selection=spec.models.live,
+                backend_model=backend_model,
+                blobs=blobs,
+                recording_key=f"{spec.simulation_id}/{RECORDING_NAME}",
+                speech_volume=volume,
+            ),
+            mock_tools=mock_tools,
+        )
+    if speech is None:
+        raise PlugError("the separate speech work order has no speech providers")
     return Assembled(
         conductor=VoiceConductor(
             connection=plug,
@@ -137,6 +157,7 @@ def assemble(
                     interruption_level=(
                         "off"
                         if persona_parameters is None
+                        or persona_parameters.interruption_level == "none"
                         else persona_parameters.interruption_level
                     ),
                 )

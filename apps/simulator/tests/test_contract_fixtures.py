@@ -22,6 +22,7 @@ from egma_simulator.contract import (
     report_validator,
     spec_contract_version,
     spec_validator,
+    spec_validator_for,
     validate_report,
     validate_spec,
 )
@@ -173,13 +174,13 @@ def place_of(error: ValidationError) -> str:
 
 
 def test_each_schema_compiles_and_pins_its_contract_version():
-    assert spec_validator().schema["properties"]["contract_version"]["const"] == 6
+    assert spec_validator().schema["properties"]["contract_version"]["const"] == 7
     assert report_validator().schema["properties"]["contract_version"]["const"] == 1
-    assert spec_validator().schema["$id"] == "urn:egma:simulation-contract:spec:v6"
+    assert spec_validator().schema["$id"] == "urn:egma:simulation-contract:spec:v7"
     assert report_validator().schema["$id"] == "urn:egma:simulation-contract:report:v1"
 
 
-def test_this_simulator_advertises_v6_and_preserves_v5_execution():
+def test_this_simulator_advertises_v7_and_preserves_old_execution():
     document = read_json(
         contract_dir()
         / "fixtures"
@@ -187,7 +188,8 @@ def test_this_simulator_advertises_v6_and_preserves_v5_execution():
         / "valid"
         / "chat-retell-text-mode-plain.json"
     )
-    assert document["contract_version"] == spec_contract_version() == 6
+    assert document["contract_version"] == 6
+    assert spec_contract_version() == 7
 
     legacy = {**document, "contract_version": 5}
     legacy["persona"] = {
@@ -488,7 +490,14 @@ def test_every_invalid_fixture_is_rejected_at_the_place_it_is_wrong(direction: s
     for name, document in fixtures:
         place, keyword, named_property = EXPECTED_REJECTION[f"{direction}/{name}"]
 
-        errors = flattened(list(VALIDATORS[direction]().iter_errors(document)))
+        selected = (
+            spec_validator_for(document["contract_version"])
+            if direction == "spec" and name != "wrong-contract-version.json"
+            else spec_validator()
+            if direction == "spec"
+            else report_validator()
+        )
+        errors = flattened(list(selected.iter_errors(document)))
         assert errors, f"{name} was accepted"
 
         decisive = [

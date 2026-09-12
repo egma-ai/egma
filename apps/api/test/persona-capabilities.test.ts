@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   discoverCartesiaVoices,
   OPENAI_STANDARD_VOICES,
+  OPENAI_LIVE_VOICES,
+  personaCapabilityRefusal,
   resolvePersonaCapabilities,
 } from "../src/persona-capabilities.ts";
 
@@ -24,6 +26,16 @@ describe("persona capability resolution", () => {
     expect(OPENAI_STANDARD_VOICES.find((voice) => voice.id === "cedar")?.presentation).toBe("male");
     expect(OPENAI_STANDARD_VOICES.find((voice) => voice.id === "coral")?.presentation).toBe("female");
     expect(OPENAI_STANDARD_VOICES.find((voice) => voice.id === "alloy")?.presentation).toBe("unknown");
+  });
+
+  it("uses the documented GPT Live voice catalog", () => {
+    expect(OPENAI_LIVE_VOICES.map((voice) => voice.id)).toEqual([
+      "alloy", "ash", "ballad", "beacon", "bossa", "cedar", "cinder", "coral", "delta", "echo", "gleam",
+      "marin", "meridian", "quartz", "ripple", "sage", "shimmer", "stone", "tempo", "verse", "vesper", "willow",
+    ]);
+    expect(resolvePersonaCapabilities({
+      mode: "live", liveProvider: "openai", liveModel: "gpt-live-1", language: "en-US",
+    }).voices.choices).toEqual(OPENAI_LIVE_VOICES);
   });
 
   it("fixes instruction-only controls for legacy OpenAI TTS", () => {
@@ -88,6 +100,24 @@ describe("persona capability resolution", () => {
     );
     expect(result.language).toMatchObject({ status: "unknown", reason: expect.stringContaining("Refresh") });
     expect(result.speed.status).toBe("unknown");
+  });
+
+  it("offers only Normal for a compatible professional clone and refuses Fast by category", () => {
+    const result = resolvePersonaCapabilities(
+      { ...selection, ttsProvider: "cartesia", ttsModel: "sonic-3.6", voiceId: "pro", language: "en-US" },
+      [{ id: "pro", name: "Pro", source: "account", presentation: "unknown", languages: ["en"], accents: [], isProfessional: true, modelIds: ["sonic-3.6"] }],
+    );
+    expect(result.speechSpeed).toEqual({
+      status: "fixed",
+      value: "normal",
+      reason: "Cartesia professional clones ignore native speed.",
+    });
+    expect(personaCapabilityRefusal(result, {
+      emotion: "neutral",
+      accent: "voice_default",
+      speechSpeed: "fast",
+      voiceId: "pro",
+    })).toBe("controls.speechSpeed: Cartesia professional clones ignore native speed.");
   });
 });
 

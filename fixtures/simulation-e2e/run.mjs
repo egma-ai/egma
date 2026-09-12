@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 
 const dryRun = process.argv.includes("--dry-run");
+const gptLivePersona = process.argv.includes("--gpt-live-persona");
 const modelKey =
   process.env.LIVEKIT_E2E_OPENAI_API_KEY?.trim() ||
   process.env.EGMA_OPENAI_API_KEY?.trim();
@@ -47,6 +48,7 @@ const shared = {
   ...process.env,
   EGMA_REQUIRE_OBJECT_STORAGE: "1",
   SIMULATION_E2E_MOCKS: "on",
+  SIMULATION_E2E_PERSONA_MODE: gptLivePersona ? "live" : "separate",
 };
 const liveKitEnvironment = { ...shared };
 delete liveKitEnvironment.LIVEKIT_E2E_PYTHON_WHEEL;
@@ -63,21 +65,22 @@ const liveKitArguments = [
   "runs a packaged LiveKit worker",
   "--maxWorkers=1",
 ];
-for (const language of ["python", "javascript"]) {
-  for (const modality of ["chat", "voice"]) {
-    run(`LiveKit ${language} ${modality}`, "pnpm", liveKitArguments, {
-      env: {
-        ...liveKitEnvironment,
-        LIVEKIT_E2E_OPENAI_API_KEY: modelKey,
-        SIMULATION_E2E_LIVE: "1",
-        SIMULATION_E2E_LANGUAGE: language,
-        SIMULATION_E2E_MODALITY: modality,
-        SIMULATION_E2E_ACCESS: "project_credentials",
-        LIVEKIT_E2E_PYTHON_AGENTS_VERSION: "1.7.1",
-        LIVEKIT_E2E_JAVASCRIPT_AGENTS_VERSION: "1.7.1",
-        EGMA_E2E_SESSION_DELAY_MS: "10000",
-      },
-    });
+for (const access of gptLivePersona ? ["project_credentials", "customer_token_endpoint"] : ["project_credentials"]) {
+  for (const language of ["python", "javascript"]) {
+    for (const modality of ["chat", "voice"]) {
+      run(`LiveKit ${language} ${modality} ${access}`, "pnpm", liveKitArguments, {
+        env: {
+          ...liveKitEnvironment,
+          LIVEKIT_E2E_OPENAI_API_KEY: modelKey,
+          SIMULATION_E2E_LIVE: "1",
+          SIMULATION_E2E_LANGUAGE: language,
+          SIMULATION_E2E_MODALITY: modality,
+          SIMULATION_E2E_ACCESS: access,
+          LIVEKIT_E2E_PYTHON_AGENTS_VERSION: "1.7.1",
+          LIVEKIT_E2E_JAVASCRIPT_AGENTS_VERSION: "1.7.1",
+        },
+      });
+    }
   }
 }
 

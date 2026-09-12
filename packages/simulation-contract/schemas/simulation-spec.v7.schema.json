@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:egma:simulation-contract:spec:v7",
+  "title": "Simulation spec (v7)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "simulation_id", "modality", "connection", "persona", "scenario", "limits", "models"],
+  "properties": {
+    "contract_version": { "const": 7 },
+    "simulation_id": { "type": "string", "minLength": 1 },
+    "modality": { "enum": ["chat", "voice"] },
+    "connection": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/connection" },
+    "persona": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "personality", "parameters"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "personality": { "type": "string", "minLength": 1, "pattern": "\\S" },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["language", "emotion", "accent", "speech_speed", "tts_speed", "speech_volume", "interruption_level", "execution_policy_version"],
+          "dependentRequired": {
+            "background_sound_id": ["background_volume"],
+            "background_volume": ["background_sound_id"]
+          },
+          "properties": {
+            "language": { "type": "string", "minLength": 1, "pattern": "\\S" },
+            "emotion": { "enum": ["neutral", "happy", "angry", "frustrated", "sad", "anxious"] },
+            "accent": { "type": "string", "minLength": 1 },
+            "speech_speed": { "enum": ["slow", "normal", "fast"] },
+            "tts_speed": { "enum": [0.8, 1, 1.5] },
+            "speech_volume": { "type": "number", "minimum": 0.5, "maximum": 1.5 },
+            "interruption_level": { "enum": ["none", "occasional", "frequent"] },
+            "execution_policy_version": { "const": 2 },
+            "background_sound_id": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/persona/properties/parameters/properties/background_sound_id" },
+            "background_volume": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/persona/properties/parameters/properties/background_volume" }
+          }
+        }
+      }
+    },
+    "scenario": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/scenario" },
+    "limits": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/limits" },
+    "agent_version": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/agent_version" },
+    "dynamic_variables": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/dynamic_variables" },
+    "job_dispatch_metadata": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/job_dispatch_metadata" },
+    "mock_tools": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/mock_tools" },
+    "platform": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/platform" },
+    "runtime": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/runtime" },
+    "models": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "llm", "stt", "tts"],
+          "properties": {
+            "mode": { "const": "separate" },
+            "llm": { "$ref": "urn:egma:simulation-contract:spec:v6#/$defs/llm_selection" },
+            "stt": { "$ref": "urn:egma:simulation-contract:spec:v6#/$defs/stt_selection" },
+            "tts": { "$ref": "urn:egma:simulation-contract:spec:v6#/$defs/tts_selection" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "llm", "live"],
+          "properties": {
+            "mode": { "const": "live" },
+            "llm": { "$ref": "urn:egma:simulation-contract:spec:v6#/$defs/llm_selection" },
+            "live": { "$ref": "#/$defs/live_selection" }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "live_selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "adapter", "voice_id"],
+      "properties": {
+        "provider": { "const": "openai" },
+        "model": { "const": "gpt-live-1" },
+        "adapter": { "const": "openai_live" },
+        "voice_id": { "enum": ["alloy", "ash", "ballad", "beacon", "bossa", "cedar", "cinder", "coral", "delta", "echo", "gleam", "marin", "meridian", "quartz", "ripple", "sage", "shimmer", "stone", "tempo", "verse", "vesper", "willow"] },
+        "key": { "type": "string", "minLength": 1 },
+        "funding_receipt": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "type": "object", "properties": { "modality": { "const": "voice" }, "models": { "type": "object", "properties": { "mode": { "const": "live" } }, "required": ["mode"] } }, "required": ["modality", "models"] },
+      "then": { "type": "object", "properties": { "models": { "type": "object", "properties": { "live": { "type": "object", "properties": { "key": {} }, "required": ["key"] } } } } }
+    },
+    {
+      "if": { "type": "object", "properties": { "modality": { "const": "chat" } }, "required": ["modality"] },
+      "then": {
+        "type": "object",
+        "properties": {
+          "models": {
+            "type": "object",
+            "properties": {
+              "live": {
+                "type": "object",
+                "not": {
+                  "type": "object",
+                  "properties": { "key": {} },
+                  "required": ["key"]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
-import { validateExecutableGraderParameters } from "../grader-library/parameters.ts";
+import { validateExecutableGraderParameters, type GraderParameter } from "../grader-library/parameters.ts";
 import { snapshotGraderDefinition } from "../grader-library/snapshot.ts";
 import {
   productionSampleSelected,
@@ -39,6 +39,7 @@ export async function resolvePersonaVersions(
     personaId: string;
     personaVersionId: string;
     personaParameterValues: PersonaParameterValues;
+    personaParameterContract: readonly GraderParameter[];
   }[]
 > {
   const unique = [...new Set(ids)];
@@ -97,6 +98,7 @@ export async function resolvePersonaVersions(
         personaId: id,
         personaVersionId: row.currentVersionId,
         personaParameterValues: settings.parameterValues,
+        personaParameterContract: settings.parameterContract,
       };
     }),
   );

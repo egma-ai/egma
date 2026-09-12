@@ -13,6 +13,11 @@ on:
       - main
   workflow_dispatch:
     inputs:
+      gpt_live_personas:
+        description: Run the opt-in real-provider GPT Live persona cells
+        required: true
+        type: boolean
+        default: false
       deploy:
         description: Replace production and ship the web after publishing the images
         required: true
@@ -397,15 +402,23 @@ jobs:
           retention-days: 7
 
   simulation-e2e-livekit:
-    name: Simulation to grade (${{ matrix.language }}, LiveKit 1.7.1, ${{ matrix.modality }}, project credentials, mocks on)
+    name: Simulation to grade (${{ matrix.language }}, LiveKit 1.7.1, ${{ matrix.modality }}, ${{ matrix.access }}, ${{ matrix.persona_mode }} persona, mocks on)
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'workflow_dispatch' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
+    concurrency:
+      group: ${{ matrix.access == 'customer_token_endpoint' && 'simulation-e2e-named-tunnels' || format('simulation-e2e-livekit-{0}-{1}-{2}-{3}-{4}', github.run_id, matrix.language, matrix.modality, matrix.access, matrix.persona_mode) }}
+      queue: max
     strategy:
       fail-fast: false
       matrix:
         language: [python, javascript]
         modality: [chat, voice]
+        access: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.gpt_live_personas && '["project_credentials", "customer_token_endpoint"]' || '["project_credentials"]') }}
+        # Normal CI keeps the existing separate speech path. A manual run can
+        # add the paid real-provider GPT Live cells without making them a
+        # probabilistic merge gate.
+        persona_mode: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.gpt_live_personas && '["separate", "live"]' || '["separate"]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -453,6 +466,66 @@ jobs:
             exit 1
           fi
 
+      - name: Install the public tunnel client
+        if: ${{ matrix.access == 'customer_token_endpoint' }}
+        run: |
+          curl --fail --silent --show-error --location \
+            --output /tmp/cloudflared.deb \
+            https://github.com/cloudflare/cloudflared/releases/download/2025.7.0/cloudflared-linux-amd64.deb
+          echo 'a65ceb838f1deb941f7ea9101ff54eaba04179135fd562456a59ea293479e113  /tmp/cloudflared.deb' | sha256sum --check --strict
+          sudo dpkg --install /tmp/cloudflared.deb
+
+      - name: Prepare the named public tunnels
+        if: ${{ matrix.access == 'customer_token_endpoint' }}
+        env:
+          TEXT_TUNNEL_ID: ${{ vars.SIMULATION_E2E_TUNNEL_TEXT_ID }}
+          TEXT_TUNNEL_URL: ${{ vars.SIMULATION_E2E_TUNNEL_TEXT_URL }}
+          TEXT_TUNNEL_CREDENTIALS: ${{ secrets.SIMULATION_E2E_TUNNEL_TEXT_CREDENTIALS }}
+          WEB_TUNNEL_ID: ${{ vars.SIMULATION_E2E_TUNNEL_WEB_ID }}
+          WEB_TUNNEL_URL: ${{ vars.SIMULATION_E2E_TUNNEL_WEB_URL }}
+          WEB_TUNNEL_CREDENTIALS: ${{ secrets.SIMULATION_E2E_TUNNEL_WEB_CREDENTIALS }}
+        run: |
+          set -eu
+          prepare_tunnel() {
+            label="$1"
+            prefix="$2"
+            tunnel_id="$3"
+            tunnel_url="$4"
+            tunnel_credentials="$5"
+            test -n "$tunnel_id" || { echo "The named Cloudflare tunnel ID for $label is required." >&2; exit 1; }
+            test -n "$tunnel_url" || { echo "The named Cloudflare tunnel URL for $label is required." >&2; exit 1; }
+            test -n "$tunnel_credentials" || { echo "The named Cloudflare tunnel credentials for $label are required." >&2; exit 1; }
+            TUNNEL_URL_TO_VALIDATE="$tunnel_url" node -e '
+              try {
+                const value = process.env.TUNNEL_URL_TO_VALIDATE;
+                const url = new URL(value);
+                if (url.protocol !== "https:" || url.pathname !== "/" || url.search !== "" ||
+                    url.hash !== "" || url.username !== "" || url.password !== "") process.exit(1);
+              } catch { process.exit(1); }
+            ' || { echo "The named Cloudflare tunnel URL for $label must be an HTTPS origin." >&2; exit 1; }
+
+            credential_file="$RUNNER_TEMP/livekit-$label-tunnel.json"
+            umask 077
+            printf '%s' "$tunnel_credentials" > "$credential_file"
+            chmod 600 "$credential_file"
+            jq -e --arg tunnel_id "$tunnel_id" '
+              (.AccountTag | type == "string" and length > 0) and
+              (.TunnelSecret | type == "string" and length > 0) and
+              (.TunnelID | type == "string" and length > 0) and
+              .TunnelID == $tunnel_id
+            ' "$credential_file" >/dev/null || {
+              echo "The named Cloudflare tunnel credentials for $label are invalid or belong to another tunnel." >&2
+              exit 1
+            }
+
+            echo "SIMULATION_E2E_TUNNEL_${prefix}_ID=$tunnel_id" >> "$GITHUB_ENV"
+            echo "SIMULATION_E2E_TUNNEL_${prefix}_URL=$tunnel_url" >> "$GITHUB_ENV"
+            echo "SIMULATION_E2E_TUNNEL_${prefix}_CREDENTIALS_FILE=$credential_file" >> "$GITHUB_ENV"
+          }
+
+          prepare_tunnel text TEXT "$TEXT_TUNNEL_ID" "$TEXT_TUNNEL_URL" "$TEXT_TUNNEL_CREDENTIALS"
+          prepare_tunnel web WEB "$WEB_TUNNEL_ID" "$WEB_TUNNEL_URL" "$WEB_TUNNEL_CREDENTIALS"
+
       - name: Report the browser
         run: google-chrome --version
 
@@ -466,7 +539,8 @@ jobs:
           SIMULATION_E2E_LIVE: "1"
           SIMULATION_E2E_LANGUAGE: ${{ matrix.language }}
           SIMULATION_E2E_MODALITY: ${{ matrix.modality }}
-          SIMULATION_E2E_ACCESS: project_credentials
+          SIMULATION_E2E_ACCESS: ${{ matrix.access }}
+          SIMULATION_E2E_PERSONA_MODE: ${{ matrix.persona_mode }}
           SIMULATION_E2E_MOCKS: "on"
           LIVEKIT_E2E_PYTHON_AGENTS_VERSION: "1.7.1"
           LIVEKIT_E2E_JAVASCRIPT_AGENTS_VERSION: "1.7.1"
@@ -476,29 +550,32 @@ jobs:
           apps/api/test/simulator-conversation.test.ts
           --testNamePattern "runs a packaged LiveKit worker"
 
+      - name: Remove the named public tunnel credentials
+        if: ${{ always() && matrix.access == 'customer_token_endpoint' }}
+        run: rm -f "$RUNNER_TEMP/livekit-text-tunnel.json" "$RUNNER_TEMP/livekit-web-tunnel.json"
+
       - name: Upload redacted proof manifest
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: simulation-e2e-${{ matrix.language }}-livekit-1.7.1-${{ matrix.modality }}-project-credentials-on-${{ github.sha }}
+          name: simulation-e2e-${{ matrix.language }}-livekit-1.7.1-${{ matrix.modality }}-${{ matrix.access }}-${{ matrix.persona_mode }}-on-${{ github.sha }}
           path: .proofs/simulation-e2e/*
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
 
   simulation-e2e-retell:
-    name: Simulation to grade (Retell ${{ matrix.connection }}, mocks on)
+    name: Simulation to grade (Retell ${{ matrix.connection }}, configured personas, mocks on)
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
-      # Each hostname must point at only one ephemeral runner at a time. Text and
-      # web use separate tunnels, so their matrix jobs can still run together.
-      group: simulation-e2e-retell-${{ matrix.connection }}
-      cancel-in-progress: false
+      group: simulation-e2e-named-tunnels
+      queue: max
     strategy:
       fail-fast: false
       matrix:
+        connection: [text, web]
         include:
           - connection: text
             tunnel_id_var: SIMULATION_E2E_TUNNEL_TEXT_ID
@@ -584,13 +661,17 @@ jobs:
           EGMA_REQUIRE_OBJECT_STORAGE: "1"
           SIMULATION_E2E_RETELL: "1"
           SIMULATION_E2E_RETELL_CONNECTION: ${{ matrix.connection }}
+          PERSONA_MODES: ${{ github.event_name == 'workflow_dispatch' && inputs.gpt_live_personas && 'separate live' || 'separate' }}
           SIMULATION_E2E_MOCKS: "on"
           SIMULATION_E2E_RETELL_API_KEY: ${{ secrets.SIMULATION_E2E_RETELL_API_KEY }}
           SIMULATION_E2E_MODEL_API_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
-        run: >-
-          pnpm exec vitest run --project fast
-          apps/api/test/retell-live-simulation.test.ts
-          --maxWorkers=1
+        run: |
+          set -eu
+          for persona_mode in $PERSONA_MODES; do
+            SIMULATION_E2E_PERSONA_MODE="$persona_mode" pnpm exec vitest run --project fast \
+              apps/api/test/retell-live-simulation.test.ts \
+              --maxWorkers=1
+          done
       - name: Remove the named public tunnel credential
         if: ${{ always() }}
         run: rm -f "$RUNNER_TEMP/retell-${{ matrix.connection }}-tunnel.json"
@@ -598,11 +679,79 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: simulation-e2e-retell-${{ matrix.connection }}-on-${{ github.sha }}
+          name: simulation-e2e-retell-${{ matrix.connection }}-configured-personas-on-${{ github.sha }}
           path: .proofs/simulation-e2e/*
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
+
+  simulation-e2e-phone:
+    name: Simulation to grade (configured phone destination, live persona)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.gpt_live_personas && !inputs.deploy }}
+    # The carrier must reach the SIP and RTP ports published by this runner.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Compose parses the complete file before selecting services. These
+      # inert values satisfy unrelated service declarations; only the three
+      # named LiveKit services start below.
+      EGMA_AUTH_SECRET: simulation-e2e-unused
+      EGMA_ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      EGMA_SIMULATOR_SERVICE_TOKEN: simulation-e2e-unused
+      EGMA_BASE_URL: http://127.0.0.1:3100
+      EGMA_S3_ACCESS_KEY_ID: simulation-e2e-unused
+      EGMA_S3_SECRET_ACCESS_KEY: simulation-e2e-unused
+      EGMA_S3_READ_ACCESS_KEY_ID: simulation-e2e-unused
+      EGMA_S3_READ_SECRET_ACCESS_KEY: simulation-e2e-unused
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+        with:
+          version: "0.11.33"
+      - name: Require the configured phone route
+        env:
+          MODEL_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
+          DESTINATION: ${{ secrets.SIMULATION_E2E_PHONE_NUMBER }}
+          SOURCE: ${{ secrets.SIMULATION_E2E_PHONE_SOURCE_NUMBER }}
+          TRUNK_ADDRESS: ${{ secrets.SIMULATION_E2E_PHONE_TRUNK_ADDRESS }}
+          TRUNK_USERNAME: ${{ secrets.SIMULATION_E2E_PHONE_TRUNK_USERNAME }}
+          TRUNK_PASSWORD: ${{ secrets.SIMULATION_E2E_PHONE_TRUNK_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in MODEL_KEY DESTINATION SOURCE TRUNK_ADDRESS TRUNK_USERNAME TRUNK_PASSWORD; do
+            [ -n "${!name}" ] || { echo "$name is required for the opt-in phone proof." >&2; exit 1; }
+          done
+      - name: Create ephemeral LiveKit credentials
+        run: |
+          key="egma_$(openssl rand -hex 16)"
+          secret="$(openssl rand -hex 32)"
+          echo "EGMA_LIVEKIT_API_KEY=$key" >> "$GITHUB_ENV"
+          echo "EGMA_LIVEKIT_API_SECRET=$secret" >> "$GITHUB_ENV"
+          echo "TEST_LIVEKIT_API_KEY=$key" >> "$GITHUB_ENV"
+          echo "TEST_LIVEKIT_API_SECRET=$secret" >> "$GITHUB_ENV"
+      - name: Start the pinned LiveKit phone bridge
+        run: docker compose up --detach --wait livekit-redis livekit livekit-sip
+      - name: Sync the shipped simulator
+        working-directory: apps/simulator
+        run: uv sync --frozen
+      - name: Dial the configured destination with GPT Live
+        working-directory: apps/simulator
+        env:
+          TEST_GPT_LIVE: "1"
+          TEST_LIVEKIT_URL: ws://127.0.0.1:7880
+          TEST_PHONE_NUMBER: ${{ secrets.SIMULATION_E2E_PHONE_NUMBER }}
+          TEST_SIP_TRUNK_ADDRESS: ${{ secrets.SIMULATION_E2E_PHONE_TRUNK_ADDRESS }}
+          TEST_SIP_TRUNK_NUMBER: ${{ secrets.SIMULATION_E2E_PHONE_SOURCE_NUMBER }}
+          TEST_SIP_TRUNK_USERNAME: ${{ secrets.SIMULATION_E2E_PHONE_TRUNK_USERNAME }}
+          TEST_SIP_TRUNK_PASSWORD: ${{ secrets.SIMULATION_E2E_PHONE_TRUNK_PASSWORD }}
+          TEST_MODEL_API_KEY: ${{ secrets.LIVEKIT_E2E_OPENAI_API_KEY }}
+        run: uv run --frozen pytest tests/test_live_phone.py -v
+      - name: Stop the phone bridge
+        if: ${{ always() }}
+        run: docker compose down --volumes
 
   deploy:
     name: Deploy

@@ -11,6 +11,7 @@ import {
   RECOMMENDED_PERSONA_MODELS,
   PERSONA_AUTHORING_SPEED_RANGE,
   personaModelsFromRow,
+  providersNeededBy,
   validGraderModel,
   validPersonaModels,
 } from "../src/models/selections.ts";
@@ -24,6 +25,7 @@ describe("one complete persona model selection", () => {
       "cartesia_manual",
       "cartesia",
       "openai",
+      "openai_live",
     ]);
 
     expectTypeOf<ModelAdapter<"llm">>().toEqualTypeOf<
@@ -33,6 +35,7 @@ describe("one complete persona model selection", () => {
       "openai_realtime" | "deepgram" | "cartesia_manual"
     >();
     expectTypeOf<ModelAdapter<"tts">>().toEqualTypeOf<"cartesia" | "openai">();
+    expectTypeOf<ModelAdapter<"live">>().toEqualTypeOf<"openai_live">();
 
     const llmEntry: ProviderCatalogEntry<"llm"> = {
       provider: "openai",
@@ -85,6 +88,46 @@ describe("one complete persona model selection", () => {
     );
   });
 
+  it("accepts GPT Live without inactive speech selections", () => {
+    const live = validPersonaModels({
+      mode: "live",
+      llm: RECOMMENDED_PERSONA_MODELS.llm,
+      live: {
+        provider: "openai",
+        model: "gpt-live-1",
+        adapter: "openai_live",
+        voiceId: "coral",
+      },
+    });
+
+    expect(live).toEqual({
+      mode: "live",
+      llm: RECOMMENDED_PERSONA_MODELS.llm,
+      live: {
+        provider: "openai",
+        model: "gpt-live-1",
+        adapter: "openai_live",
+        voiceId: "coral",
+      },
+    });
+    expect(providersNeededBy(live, "chat")).toEqual(["openai"]);
+    expect(providersNeededBy(live, "voice")).toEqual(["openai"]);
+  });
+
+  it("refuses inactive or invented GPT Live fields", () => {
+    expect(() => validPersonaModels({
+      mode: "live",
+      llm: RECOMMENDED_PERSONA_MODELS.llm,
+      live: { provider: "openai", model: "gpt-live-1", adapter: "openai_live", voiceId: "coral" },
+      stt: RECOMMENDED_PERSONA_MODELS.stt,
+    })).toThrow(/unsupported fields stt/i);
+    expect(() => validPersonaModels({
+      mode: "live",
+      llm: RECOMMENDED_PERSONA_MODELS.llm,
+      live: { provider: "openai", model: "gpt-live-1", adapter: "openai_realtime", voiceId: "coral" },
+    })).toThrow(/catalog adapter/i);
+  });
+
   it.each([
     PERSONA_AUTHORING_SPEED_RANGE.slowest,
     PERSONA_AUTHORING_SPEED_RANGE.fastest,
@@ -95,8 +138,8 @@ describe("one complete persona model selection", () => {
         validPersonaModels({
           ...RECOMMENDED_PERSONA_MODELS,
           tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed },
-        }).tts.speed,
-      ).toBe(speed);
+        }),
+      ).toMatchObject({ tts: { speed } });
     },
   );
 
@@ -127,8 +170,8 @@ describe("one complete persona model selection", () => {
       validPersonaModels({
         ...RECOMMENDED_PERSONA_MODELS,
         stt: { provider: "openai", model },
-      }).stt,
-    ).toEqual({ provider: "openai", model });
+      }),
+    ).toMatchObject({ stt: { provider: "openai", model } });
 
     expect(() =>
       validPersonaModels({
@@ -146,8 +189,8 @@ describe("one complete persona model selection", () => {
       validPersonaModels({
         ...RECOMMENDED_PERSONA_MODELS,
         stt: { provider, model },
-      }).stt,
-    ).toEqual({ provider, model });
+      }),
+    ).toMatchObject({ stt: { provider, model } });
   });
 
   it.each(["sonic-3.6", "sonic-3.6-2026-08-27"])(

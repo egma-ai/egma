@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { agent, connection, CONNECTION_TYPES, MODALITIES } from "./agents.ts";
+import type { GraderParameter } from "../grader-library/parameters.ts";
 import type { PersonaParameterValues } from "../persona-library/parameters.ts";
 import type { FrozenRunGradingPlan } from "../grading/plan.ts";
 import { personaVersion } from "./personas.ts";
@@ -312,6 +313,7 @@ export const simulation = pgTable(
     personaId: idText("persona_id").notNull(),
     personaVersionId: idText("persona_version_id").notNull(),
     personaParameterValues: jsonb("persona_parameter_values").$type<PersonaParameterValues>().notNull(),
+    personaParameterContract: jsonb("persona_parameter_contract").$type<readonly GraderParameter[]>(),
     /**
      * Frozen test version executed by this simulation. The identity is also
      * stored so composite foreign keys enforce test and project ownership.

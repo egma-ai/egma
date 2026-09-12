@@ -16,7 +16,6 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
-    StartFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -64,7 +63,10 @@ async def recorder_started(
         auto_start_recording=True,
         real_time=real_time,
     )
-    made._update_sample_rate(StartFrame(audio_out_sample_rate=BAND))
+    # Pipecat's pipeline setup normally initializes this runtime value. These
+    # focused processor tests supply the same pinned constructor rate directly.
+    made._sample_rate = BAND
+    made._audio_buffer_size_1s = BAND * 2
     await made.start_recording()
     return made
 

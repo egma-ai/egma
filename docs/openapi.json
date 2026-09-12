@@ -11400,74 +11400,148 @@
                     "minLength": 1
                   },
                   "models": {
-                    "type": "object",
-                    "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                    "properties": {
-                      "llm": {
+                    "oneOf": [
+                      {
                         "type": "object",
+                        "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
                         "properties": {
-                          "provider": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "provider",
-                          "model"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "stt": {
-                        "type": "object",
-                        "properties": {
-                          "provider": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "provider",
-                          "model"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "tts": {
-                        "type": "object",
-                        "properties": {
-                          "provider": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          },
-                          "voiceId": {
+                          "mode": {
                             "type": "string",
-                            "description": "A voice identifier supported by the selected text-to-speech provider."
+                            "enum": [
+                              "separate"
+                            ]
                           },
-                          "speed": {
-                            "type": "number",
-                            "description": "Provider-supported speech rate. Read the selected combination's capability range."
+                          "llm": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "stt": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "tts": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              },
+                              "voiceId": {
+                                "type": "string",
+                                "description": "A voice identifier supported by the selected text-to-speech provider."
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model",
+                              "voiceId"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
-                          "provider",
-                          "model",
-                          "voiceId",
-                          "speed"
+                          "mode",
+                          "llm",
+                          "stt",
+                          "tts"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "description": "A GPT Live speech selection and an independently selected reasoning model.",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "live"
+                            ]
+                          },
+                          "llm": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "live": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string",
+                                "enum": [
+                                  "openai"
+                                ]
+                              },
+                              "model": {
+                                "type": "string",
+                                "enum": [
+                                  "gpt-live-1"
+                                ]
+                              },
+                              "adapter": {
+                                "type": "string",
+                                "enum": [
+                                  "openai_live"
+                                ]
+                              },
+                              "voiceId": {
+                                "type": "string",
+                                "description": "A built-in voice supported by GPT Live."
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model",
+                              "adapter",
+                              "voiceId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "llm",
+                          "live"
                         ],
                         "additionalProperties": false
                       }
-                    },
-                    "required": [
-                      "llm",
-                      "stt",
-                      "tts"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   "controls": {
                     "type": "object",
@@ -11518,10 +11592,19 @@
                       "interruptionLevel": {
                         "type": "string",
                         "enum": [
-                          "off",
+                          "none",
                           "occasional",
                           "frequent"
                         ]
+                      },
+                      "speechSpeed": {
+                        "type": "string",
+                        "enum": [
+                          "slow",
+                          "normal",
+                          "fast"
+                        ],
+                        "description": "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported."
                       }
                     },
                     "required": [
@@ -11531,7 +11614,8 @@
                       "speechVolume",
                       "backgroundSoundId",
                       "backgroundVolume",
-                      "interruptionLevel"
+                      "interruptionLevel",
+                      "speechSpeed"
                     ],
                     "additionalProperties": false
                   }
@@ -11686,74 +11770,154 @@
                               "minLength": 1
                             },
                             "models": {
-                              "type": "object",
-                              "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                              "properties": {
-                                "llm": {
+                              "oneOf": [
+                                {
                                   "type": "object",
+                                  "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
                                   "properties": {
-                                    "provider": {
-                                      "type": "string"
-                                    },
-                                    "model": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "provider",
-                                    "model"
-                                  ],
-                                  "additionalProperties": false
-                                },
-                                "stt": {
-                                  "type": "object",
-                                  "properties": {
-                                    "provider": {
-                                      "type": "string"
-                                    },
-                                    "model": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "provider",
-                                    "model"
-                                  ],
-                                  "additionalProperties": false
-                                },
-                                "tts": {
-                                  "type": "object",
-                                  "properties": {
-                                    "provider": {
-                                      "type": "string"
-                                    },
-                                    "model": {
-                                      "type": "string"
-                                    },
-                                    "voiceId": {
+                                    "mode": {
                                       "type": "string",
-                                      "description": "A voice identifier supported by the selected text-to-speech provider."
+                                      "enum": [
+                                        "separate"
+                                      ]
                                     },
-                                    "speed": {
-                                      "type": "number",
-                                      "description": "Provider-supported speech rate. Read the selected combination's capability range."
+                                    "llm": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "stt": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "tts": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        },
+                                        "voiceId": {
+                                          "type": "string",
+                                          "description": "A voice identifier supported by the selected text-to-speech provider."
+                                        },
+                                        "speed": {
+                                          "type": "number",
+                                          "readOnly": true,
+                                          "description": "Resolved provider speed for the selected speechSpeed category."
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model",
+                                        "voiceId",
+                                        "speed"
+                                      ],
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": [
-                                    "provider",
-                                    "model",
-                                    "voiceId",
-                                    "speed"
+                                    "mode",
+                                    "llm",
+                                    "stt",
+                                    "tts"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "description": "A GPT Live speech selection and an independently selected reasoning model.",
+                                  "properties": {
+                                    "mode": {
+                                      "type": "string",
+                                      "enum": [
+                                        "live"
+                                      ]
+                                    },
+                                    "llm": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "live": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string",
+                                          "enum": [
+                                            "openai"
+                                          ]
+                                        },
+                                        "model": {
+                                          "type": "string",
+                                          "enum": [
+                                            "gpt-live-1"
+                                          ]
+                                        },
+                                        "adapter": {
+                                          "type": "string",
+                                          "enum": [
+                                            "openai_live"
+                                          ]
+                                        },
+                                        "voiceId": {
+                                          "type": "string",
+                                          "description": "A built-in voice supported by GPT Live."
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model",
+                                        "adapter",
+                                        "voiceId"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": [
+                                    "mode",
+                                    "llm",
+                                    "live"
                                   ],
                                   "additionalProperties": false
                                 }
-                              },
-                              "required": [
-                                "llm",
-                                "stt",
-                                "tts"
-                              ],
-                              "additionalProperties": false
+                              ]
                             },
                             "controls": {
                               "type": "object",
@@ -11809,10 +11973,19 @@
                                 "interruptionLevel": {
                                   "type": "string",
                                   "enum": [
-                                    "off",
+                                    "none",
                                     "occasional",
                                     "frequent"
                                   ]
+                                },
+                                "speechSpeed": {
+                                  "type": "string",
+                                  "enum": [
+                                    "slow",
+                                    "normal",
+                                    "fast"
+                                  ],
+                                  "description": "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported."
                                 }
                               },
                               "required": [
@@ -11823,7 +11996,8 @@
                                 "executionPolicyVersion",
                                 "backgroundSoundId",
                                 "backgroundVolume",
-                                "interruptionLevel"
+                                "interruptionLevel",
+                                "speechSpeed"
                               ],
                               "additionalProperties": false
                             },
@@ -12175,74 +12349,154 @@
                                     "minLength": 1
                                   },
                                   "models": {
-                                    "type": "object",
-                                    "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                                    "properties": {
-                                      "llm": {
+                                    "oneOf": [
+                                      {
                                         "type": "object",
+                                        "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
                                         "properties": {
-                                          "provider": {
-                                            "type": "string"
-                                          },
-                                          "model": {
-                                            "type": "string"
-                                          }
-                                        },
-                                        "required": [
-                                          "provider",
-                                          "model"
-                                        ],
-                                        "additionalProperties": false
-                                      },
-                                      "stt": {
-                                        "type": "object",
-                                        "properties": {
-                                          "provider": {
-                                            "type": "string"
-                                          },
-                                          "model": {
-                                            "type": "string"
-                                          }
-                                        },
-                                        "required": [
-                                          "provider",
-                                          "model"
-                                        ],
-                                        "additionalProperties": false
-                                      },
-                                      "tts": {
-                                        "type": "object",
-                                        "properties": {
-                                          "provider": {
-                                            "type": "string"
-                                          },
-                                          "model": {
-                                            "type": "string"
-                                          },
-                                          "voiceId": {
+                                          "mode": {
                                             "type": "string",
-                                            "description": "A voice identifier supported by the selected text-to-speech provider."
+                                            "enum": [
+                                              "separate"
+                                            ]
                                           },
-                                          "speed": {
-                                            "type": "number",
-                                            "description": "Provider-supported speech rate. Read the selected combination's capability range."
+                                          "llm": {
+                                            "type": "object",
+                                            "properties": {
+                                              "provider": {
+                                                "type": "string"
+                                              },
+                                              "model": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "provider",
+                                              "model"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          "stt": {
+                                            "type": "object",
+                                            "properties": {
+                                              "provider": {
+                                                "type": "string"
+                                              },
+                                              "model": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "provider",
+                                              "model"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          "tts": {
+                                            "type": "object",
+                                            "properties": {
+                                              "provider": {
+                                                "type": "string"
+                                              },
+                                              "model": {
+                                                "type": "string"
+                                              },
+                                              "voiceId": {
+                                                "type": "string",
+                                                "description": "A voice identifier supported by the selected text-to-speech provider."
+                                              },
+                                              "speed": {
+                                                "type": "number",
+                                                "readOnly": true,
+                                                "description": "Resolved provider speed for the selected speechSpeed category."
+                                              }
+                                            },
+                                            "required": [
+                                              "provider",
+                                              "model",
+                                              "voiceId",
+                                              "speed"
+                                            ],
+                                            "additionalProperties": false
                                           }
                                         },
                                         "required": [
-                                          "provider",
-                                          "model",
-                                          "voiceId",
-                                          "speed"
+                                          "mode",
+                                          "llm",
+                                          "stt",
+                                          "tts"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "description": "A GPT Live speech selection and an independently selected reasoning model.",
+                                        "properties": {
+                                          "mode": {
+                                            "type": "string",
+                                            "enum": [
+                                              "live"
+                                            ]
+                                          },
+                                          "llm": {
+                                            "type": "object",
+                                            "properties": {
+                                              "provider": {
+                                                "type": "string"
+                                              },
+                                              "model": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "required": [
+                                              "provider",
+                                              "model"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          "live": {
+                                            "type": "object",
+                                            "properties": {
+                                              "provider": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "openai"
+                                                ]
+                                              },
+                                              "model": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "gpt-live-1"
+                                                ]
+                                              },
+                                              "adapter": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "openai_live"
+                                                ]
+                                              },
+                                              "voiceId": {
+                                                "type": "string",
+                                                "description": "A built-in voice supported by GPT Live."
+                                              }
+                                            },
+                                            "required": [
+                                              "provider",
+                                              "model",
+                                              "adapter",
+                                              "voiceId"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        },
+                                        "required": [
+                                          "mode",
+                                          "llm",
+                                          "live"
                                         ],
                                         "additionalProperties": false
                                       }
-                                    },
-                                    "required": [
-                                      "llm",
-                                      "stt",
-                                      "tts"
-                                    ],
-                                    "additionalProperties": false
+                                    ]
                                   },
                                   "controls": {
                                     "type": "object",
@@ -12298,10 +12552,19 @@
                                       "interruptionLevel": {
                                         "type": "string",
                                         "enum": [
-                                          "off",
+                                          "none",
                                           "occasional",
                                           "frequent"
                                         ]
+                                      },
+                                      "speechSpeed": {
+                                        "type": "string",
+                                        "enum": [
+                                          "slow",
+                                          "normal",
+                                          "fast"
+                                        ],
+                                        "description": "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported."
                                       }
                                     },
                                     "required": [
@@ -12312,7 +12575,8 @@
                                       "executionPolicyVersion",
                                       "backgroundSoundId",
                                       "backgroundVolume",
-                                      "interruptionLevel"
+                                      "interruptionLevel",
+                                      "speechSpeed"
                                     ],
                                     "additionalProperties": false
                                   },
@@ -12521,74 +12785,148 @@
                     "description": "How the caller behaves and speaks. Put the situation and goal in the test scenario."
                   },
                   "models": {
-                    "type": "object",
-                    "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                    "properties": {
-                      "llm": {
+                    "oneOf": [
+                      {
                         "type": "object",
+                        "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
                         "properties": {
-                          "provider": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "provider",
-                          "model"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "stt": {
-                        "type": "object",
-                        "properties": {
-                          "provider": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "provider",
-                          "model"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "tts": {
-                        "type": "object",
-                        "properties": {
-                          "provider": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          },
-                          "voiceId": {
+                          "mode": {
                             "type": "string",
-                            "description": "A voice identifier supported by the selected text-to-speech provider."
+                            "enum": [
+                              "separate"
+                            ]
                           },
-                          "speed": {
-                            "type": "number",
-                            "description": "Provider-supported speech rate. Read the selected combination's capability range."
+                          "llm": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "stt": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "tts": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              },
+                              "voiceId": {
+                                "type": "string",
+                                "description": "A voice identifier supported by the selected text-to-speech provider."
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model",
+                              "voiceId"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
-                          "provider",
-                          "model",
-                          "voiceId",
-                          "speed"
+                          "mode",
+                          "llm",
+                          "stt",
+                          "tts"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "description": "A GPT Live speech selection and an independently selected reasoning model.",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "live"
+                            ]
+                          },
+                          "llm": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "live": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string",
+                                "enum": [
+                                  "openai"
+                                ]
+                              },
+                              "model": {
+                                "type": "string",
+                                "enum": [
+                                  "gpt-live-1"
+                                ]
+                              },
+                              "adapter": {
+                                "type": "string",
+                                "enum": [
+                                  "openai_live"
+                                ]
+                              },
+                              "voiceId": {
+                                "type": "string",
+                                "description": "A built-in voice supported by GPT Live."
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model",
+                              "adapter",
+                              "voiceId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "llm",
+                          "live"
                         ],
                         "additionalProperties": false
                       }
-                    },
-                    "required": [
-                      "llm",
-                      "stt",
-                      "tts"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   "controls": {
                     "type": "object",
@@ -12639,10 +12977,19 @@
                       "interruptionLevel": {
                         "type": "string",
                         "enum": [
-                          "off",
+                          "none",
                           "occasional",
                           "frequent"
                         ]
+                      },
+                      "speechSpeed": {
+                        "type": "string",
+                        "enum": [
+                          "slow",
+                          "normal",
+                          "fast"
+                        ],
+                        "description": "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported."
                       }
                     },
                     "required": [
@@ -12652,7 +12999,8 @@
                       "speechVolume",
                       "backgroundSoundId",
                       "backgroundVolume",
-                      "interruptionLevel"
+                      "interruptionLevel",
+                      "speechSpeed"
                     ],
                     "additionalProperties": false
                   }
@@ -12670,6 +13018,7 @@
                     "identityName": "Morgan Chen",
                     "personality": "Answers briefly, asks for the earliest appointment, and stays polite when asking the agent to get to the point.",
                     "models": {
+                      "mode": "separate",
                       "llm": {
                         "provider": "openai",
                         "model": "gpt-4o-mini"
@@ -12681,8 +13030,7 @@
                       "tts": {
                         "provider": "openai",
                         "model": "gpt-4o-mini-tts",
-                        "voiceId": "alloy",
-                        "speed": 1
+                        "voiceId": "alloy"
                       }
                     }
                   }
@@ -12836,74 +13184,154 @@
                               "minLength": 1
                             },
                             "models": {
-                              "type": "object",
-                              "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                              "properties": {
-                                "llm": {
+                              "oneOf": [
+                                {
                                   "type": "object",
+                                  "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
                                   "properties": {
-                                    "provider": {
-                                      "type": "string"
-                                    },
-                                    "model": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "provider",
-                                    "model"
-                                  ],
-                                  "additionalProperties": false
-                                },
-                                "stt": {
-                                  "type": "object",
-                                  "properties": {
-                                    "provider": {
-                                      "type": "string"
-                                    },
-                                    "model": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "provider",
-                                    "model"
-                                  ],
-                                  "additionalProperties": false
-                                },
-                                "tts": {
-                                  "type": "object",
-                                  "properties": {
-                                    "provider": {
-                                      "type": "string"
-                                    },
-                                    "model": {
-                                      "type": "string"
-                                    },
-                                    "voiceId": {
+                                    "mode": {
                                       "type": "string",
-                                      "description": "A voice identifier supported by the selected text-to-speech provider."
+                                      "enum": [
+                                        "separate"
+                                      ]
                                     },
-                                    "speed": {
-                                      "type": "number",
-                                      "description": "Provider-supported speech rate. Read the selected combination's capability range."
+                                    "llm": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "stt": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "tts": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        },
+                                        "voiceId": {
+                                          "type": "string",
+                                          "description": "A voice identifier supported by the selected text-to-speech provider."
+                                        },
+                                        "speed": {
+                                          "type": "number",
+                                          "readOnly": true,
+                                          "description": "Resolved provider speed for the selected speechSpeed category."
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model",
+                                        "voiceId",
+                                        "speed"
+                                      ],
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": [
-                                    "provider",
-                                    "model",
-                                    "voiceId",
-                                    "speed"
+                                    "mode",
+                                    "llm",
+                                    "stt",
+                                    "tts"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "description": "A GPT Live speech selection and an independently selected reasoning model.",
+                                  "properties": {
+                                    "mode": {
+                                      "type": "string",
+                                      "enum": [
+                                        "live"
+                                      ]
+                                    },
+                                    "llm": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "live": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string",
+                                          "enum": [
+                                            "openai"
+                                          ]
+                                        },
+                                        "model": {
+                                          "type": "string",
+                                          "enum": [
+                                            "gpt-live-1"
+                                          ]
+                                        },
+                                        "adapter": {
+                                          "type": "string",
+                                          "enum": [
+                                            "openai_live"
+                                          ]
+                                        },
+                                        "voiceId": {
+                                          "type": "string",
+                                          "description": "A built-in voice supported by GPT Live."
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model",
+                                        "adapter",
+                                        "voiceId"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": [
+                                    "mode",
+                                    "llm",
+                                    "live"
                                   ],
                                   "additionalProperties": false
                                 }
-                              },
-                              "required": [
-                                "llm",
-                                "stt",
-                                "tts"
-                              ],
-                              "additionalProperties": false
+                              ]
                             },
                             "controls": {
                               "type": "object",
@@ -12959,10 +13387,19 @@
                                 "interruptionLevel": {
                                   "type": "string",
                                   "enum": [
-                                    "off",
+                                    "none",
                                     "occasional",
                                     "frequent"
                                   ]
+                                },
+                                "speechSpeed": {
+                                  "type": "string",
+                                  "enum": [
+                                    "slow",
+                                    "normal",
+                                    "fast"
+                                  ],
+                                  "description": "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported."
                                 }
                               },
                               "required": [
@@ -12973,7 +13410,8 @@
                                 "executionPolicyVersion",
                                 "backgroundSoundId",
                                 "backgroundVolume",
-                                "interruptionLevel"
+                                "interruptionLevel",
+                                "speechSpeed"
                               ],
                               "additionalProperties": false
                             },
@@ -13180,7 +13618,8 @@
                             "enum": [
                               "llm",
                               "stt",
-                              "tts"
+                              "tts",
+                              "live"
                             ]
                           },
                           "model": {
@@ -13194,6 +13633,9 @@
                           },
                           "recommendedVoiceId": {
                             "type": "string"
+                          },
+                          "adapter": {
+                            "type": "string"
                           }
                         },
                         "required": [
@@ -13206,74 +13648,154 @@
                       }
                     },
                     "recommendedModels": {
-                      "type": "object",
-                      "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                      "properties": {
-                        "llm": {
+                      "oneOf": [
+                        {
                           "type": "object",
+                          "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
                           "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "stt": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "provider",
-                            "model"
-                          ],
-                          "additionalProperties": false
-                        },
-                        "tts": {
-                          "type": "object",
-                          "properties": {
-                            "provider": {
-                              "type": "string"
-                            },
-                            "model": {
-                              "type": "string"
-                            },
-                            "voiceId": {
+                            "mode": {
                               "type": "string",
-                              "description": "A voice identifier supported by the selected text-to-speech provider."
+                              "enum": [
+                                "separate"
+                              ]
                             },
-                            "speed": {
-                              "type": "number",
-                              "description": "Provider-supported speech rate. Read the selected combination's capability range."
+                            "llm": {
+                              "type": "object",
+                              "properties": {
+                                "provider": {
+                                  "type": "string"
+                                },
+                                "model": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "provider",
+                                "model"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "stt": {
+                              "type": "object",
+                              "properties": {
+                                "provider": {
+                                  "type": "string"
+                                },
+                                "model": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "provider",
+                                "model"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "tts": {
+                              "type": "object",
+                              "properties": {
+                                "provider": {
+                                  "type": "string"
+                                },
+                                "model": {
+                                  "type": "string"
+                                },
+                                "voiceId": {
+                                  "type": "string",
+                                  "description": "A voice identifier supported by the selected text-to-speech provider."
+                                },
+                                "speed": {
+                                  "type": "number",
+                                  "readOnly": true,
+                                  "description": "Resolved provider speed for the selected speechSpeed category."
+                                }
+                              },
+                              "required": [
+                                "provider",
+                                "model",
+                                "voiceId",
+                                "speed"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "required": [
-                            "provider",
-                            "model",
-                            "voiceId",
-                            "speed"
+                            "mode",
+                            "llm",
+                            "stt",
+                            "tts"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "description": "A GPT Live speech selection and an independently selected reasoning model.",
+                          "properties": {
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "live"
+                              ]
+                            },
+                            "llm": {
+                              "type": "object",
+                              "properties": {
+                                "provider": {
+                                  "type": "string"
+                                },
+                                "model": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "provider",
+                                "model"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "live": {
+                              "type": "object",
+                              "properties": {
+                                "provider": {
+                                  "type": "string",
+                                  "enum": [
+                                    "openai"
+                                  ]
+                                },
+                                "model": {
+                                  "type": "string",
+                                  "enum": [
+                                    "gpt-live-1"
+                                  ]
+                                },
+                                "adapter": {
+                                  "type": "string",
+                                  "enum": [
+                                    "openai_live"
+                                  ]
+                                },
+                                "voiceId": {
+                                  "type": "string",
+                                  "description": "A built-in voice supported by GPT Live."
+                                }
+                              },
+                              "required": [
+                                "provider",
+                                "model",
+                                "adapter",
+                                "voiceId"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "mode",
+                            "llm",
+                            "live"
                           ],
                           "additionalProperties": false
                         }
-                      },
-                      "required": [
-                        "llm",
-                        "stt",
-                        "tts"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   },
                   "required": [
@@ -13384,9 +13906,21 @@
             }
           },
           {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "separate",
+                "live"
+              ]
+            }
+          },
+          {
             "name": "ttsProvider",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -13394,7 +13928,7 @@
           {
             "name": "ttsModel",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -13402,7 +13936,7 @@
           {
             "name": "sttProvider",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -13410,7 +13944,23 @@
           {
             "name": "sttModel",
             "in": "query",
-            "required": true,
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "liveProvider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "liveModel",
+            "in": "query",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -13788,6 +14338,66 @@
                       ],
                       "additionalProperties": false
                     },
+                    "speechSpeed": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "supported",
+                            "fixed",
+                            "unsupported",
+                            "unknown"
+                          ]
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "choices": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "slow",
+                              "normal",
+                              "fast"
+                            ]
+                          }
+                        },
+                        "value": {
+                          "type": "string",
+                          "enum": [
+                            "slow",
+                            "normal",
+                            "fast"
+                          ]
+                        },
+                        "range": {
+                          "type": "object",
+                          "properties": {
+                            "minimum": {
+                              "type": "number"
+                            },
+                            "maximum": {
+                              "type": "number"
+                            },
+                            "step": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "minimum",
+                            "maximum",
+                            "step"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    },
                     "speechVolume": {
                       "type": "object",
                       "properties": {
@@ -13845,6 +14455,7 @@
                     "accent",
                     "emotion",
                     "speed",
+                    "speechSpeed",
                     "speechVolume"
                   ],
                   "additionalProperties": false
@@ -14104,74 +14715,154 @@
                               "minLength": 1
                             },
                             "models": {
-                              "type": "object",
-                              "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                              "properties": {
-                                "llm": {
+                              "oneOf": [
+                                {
                                   "type": "object",
+                                  "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
                                   "properties": {
-                                    "provider": {
-                                      "type": "string"
-                                    },
-                                    "model": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "provider",
-                                    "model"
-                                  ],
-                                  "additionalProperties": false
-                                },
-                                "stt": {
-                                  "type": "object",
-                                  "properties": {
-                                    "provider": {
-                                      "type": "string"
-                                    },
-                                    "model": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "provider",
-                                    "model"
-                                  ],
-                                  "additionalProperties": false
-                                },
-                                "tts": {
-                                  "type": "object",
-                                  "properties": {
-                                    "provider": {
-                                      "type": "string"
-                                    },
-                                    "model": {
-                                      "type": "string"
-                                    },
-                                    "voiceId": {
+                                    "mode": {
                                       "type": "string",
-                                      "description": "A voice identifier supported by the selected text-to-speech provider."
+                                      "enum": [
+                                        "separate"
+                                      ]
                                     },
-                                    "speed": {
-                                      "type": "number",
-                                      "description": "Provider-supported speech rate. Read the selected combination's capability range."
+                                    "llm": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "stt": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "tts": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        },
+                                        "voiceId": {
+                                          "type": "string",
+                                          "description": "A voice identifier supported by the selected text-to-speech provider."
+                                        },
+                                        "speed": {
+                                          "type": "number",
+                                          "readOnly": true,
+                                          "description": "Resolved provider speed for the selected speechSpeed category."
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model",
+                                        "voiceId",
+                                        "speed"
+                                      ],
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": [
-                                    "provider",
-                                    "model",
-                                    "voiceId",
-                                    "speed"
+                                    "mode",
+                                    "llm",
+                                    "stt",
+                                    "tts"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "description": "A GPT Live speech selection and an independently selected reasoning model.",
+                                  "properties": {
+                                    "mode": {
+                                      "type": "string",
+                                      "enum": [
+                                        "live"
+                                      ]
+                                    },
+                                    "llm": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "live": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string",
+                                          "enum": [
+                                            "openai"
+                                          ]
+                                        },
+                                        "model": {
+                                          "type": "string",
+                                          "enum": [
+                                            "gpt-live-1"
+                                          ]
+                                        },
+                                        "adapter": {
+                                          "type": "string",
+                                          "enum": [
+                                            "openai_live"
+                                          ]
+                                        },
+                                        "voiceId": {
+                                          "type": "string",
+                                          "description": "A built-in voice supported by GPT Live."
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model",
+                                        "adapter",
+                                        "voiceId"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": [
+                                    "mode",
+                                    "llm",
+                                    "live"
                                   ],
                                   "additionalProperties": false
                                 }
-                              },
-                              "required": [
-                                "llm",
-                                "stt",
-                                "tts"
-                              ],
-                              "additionalProperties": false
+                              ]
                             },
                             "controls": {
                               "type": "object",
@@ -14227,10 +14918,19 @@
                                 "interruptionLevel": {
                                   "type": "string",
                                   "enum": [
-                                    "off",
+                                    "none",
                                     "occasional",
                                     "frequent"
                                   ]
+                                },
+                                "speechSpeed": {
+                                  "type": "string",
+                                  "enum": [
+                                    "slow",
+                                    "normal",
+                                    "fast"
+                                  ],
+                                  "description": "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported."
                                 }
                               },
                               "required": [
@@ -14241,7 +14941,8 @@
                                 "executionPolicyVersion",
                                 "backgroundSoundId",
                                 "backgroundVolume",
-                                "interruptionLevel"
+                                "interruptionLevel",
+                                "speechSpeed"
                               ],
                               "additionalProperties": false
                             },
@@ -14449,74 +15150,148 @@
                     "description": "How the caller behaves and speaks. Put the situation and goal in the test scenario."
                   },
                   "models": {
-                    "type": "object",
-                    "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                    "properties": {
-                      "llm": {
+                    "oneOf": [
+                      {
                         "type": "object",
+                        "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
                         "properties": {
-                          "provider": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "provider",
-                          "model"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "stt": {
-                        "type": "object",
-                        "properties": {
-                          "provider": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "provider",
-                          "model"
-                        ],
-                        "additionalProperties": false
-                      },
-                      "tts": {
-                        "type": "object",
-                        "properties": {
-                          "provider": {
-                            "type": "string"
-                          },
-                          "model": {
-                            "type": "string"
-                          },
-                          "voiceId": {
+                          "mode": {
                             "type": "string",
-                            "description": "A voice identifier supported by the selected text-to-speech provider."
+                            "enum": [
+                              "separate"
+                            ]
                           },
-                          "speed": {
-                            "type": "number",
-                            "description": "Provider-supported speech rate. Read the selected combination's capability range."
+                          "llm": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "stt": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "tts": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              },
+                              "voiceId": {
+                                "type": "string",
+                                "description": "A voice identifier supported by the selected text-to-speech provider."
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model",
+                              "voiceId"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
-                          "provider",
-                          "model",
-                          "voiceId",
-                          "speed"
+                          "mode",
+                          "llm",
+                          "stt",
+                          "tts"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "description": "A GPT Live speech selection and an independently selected reasoning model.",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "live"
+                            ]
+                          },
+                          "llm": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "live": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string",
+                                "enum": [
+                                  "openai"
+                                ]
+                              },
+                              "model": {
+                                "type": "string",
+                                "enum": [
+                                  "gpt-live-1"
+                                ]
+                              },
+                              "adapter": {
+                                "type": "string",
+                                "enum": [
+                                  "openai_live"
+                                ]
+                              },
+                              "voiceId": {
+                                "type": "string",
+                                "description": "A built-in voice supported by GPT Live."
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model",
+                              "adapter",
+                              "voiceId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "llm",
+                          "live"
                         ],
                         "additionalProperties": false
                       }
-                    },
-                    "required": [
-                      "llm",
-                      "stt",
-                      "tts"
-                    ],
-                    "additionalProperties": false
+                    ]
                   },
                   "controls": {
                     "type": "object",
@@ -14567,10 +15342,19 @@
                       "interruptionLevel": {
                         "type": "string",
                         "enum": [
-                          "off",
+                          "none",
                           "occasional",
                           "frequent"
                         ]
+                      },
+                      "speechSpeed": {
+                        "type": "string",
+                        "enum": [
+                          "slow",
+                          "normal",
+                          "fast"
+                        ],
+                        "description": "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported."
                       }
                     },
                     "required": [
@@ -14580,7 +15364,8 @@
                       "speechVolume",
                       "backgroundSoundId",
                       "backgroundVolume",
-                      "interruptionLevel"
+                      "interruptionLevel",
+                      "speechSpeed"
                     ],
                     "additionalProperties": false
                   },
@@ -14740,74 +15525,154 @@
                               "minLength": 1
                             },
                             "models": {
-                              "type": "object",
-                              "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                              "properties": {
-                                "llm": {
+                              "oneOf": [
+                                {
                                   "type": "object",
+                                  "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
                                   "properties": {
-                                    "provider": {
-                                      "type": "string"
-                                    },
-                                    "model": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "provider",
-                                    "model"
-                                  ],
-                                  "additionalProperties": false
-                                },
-                                "stt": {
-                                  "type": "object",
-                                  "properties": {
-                                    "provider": {
-                                      "type": "string"
-                                    },
-                                    "model": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "provider",
-                                    "model"
-                                  ],
-                                  "additionalProperties": false
-                                },
-                                "tts": {
-                                  "type": "object",
-                                  "properties": {
-                                    "provider": {
-                                      "type": "string"
-                                    },
-                                    "model": {
-                                      "type": "string"
-                                    },
-                                    "voiceId": {
+                                    "mode": {
                                       "type": "string",
-                                      "description": "A voice identifier supported by the selected text-to-speech provider."
+                                      "enum": [
+                                        "separate"
+                                      ]
                                     },
-                                    "speed": {
-                                      "type": "number",
-                                      "description": "Provider-supported speech rate. Read the selected combination's capability range."
+                                    "llm": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "stt": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "tts": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        },
+                                        "voiceId": {
+                                          "type": "string",
+                                          "description": "A voice identifier supported by the selected text-to-speech provider."
+                                        },
+                                        "speed": {
+                                          "type": "number",
+                                          "readOnly": true,
+                                          "description": "Resolved provider speed for the selected speechSpeed category."
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model",
+                                        "voiceId",
+                                        "speed"
+                                      ],
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": [
-                                    "provider",
-                                    "model",
-                                    "voiceId",
-                                    "speed"
+                                    "mode",
+                                    "llm",
+                                    "stt",
+                                    "tts"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "description": "A GPT Live speech selection and an independently selected reasoning model.",
+                                  "properties": {
+                                    "mode": {
+                                      "type": "string",
+                                      "enum": [
+                                        "live"
+                                      ]
+                                    },
+                                    "llm": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "live": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string",
+                                          "enum": [
+                                            "openai"
+                                          ]
+                                        },
+                                        "model": {
+                                          "type": "string",
+                                          "enum": [
+                                            "gpt-live-1"
+                                          ]
+                                        },
+                                        "adapter": {
+                                          "type": "string",
+                                          "enum": [
+                                            "openai_live"
+                                          ]
+                                        },
+                                        "voiceId": {
+                                          "type": "string",
+                                          "description": "A built-in voice supported by GPT Live."
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model",
+                                        "adapter",
+                                        "voiceId"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": [
+                                    "mode",
+                                    "llm",
+                                    "live"
                                   ],
                                   "additionalProperties": false
                                 }
-                              },
-                              "required": [
-                                "llm",
-                                "stt",
-                                "tts"
-                              ],
-                              "additionalProperties": false
+                              ]
                             },
                             "controls": {
                               "type": "object",
@@ -14863,10 +15728,19 @@
                                 "interruptionLevel": {
                                   "type": "string",
                                   "enum": [
-                                    "off",
+                                    "none",
                                     "occasional",
                                     "frequent"
                                   ]
+                                },
+                                "speechSpeed": {
+                                  "type": "string",
+                                  "enum": [
+                                    "slow",
+                                    "normal",
+                                    "fast"
+                                  ],
+                                  "description": "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported."
                                 }
                               },
                               "required": [
@@ -14877,7 +15751,8 @@
                                 "executionPolicyVersion",
                                 "backgroundSoundId",
                                 "backgroundVolume",
-                                "interruptionLevel"
+                                "interruptionLevel",
+                                "speechSpeed"
                               ],
                               "additionalProperties": false
                             },
@@ -15998,74 +16873,154 @@
                               "minLength": 1
                             },
                             "models": {
-                              "type": "object",
-                              "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                              "properties": {
-                                "llm": {
+                              "oneOf": [
+                                {
                                   "type": "object",
+                                  "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
                                   "properties": {
-                                    "provider": {
-                                      "type": "string"
-                                    },
-                                    "model": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "provider",
-                                    "model"
-                                  ],
-                                  "additionalProperties": false
-                                },
-                                "stt": {
-                                  "type": "object",
-                                  "properties": {
-                                    "provider": {
-                                      "type": "string"
-                                    },
-                                    "model": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "provider",
-                                    "model"
-                                  ],
-                                  "additionalProperties": false
-                                },
-                                "tts": {
-                                  "type": "object",
-                                  "properties": {
-                                    "provider": {
-                                      "type": "string"
-                                    },
-                                    "model": {
-                                      "type": "string"
-                                    },
-                                    "voiceId": {
+                                    "mode": {
                                       "type": "string",
-                                      "description": "A voice identifier supported by the selected text-to-speech provider."
+                                      "enum": [
+                                        "separate"
+                                      ]
                                     },
-                                    "speed": {
-                                      "type": "number",
-                                      "description": "Provider-supported speech rate. Read the selected combination's capability range."
+                                    "llm": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "stt": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "tts": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        },
+                                        "voiceId": {
+                                          "type": "string",
+                                          "description": "A voice identifier supported by the selected text-to-speech provider."
+                                        },
+                                        "speed": {
+                                          "type": "number",
+                                          "readOnly": true,
+                                          "description": "Resolved provider speed for the selected speechSpeed category."
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model",
+                                        "voiceId",
+                                        "speed"
+                                      ],
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": [
-                                    "provider",
-                                    "model",
-                                    "voiceId",
-                                    "speed"
+                                    "mode",
+                                    "llm",
+                                    "stt",
+                                    "tts"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "description": "A GPT Live speech selection and an independently selected reasoning model.",
+                                  "properties": {
+                                    "mode": {
+                                      "type": "string",
+                                      "enum": [
+                                        "live"
+                                      ]
+                                    },
+                                    "llm": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string"
+                                        },
+                                        "model": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "live": {
+                                      "type": "object",
+                                      "properties": {
+                                        "provider": {
+                                          "type": "string",
+                                          "enum": [
+                                            "openai"
+                                          ]
+                                        },
+                                        "model": {
+                                          "type": "string",
+                                          "enum": [
+                                            "gpt-live-1"
+                                          ]
+                                        },
+                                        "adapter": {
+                                          "type": "string",
+                                          "enum": [
+                                            "openai_live"
+                                          ]
+                                        },
+                                        "voiceId": {
+                                          "type": "string",
+                                          "description": "A built-in voice supported by GPT Live."
+                                        }
+                                      },
+                                      "required": [
+                                        "provider",
+                                        "model",
+                                        "adapter",
+                                        "voiceId"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": [
+                                    "mode",
+                                    "llm",
+                                    "live"
                                   ],
                                   "additionalProperties": false
                                 }
-                              },
-                              "required": [
-                                "llm",
-                                "stt",
-                                "tts"
-                              ],
-                              "additionalProperties": false
+                              ]
                             },
                             "controls": {
                               "type": "object",
@@ -16121,10 +17076,19 @@
                                 "interruptionLevel": {
                                   "type": "string",
                                   "enum": [
-                                    "off",
+                                    "none",
                                     "occasional",
                                     "frequent"
                                   ]
+                                },
+                                "speechSpeed": {
+                                  "type": "string",
+                                  "enum": [
+                                    "slow",
+                                    "normal",
+                                    "fast"
+                                  ],
+                                  "description": "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported."
                                 }
                               },
                               "required": [
@@ -16135,7 +17099,8 @@
                                 "executionPolicyVersion",
                                 "backgroundSoundId",
                                 "backgroundVolume",
-                                "interruptionLevel"
+                                "interruptionLevel",
+                                "speechSpeed"
                               ],
                               "additionalProperties": false
                             },

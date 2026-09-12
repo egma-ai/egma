@@ -75,9 +75,11 @@ describe("the platform API operation registry", () => {
     for (const controls of [savedControls, inputControls] as const) {
       expect(controls.properties.interruptionLevel).toEqual({
         type: "string",
-        enum: ["off", "occasional", "frequent"],
+        enum: ["none", "occasional", "frequent"],
       });
       expect(controls.required).toContain("interruptionLevel");
+      expect(controls.properties.speechSpeed).toMatchObject({ enum: ["slow", "normal", "fast"] });
+      expect(controls.required).toContain("speechSpeed");
       expect(controls.additionalProperties).toBe(false);
     }
     expect(savedControls.properties.executionPolicyVersion).toMatchObject({

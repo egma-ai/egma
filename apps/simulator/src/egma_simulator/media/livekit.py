@@ -13,7 +13,7 @@ import contextlib
 import logging
 
 from ..config import MediaSettings
-from ..redaction import SecretRegistry
+from ..redaction import REDACTED, SecretRegistry
 from . import ERROR, NOT_ANSWERED, MediaBackendError, VoiceMedia, sip_refusal
 from .room import (
     QUOTED_REFUSAL_CHARS,
@@ -24,6 +24,11 @@ from .room import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _private_phone_reference(reference: str, number: str) -> str:
+    """Keep LiveKit's call identity while removing the private destination."""
+    return reference.replace(number, REDACTED)
 
 
 class LiveKitBackend:
@@ -164,6 +169,7 @@ class LiveKitBackend:
             # SIP leg, and that identity is what the report carries as its
             # join to the platform's own telemetry.
             participant_name="agent-under-test",
+            hide_phone_number=True,
             wait_until_answered=True,
             play_dialtone=False,
         )
@@ -212,7 +218,7 @@ class LiveKitBackend:
         finally:
             with contextlib.suppress(Exception):
                 await lkapi.aclose()
-        return participant.participant_identity
+        return _private_phone_reference(participant.participant_identity, number)
 
     def _quotable(self, told: str) -> str:
         """Somebody else's words, minus this driver's secrets, short enough

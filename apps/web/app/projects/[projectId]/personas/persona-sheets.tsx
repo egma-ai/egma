@@ -74,7 +74,14 @@ function modelReads(
   models: PersonaModels,
   form: PersonaForm | null,
 ): readonly Read[] {
+  if (models.mode === "live") return [
+    { label: "Speech mode", value: "GPT Live" },
+    { label: "Language model", value: modelSaid(form?.modelCatalog, "llm", models.llm) },
+    { label: "Live speech model", value: modelSaid(form?.modelCatalog, "live", models.live) },
+    { label: "Voice", value: models.live.voiceId, mono: true },
+  ];
   return [
+    { label: "Speech mode", value: "Separate speech models" },
     {
       label: "Language model",
       value: modelSaid(form?.modelCatalog, "llm", models.llm),

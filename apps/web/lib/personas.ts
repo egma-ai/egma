@@ -67,6 +67,7 @@ export function sameBehaviorDraft(
 
 /** What the model editor holds while a speed can still be half typed. */
 export type ModelsDraft = {
+  readonly mode: PersonaModels["mode"];
   readonly llmProvider: string;
   readonly llmModel: string;
   readonly sttProvider: string;
@@ -74,7 +75,10 @@ export type ModelsDraft = {
   readonly ttsProvider: string;
   readonly ttsModel: string;
   readonly voiceId: string;
+  readonly separateVoiceId: string;
+  readonly liveVoiceId: string;
   readonly speed: string;
+  readonly speechSpeed: PersonaControls["speechSpeed"];
   readonly language: string;
   readonly emotion: PersonaControls["emotion"];
   readonly accent: string;
@@ -107,16 +111,26 @@ export function decibelsToGain(decibels: string): string {
   return Number.isFinite(value) ? String(10 ** (value / 20)) : decibels;
 }
 
+function speechSpeedOf(target: number): PersonaControls["speechSpeed"] {
+  const choices = [["slow", 0.8], ["normal", 1], ["fast", 1.5]] as const;
+  return [...choices].sort((left, right) => Math.abs(target - left[1]) - Math.abs(target - right[1]) || (left[0] === "normal" ? -1 : right[0] === "normal" ? 1 : 0))[0]![0];
+}
+
 export function modelsDraftOf(models: PersonaModels, controls?: PersonaControls): ModelsDraft {
+  const separate = models.mode === "separate" ? models : null;
   return {
+    mode: models.mode,
     llmProvider: models.llm.provider,
     llmModel: models.llm.model,
-    sttProvider: models.stt.provider,
-    sttModel: models.stt.model,
-    ttsProvider: models.tts.provider,
-    ttsModel: models.tts.model,
-    voiceId: models.tts.voiceId,
-    speed: String(models.tts.speed),
+    sttProvider: separate?.stt.provider ?? "openai",
+    sttModel: separate?.stt.model ?? "gpt-4o-mini-transcribe",
+    ttsProvider: separate?.tts.provider ?? "openai",
+    ttsModel: separate?.tts.model ?? "gpt-4o-mini-tts",
+    voiceId: models.mode === "live" ? models.live.voiceId : models.tts.voiceId,
+    separateVoiceId: separate?.tts.voiceId ?? "alloy",
+    liveVoiceId: models.mode === "live" ? models.live.voiceId : "alloy",
+    speed: String(separate?.tts.speed ?? 1),
+    speechSpeed: controls?.speechSpeed ?? (separate === null ? "normal" : speechSpeedOf(separate.tts.speed)),
     language: controls?.language ?? "en-US",
     emotion: controls?.emotion ?? "neutral",
     accent: controls?.accent ?? "voice_default",
@@ -124,7 +138,7 @@ export function modelsDraftOf(models: PersonaModels, controls?: PersonaControls)
     backgroundSoundId: controls?.backgroundSoundId ?? "none",
     backgroundVolume: String(controls?.backgroundVolume ?? 0.0631),
     backgroundVolumeDb: gainToDecibels(controls?.backgroundVolume ?? 0.0631),
-    interruptionLevel: controls?.interruptionLevel ?? "off",
+    interruptionLevel: controls?.interruptionLevel ?? "none",
   };
 }
 
@@ -137,13 +151,19 @@ export function controlsFrom(draft: ModelsDraft): Omit<PersonaControls, "executi
     backgroundSoundId: draft.backgroundSoundId,
     backgroundVolume: Number(draft.backgroundVolume),
     interruptionLevel: draft.interruptionLevel,
+    speechSpeed: draft.speechSpeed,
   };
 }
 
 /** One complete models value, in the exact shape the API validates. */
 export function modelsFrom(draft: ModelsDraft): PersonaModels {
-  const speed = Number(draft.speed);
+  if (draft.mode === "live") return {
+    mode: "live",
+    llm: { provider: draft.llmProvider, model: draft.llmModel },
+    live: { provider: "openai", model: "gpt-live-1", adapter: "openai_live", voiceId: draft.liveVoiceId },
+  } as PersonaModels;
   const models = {
+    mode: "separate",
     llm: {
       provider: draft.llmProvider,
       model: draft.llmModel,
@@ -152,16 +172,10 @@ export function modelsFrom(draft: ModelsDraft): PersonaModels {
     tts: {
       provider: draft.ttsProvider,
       model: draft.ttsModel,
-      voiceId: draft.voiceId,
-      // Preserve invalid text so the server can give the one authoritative
-      // range refusal. JSON cannot carry NaN.
-      speed: Number.isNaN(speed) ? draft.speed : speed,
+      voiceId: draft.separateVoiceId,
     },
   };
 
-  // The current API accepts invalid speed text so it can return its own range
-  // refusal. The generated contract says this value is always a number. Keep
-  // the existing request behavior until that contract mismatch is resolved.
   return models as unknown as PersonaModels;
 }
 
@@ -231,6 +245,7 @@ export function modelsOfPersona(persona: Persona): PersonaModels {
   if (persona.settings !== null) return persona.settings.models;
   const values = Object.fromEntries(persona.parameterContract.map((field) => [field.key, field.defaultValue]));
   return {
+    mode: "separate",
     llm: { provider: String(values.llm_provider), model: String(values.llm_model) },
     stt: { provider: String(values.stt_provider), model: String(values.stt_model) },
     tts: { provider: String(values.tts_provider), model: String(values.tts_model), voiceId: String(values.tts_voice_id), speed: Number(values.tts_speed) },
@@ -247,6 +262,7 @@ export function controlsOfPersona(persona: Persona): Omit<PersonaControls, "exec
     speechVolume: Number(values.speech_volume ?? 1),
     backgroundSoundId: (values.background_sound_id ?? "none") as PersonaControls["backgroundSoundId"],
     backgroundVolume: Number(values.background_volume ?? 0.0631),
-    interruptionLevel: (values.interruption_level ?? "off") as PersonaControls["interruptionLevel"],
+    interruptionLevel: (values.interruption_level === "off" ? "none" : values.interruption_level ?? "none") as PersonaControls["interruptionLevel"],
+    speechSpeed: (values.speech_speed ?? speechSpeedOf(Number(values.tts_speed))) as PersonaControls["speechSpeed"],
   };
 }

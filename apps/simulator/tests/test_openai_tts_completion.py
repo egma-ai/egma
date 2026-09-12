@@ -140,6 +140,7 @@ class _PendingVoiceTurn(_Conductor):
         self._pending_silence_follow_up = 0
         self._persona_began = None
         self._persona_ended = None
+        self._cancel_after_accepted_audio = None
         self._owes_a_turn = True
         self._record = SimpleNamespace(
             persona_last_stopped_at=None,
@@ -215,8 +216,12 @@ async def test_openai_http_tts_completes_on_eof_not_an_idle_gap(monkeypatch) -> 
 
     monkeypatch.setattr(
         pipecat.utils.string,
-        "sent_tokenize",
-        lambda text: [f"{part.strip()}." for part in text.split(".") if part.strip()],
+        "_sent_tokenizer",
+        lambda: (
+            lambda text: [
+                f"{part.strip()}." for part in text.split(".") if part.strip()
+            ]
+        ),
     )
     first_response = _HeldResponse()
     second_response = _HeldResponse()
@@ -342,8 +347,9 @@ async def test_openai_interruption_before_audio_has_no_late_completion() -> None
     failed = asyncio.Event()
 
     @worker.event_handler("on_pipeline_error")
-    async def on_error(_worker, _frame: ErrorFrame) -> None:
-        failed.set()
+    async def on_error(_worker, frame: ErrorFrame) -> None:
+        if frame.fatal:
+            failed.set()
 
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(worker)

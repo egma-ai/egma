@@ -5408,8 +5408,15 @@ it(
       await walk.selectOption("#persona-llm", "openai::gpt-4o");
       await walk.selectOption("#persona-stt", "deepgram::nova-3-general");
       await walk.selectOption("#persona-tts", "openai::tts-1-hd");
-      await walk.fill("#persona-tts-speed", "0.85");
+      await walk.selectOption("#persona-tts-speed", "normal");
       await walk.selectOption("#persona-tts-voice", "alloy");
+      await walk.selectOption("#persona-speech-mode", "live");
+      expect(await walk.locator("#persona-stt").count()).toBe(0);
+      expect(await walk.locator("#persona-tts").count()).toBe(0);
+      expect(await walk.inputValue("#persona-live")).toBe("openai::gpt-live-1");
+      await walk.selectOption("#persona-speech-mode", "separate");
+      expect(await walk.inputValue("#persona-stt")).toBe("deepgram::nova-3-general");
+      expect(await walk.inputValue("#persona-tts")).toBe("openai::tts-1-hd");
       await walk.selectOption("#persona-interruption-level", "frequent");
       await walk.selectOption("#persona-background-sound", "office-v1");
       await walk.fill("#persona-background-volume", "-18");
@@ -5427,7 +5434,7 @@ it(
         "deepgram::nova-3-general",
       );
       expect(await walk.inputValue("#persona-tts")).toBe("openai::tts-1-hd");
-      expect(await walk.inputValue("#persona-tts-speed")).toBe("0.85");
+      expect(await walk.inputValue("#persona-tts-speed")).toBe("normal");
       expect(await walk.inputValue("#persona-tts-voice")).toBe(
         "alloy",
       );

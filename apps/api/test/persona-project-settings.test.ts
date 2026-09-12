@@ -2,6 +2,7 @@ import {
   createProject,
   createTestSuite,
   EGMA_PROVIDED_PERSONAS,
+  PERSONA_LIBRARY_CATALOG,
   RECOMMENDED_PERSONA_MODELS,
 } from "@egma/db";
 import { afterEach, expect, it } from "vitest";
@@ -21,7 +22,8 @@ const DEFAULT_CONTROLS = {
   speechVolume: 1,
   backgroundSoundId: "none",
   backgroundVolume: 0.0631,
-  interruptionLevel: "off",
+  interruptionLevel: "none",
+  speechSpeed: "normal",
 } as const;
 
 async function request(
@@ -71,7 +73,7 @@ it("saves independent shared-persona settings, clones current behavior, and reje
     models,
   });
   expect(second.statusCode, second.body).toBe(200);
-  expect(second.json().settings.models).toEqual(models);
+  expect(second.json().settings.models).toEqual({ ...models, tts: { ...models.tts, speed: 0.8 } });
   const firstRead = await request(
     who,
     "GET",
@@ -84,7 +86,7 @@ it("saves independent shared-persona settings, clones current behavior, and reje
   });
   expect(clone.statusCode, clone.body).toBe(201);
   const custom = clone.json();
-  expect(custom.settings.models).toEqual(models);
+  expect(custom.settings.models).toEqual({ ...models, tts: { ...models.tts, speed: 0.8 } });
   const moved = await request(who, "PATCH", `/v1/personas/${custom.id}`, {
     projectId: other.id,
     expectedVersionId: custom.versionId,
@@ -125,6 +127,51 @@ it("saves independent shared-persona settings, clones current behavior, and reje
     `/v1/personas/${custom.id}?projectId=${who.projectId}`,
   );
   expect(foreign.statusCode).toBe(404);
+});
+
+it("keeps a shared persona's categorical speed during a models-only edit", async () => {
+  api = await createApi("shared_persona_models_keep_speed");
+  const who = await signUp(api.app, "shared-speed@project.example", "Shared speed");
+  const personaId = EGMA_PROVIDED_PERSONAS.defaultPersona;
+  const core = PERSONA_LIBRARY_CATALOG.find((persona) => persona.id === personaId)?.versions.at(-1);
+  if (core === undefined) throw new Error("the shared persona core is missing");
+  expect(core.parameterContract.map((field) => field.key)).not.toContain("speech_speed");
+  const selected = {
+    ...RECOMMENDED_PERSONA_MODELS,
+    tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed: 0.85 },
+  };
+  const used = await request(who, "POST", `/v1/personas/${personaId}/use`, {
+    projectId: who.projectId,
+    models: selected,
+  });
+  expect(used.statusCode, used.body).toBe(200);
+  expect(used.json().settings).toMatchObject({
+    models: { tts: { speed: 0.8 } },
+    controls: { speechSpeed: "slow" },
+  });
+  const versionId = used.json().versionId;
+
+  const edited = await request(who, "PATCH", `/v1/personas/${personaId}`, {
+    projectId: who.projectId,
+    models: {
+      ...RECOMMENDED_PERSONA_MODELS,
+      llm: { provider: "openai", model: "gpt-5.6-terra" },
+      tts: {
+        provider: RECOMMENDED_PERSONA_MODELS.tts.provider,
+        model: RECOMMENDED_PERSONA_MODELS.tts.model,
+        voiceId: RECOMMENDED_PERSONA_MODELS.tts.voiceId,
+      },
+    },
+  });
+
+  expect(edited.statusCode, edited.body).toBe(200);
+  expect(edited.json()).toMatchObject({
+    versionId,
+    settings: {
+      models: { llm: { model: "gpt-5.6-terra" }, tts: { speed: 0.8 } },
+      controls: { speechSpeed: "slow" },
+    },
+  });
 });
 
 it("rejects incomplete, unknown and invalid settings without creating a partial persona", async () => {

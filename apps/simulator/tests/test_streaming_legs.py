@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from egma_simulator.contract import spec_validator
+from egma_simulator.contract import spec_validator_for
 from egma_simulator.speech import (
     CARTESIA_SPEED_RANGE,
     LISTENING_READY_SECONDS,
@@ -27,7 +27,7 @@ A_KEY = "sk-only-this-test-holds-this-one"
 
 
 def contract_tts_speed_range() -> tuple[float, float]:
-    speed_schema = spec_validator().schema["$defs"]["tts_selection"]["properties"][
+    speed_schema = spec_validator_for(6).schema["$defs"]["tts_selection"]["properties"][
         "speed"
     ]
     return (speed_schema["minimum"], speed_schema["maximum"])

@@ -23,6 +23,15 @@ const addFormats = ajvFormats.default;
 function compileFromDisk(schemaFile: string): ValidateFunction {
   const ajv = new Ajv2020({ strict: true, allErrors: true });
   addFormats(ajv);
+  if (schemaFile === "simulation-spec.v7.schema.json") {
+    const previous = JSON.parse(
+      readFileSync(
+        new URL("../schemas/simulation-spec.v6.schema.json", import.meta.url),
+        "utf8",
+      ),
+    ) as Record<string, unknown>;
+    ajv.addSchema(previous, "simulation-spec.v6.schema.json");
+  }
   const schema: unknown = JSON.parse(
     readFileSync(new URL(`../schemas/${schemaFile}`, import.meta.url), "utf8"),
   );
@@ -31,6 +40,7 @@ function compileFromDisk(schemaFile: string): ValidateFunction {
 
 let compiledSpecV5: ValidateFunction | undefined;
 let compiledSpecV6: ValidateFunction | undefined;
+let compiledSpecV7: ValidateFunction | undefined;
 let compiledReport: ValidateFunction | undefined;
 
 /**
@@ -64,8 +74,12 @@ export function specComplaints(document: unknown): readonly string[] {
     compiledSpecV5 ??= compileFromDisk("simulation-spec.v5.schema.json");
     return complaintsFrom(compiledSpecV5, document);
   }
-  compiledSpecV6 ??= compileFromDisk("simulation-spec.v6.schema.json");
-  return complaintsFrom(compiledSpecV6, document);
+  if (version === 6) {
+    compiledSpecV6 ??= compileFromDisk("simulation-spec.v6.schema.json");
+    return complaintsFrom(compiledSpecV6, document);
+  }
+  compiledSpecV7 ??= compileFromDisk("simulation-spec.v7.schema.json");
+  return complaintsFrom(compiledSpecV7, document);
 }
 
 /**
