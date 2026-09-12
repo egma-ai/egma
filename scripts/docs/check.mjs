@@ -35,11 +35,20 @@ async function checkLink(link, from) {
   const route = decodeURI(link.split(/[?#]/)[0]);
   const relative = route.replace(/^\//, '').replace(/\/$/, '');
   if (pages.includes(relative)) return;
+  // Hosted Mintlify strips a leading content route from CDN asset paths.
+  if (relative.includes('/assets/')) {
+    throw new Error(`Static asset paths must start at /assets/ in ${from}: ${link}`);
+  }
   const asset = path.resolve(docs, relative);
   if (asset.startsWith(docs) && (await stat(asset).catch(() => null))?.isFile()) return;
   if (redirects.has(route) && from !== 'redirect') return;
   throw new Error(`Broken internal link in ${from}: ${link}`);
 }
+const themedAssets = (value) => typeof value === 'string'
+  ? [value]
+  : [value?.light, value?.dark].filter(Boolean);
+for (const asset of themedAssets(config.logo)) await checkLink(asset, 'docs.json logo');
+for (const asset of themedAssets(config.favicon)) await checkLink(asset, 'docs.json favicon');
 for (const [source, destination] of redirects) {
   assert(!pages.includes(source.slice(1)), `Redirect shadows a page: ${source}`);
   await checkLink(destination, 'redirect');

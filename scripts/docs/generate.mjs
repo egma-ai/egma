@@ -128,7 +128,7 @@ const light = '#' + ember.slice(1).match(/../g).map((channel, index) => Math.rou
 config.colors = { primary, light, dark: primary };
 generated.set('docs.json', json(config));
 for (const mode of ['light', 'dark']) {
-  generated.set(`docs/assets/logo/mark-${mode}.svg`, await read(`apps/web/public/brand/egma-mark-${mode}.svg`));
+  generated.set(`assets/logo/mark-${mode}.svg`, await read(`apps/web/public/brand/egma-mark-${mode}.svg`));
 }
 
 // The API reference folder contains one written overview and generated operation pages.
