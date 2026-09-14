@@ -1587,6 +1587,9 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           claimant: caseId,
           simulatorDirectory: SIMULATOR_DIRECTORY,
           walDirectory: path.join(scratch, `${caseId}-wal`),
+          ...(LIVE_PERSONA_MODE && LIVE_MODALITY === "voice" ? {
+            runtimeProbeFile: path.join(proofDirectory, `${caseId}.runtime.json`),
+          } : {}),
           recordingStore: (storage as Extract<ObjectStorage, { available: true }>).writeStore,
           modelKey: LIVE_MODEL_KEY,
         });
