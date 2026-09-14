@@ -22,6 +22,8 @@ const RUN_CONCURRENCY = "0001_run_concurrency.sql";
 const PERSONA_CONTROLS = "0002_melodic_switch.sql";
 const PERSONA_BACKGROUND = "0003_persona_background_sound.sql";
 const PERSONA_INTERRUPTION = "0004_persona_interruptions.sql";
+const PERSONA_SPEECH_CATEGORIES = "0005_persona_speech_categories.sql";
+const GPT_LIVE_PERSONA_MODELS = "0006_gpt_live_persona_models.sql";
 const SHIPPED_BASELINE_HASH =
   "ea57d012e674f136f4ef74930865a8ccfeafaebcf92d7f628ce53e8deddc084a";
 const CURRENT_MIGRATIONS = [
@@ -30,6 +32,8 @@ const CURRENT_MIGRATIONS = [
   PERSONA_CONTROLS,
   PERSONA_BACKGROUND,
   PERSONA_INTERRUPTION,
+  PERSONA_SPEECH_CATEGORIES,
+  GPT_LIVE_PERSONA_MODELS,
 ];
 let database: EmptyDatabase;
 let store: SingleConnection;
@@ -167,7 +171,7 @@ describe("the Postgres migration chain", () => {
     }
 
     expect(await runMigrations(database.url)).toEqual({
-      applied: [RUN_CONCURRENCY, PERSONA_CONTROLS, PERSONA_BACKGROUND, PERSONA_INTERRUPTION],
+      applied: [RUN_CONCURRENCY, PERSONA_CONTROLS, PERSONA_BACKGROUND, PERSONA_INTERRUPTION, PERSONA_SPEECH_CATEGORIES, GPT_LIVE_PERSONA_MODELS],
       alreadyApplied: [BASELINE],
     });
     expect((await store.sql("select id from organization where id = $1", [organizationId])).rows)

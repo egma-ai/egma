@@ -853,6 +853,11 @@ it("freezes complete persona settings on every simulation", async () => {
     (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
   );
   await expect(
+    db.sql("update simulation set persona_parameter_contract = '[]'::jsonb where id = $1", [id]),
+  ).rejects.toSatisfy(
+    (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+  );
+  await expect(
     insertSimulation("queued", {
       persona_parameter_values: JSON.stringify({ tts_speed: 1 }),
     }),

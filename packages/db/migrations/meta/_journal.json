@@ -36,6 +36,20 @@
       "when": 1789257600000,
       "tag": "0004_persona_interruptions",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789344000000,
+      "tag": "0005_persona_speech_categories",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789430400000,
+      "tag": "0006_gpt_live_persona_models",
+      "breakpoints": true
     }
   ]
 }

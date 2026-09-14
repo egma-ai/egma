@@ -1,11 +1,13 @@
 import { newId } from "@egma/ids";
-import { and, asc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import type { Queryable } from "../client.ts";
-import { validateUnchangedParameterUnits } from "../grader-library/parameters.ts";
+import type { GraderParameter } from "../grader-library/parameters.ts";
 import {
-  defaultPersonaParameterValues,
+  currentPersonaParameterDefaults,
   personaModelsOfParameters,
+  personaControlsOfParameters,
+  personaParameterContract,
   validatePersonaParameterValues,
   type PersonaParameterValues,
 } from "../persona-library/parameters.ts";
@@ -18,6 +20,7 @@ import { within } from "./within.ts";
 export type ProjectPersonaSettings = {
   readonly id: string;
   readonly parameterValues: PersonaParameterValues;
+  readonly parameterContract: readonly GraderParameter[];
   readonly models: ReturnType<typeof personaModelsOfParameters>;
   readonly createdAt: Date;
   readonly updatedAt: Date;
@@ -36,6 +39,7 @@ export async function readProjectPersonaSettingsOn(
     .select({
       id: projectPersona.id,
       parameterValues: projectPersona.parameterValues,
+      parameterContract: projectPersona.parameterContract,
       createdAt: projectPersona.createdAt,
       updatedAt: projectPersona.updatedAt,
     })
@@ -56,11 +60,12 @@ export async function readProjectPersonaSettingsOn(
     : query);
   if (row === undefined) return undefined;
   const parameterValues = validatePersonaParameterValues(
-    contract,
+    row.parameterContract ?? contract,
     row.parameterValues,
   );
   return {
     ...row,
+    parameterContract: row.parameterContract,
     parameterValues,
     models: personaModelsOfParameters(parameterValues),
   };
@@ -95,20 +100,31 @@ export async function ensureProjectPersonaOn(
     );
   }
   const [version] = await on
-    .select({ parameterContract: personaVersion.parameterContract })
+    .select({
+      language: personaVersion.language,
+      parameterContract: personaVersion.parameterContract,
+    })
     .from(personaVersion)
     .where(eq(personaVersion.id, definition.currentVersionId))
     .limit(1);
   if (version === undefined) {
     throw new Error("the persona's current version is missing");
   }
+  const currentDefaults = currentPersonaParameterDefaults(version.parameterContract, {
+    ...(version.language === null ? {} : { language: version.language }),
+  });
   const values =
     parameterValues === undefined
-      ? defaultPersonaParameterValues(version.parameterContract)
+      ? currentDefaults.values
       : validatePersonaParameterValues(
-          version.parameterContract,
+          parameterValues.speech_mode === undefined ? version.parameterContract : personaParameterContract(personaModelsOfParameters(parameterValues), personaControlsOfParameters(parameterValues)),
           parameterValues,
         );
+  const settingsContract = parameterValues === undefined
+    ? currentDefaults.contract
+    : parameterValues.speech_mode === undefined
+    ? version.parameterContract
+    : personaParameterContract(personaModelsOfParameters(parameterValues), personaControlsOfParameters(parameterValues));
   await on
     .insert(projectPersona)
     .values({
@@ -117,6 +133,7 @@ export async function ensureProjectPersonaOn(
       projectId,
       personaDefinitionId: definitionId,
       parameterValues: values,
+      parameterContract: settingsContract,
     })
     .onConflictDoNothing({
       target: [projectPersona.projectId, projectPersona.personaDefinitionId],
@@ -126,33 +143,11 @@ export async function ensureProjectPersonaOn(
     auth,
     projectId,
     definitionId,
-    version.parameterContract,
+    settingsContract,
     true,
   );
   if (saved === undefined) {
     throw new Error("the project persona settings were not written");
   }
   return saved;
-}
-
-/** The definition is locked first, so settings cannot change during publication. */
-export async function assertPersonaSettingsCompatibleOn(
-  on: Queryable,
-  definitionId: string,
-  contract: unknown,
-  currentContract: unknown,
-): Promise<void> {
-  const saved = await on.select({ id: projectPersona.id, parameterValues: projectPersona.parameterValues })
-    .from(projectPersona)
-    .where(eq(projectPersona.personaDefinitionId, definitionId))
-    .orderBy(asc(projectPersona.id))
-    .for("share", { of: projectPersona });
-  for (const row of saved) {
-    try {
-      validatePersonaParameterValues(contract, row.parameterValues);
-      validateUnchangedParameterUnits(currentContract, contract);
-    } catch (cause) {
-      throw new Error(`persona ${definitionId} cannot publish: saved project settings ${row.id} are incompatible: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
-    }
-  }
 }

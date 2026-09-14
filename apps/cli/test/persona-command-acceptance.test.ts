@@ -53,9 +53,10 @@ it("uses built-in defaults and preserves them through a one-control update", asy
 });
 
 const DEFAULT_EXPECTED_MODELS = {
+  mode: "separate",
   llm: { provider: "openai", model: "gpt-4o" },
   stt: { provider: "deepgram", model: "nova-3" },
-  tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy", speed: 1 },
+  tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy" },
 };
 
 const DEFAULT_EXPECTED_CONTROLS = {
@@ -63,5 +64,5 @@ const DEFAULT_EXPECTED_CONTROLS = {
   emotion: "neutral",
   accent: "voice_default",
   speechVolume: 1,
-  interruptionLevel: "off",
+  interruptionLevel: "none",
 };

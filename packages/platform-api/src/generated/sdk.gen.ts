@@ -1240,6 +1240,7 @@ export const usePersona = <ThrowOnError extends boolean = false>(parameters: {
     personaId: string;
     projectId?: string;
     models?: {
+        mode: 'separate';
         llm: {
             provider: string;
             model: string;
@@ -1255,10 +1256,21 @@ export const usePersona = <ThrowOnError extends boolean = false>(parameters: {
              * A voice identifier supported by the selected text-to-speech provider.
              */
             voiceId: string;
+        };
+    } | {
+        mode: 'live';
+        llm: {
+            provider: string;
+            model: string;
+        };
+        live: {
+            provider: 'openai';
+            model: 'gpt-live-1';
+            adapter: 'openai_live';
             /**
-             * Provider-supported speech rate. Read the selected combination's capability range.
+             * A built-in voice supported by GPT Live.
              */
-            speed: number;
+            voiceId: string;
         };
     };
     controls?: {
@@ -1268,7 +1280,11 @@ export const usePersona = <ThrowOnError extends boolean = false>(parameters: {
         speechVolume: number;
         backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
         backgroundVolume: number;
-        interruptionLevel: 'off' | 'occasional' | 'frequent';
+        interruptionLevel: 'none' | 'occasional' | 'frequent';
+        /**
+         * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
+         */
+        speechSpeed: 'slow' | 'normal' | 'fast';
     };
 }, options?: Options<never, ThrowOnError>): RequestResult<UsePersonaResponses, UsePersonaErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
@@ -1331,6 +1347,7 @@ export const createPersona = <ThrowOnError extends boolean = false>(parameters: 
     identityName: string;
     personality: string;
     models?: {
+        mode: 'separate';
         llm: {
             provider: string;
             model: string;
@@ -1346,10 +1363,21 @@ export const createPersona = <ThrowOnError extends boolean = false>(parameters: 
              * A voice identifier supported by the selected text-to-speech provider.
              */
             voiceId: string;
+        };
+    } | {
+        mode: 'live';
+        llm: {
+            provider: string;
+            model: string;
+        };
+        live: {
+            provider: 'openai';
+            model: 'gpt-live-1';
+            adapter: 'openai_live';
             /**
-             * Provider-supported speech rate. Read the selected combination's capability range.
+             * A built-in voice supported by GPT Live.
              */
-            speed: number;
+            voiceId: string;
         };
     };
     controls?: {
@@ -1359,7 +1387,11 @@ export const createPersona = <ThrowOnError extends boolean = false>(parameters: 
         speechVolume: number;
         backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
         backgroundVolume: number;
-        interruptionLevel: 'off' | 'occasional' | 'frequent';
+        interruptionLevel: 'none' | 'occasional' | 'frequent';
+        /**
+         * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
+         */
+        speechSpeed: 'slow' | 'normal' | 'fast';
     };
 }, options?: Options<never, ThrowOnError>): RequestResult<CreatePersonaResponses, CreatePersonaErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
@@ -1414,22 +1446,28 @@ export const getPersonaForm = <ThrowOnError extends boolean = false>(parameters?
  *
  * Resolve the selected provider, model, voice, and language combination. Status and reason values are authoritative for authoring and voice execution.
  */
-export const getPersonaCapabilities = <ThrowOnError extends boolean = false>(parameters: {
+export const getPersonaCapabilities = <ThrowOnError extends boolean = false>(parameters?: {
     projectId?: string;
-    ttsProvider: string;
-    ttsModel: string;
-    sttProvider: string;
-    sttModel: string;
+    mode?: 'separate' | 'live';
+    ttsProvider?: string;
+    ttsModel?: string;
+    sttProvider?: string;
+    sttModel?: string;
+    liveProvider?: string;
+    liveModel?: string;
     language?: string;
     voiceId?: string;
     refresh?: boolean;
 }, options?: Options<never, ThrowOnError>): RequestResult<GetPersonaCapabilitiesResponses, GetPersonaCapabilitiesErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
                 { in: 'query', key: 'projectId' },
+                { in: 'query', key: 'mode' },
                 { in: 'query', key: 'ttsProvider' },
                 { in: 'query', key: 'ttsModel' },
                 { in: 'query', key: 'sttProvider' },
                 { in: 'query', key: 'sttModel' },
+                { in: 'query', key: 'liveProvider' },
+                { in: 'query', key: 'liveModel' },
                 { in: 'query', key: 'language' },
                 { in: 'query', key: 'voiceId' },
                 { in: 'query', key: 'refresh' }
@@ -1501,6 +1539,7 @@ export const updatePersona = <ThrowOnError extends boolean = false>(parameters: 
     identityName?: string;
     personality?: string;
     models?: {
+        mode: 'separate';
         llm: {
             provider: string;
             model: string;
@@ -1516,10 +1555,21 @@ export const updatePersona = <ThrowOnError extends boolean = false>(parameters: 
              * A voice identifier supported by the selected text-to-speech provider.
              */
             voiceId: string;
+        };
+    } | {
+        mode: 'live';
+        llm: {
+            provider: string;
+            model: string;
+        };
+        live: {
+            provider: 'openai';
+            model: 'gpt-live-1';
+            adapter: 'openai_live';
             /**
-             * Provider-supported speech rate. Read the selected combination's capability range.
+             * A built-in voice supported by GPT Live.
              */
-            speed: number;
+            voiceId: string;
         };
     };
     controls?: {
@@ -1529,7 +1579,11 @@ export const updatePersona = <ThrowOnError extends boolean = false>(parameters: 
         speechVolume: number;
         backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
         backgroundVolume: number;
-        interruptionLevel: 'off' | 'occasional' | 'frequent';
+        interruptionLevel: 'none' | 'occasional' | 'frequent';
+        /**
+         * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
+         */
+        speechSpeed: 'slow' | 'normal' | 'fast';
     };
     expectedVersionId?: string;
 }, options?: Options<never, ThrowOnError>): RequestResult<UpdatePersonaResponses, UpdatePersonaErrors, ThrowOnError> => {

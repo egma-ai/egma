@@ -55,6 +55,84 @@ Your name is {name}. Give that name when the agent asks who is calling, and use 
 - When your goal is concluded and nothing further is needed, say a brief goodbye and end your reply with the `end_call` tool
 """
 
+_LIVE_PROMPT_FRAME = """\
+# Role
+
+You are {name}, a human caller speaking with a voice agent. Never say that you
+are a simulator or an AI.
+
+# Conversation style
+
+- Your personality is: {personality}
+- Speak in {language}.
+- Keep a consistent {emotion} emotional delivery.
+- {accent_instruction}
+- {pace_instruction}
+- {interruption_instruction}
+
+# Opening the call
+
+Wait for the agent to finish its greeting before your first reply. If the agent
+has not spoken, stay quiet until you are asked to speak your first turn.
+
+# Situation
+
+{scenario}
+
+Delegation policy:
+Backend tools:
+- Scenario decisions: decide the caller's next action from the situation and conversation.
+- End call: confirm that the caller's goal is complete and close the call.
+
+Delegate to the backend when:
+- Before making your first request about the situation.
+- The agent gives a result or asks you to decide what to do next.
+- Your goal appears complete, the agent says goodbye, or you are ready to end the call.
+
+Do not delegate to the backend when:
+- You are greeting the agent, giving an already-known detail, or repeating a current backend result.
+
+Always delegate before saying goodbye or agreeing that you need nothing else.
+Wait for the backend's completion decision. Once it confirms the goal is complete,
+say a brief natural goodbye. A spoken goodbye alone does not close the call.
+"""
+
+
+def compose_live_prompt(authored: AuthoredPersona, scenario_instructions: str) -> str:
+    """Conversation-only instructions for GPT Live's continuous voice layer."""
+    parameters = authored.parameters
+    speed = "normal" if parameters is None else getattr(parameters, "speech_speed", "normal")
+    interruption = (
+        "none" if parameters is None else parameters.interruption_level
+    )
+    pace = {
+        "slow": "Speak slowly, aiming for about 0.8x the normal conversational pace.",
+        "normal": "Speak at about 1.0x the normal conversational pace.",
+        "fast": "Speak quickly and clearly, aiming for about 1.5x the normal conversational pace.",
+    }[speed]
+    interruptions = {
+        "off": "Wait quietly while the agent speaks. Do not overlap it or make listening sounds.",
+        "none": "Wait quietly while the agent speaks. Do not overlap it or make listening sounds.",
+        "occasional": "Occasionally interrupt when a human with this personality naturally would.",
+        "frequent": "Interrupt readily and frequently when it fits the conversation.",
+    }[interruption]
+    accent = "voice_default" if parameters is None else parameters.accent
+    accent_instruction = (
+        "Use the selected voice's natural accent."
+        if accent == "voice_default"
+        else f"Speak with a {accent} accent."
+    )
+    return _LIVE_PROMPT_FRAME.format(
+        name=authored.name,
+        personality=authored.personality,
+        scenario=scenario_instructions,
+        language=authored.language,
+        emotion="neutral" if parameters is None else parameters.emotion,
+        accent_instruction=accent_instruction,
+        pace_instruction=pace,
+        interruption_instruction=interruptions,
+    )
+
 
 def compose_system_prompt(authored: AuthoredPersona, scenario_instructions: str) -> str:
     """The exact platform prompt, filled from the claimed persona and test."""
@@ -102,8 +180,18 @@ class Persona:
         scenario_instructions: str,
         model: ModelClient,
     ) -> None:
+        self._authored = authored
+        self._scenario_instructions = scenario_instructions
         self._system_prompt = compose_system_prompt(authored, scenario_instructions)
         self._model = model
+
+    @property
+    def authored(self) -> AuthoredPersona:
+        return self._authored
+
+    def live_prompt(self) -> str:
+        """The continuous voice prompt, including this test's situation."""
+        return compose_live_prompt(self._authored, self._scenario_instructions)
 
     @property
     def model_name(self) -> str:

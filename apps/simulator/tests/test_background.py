@@ -8,6 +8,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     OutputAudioRawFrame,
+    SpeechOutputAudioRawFrame,
     TTSAudioRawFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
@@ -110,7 +111,8 @@ async def test_background_gain_is_independent_and_the_final_mix_clips():
     await loud.stop()
 
 
-async def test_pipecat_transmits_and_records_one_continuous_protected_mix():
+@pytest.mark.parametrize("speech_frame", [TTSAudioRawFrame, SpeechOutputAudioRawFrame])
+async def test_pipecat_transmits_and_records_one_continuous_protected_mix(speech_frame):
     mixer = soundfile_mixer(BackgroundSound("rain-v1", DEFAULT_BACKGROUND_VOLUME))
     assert mixer is not None
     transport = _TransmittedAudio(mixer)
@@ -138,7 +140,7 @@ async def test_pipecat_transmits_and_records_one_continuous_protected_mix():
         await asyncio.wait_for(transport.background_ready.wait(), 2)
         loud_speech = array("h", [30_000] * 240).tobytes()
         await worker.queue_frame(
-            TTSAudioRawFrame(loud_speech, sample_rate=24_000, num_channels=1)
+            speech_frame(loud_speech, sample_rate=24_000, num_channels=1)
         )
         await asyncio.wait_for(transport.frames.wait(), 2)
         await worker.queue_frame(EndFrame())
@@ -149,9 +151,9 @@ async def test_pipecat_transmits_and_records_one_continuous_protected_mix():
             await running
 
     assert transport.audio[: len(recorded.audio)] == recorded.audio
-    speech = [pcm for kind, pcm in recorded.audio if issubclass(kind, TTSAudioRawFrame)]
+    speech = [pcm for kind, pcm in recorded.audio if issubclass(kind, speech_frame)]
     background_only = [
-        pcm for kind, pcm in recorded.audio if not issubclass(kind, TTSAudioRawFrame)
+        pcm for kind, pcm in recorded.audio if not issubclass(kind, speech_frame)
     ]
     assert speech and len(background_only) >= 2
     assert any(any(frame) for frame in background_only)

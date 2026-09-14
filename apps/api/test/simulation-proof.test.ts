@@ -5,6 +5,7 @@ import {
   assertPublicEvidence,
   assertValidGrade,
   namedTunnelSettings,
+  safeSimulationDiagnostic,
   startPublicTunnel,
   stopChild,
 } from "./support/simulation-proof.ts";
@@ -61,6 +62,42 @@ describe("full-path transcript proof", () => {
   });
 });
 
+describe("safe simulation diagnostics", () => {
+  it("records lifecycle facts and POV counts without sensitive evidence", () => {
+    const diagnostic = safeSimulationDiagnostic({
+      id: "sim_participant-id",
+      status: "failed",
+      reason: "simulator_error",
+      executionFailure: "The agent session stopped before completion.",
+      agentPovComplete: false,
+      hasRecording: true,
+      providerReference: "provider-payload-id",
+      participantId: "participant-id",
+      transcript: {
+        turns: [
+          { pov: "agent", text: "secret agent transcript" },
+          { pov: "agent", text: "more secret transcript" },
+          { pov: "persona", text: "secret persona transcript" },
+          { pov: "participant-id", text: "provider payload" },
+        ],
+        spans: [{ payload: { apiKey: "secret-key" } }],
+      },
+    });
+
+    expect(diagnostic).toEqual({
+      status: "failed",
+      reason: "simulator_error",
+      executionFailure: "The agent session stopped before completion.",
+      transcriptTurnCounts: { agent: 2, persona: 1 },
+      agentPovComplete: false,
+      hasRecording: true,
+    });
+    expect(JSON.stringify(diagnostic)).not.toMatch(
+      /secret|participant-id|provider-payload/u,
+    );
+  });
+});
+
 describe("named simulation tunnel settings", () => {
   it("uses a complete HTTPS named-tunnel configuration", () => {
     expect(namedTunnelSettings({
@@ -95,6 +132,40 @@ describe("named simulation tunnel settings", () => {
       SIMULATION_E2E_TUNNEL_CREDENTIALS_FILE: "/private/tunnel.json",
     })).toThrow(/must be an HTTPS origin/u);
   });
+
+  it("selects distinct named tunnels by configuration prefix", () => {
+    const env = {
+      SIMULATION_E2E_TUNNEL_TEXT_ID: "text-tunnel-id",
+      SIMULATION_E2E_TUNNEL_TEXT_URL: "https://livekit.example.com",
+      SIMULATION_E2E_TUNNEL_TEXT_CREDENTIALS_FILE: "/private/text-tunnel.json",
+      SIMULATION_E2E_TUNNEL_WEB_ID: "web-tunnel-id",
+      SIMULATION_E2E_TUNNEL_WEB_URL: "https://tokens.example.com",
+      SIMULATION_E2E_TUNNEL_WEB_CREDENTIALS_FILE: "/private/web-tunnel.json",
+    };
+
+    expect(namedTunnelSettings(env, "TEXT")).toEqual({
+      id: "text-tunnel-id",
+      url: "https://livekit.example.com",
+      credentialsFile: "/private/text-tunnel.json",
+    });
+    expect(namedTunnelSettings(env, "WEB")).toEqual({
+      id: "web-tunnel-id",
+      url: "https://tokens.example.com",
+      credentialsFile: "/private/web-tunnel.json",
+    });
+  });
+
+  it("rejects a partial prefixed configuration without using another tunnel", () => {
+    expect(() => namedTunnelSettings({
+      SIMULATION_E2E_TUNNEL_ID: "generic-tunnel-id",
+      SIMULATION_E2E_TUNNEL_URL: "https://generic.example.com",
+      SIMULATION_E2E_TUNNEL_CREDENTIALS_FILE: "/private/generic-tunnel.json",
+      SIMULATION_E2E_TUNNEL_TEXT_ID: "text-tunnel-id",
+      SIMULATION_E2E_TUNNEL_WEB_ID: "web-tunnel-id",
+      SIMULATION_E2E_TUNNEL_WEB_URL: "https://tokens.example.com",
+      SIMULATION_E2E_TUNNEL_WEB_CREDENTIALS_FILE: "/private/web-tunnel.json",
+    }, "TEXT")).toThrow(/requires SIMULATION_E2E_TUNNEL_TEXT_ID/u);
+  });
 });
 
 describe("public tunnel startup", () => {
@@ -110,6 +181,7 @@ describe("public tunnel startup", () => {
       });
     });
     const tunnel = await startPublicTunnel("http://127.0.0.1:3100", {
+      configurationPrefix: "TEXT",
       env: {},
       launch,
       pause: async () => new Promise((resolve) => setTimeout(resolve, 5)),

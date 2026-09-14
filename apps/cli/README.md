@@ -79,6 +79,15 @@ egma agent connection add --help
 The CLI has no wizard or interactive setup state machine. Persona read and
 write commands print JSON so coding agents can use the complete API response.
 
+Persona authoring supports two speech modes. Pass `--speech-mode separate`
+with `--stt-provider`, `--stt-model`, `--tts-provider`, and `--tts-model` to
+choose speech services independently. Pass `--speech-mode live --voice alloy`
+to use OpenAI `gpt-live-1`; the CLI sends no inactive STT or TTS fields. Both
+modes use the independent `--llm-provider` and `--llm-model` reasoning choice.
+Use `egma persona capabilities` before saving and run a simulation to hear the
+result. Speech rate uses `slow`, `normal`, or `fast`, and interruption level
+uses `none`, `occasional`, or `frequent`.
+
 ## Sign in and initialize a repository
 
 Start browser-based device login:

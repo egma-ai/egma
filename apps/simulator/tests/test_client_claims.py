@@ -46,7 +46,7 @@ async def test_a_claim_declares_how_long_it_will_wait(recording_control_plane):
             "claimant": "sim-under-test",
             "capacity": 3,
             "wait_seconds": 7.0,
-            "contract_versions": [6, 5],
+            "contract_versions": [7, 6, 5],
         }
     ]
 

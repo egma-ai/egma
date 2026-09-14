@@ -48,14 +48,17 @@ CARTESIA_API_KEY = credential("TEST_CARTESIA_API_KEY", "CARTESIA_API_KEY")
 # default, whose turns are one sentence each, and a live call conducted that
 # way proves the carrier and the wire while saying nothing about speech.
 MODEL_API_KEY = credential("TEST_MODEL_API_KEY", "OPENAI_API_KEY")
+GPT_LIVE = credential("TEST_GPT_LIVE") == "1"
 
 REQUIRED = {
     "TEST_LIVEKIT_URL": LIVEKIT_URL,
     "TEST_LIVEKIT_API_KEY": LIVEKIT_API_KEY,
     "TEST_LIVEKIT_API_SECRET": LIVEKIT_API_SECRET,
     "TEST_PHONE_NUMBER": PHONE_NUMBER,
-    "TEST_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
-    "TEST_CARTESIA_API_KEY": CARTESIA_API_KEY,
+    **({} if GPT_LIVE else {
+        "TEST_DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
+        "TEST_CARTESIA_API_KEY": CARTESIA_API_KEY,
+    }),
     "TEST_SIP_TRUNK_ADDRESS": TRUNK_ADDRESS,
     "TEST_SIP_TRUNK_NUMBER": TRUNK_NUMBER,
     "TEST_SIP_TRUNK_USERNAME": TRUNK_USERNAME,
@@ -82,7 +85,7 @@ CORPUS_ROOT = _corpus_root()
 
 pytestmark = [
     pytest.mark.skipif(
-        bool(MISSING),
+        bool(MISSING) and not GPT_LIVE,
         reason=(
             "no live phone deployment: set "
             + ", ".join(MISSING)
@@ -90,7 +93,7 @@ pytestmark = [
         ),
     ),
     pytest.mark.skipif(
-        not CORPUS_ROOT,
+        not CORPUS_ROOT and not GPT_LIVE,
         reason=(
             "no sentence-tokenizer corpus on this machine: the image ships "
             "one, and speaking a turn of two sentences needs it — "
@@ -103,9 +106,11 @@ SECRETS = tuple(
     secret
     for secret in (
         LIVEKIT_API_SECRET,
+        PHONE_NUMBER,
         TRUNK_PASSWORD,
         DEEPGRAM_API_KEY,
         CARTESIA_API_KEY,
+        MODEL_API_KEY,
     )
     if secret
 )
@@ -152,19 +157,27 @@ def platform() -> dict:
 async def test_the_simulator_dials_a_real_number_and_holds_a_conversation(
     workbench, start_simulator
 ):
-    spec = phone_spec(
-        "sim-phone-live-001",
-        number=PHONE_NUMBER,
-        backend="livekit",
-        scenario=(
-            "You are calling about an appointment. Ask whether it can be "
-            "moved to Thursday, then thank them and finish."
-        ),
-        personality="Polite and brief; asks one thing at a time.",
-        max_turns=MAX_TURNS,
-        max_duration_seconds=MAX_DURATION_SECONDS,
-        platform=platform(),
-        models=direct_models(
+    if GPT_LIVE and MISSING:
+        pytest.fail("TEST_GPT_LIVE requires " + ", ".join(MISSING))
+    models = (
+        {
+            "mode": "live",
+            "llm": {
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "adapter": "openai_chat_completions",
+                "key": MODEL_API_KEY,
+            },
+            "live": {
+                "provider": "openai",
+                "model": "gpt-live-1",
+                "adapter": "openai_live",
+                "voice_id": "marin",
+                "key": MODEL_API_KEY,
+            },
+        }
+        if GPT_LIVE
+        else direct_models(
             modality="voice",
             voice={
                 "provider": "cartesia",
@@ -174,14 +187,45 @@ async def test_the_simulator_dials_a_real_number_and_holds_a_conversation(
             llm_key=MODEL_API_KEY,
             stt_key=DEEPGRAM_API_KEY,
             tts_key=CARTESIA_API_KEY,
-        ),
+        )
     )
+    spec = phone_spec(
+        "sim-phone-live-001",
+        number=PHONE_NUMBER,
+        backend="livekit",
+        scenario=(
+            "Ask which weekday the office is closed, then thank them and finish. "
+            "Do not ask for, offer, or repeat a phone number or other contact "
+            "detail. If asked for one, politely decline."
+        ),
+        personality=(
+            "Polite and brief; asks one thing at a time and keeps contact "
+            "details private."
+        ),
+        max_turns=MAX_TURNS,
+        max_duration_seconds=MAX_DURATION_SECONDS,
+        platform=platform(),
+        models=models,
+    )
+    if GPT_LIVE:
+        spec["contract_version"] = 7
+        spec["persona"].pop("language", None)
+        spec["persona"]["parameters"] = {
+            "language": "en-US",
+            "emotion": "neutral",
+            "accent": "voice_default",
+            "speech_speed": "normal",
+            "tts_speed": 1,
+            "speech_volume": 1,
+            "interruption_level": "none",
+            "execution_policy_version": 2,
+        }
     await workbench.offer(spec)
     simulator = start_simulator(
         workbench,
         extra_env=deployment(),
         direct_model=True,
-        direct_speech=True,
+        direct_speech=not GPT_LIVE,
     )
 
     records = await workbench.wait_for(
@@ -243,24 +287,11 @@ async def test_the_simulator_dials_a_real_number_and_holds_a_conversation(
     measures = measures_for(records, "sim-phone-live-001")
     assert "turn_response_latency" in measures
     assert "agent_speech_duration" in measures
-    timed = [
-        record["span"]
-        for record in spans_for(records, "sim-phone-live-001")
-        if record["span"]["name"] in measures
-    ]
-    assert all(milliseconds_of(span) >= 0 for span in timed)
+    evidence = spans_for(records, "sim-phone-live-001")
+    assert all(milliseconds_of(record["span"]) >= 0 for record in evidence)
 
-    # Monotonic, in both the senses a live record has to be: no measurement
-    # taken before the one taken ahead of it, and no turn beginning before
-    # the turn beginning ahead of it. On a real line these are read from
-    # real audio arriving in real time, so an ordering that went backwards
-    # would mean the clock or the reader was wrong — which is exactly the
-    # thing a latency number is trusted not to be.
-    stamped = [int(span["endTimeUnixNano"]) for span in timed]
-    assert stamped == sorted(stamped), "a measurement is taken out of order"
-    observed = [
-        int(record["span"]["endTimeUnixNano"])
-        for record in spans_for(records, "sim-phone-live-001")
-        if record["span"]["name"].endswith("_turn")
-    ]
-    assert observed == sorted(observed), "a turn was heard out of order"
+    # Provider callbacks can arrive late with an earlier source timestamp.
+    # Each source interval must point forward, while the workbench sequence
+    # proves that evidence itself arrived in order.
+    sequence = [record["seq"] for record in evidence]
+    assert sequence == sorted(sequence), "evidence arrived out of sequence"

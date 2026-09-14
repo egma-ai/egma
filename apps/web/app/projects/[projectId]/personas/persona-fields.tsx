@@ -273,18 +273,23 @@ export function ModelFields({
     request.current = turn;
     setCapabilities(null);
     setCapabilityError(null);
-    void platformAnswer(getPersonaCapabilities({
-      projectId,
+    void platformAnswer(getPersonaCapabilities(draft.mode === "live" ? {
+      projectId, mode: "live", liveProvider: "openai", liveModel: "gpt-live-1",
+      language: draft.language, voiceId: draft.liveVoiceId,
+    } : {
+      projectId, mode: "separate",
       ttsProvider: draft.ttsProvider, ttsModel: draft.ttsModel,
       sttProvider: draft.sttProvider, sttModel: draft.sttModel,
-      language: draft.language, voiceId: draft.voiceId,
+      language: draft.language, voiceId: draft.separateVoiceId,
     }, { client: platformClient })).then((answer) => {
       if (request.current !== turn) return;
       if (answer.status === "ready") setCapabilities(answer.value);
       else if (answer.status !== "signed-out") setCapabilityError(answer.refusal.message);
     });
     return undefined;
-  }, [projectId, draft.ttsProvider, draft.ttsModel, draft.sttProvider, draft.sttModel, draft.language, draft.voiceId]);
+  }, [projectId, draft.mode, draft.ttsProvider, draft.ttsModel, draft.sttProvider, draft.sttModel, draft.language, draft.separateVoiceId, draft.liveVoiceId]);
+
+  const activeVoiceId = draft.mode === "live" ? draft.liveVoiceId : draft.separateVoiceId;
 
   const voices = useMemo(() => {
     const all = capabilities?.voices.choices ?? [];
@@ -310,19 +315,19 @@ export function ModelFields({
     return state.choices.some((choice) => choice.toLowerCase().split("-")[0] === base);
   }
   const catalogHasVoice = capabilities?.voices.status === "supported"
-    && (capabilities.voices.choices ?? []).some((voice) => voice.id === draft.voiceId);
+    && (capabilities.voices.choices ?? []).some((voice) => voice.id === activeVoiceId);
   const valid = capabilities !== null
     && acceptsLanguage(capabilities.language, draft.language)
     && accepts(capabilities.accent, draft.accent, "voice_default")
     && accepts(capabilities.emotion, draft.emotion, "neutral")
-    && accepts(capabilities.speed, Number(draft.speed), 1)
+    && accepts(capabilities.speechSpeed, draft.speechSpeed, "normal")
     && accepts(capabilities.speechVolume, Number(draft.speechVolume), 1)
     && Number.isFinite(Number(draft.backgroundVolumeDb))
     && Number(draft.backgroundVolumeDb) >= -36
     && Number(draft.backgroundVolumeDb) <= -12
     && (capabilities.voices.status === "supported"
       ? catalogHasVoice
-      : capabilities.voices.status === "fixed" && capabilities.voices.value?.id === draft.voiceId);
+      : capabilities.voices.status === "fixed" && capabilities.voices.value?.id === activeVoiceId);
   useEffect(() => {
     if (capabilities !== null || capabilityError !== null) onValidityChange?.(valid);
   }, [valid, capabilities, capabilityError, onValidityChange]);
@@ -331,7 +336,13 @@ export function ModelFields({
   return (
     <SheetSection label="Settings">
       <div className="flex flex-col gap-4">
-        <EngineField
+        <Field label="Speech mode*" htmlFor={`${prefix}-speech-mode`} hint="Separate uses speech recognition and generation services. GPT Live combines both.">
+          <Select id={`${prefix}-speech-mode`} value={draft.mode} aria-required="true" disabled={disabled} onChange={(event) => change({ ...draft, mode: event.target.value as ModelsDraft["mode"], voiceId: event.target.value === "live" ? draft.liveVoiceId : draft.separateVoiceId })}>
+            <option value="separate">Separate speech models</option>
+            <option value="live">GPT Live</option>
+          </Select>
+        </Field>
+        {draft.mode === "live" ? <EngineField prefix={prefix} job="live" label="Live speech model" selection={{ provider: "openai", model: "gpt-live-1" }} form={form} disabled={true} onSelect={() => undefined} /> : <><EngineField
           prefix={prefix}
           job="stt"
           label="Speech-to-text"
@@ -361,7 +372,7 @@ export function ModelFields({
               ttsModel: entry.model,
             })
           }
-        />
+        /></>}
         <EngineField prefix={prefix} job="llm" label="Language model" selection={{ provider: draft.llmProvider, model: draft.llmModel }} form={form} disabled={disabled} onSelect={(entry) => change({ ...draft, llmProvider: entry.provider, llmModel: entry.model })} />
         {capabilityError === null ? null : <p role="alert" className="m-0 text-sm text-failure">{capabilityError}</p>}
         <Field label="Language*" htmlFor={`${prefix}-language`}>
@@ -373,7 +384,7 @@ export function ModelFields({
         {capabilities === null ? <Note>Loading voice capabilities…</Note> : stateNote("Language", capabilities.language)}
         <Field label="Find a voice" htmlFor={`${prefix}-voice-search`}><Input id={`${prefix}-voice-search`} value={voiceSearch} disabled={disabled} placeholder="Search the full voice catalog" onChange={(event) => setVoiceSearch(event.target.value)} /></Field>
         <Field label="Voice type" htmlFor={`${prefix}-voice-type`}><Select id={`${prefix}-voice-type`} value={voiceType} disabled={disabled} onChange={(event) => setVoiceType(event.target.value)}><option value="all">All</option><option value="male">Male</option><option value="female">Female</option></Select></Field>
-        <Field label="Voice*" htmlFor={`${prefix}-tts-voice`}><Select id={`${prefix}-tts-voice`} value={draft.voiceId} aria-required="true" disabled={disabled || capabilities?.voices.status !== "supported"} onChange={(event) => change({ ...draft, voiceId: event.target.value })}>{voices.some((voice) => voice.id === draft.voiceId) ? null : <option value={draft.voiceId}>{draft.voiceId}</option>}{voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name} · {voice.presentation === "unknown" ? "Type unknown" : voice.presentation}</option>)}</Select></Field>
+        <Field label="Voice*" htmlFor={`${prefix}-tts-voice`}><Select id={`${prefix}-tts-voice`} value={activeVoiceId} aria-required="true" disabled={disabled || capabilities?.voices.status !== "supported"} onChange={(event) => change({ ...draft, voiceId: event.target.value, ...(draft.mode === "live" ? { liveVoiceId: event.target.value } : { separateVoiceId: event.target.value }) })}>{voices.some((voice) => voice.id === activeVoiceId) ? null : <option value={activeVoiceId}>{activeVoiceId}</option>}{voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name} · {voice.presentation === "unknown" ? "Type unknown" : voice.presentation}</option>)}</Select></Field>
         {capabilities === null ? null : stateNote("Voice", capabilities.voices)}
         <Field label="Accent*" htmlFor={`${prefix}-accent`}>
           <Select id={`${prefix}-accent`} value={draft.accent} aria-required="true" disabled={disabled || capabilities?.accent.status !== "supported"} onChange={(event) => change({ ...draft, accent: event.target.value })}>
@@ -391,28 +402,19 @@ export function ModelFields({
         {capabilities?.emotion.status === "fixed" && draft.emotion !== capabilities.emotion.value && capabilities.emotion.value === "neutral" ? <Button type="button" variant="secondary" disabled={disabled} onClick={() => change({ ...draft, emotion: "neutral" })}>Use Neutral</Button> : null}
         <Field label="Interruptions*" htmlFor={`${prefix}-interruption-level`} hint="An interruption finishes one brief sentence, then the caller listens again.">
           <Select id={`${prefix}-interruption-level`} value={draft.interruptionLevel} aria-required="true" disabled={disabled} onChange={(event) => change({ ...draft, interruptionLevel: event.target.value as ModelsDraft["interruptionLevel"] })}>
-            <option value="off">Off</option>
+            <option value="none">None</option>
             <option value="occasional">Occasional</option>
             <option value="frequent">Frequent</option>
           </Select>
         </Field>
-        {/*
-         * The rate carries no `min`, `max` or `step`, and that is deliberate.
-         * The accepted range is the server's rule, and a bound written here
-         * as well would either refuse a rate egma would have taken or take
-         * one egma will refuse. The one authoritative refusal is the
-         * server's, and the instruction that used to explain the range here
-         * was deleted on the developer's note against this very field.
-         */}
-        <NumberField
-          id={`${prefix}-tts-speed`}
-          label="Speech rate*"
-          value={draft.speed}
-          disabled={disabled}
-          required
-          onChange={(speed) => change({ ...draft, speed })}
-        />
-        {capabilities === null ? null : stateNote("Speech rate", capabilities.speed)}
+        <Field label="Speech rate*" htmlFor={`${prefix}-tts-speed`}>
+          <Select id={`${prefix}-tts-speed`} value={draft.speechSpeed} aria-required="true" disabled={disabled} onChange={(event) => change({ ...draft, speechSpeed: event.target.value as ModelsDraft["speechSpeed"] })}>
+            <option value="slow" disabled={capabilities?.speechSpeed.status === "fixed" || capabilities?.speechSpeed.choices?.includes("slow") === false}>Slow</option>
+            <option value="normal">Normal</option>
+            <option value="fast" disabled={capabilities?.speechSpeed.status === "fixed" || capabilities?.speechSpeed.choices?.includes("fast") === false}>Fast</option>
+          </Select>
+        </Field>
+        {capabilities === null ? null : stateNote("Speech rate", capabilities.speechSpeed)}
 
         <NumberField id={`${prefix}-speech-volume`} label="Speech volume*" value={draft.speechVolume} disabled={disabled || capabilities?.speechVolume.status !== "supported"} required onChange={(speechVolume) => change({ ...draft, speechVolume })} />
         {capabilities === null ? null : stateNote("Speech volume", capabilities.speechVolume)}

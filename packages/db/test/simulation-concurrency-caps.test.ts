@@ -37,6 +37,7 @@ const auth: AuthContext = {
 };
 
 const CARTESIA: PersonaModels = {
+  mode: "separate",
   llm: { provider: "openai", model: "gpt-5.6-terra" },
   stt: { provider: "cartesia", model: "ink-2" },
   tts: {
@@ -48,6 +49,7 @@ const CARTESIA: PersonaModels = {
 };
 
 const OPENAI: PersonaModels = {
+  mode: "separate",
   llm: { provider: "openai", model: "gpt-5.6-terra" },
   stt: { provider: "openai", model: "gpt-4o-mini-transcribe" },
   tts: {

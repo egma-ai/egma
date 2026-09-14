@@ -785,6 +785,7 @@ export async function startRun(auth: AuthContext, input: NewRun): Promise<Starte
           personaId: pin.personaId,
           personaVersionId: pin.personaVersionId,
           personaParameterValues: pin.personaParameterValues,
+          personaParameterContract: pin.personaParameterContract,
           testId: current.testId,
           testVersionId: current.testVersionId,
           position: simulationCount + index + 1,
@@ -1677,6 +1678,7 @@ export type SimulationClaim = {
   readonly personaId: string;
   readonly personaVersionId: string;
   readonly personaParameterValues: PersonaParameterValues;
+  readonly personaParameterContract: unknown;
   /** What is being checked, by stable identity and exact immutable version. */
   readonly testId: string;
   readonly testVersionId: string;
@@ -1703,6 +1705,7 @@ const SIMULATION_CLAIM_COLUMNS = {
   personaId: simulation.personaId,
   personaVersionId: simulation.personaVersionId,
   personaParameterValues: simulation.personaParameterValues,
+  personaParameterContract: simulation.personaParameterContract,
   testId: simulation.testId,
   testVersionId: simulation.testVersionId,
   modality: simulation.modality,
@@ -1920,7 +1923,7 @@ async function activeSimulationCandidates(
       concurrency: run.concurrency,
       modality: simulation.modality,
       parameterValues: simulation.personaParameterValues,
-      parameterContract: personaVersion.parameterContract,
+      parameterContract: sql`coalesce(${simulation.personaParameterContract}, ${personaVersion.parameterContract})`,
     })
     .from(simulation)
     .innerJoin(run, eq(run.id, simulation.runId))
@@ -1952,7 +1955,7 @@ export async function estimateVoiceSimulationDemand(
           concurrency: run.concurrency,
           modality: simulation.modality,
           parameterValues: simulation.personaParameterValues,
-          parameterContract: personaVersion.parameterContract,
+          parameterContract: sql`coalesce(${simulation.personaParameterContract}, ${personaVersion.parameterContract})`,
         })
         .from(simulation)
         .innerJoin(run, eq(run.id, simulation.runId))
@@ -2018,7 +2021,7 @@ export async function claimSimulations(
           concurrency: run.concurrency,
           modality: simulation.modality,
           parameterValues: simulation.personaParameterValues,
-          parameterContract: personaVersion.parameterContract,
+          parameterContract: sql`coalesce(${simulation.personaParameterContract}, ${personaVersion.parameterContract})`,
         })
         .from(simulation)
         .innerJoin(run, eq(run.id, simulation.runId))
@@ -2120,6 +2123,7 @@ export async function claimSimulations(
       personaId: row.personaId,
       personaVersionId: row.personaVersionId,
       personaParameterValues: row.personaParameterValues,
+      personaParameterContract: row.personaParameterContract,
       testId: row.testId,
       testVersionId: row.testVersionId,
       modality: row.modality as Modality,

@@ -16,10 +16,12 @@ const versionParams = parameters({ versionId: stringIdSchema }, ["versionId"]);
 const projectQuery = parameters({ projectId: stringIdSchema });
 const capabilityQuery = parameters({
   projectId: stringIdSchema,
+  mode: { type: "string", enum: ["separate", "live"] },
   ttsProvider: { type: "string" }, ttsModel: { type: "string" },
   sttProvider: { type: "string" }, sttModel: { type: "string" },
+  liveProvider: { type: "string" }, liveModel: { type: "string" },
   language: { type: "string" }, voiceId: { type: "string" }, refresh: { type: "boolean" },
-}, ["ttsProvider", "ttsModel", "sttProvider", "sttModel"]);
+});
 const personaListQuery = parameters({
   projectId: stringIdSchema,
   pageToken: stringIdSchema,
@@ -76,24 +78,65 @@ const speechSelection = {
     },
     speed: {
       type: "number",
-      description: "Provider-supported speech rate. Read the selected combination's capability range.",
+      readOnly: true,
+      description: "Resolved provider speed for the selected speechSpeed category.",
     },
   },
   required: [...modelSelection.required, "voiceId", "speed"],
 } as const;
 
-const personaModels = {
+const separatePersonaModels = {
   type: "object",
   description:
     "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
   properties: {
+    mode: { type: "string", enum: ["separate"] },
     llm: modelSelection,
     stt: modelSelection,
     tts: speechSelection,
   },
-  required: ["llm", "stt", "tts"],
+  required: ["mode", "llm", "stt", "tts"],
   additionalProperties: false,
 } as const;
+
+const separatePersonaModelsInput = {
+  ...separatePersonaModels,
+  properties: {
+    ...separatePersonaModels.properties,
+    tts: {
+      ...speechSelection,
+      properties: {
+        provider: speechSelection.properties.provider,
+        model: speechSelection.properties.model,
+        voiceId: speechSelection.properties.voiceId,
+      },
+      required: ["provider", "model", "voiceId"],
+    },
+  },
+} as const;
+
+const liveSelection = {
+  type: "object",
+  properties: {
+    provider: { type: "string", enum: ["openai"] },
+    model: { type: "string", enum: ["gpt-live-1"] },
+    adapter: { type: "string", enum: ["openai_live"] },
+    voiceId: { type: "string", description: "A built-in voice supported by GPT Live." },
+  },
+  required: ["provider", "model", "adapter", "voiceId"],
+  additionalProperties: false,
+} as const;
+
+const livePersonaModels = {
+  type: "object",
+  description: "A GPT Live speech selection and an independently selected reasoning model.",
+  properties: { mode: { type: "string", enum: ["live"] }, llm: modelSelection, live: liveSelection },
+  required: ["mode", "llm", "live"],
+  additionalProperties: false,
+} as const;
+
+const personaModels = { oneOf: [separatePersonaModels, livePersonaModels] } as const;
+const personaModelsInput = { oneOf: [separatePersonaModelsInput, livePersonaModels] } as const;
 
 const personaControls = {
   type: "object",
@@ -105,9 +148,10 @@ const personaControls = {
     executionPolicyVersion: { type: "integer", minimum: 1, readOnly: true },
     backgroundSoundId: { type: "string", enum: ["none", "office-v1", "cafe-v1", "street-traffic-v1", "crowd-talking-v1", "inside-car-v1", "home-tv-v1", "wind-v1", "rain-v1"] },
     backgroundVolume: { type: "number", minimum: 0.015848931924611134, maximum: 0.251188643150958 },
-    interruptionLevel: { type: "string", enum: ["off", "occasional", "frequent"] },
+    interruptionLevel: { type: "string", enum: ["none", "occasional", "frequent"] },
+    speechSpeed: { type: "string", enum: ["slow", "normal", "fast"], description: "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported." },
   },
-  required: ["language", "emotion", "accent", "speechVolume", "executionPolicyVersion", "backgroundSoundId", "backgroundVolume", "interruptionLevel"],
+  required: ["language", "emotion", "accent", "speechVolume", "executionPolicyVersion", "backgroundSoundId", "backgroundVolume", "interruptionLevel", "speechSpeed"],
   additionalProperties: false,
 } as const;
 
@@ -121,8 +165,9 @@ const personaControlsInput = {
     backgroundSoundId: personaControls.properties.backgroundSoundId,
     backgroundVolume: personaControls.properties.backgroundVolume,
     interruptionLevel: personaControls.properties.interruptionLevel,
+    speechSpeed: personaControls.properties.speechSpeed,
   },
-  required: ["language", "emotion", "accent", "speechVolume", "backgroundSoundId", "backgroundVolume", "interruptionLevel"],
+  required: ["language", "emotion", "accent", "speechVolume", "backgroundSoundId", "backgroundVolume", "interruptionLevel", "speechSpeed"],
   additionalProperties: false,
 } as const;
 
@@ -216,11 +261,12 @@ const modelCatalogEntry = {
   type: "object",
   properties: {
     provider: { type: "string" },
-    job: { type: "string", enum: ["llm", "stt", "tts"] },
+    job: { type: "string", enum: ["llm", "stt", "tts", "live"] },
     model: { type: "string" },
     label: { type: "string" },
     modelLabel: { type: "string" },
     recommendedVoiceId: { type: "string" },
+    adapter: { type: "string" },
   },
   required: ["provider", "job", "model", "label"],
   additionalProperties: false,
@@ -259,8 +305,8 @@ const personaCapabilities = {
   type: "object", properties: {
     voices: capabilityState(voiceChoice), language: capabilityState({ type: "string" }),
     accent: capabilityState({ type: "string" }), emotion: capabilityState({ type: "string" }),
-    speed: capabilityState({ type: "number" }), speechVolume: capabilityState({ type: "number" }),
-  }, required: ["voices", "language", "accent", "emotion", "speed", "speechVolume"], additionalProperties: false,
+    speed: capabilityState({ type: "number" }), speechSpeed: capabilityState({ type: "string", enum: ["slow", "normal", "fast"] }), speechVolume: capabilityState({ type: "number" }),
+  }, required: ["voices", "language", "accent", "emotion", "speed", "speechSpeed", "speechVolume"], additionalProperties: false,
 } as const;
 
 const namedTest = {
@@ -291,7 +337,7 @@ const createPersonaBody = {
     description: { type: "string" },
     identityName: behavior.identityName,
     personality: behavior.personality,
-    models: personaModels,
+    models: personaModelsInput,
     controls: personaControlsInput,
   },
   required: ["name", "identityName", "personality"],
@@ -303,9 +349,10 @@ const createPersonaBody = {
     personality:
       "Answers briefly, asks for the earliest appointment, and stays polite when asking the agent to get to the point.",
     models: {
+      mode: "separate",
       llm: { provider: "openai", model: "gpt-4o-mini" },
       stt: { provider: "openai", model: "gpt-4o-mini-transcribe" },
-      tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy", speed: 1 },
+      tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy" },
     },
   }],
 } as const;
@@ -352,7 +399,7 @@ export const personaOperations = {
   usePersona: defineOperation({
     operationId: "usePersona", method: "POST", path: "/v1/personas/{personaId}/use", summary: "Use a persona", tag: "Personas", security: "credentialed",
     description: "Save this project's first model settings for the persona. Omit models to use its declared defaults. Repeated use returns the existing settings; use Update a persona to change them.",
-    request: { params: personaParams, body: { type: "object", properties: { projectId: stringIdSchema, models: personaModels, controls: personaControlsInput }, additionalProperties: false }, bodyRequired: false },
+    request: { params: personaParams, body: { type: "object", properties: { projectId: stringIdSchema, models: personaModelsInput, controls: personaControlsInput }, additionalProperties: false }, bodyRequired: false },
     responses: { 200: { description: "The persona with its saved project settings.", schema: persona }, ...writeRefusals },
   }),
   listPersonas: defineOperation({

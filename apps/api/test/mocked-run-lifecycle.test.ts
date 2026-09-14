@@ -394,7 +394,7 @@ async function claim(): Promise<Record<string, unknown>[]> {
       claimant: CONDUCTOR,
       capacity: 50,
       wait_seconds: 0,
-      contract_versions: [5, 6],
+      contract_versions: [5, 6, 7],
     },
   });
   expect(claimed.statusCode, claimed.body).toBe(200);

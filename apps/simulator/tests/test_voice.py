@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pytest
@@ -53,7 +53,7 @@ from egma_simulator.recording import (
     channels_of,
     dual_channel_wav,
 )
-from egma_simulator.spec import AuthoredPersona, SimulationSpec
+from egma_simulator.spec import AuthoredPersona, PersonaParameters, SimulationSpec
 from egma_simulator.speech import (
     CONVERSATION_VAD,
     SAMPLES_PER_BYTE,
@@ -185,6 +185,54 @@ async def observe(
         measures=measures,
         interruptions=interruptions,
     )
+
+
+async def test_current_none_runs_as_disabled_interruption_without_changing_history(
+    tmp_path: Path,
+) -> None:
+    base = spec_for(
+        scenario="Confirm the greeting, then finish.", replies=["Confirmed."]
+    )
+    historical = replace(
+        base,
+        persona=replace(
+            base.persona,
+            parameters=PersonaParameters(language="en-US", interruption_level="off"),
+        ),
+    )
+    historical_assembled = assemble(
+        historical,
+        blobs=FilesystemBlobStore(tmp_path),
+        speech=SCRIPTED_PAIR,
+    )
+    historical_conductor = historical_assembled.conductor
+    assert isinstance(historical_conductor, VoiceConductor)
+    assert historical_conductor._parameters.interruption_level == "off"
+    assert historical.persona.parameters is not None
+    current = replace(
+        historical,
+        persona=replace(
+            historical.persona,
+            parameters=replace(
+                historical.persona.parameters,
+                interruption_level="none",
+                execution_policy_version=2,
+            ),
+        ),
+    )
+    assembled = assemble(
+        current,
+        blobs=FilesystemBlobStore(tmp_path),
+        speech=SCRIPTED_PAIR,
+    )
+    conductor = assembled.conductor
+    assert isinstance(conductor, VoiceConductor)
+    assert conductor._parameters.interruption_level == "off"
+
+    observed = await observe(
+        conductor, assembled, current, controls=ConversationControls()
+    )
+    assert observed.conducted.status == "completed"
 
 
 @pytest.mark.parametrize("late_stop", ["request_cancel", "trip_duration_limit"])
@@ -1478,7 +1526,7 @@ async def test_the_speech_legs_need_no_corpus_and_no_download(
     def starved(*_args: object, **_kwargs: object):
         raise LookupError("no tokenizer corpus, and none is meant to be needed")
 
-    monkeypatch.setattr(pipecat.utils.string, "sent_tokenize", starved)
+    monkeypatch.setattr(pipecat.utils.string, "_sent_tokenizer", lambda: starved)
     monkeypatch.setattr(nltk.data, "load", starved)
     monkeypatch.setattr(nltk.data, "find", starved)
 

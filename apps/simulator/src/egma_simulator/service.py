@@ -277,13 +277,18 @@ class RunningSimulation:
             assembled = assemble(
                 self._spec,
                 blobs=self._blobs,
+                backend_model=model,
                 # The pinned persona version is the only model and voice
                 # source. The current direct keys arrived on this claim.
-                speech=replace(
-                    SpeechProviders.from_models(
-                        self._spec.models, vad=self._config.vad_provider
-                    ),
-                    use_environment_proxy=self._spec.runtime is not None,
+                speech=(
+                    None
+                    if self._spec.models.mode == "live"
+                    else replace(
+                        SpeechProviders.from_models(
+                            self._spec.models, vad=self._config.vad_provider
+                        ),
+                        use_environment_proxy=self._spec.runtime is not None,
+                    )
                 ),
                 media=MediaSettings.for_simulation(
                     self._config.media, self._spec.platform.carrier
@@ -566,12 +571,17 @@ class RunningSimulation:
         the wire before the terminal report, and what makes a resend of this
         flush collapse rather than charge twice.
         """
-        selected = (self._spec.models.llm, self._spec.models.stt, self._spec.models.tts)
+        selected = (
+            self._spec.models.llm,
+            self._spec.models.stt,
+            self._spec.models.tts,
+            self._spec.models.live,
+        )
         funding_receipt = next(
             (
                 model.funding_receipt
                 for model in selected
-                if model.provider == usage.provider
+                if model is not None and model.provider == usage.provider
             ),
             None,
         )

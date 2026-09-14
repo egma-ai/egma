@@ -26,6 +26,7 @@
     "test:fixture": "pnpm --filter @egma/livekit-dumb-agent test",
     "test:livekit-e2e": "pnpm --filter @egma/livekit-e2e test",
     "test:simulation-e2e:live": "node --env-file-if-exists=.env fixtures/simulation-e2e/run.mjs",
+    "test:simulation-e2e:gpt-live": "node --env-file-if-exists=.env fixtures/simulation-e2e/run.mjs --gpt-live-persona",
     "test:watch": "vitest",
     "docs:generate": "pnpm --filter @egma/platform-api generate && node scripts/docs/generate.mjs",
     "docs:check": "pnpm --filter @egma/platform-api generate:check && node scripts/docs/generate.mjs --check && node scripts/docs/check.mjs",

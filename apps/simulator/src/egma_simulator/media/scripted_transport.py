@@ -21,7 +21,11 @@ from pipecat.frames.frames import (
     StartFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import (
+    FrameDirection,
+    FrameProcessor,
+    FrameProcessorSetup,
+)
 
 from ..speech import decode_speech, encode_speech, silence
 from . import (
@@ -247,11 +251,14 @@ class _ScriptedInput(FrameProcessor):
         self._transport = transport
         self._pump: asyncio.Task | None = None
 
+    async def setup(self, setup: FrameProcessorSetup) -> None:
+        await super().setup(setup)
+        self._transport.started(input_rate=setup.audio_in_sample_rate)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         await self.push_frame(frame, direction)
         if isinstance(frame, StartFrame):
-            self._transport.started(input_rate=frame.audio_in_sample_rate)
             self._pump = self.create_task(self._run(), name="scripted-input")
         elif isinstance(frame, (EndFrame, CancelFrame)):
             self._transport.stop()
@@ -289,11 +296,13 @@ class _ScriptedOutput(FrameProcessor):
         super().__init__()
         self._transport = transport
 
+    async def setup(self, setup: FrameProcessorSetup) -> None:
+        await super().setup(setup)
+        self._transport.started(output_rate=setup.audio_out_sample_rate)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
-        if isinstance(frame, StartFrame):
-            self._transport.started(output_rate=frame.audio_out_sample_rate)
-        elif isinstance(frame, OutputAudioRawFrame):
+        if isinstance(frame, OutputAudioRawFrame):
             await self._transport.accepted_output(frame)
             played_out_at(
                 frame,

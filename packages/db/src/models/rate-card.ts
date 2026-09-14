@@ -143,7 +143,9 @@ export function billableUsageTypesOf(
     case "openai_chat_completions":
       return LLM_USAGE_TYPES;
     case "openai_realtime":
+    case "openai_live":
       return TOKEN_BILLED_TRANSCRIPTION.has(entry.model)
+        && entry.adapter === "openai_realtime"
         ? TOKEN_TRANSCRIPTION_USAGE_TYPES
         : DURATION_USAGE_TYPES;
     case "deepgram":

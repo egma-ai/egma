@@ -20,6 +20,16 @@
   "entries": [
     {
       "provider": "openai",
+      "model": "gpt-live-1",
+      "effectiveFrom": "2026-09-11",
+      "source": "https://developers.openai.com/api/docs/models/gpt-live-1",
+      "readAt": "2026-09-11",
+      "prices": {
+        "audio_seconds": { "unit": "second", "usdPerMillion": "833.333333333333" }
+      }
+    },
+    {
+      "provider": "openai",
       "model": "gpt-4o-mini",
       "effectiveFrom": "2026-09-07",
       "source": "https://developers.openai.com/api/docs/pricing",

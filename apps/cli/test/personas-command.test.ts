@@ -34,6 +34,63 @@ beforeEach(async () => {
 afterEach(async () => workspace.remove());
 
 describe("runPersonasCommand", () => {
+  it("creates a GPT Live persona without STT or TTS fields", async () => {
+    let body: Record<string, unknown> | undefined;
+    const code = await runPersonaActionCommand({
+      access: { url: URL, credentialsFile: workspace.credentialsFile }, cwd: workspace.dir,
+      out: () => undefined, fail: () => undefined,
+      fetchImpl: async (_input, init) => {
+        body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new JsonResponse({ id: "prs_live" });
+      },
+    }, "create", { positionals: [], values: { "--name": "Live caller", "--identity-name": "Morgan", "--personality": "Direct and patient.", "--speech-mode": "live", "--llm-provider": "openai", "--llm-model": "gpt-5.6-sol", "--voice": "coral" } });
+
+    expect(code).toBe(0);
+    expect(body?.models).toEqual({ mode: "live", llm: { provider: "openai", model: "gpt-5.6-sol" }, live: { provider: "openai", model: "gpt-live-1", adapter: "openai_live", voiceId: "coral" } });
+    expect(body?.models).not.toHaveProperty("stt");
+    expect(body?.models).not.toHaveProperty("tts");
+  });
+
+  it("rejects separate speech flags for a saved Live persona", async () => {
+    const failures: string[] = [];
+    let writes = 0;
+    const code = await runPersonaActionCommand({
+      access: { url: URL, credentialsFile: workspace.credentialsFile }, cwd: workspace.dir,
+      out: () => undefined, fail: (message) => failures.push(message),
+      fetchImpl: async (_input, init) => {
+        if ((init?.method ?? "GET") !== "GET") writes += 1;
+        return new JsonResponse({
+          id: "prs_live", parameterContract: [], language: null,
+          settings: {
+            models: { mode: "live", llm: { provider: "openai", model: "gpt-5.6-sol" }, live: { provider: "openai", model: "gpt-live-1", adapter: "openai_live", voiceId: "coral" } },
+            controls: { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, backgroundSoundId: "none", backgroundVolume: 0.0631, interruptionLevel: "none", speechSpeed: "normal", executionPolicyVersion: 2 },
+          },
+        });
+      },
+    }, "update", { positionals: ["prs_live"], values: { "--stt-provider": "deepgram" } });
+
+    expect(code).toBe(1);
+    expect(writes).toBe(0);
+    expect(failures).toEqual(["STT and TTS flags cannot be used with --speech-mode live."]);
+  });
+
+  it("requires every separate speech selection when switching from Live", async () => {
+    const failures: string[] = [];
+    const code = await runPersonaActionCommand({
+      access: { url: URL, credentialsFile: workspace.credentialsFile }, cwd: workspace.dir,
+      out: () => undefined, fail: (message) => failures.push(message),
+      fetchImpl: async () => new JsonResponse({
+        id: "prs_live", parameterContract: [], language: null,
+        settings: {
+          models: { mode: "live", llm: { provider: "openai", model: "gpt-5.6-sol" }, live: { provider: "openai", model: "gpt-live-1", adapter: "openai_live", voiceId: "coral" } },
+          controls: { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, backgroundSoundId: "none", backgroundVolume: 0.0631, interruptionLevel: "none", speechSpeed: "normal", executionPolicyVersion: 2 },
+        },
+      }),
+    }, "update", { positionals: ["prs_live"], values: { "--speech-mode": "separate" } });
+
+    expect(code).toBe(1);
+    expect(failures).toEqual(["--stt-provider is required for this speech mode."]);
+  });
   it("uses a predefined persona with its built-in defaults", async () => {
     const requests: Array<{ method: string; body?: Record<string, unknown> }> = [];
     const code = await runPersonaActionCommand({
@@ -58,8 +115,8 @@ describe("runPersonasCommand", () => {
     expect(requests.map((request) => request.method)).toEqual(["GET", "POST"]);
     expect(requests[1]?.body).toMatchObject({
       projectId: PROJECT_ID,
-      models: { llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "deepgram", model: "nova-3" }, tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy", speed: 1 } },
-      controls: { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, backgroundSoundId: "none", backgroundVolume: 0.0631, interruptionLevel: "off" },
+      models: { llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "deepgram", model: "nova-3" }, tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy" } },
+      controls: { language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, backgroundSoundId: "none", backgroundVolume: 0.0631, interruptionLevel: "none", speechSpeed: "normal" },
     });
   });
 
@@ -84,8 +141,8 @@ describe("runPersonasCommand", () => {
     expect(code).toBe(0);
     expect(bodies).toHaveLength(1);
     expect(bodies[0]).toMatchObject({
-      models: { llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "deepgram", model: "nova-3" }, tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy", speed: 0.9 } },
-      controls: { language: "es-ES", emotion: "happy", accent: "voice_default", speechVolume: 1.2, backgroundSoundId: "cafe-v1", backgroundVolume: 0.1, interruptionLevel: "occasional" },
+      models: { llm: { provider: "openai", model: "gpt-4o" }, stt: { provider: "deepgram", model: "nova-3" }, tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy" } },
+      controls: { language: "es-ES", emotion: "happy", accent: "voice_default", speechVolume: 1.2, backgroundSoundId: "cafe-v1", backgroundVolume: 0.1, interruptionLevel: "occasional", speechSpeed: "normal" },
     });
     expect((bodies[0]?.controls as Record<string, unknown>).executionPolicyVersion).toBeUndefined();
   });

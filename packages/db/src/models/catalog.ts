@@ -6,7 +6,7 @@
  * two fields independently is what allowed a realtime OpenAI model to reach
  * the segmented transcription endpoint in production.
  */
-export const MODEL_JOBS = ["llm", "stt", "tts"] as const;
+export const MODEL_JOBS = ["llm", "stt", "tts", "live"] as const;
 export type ModelJob = (typeof MODEL_JOBS)[number];
 
 export const MODEL_PROVIDERS = ["openai", "deepgram", "cartesia"] as const;
@@ -25,6 +25,7 @@ const MODEL_ADAPTERS_BY_JOB = {
   llm: ["openai_chat_completions"],
   stt: ["openai_realtime", "deepgram", "cartesia_manual"],
   tts: ["cartesia", "openai"],
+  live: ["openai_live"],
 } as const satisfies {
   readonly [Job in ModelJob]: readonly string[];
 };
@@ -33,6 +34,7 @@ export const MODEL_ADAPTERS = [
   ...MODEL_ADAPTERS_BY_JOB.llm,
   ...MODEL_ADAPTERS_BY_JOB.stt,
   ...MODEL_ADAPTERS_BY_JOB.tts,
+  ...MODEL_ADAPTERS_BY_JOB.live,
 ] as const;
 
 export type ModelAdapterByJob = {
@@ -59,7 +61,9 @@ type CatalogCapabilities<Job extends ModelJob> = Job extends "llm"
         readonly recommendedVoiceId?: string;
         readonly recommendedSpeed?: number;
       }
-    : Record<never, never>;
+    : Job extends "live"
+      ? { readonly recommendedVoiceId?: string }
+      : Record<never, never>;
 
 export type ProviderCatalogEntry<
   Job extends ModelJob = ModelJob,
@@ -78,6 +82,15 @@ export type ProviderCatalogEntry<
   : never;
 
 export const PROVIDER_CATALOG = [
+  {
+    provider: "openai",
+    job: "live",
+    model: "gpt-live-1",
+    adapter: "openai_live",
+    label: "OpenAI",
+    modelLabel: "GPT Live 1",
+    recommendedVoiceId: "alloy",
+  },
   {
     provider: "openai",
     job: "llm",
@@ -262,6 +275,7 @@ export const PROVIDERS_BY_JOB: {
   llm: PROVIDER_CATALOG.filter((entry) => entry.job === "llm"),
   stt: PROVIDER_CATALOG.filter((entry) => entry.job === "stt"),
   tts: PROVIDER_CATALOG.filter((entry) => entry.job === "tts"),
+  live: PROVIDER_CATALOG.filter((entry) => entry.job === "live"),
 };
 
 /** The first supported pair for each job is the release default. */
@@ -271,6 +285,7 @@ export const RECOMMENDED_ENTRY: {
   llm: firstEntryFor("llm"),
   stt: firstEntryFor("stt"),
   tts: firstEntryFor("tts"),
+  live: firstEntryFor("live"),
 };
 
 export function isModelProvider(provider: string): provider is ModelProvider {

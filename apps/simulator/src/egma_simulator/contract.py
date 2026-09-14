@@ -11,13 +11,15 @@ from functools import cache
 from pathlib import Path
 
 from jsonschema import Draft202012Validator, FormatChecker
+from referencing import Registry, Resource
 
 CONTRACT_DIR_ENV = "EGMA_SIMULATION_CONTRACT_DIR"
 
-SPEC_SCHEMA_FILENAME = "simulation-spec.v6.schema.json"
+SPEC_SCHEMA_FILENAME = "simulation-spec.v7.schema.json"
 SPEC_SCHEMA_FILENAMES = {
     5: "simulation-spec.v5.schema.json",
-    6: SPEC_SCHEMA_FILENAME,
+    6: "simulation-spec.v6.schema.json",
+    7: SPEC_SCHEMA_FILENAME,
 }
 REPORT_SCHEMA_FILENAME = "simulation-report.v1.schema.json"
 
@@ -81,6 +83,18 @@ def _load_schema(filename: str) -> dict:
         return json.load(handle)
 
 
+def _schema_registry() -> Registry:
+    registry = Registry()
+    for path in contract_dir().joinpath("schemas").glob("*.schema.json"):
+        contents = _load_schema(path.name)
+        resource = Resource.from_contents(contents)
+        registry = registry.with_resource(path.name, resource)
+        schema_id = contents.get("$id")
+        if isinstance(schema_id, str):
+            registry = registry.with_resource(schema_id, resource)
+    return registry
+
+
 @cache
 def spec_contract_version() -> int:
     """The one spec version this simulator can read.
@@ -123,11 +137,18 @@ def validator(direction: str) -> Draft202012Validator:
     """
     schema = _load_schema(SCHEMA_OF[direction])
     Draft202012Validator.check_schema(schema)
-    return Draft202012Validator(schema, format_checker=FormatChecker())
+    return Draft202012Validator(
+        schema, format_checker=FormatChecker(), registry=_schema_registry()
+    )
 
 
 def spec_validator() -> Draft202012Validator:
     return validator("spec")
+
+
+def spec_validator_for(version: int) -> Draft202012Validator:
+    """The validator for one advertised work-order version."""
+    return _spec_validator_for(version)
 
 
 @cache
@@ -137,7 +158,9 @@ def _spec_validator_for(version: int) -> Draft202012Validator:
         return spec_validator()
     schema = _load_schema(filename)
     Draft202012Validator.check_schema(schema)
-    return Draft202012Validator(schema, format_checker=FormatChecker())
+    return Draft202012Validator(
+        schema, format_checker=FormatChecker(), registry=_schema_registry()
+    )
 
 
 def report_validator() -> Draft202012Validator:

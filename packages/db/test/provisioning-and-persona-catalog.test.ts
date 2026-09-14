@@ -22,6 +22,12 @@ import {
   type AuthContext,
   type PersonaModels,
 } from "@egma/db";
+import {
+  currentPersonaParameterDefaults,
+  preCategoricalPersonaParameterContract,
+  ticket01PersonaParameterContract,
+  ticket02PersonaParameterContract,
+} from "../src/persona-library/parameters.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -184,9 +190,54 @@ describe("the Predefined persona", () => {
     });
   });
 
-  it("is seeded idempotently", async () => {
+  it("migrates project settings without changing built-in core history", async () => {
+    const before = await getPersona(globex.auth, EGMA_PROVIDED_PERSONAS.defaultPersona);
+    expect(before).toMatchObject({
+      version: 5,
+      versionId: "prsv_01K4R000000000000000000016",
+      settings: null,
+    });
+
+    const used = await usePersona(globex.auth, EGMA_PROVIDED_PERSONAS.defaultPersona);
+    expect(used).toMatchObject({
+      version: 5,
+      versionId: "prsv_01K4R000000000000000000016",
+      settings: { parameterValues: {
+        speech_mode: "separate",
+        speech_speed: "normal",
+        tts_speed: 1,
+        interruption_level: "none",
+        execution_policy_version: 2,
+      } },
+    });
+
+    const historicalContract = PERSONA_LIBRARY_CATALOG[0]!.versions[0]!.parameterContract;
+    await database.sql(
+      `update project_persona
+          set parameter_contract = $1::jsonb, parameter_values = $2::jsonb
+        where project_id = $3 and persona_definition_id = $4`,
+      [
+        JSON.stringify(historicalContract),
+        JSON.stringify(defaultPersonaParameterValues(historicalContract)),
+        globex.projectId,
+        EGMA_PROVIDED_PERSONAS.defaultPersona,
+      ],
+    );
+
     expect(await seedPersonaLibrary()).toEqual([]);
     expect(await seedPersonaLibrary()).toEqual([]);
+    expect(await getPersona(globex.auth, EGMA_PROVIDED_PERSONAS.defaultPersona)).toMatchObject({
+      version: 5,
+      versionId: "prsv_01K4R000000000000000000016",
+      settings: { parameterValues: { language: "en-US", speech_mode: "separate", speech_speed: "normal", tts_speed: 1, interruption_level: "none" } },
+    });
+    const { rows } = await database.sql<{ id: string; version: number }>(
+      "select id, version from persona_definition_version where persona_id = $1 order by version",
+      [EGMA_PROVIDED_PERSONAS.defaultPersona],
+    );
+    expect(rows).toHaveLength(5);
+    expect(rows.at(-1)).toEqual({ id: "prsv_01K4R000000000000000000016", version: 5 });
+    expect(rows.map((row) => row.id)).not.toContain("prsv_01K4R000000000000000000021");
   });
 
   it("cannot be edited or deleted", async () => {
@@ -331,6 +382,96 @@ describe("forking a persona", () => {
 });
 
 describe("catalog integrity", () => {
+  it("completes every historical settings shape without changing its models", () => {
+    const contracts = [
+      legacyPersonaParameterContract(),
+      ticket01PersonaParameterContract(),
+      ticket02PersonaParameterContract(),
+      preCategoricalPersonaParameterContract(),
+    ];
+
+    expect(contracts.map((contract) => contract.length)).toEqual([8, 13, 15, 16]);
+    for (const contract of contracts) {
+      const historical = defaultPersonaParameterValues(contract);
+      const expectedModels = personaModelsOfParameters(historical);
+      const completed = currentPersonaParameterDefaults(contract, { language: "es-ES" });
+      expect(completed.contract).toHaveLength(18);
+      expect(personaModelsOfParameters(completed.values)).toEqual({
+        ...expectedModels,
+        ...(expectedModels.mode === "separate"
+          ? { tts: { ...expectedModels.tts, speed: 1 } }
+          : {}),
+      });
+      expect(completed.values).toMatchObject({
+        language: contract.some((field) => field.key === "language") ? "en-US" : "es-ES",
+        interruption_level: "none",
+        execution_policy_version: 2,
+      });
+    }
+  });
+
+  it("upgrades untouched custom persona settings once without changing their old version", async () => {
+    const made = await createPersona(acme.auth, {
+      name: "Untouched legacy caller",
+      identityName: "Morgan Lee",
+      personality: "Calls about an existing order and answers directly.",
+      language: "en-US",
+    });
+    if (made.settings === null) throw new Error("custom settings were not created");
+    if (made.settings.models.mode !== "separate") throw new Error("default persona settings must use separate speech models");
+    const oldContract = legacyPersonaParameterContract(
+      { ...made.settings.models, tts: { ...made.settings.models.tts, speed: 0.9 } },
+    );
+    const frozenOldValues = {
+      ...defaultPersonaParameterValues(oldContract),
+      tts_speed: 0.9,
+    };
+    const legacyVersionId = newId("prsv");
+    await database.sql(
+      `insert into persona_definition_version
+         (id, persona_id, version, identity_name, personality, language, parameter_contract, created_by)
+       values ($1, $2, 2, $3, $4, 'es-ES', $5, $6)`,
+      [legacyVersionId, made.id, made.identityName, made.personality, JSON.stringify(oldContract), acme.auth.userId],
+    );
+    await database.sql(
+      "update persona_definition set current_version_id = $1 where id = $2",
+      [legacyVersionId, made.id],
+    );
+    await database.sql(
+      "update project_persona set parameter_values = $1, parameter_contract = $2 where persona_definition_id = $3",
+      [JSON.stringify(frozenOldValues), JSON.stringify(oldContract), made.id],
+    );
+
+    await seedPersonaLibrary();
+    const upgraded = await getPersona(acme.auth, made.id);
+    expect(upgraded).toMatchObject({
+      id: made.id,
+      version: 2,
+      versionId: legacyVersionId,
+      identityName: made.identityName,
+      personality: made.personality,
+      language: "es-ES",
+      settings: {
+        parameterValues: {
+          language: "es-ES",
+          speech_speed: "normal",
+          tts_speed: 1,
+          interruption_level: "none",
+          execution_policy_version: 2,
+        },
+      },
+    });
+    expect((await getPersonaVersion(acme.auth, legacyVersionId))?.parameterContract).toEqual(oldContract);
+
+    await seedPersonaLibrary();
+    expect(await getPersona(acme.auth, made.id)).toMatchObject({
+      version: 2,
+      versionId: legacyVersionId,
+      language: "es-ES",
+      settings: { parameterValues: { language: "es-ES", speech_speed: "normal", tts_speed: 1 } },
+    });
+  });
+
   it("adds background defaults without resetting ticket 01 choices", async () => {
     const source = PERSONA_LIBRARY_CATALOG[0];
     if (source === undefined) throw new Error("the source persona is missing");
@@ -352,6 +493,7 @@ describe("catalog integrity", () => {
     const chosen = {
       ...before.settings.parameterValues,
       tts_speed: 0.8,
+      speech_speed: "slow",
       emotion: "happy",
       speech_volume: 1.2,
     };
@@ -377,7 +519,7 @@ describe("catalog integrity", () => {
       ...chosen,
       language: "en-US",
       accent: "voice_default",
-      execution_policy_version: 1,
+      execution_policy_version: 2,
       background_sound_id: "none",
       background_volume: 0.0631,
     });
@@ -405,6 +547,7 @@ describe("catalog integrity", () => {
     const chosen = {
       ...before.settings.parameterValues,
       tts_speed: 0.8,
+      speech_speed: "slow",
       emotion: "happy",
       speech_volume: 1.2,
       background_sound_id: "rain-v1",
@@ -424,14 +567,14 @@ describe("catalog integrity", () => {
 
     expect((await getPersona(acme.auth, prior.id))?.settings?.parameterValues).toEqual({
       ...chosen,
-      interruption_level: "off",
+      interruption_level: "none",
     });
   });
 
   it("ships exactly five presets with complete starting controls", () => {
     const defaults = new Map(PERSONA_LIBRARY_CATALOG.map((entry) => [
       entry.name,
-      defaultPersonaParameterValues(entry.versions.at(-1)?.parameterContract),
+      currentPersonaParameterDefaults(entry.versions.at(-1)?.parameterContract).values,
     ]));
     expect([...defaults.keys()]).toEqual([
       "Everyday Caller [Male]",
@@ -449,8 +592,9 @@ describe("catalog integrity", () => {
         speech_volume: 1,
         background_sound_id: "none",
         background_volume: 0.0631,
-        interruption_level: name === "Interruptive caller" ? "frequent" : "off",
-        execution_policy_version: 1,
+        interruption_level: name === "Interruptive caller" ? "frequent" : "none",
+        speech_speed: "normal",
+        execution_policy_version: 2,
       });
     }
   });
@@ -521,8 +665,8 @@ describe("catalog integrity", () => {
   it("adds a new immutable catalog version without changing an existing fork", async () => {
     const entry = PERSONA_LIBRARY_CATALOG[0];
     const v1 = entry?.versions[0];
-    const v5 = entry?.versions[4];
-    if (entry === undefined || v1 === undefined || v5 === undefined) {
+    const current = entry?.versions.at(-1);
+    if (entry === undefined || v1 === undefined || current === undefined) {
       throw new Error("the Predefined persona catalog entry is incomplete");
     }
     const fork = await forkPersona(
@@ -531,25 +675,25 @@ describe("catalog integrity", () => {
     );
     if (fork === undefined) throw new Error("the fork is missing");
 
-    const v6 = {
-      ...v5,
+    const next = {
+      ...current,
       id: "prsv_01M0E4J0BBE1FVDVTZ1BSS5C98",
-      version: 6,
+      version: current.version + 1,
       personality: "Stays calm and asks one clear question.",
-      parameterContract: v5.parameterContract,
+      parameterContract: current.parameterContract,
       createdAt: new Date("2026-09-09T00:00:00.000Z"),
     } as const;
 
     expect(
       await seedPersonaLibrary([
-        { ...entry, versions: [...entry.versions, v6] },
+        { ...entry, versions: [...entry.versions, next] },
       ]),
     ).toEqual([
       {
         id: entry.id,
         name: entry.name,
-        version: 6,
-        versionId: v6.id,
+        version: next.version,
+        versionId: next.id,
       },
     ]);
     expect(await getPersonaVersion(acme.auth, v1.id)).toMatchObject({

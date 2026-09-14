@@ -548,6 +548,7 @@ describe("persona core and settings ownership", () => {
   it("keeps required complete settings on the project and simulation", () => {
     expect(columns.find((column) => column.table_name === "project_persona" && column.column_name === "parameter_values")).toMatchObject({ not_null: true, type_name: "jsonb", has_default: false });
     expect(columns.find((column) => column.table_name === "simulation" && column.column_name === "persona_parameter_values")).toMatchObject({ not_null: true, type_name: "jsonb", has_default: false });
+    expect(columns.find((column) => column.table_name === "simulation" && column.column_name === "persona_parameter_contract")).toMatchObject({ not_null: false, type_name: "jsonb", has_default: false });
   });
 });
 
