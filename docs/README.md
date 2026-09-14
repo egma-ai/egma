@@ -14,6 +14,7 @@ This is the source for [docs.egma.ai](https://docs.egma.ai). Mintlify reads the
 - `self-hosting/`: quick setup, environment settings, and support.
 - `api-reference/`: generated endpoint pages plus the written authentication,
   requests, pagination, and errors overview.
+- `assets/`: static images and logos. Keep assets outside the four content folders.
 
 Write short instructions with a complete example. Check each command and field
 against its implementation. Add the page to `docs.json` and update its links.

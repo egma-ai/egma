@@ -40,7 +40,9 @@ that phone support passed.
 TTS persona coverage. The GPT Live command selects the combined Live speech
 mode explicitly.
 
-The `Tests` workflow always runs the separate persona cells. A manual dispatch
-with `gpt_live_personas` enabled adds the GPT Live cells for both LiveKit access
-variants and Retell text and web. Keep `deploy` disabled when dispatching a
-feature branch.
+The `Tests` workflow always runs the separate LiveKit persona cells. A manual
+dispatch with `gpt_live_personas` enabled adds the GPT Live cells for both
+LiveKit access variants and the configured phone destination. The Retell CI
+job is temporarily disabled on main because of tunnel and image-pull failures;
+the local command still runs Retell text and web. Keep `deploy` disabled when
+dispatching a feature branch.
