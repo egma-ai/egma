@@ -961,6 +961,8 @@ class _PersonaReplyGate(FrameProcessor):
                 and not self._conductor.may_start_interruption
             ):
                 self._conductor.interruption_canceled("agent_stopped_before_playout")
+            elif self._kind == "deliberate" and not reply.text:
+                self._conductor.interruption_canceled("empty_reply", drain=False)
             elif reply.concluded and not reply.text:
                 self._conductor.persona_concluded_without_speech()
             elif not self._conductor.is_ending:
@@ -1178,7 +1180,7 @@ class _InterruptionAudioLimit(FrameProcessor):
             await self.push_frame(frame, direction)
             return
         if (
-            isinstance(frame, TTSStoppedFrame)
+            isinstance(frame, (TTSStoppedFrame, InterruptionFrame))
             and self._conductor.discarding_deliberate_audio
         ):
             self._conductor.deliberate_audio_discarded()
@@ -1512,6 +1514,7 @@ class VoiceConductor:
             "ready",
             "awaiting_playout",
             "delivering",
+            "draining",
         }
 
     @property
@@ -1669,7 +1672,15 @@ class VoiceConductor:
         self.interruption_canceled(reason, force=True)
 
     def deliberate_audio_discarded(self) -> None:
+        """The last frame of a canceled deliberate turn has passed the gate."""
         self._discard_deliberate_audio = False
+        if self._interruption_state != "draining":
+            return
+        self._interruption_state = "listening"
+        self._interruption_idle.set()
+        self.media_advanced()
+        if self._segment_waiting_for_interruption_owner:
+            self._arm_interruption_for_active_segment()
 
     def interruption_audio_capped(self) -> None:
         self._deliberate_capped = True
@@ -1722,26 +1733,31 @@ class VoiceConductor:
             return self._position
         return max(self._position, ear.position + offset)
 
-    def interruption_canceled(self, reason: str, *, force: bool = False) -> None:
-        cancelable = {"scheduled", "preparing", "ready", "awaiting_playout"}
+    def interruption_canceled(
+        self, reason: str, *, force: bool = False, drain: bool = True
+    ) -> None:
+        cancelable = {"scheduled", "preparing", "ready", "awaiting_playout", "draining"}
         if force:
             cancelable.add("delivering")
         if self._interruption_state not in cancelable:
             return
         was_delivering = self._interruption_state == "delivering"
         was_awaiting_playout = self._interruption_state == "awaiting_playout"
+        was_ready = self._interruption_state == "ready"
         heard_audio = was_delivering and self._deliberate_playout_has_begun()
         began = self._persona_began if heard_audio else None
         ended = self._persona_ended if heard_audio else None
-        self._interruption_state = "listening"
-        self._interruption_idle.set()
+        draining = was_ready and not force and drain
+        self._interruption_state = "draining" if draining else "listening"
+        if not draining:
+            self._interruption_idle.set()
         self._cancel_after_accepted_audio = None
         self._interruption_playout_began = None
         self._agent_to_playout_offset = None
         self._interruption_due_at = None
         generated_text = self._pending_persona_text
         self._pending_persona_text = None
-        if was_delivering or was_awaiting_playout:
+        if was_delivering or was_awaiting_playout or was_ready:
             self._discard_deliberate_audio = True
         if self._interruptions is not None:
             self._interruptions.cancel_owned_work()
@@ -1767,7 +1783,7 @@ class VoiceConductor:
             attributes={"egma.interruption.cancel_reason": reason},
         )
         self.media_advanced()
-        if self._segment_waiting_for_interruption_owner:
+        if self._segment_waiting_for_interruption_owner and not draining:
             self._arm_interruption_for_active_segment()
 
     def _report_interruption(self, evidence: InterruptionEvidence) -> None:
@@ -1783,7 +1799,7 @@ class VoiceConductor:
             self._interruption_model_fault_observed = False
         else:
             self._ignored_pipeline_faults += 1
-        self.interruption_canceled(reason)
+        self.interruption_canceled(reason, drain=False)
 
     async def conduct(
         self,
@@ -1992,6 +2008,7 @@ class VoiceConductor:
                 self.interruption_canceled(
                     "speech_provider_failed",
                     force=self.deliberate_delivering,
+                    drain=False,
                 )
                 return
             if isinstance(exception, ProviderKeyUnavailable):
@@ -2270,6 +2287,7 @@ class VoiceConductor:
         self._pending_silence_follow_up = silence_follow_up
         self._persona_began = None
         self._persona_ended = None
+        self._discard_deliberate_audio = False
         if deliberate:
             self._interruption_state = "ready"
 
