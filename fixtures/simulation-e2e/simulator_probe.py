@@ -55,7 +55,7 @@ async def main() -> None:
         await asyncio.sleep(90)
         destination = Path(os.environ["EGMA_E2E_RUNTIME_PROBE_FILE"])
         destination.parent.mkdir(parents=True, exist_ok=True)
-        with destination.open("w", encoding="utf-8", opener=lambda path, flags: os.open(path, flags, 0o600)) as output:
+        with open(destination, "w", encoding="utf-8", opener=lambda path, flags: os.open(path, flags, 0o600)) as output:
             json.dump(snapshot(), output, indent=2)
 
     pending_probe = asyncio.create_task(probe())
