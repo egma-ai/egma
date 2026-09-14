@@ -67,7 +67,9 @@ def test_live_prompt_keeps_conversation_controls_and_delegates_scenario() -> Non
     assert "Wait quietly" in prompt
     assert "Do not overlap" in prompt
     assert "Ask to move the appointment to Thursday." in prompt
-    assert "Delegate decisions about the situation" in prompt
+    assert "Delegation policy:" in prompt
+    assert "End call: confirm that the caller" in prompt
+    assert "Always delegate before saying goodbye" in prompt
 
     fast_prompt = compose_live_prompt(
         authored(speech_speed="fast", tts_speed=1.5), "Ask about an appointment."
@@ -252,14 +254,19 @@ def test_v7_live_work_order_needs_no_stt_or_tts() -> None:
 class _BackendModel:
     model_name = "gpt-5.6-luna"
 
-    def __init__(self, *, concluded: bool = False) -> None:
+    def __init__(self, *, concluded: bool = False, textless: bool = False) -> None:
         self.requests = []
         self.concluded = concluded
+        self.textless = textless
 
     async def reply(self, context):
         self.requests.append(context.get_messages())
         return PersonaReply(
-            text="The caller should ask for the account balance.",
+            text=(
+                ""
+                if self.textless
+                else "The caller should ask for the account balance."
+            ),
             concluded=False,
             tool_calls=(
                 PersonaToolCall(
@@ -578,12 +585,13 @@ async def test_live_conductor_cancels_both_workers_without_false_transcript() ->
 
 
 @pytest.mark.parametrize(
-    ("max_turns", "cancel_goodbye", "filler", "expected_ending"),
+    ("max_turns", "cancel_goodbye", "filler", "expected_ending", "textless"),
     [
-        (8, False, False, "persona_concluded"),
-        (1, False, False, "limit_reached"),
-        (8, True, False, "canceled"),
-        (8, False, True, "persona_concluded"),
+        (8, False, False, "persona_concluded", False),
+        (8, False, False, "persona_concluded", True),
+        (1, False, False, "limit_reached", False),
+        (8, True, False, "canceled", False),
+        (8, False, True, "persona_concluded", False),
     ],
 )
 async def test_live_conductor_waits_for_concluding_goodbye_playout(
@@ -591,6 +599,7 @@ async def test_live_conductor_waits_for_concluding_goodbye_playout(
     cancel_goodbye: bool,
     filler: bool,
     expected_ending: str,
+    textless: bool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ended = asyncio.Event()
@@ -598,6 +607,7 @@ async def test_live_conductor_waits_for_concluding_goodbye_playout(
     close_seen = asyncio.Event()
     controls = ConversationControls()
     observed_targets = []
+    backend_answers = []
     original_wait = _LiveEvidence.wait_for_assistant_turn_after
 
     async def observe_target(self, count: int) -> None:
@@ -650,6 +660,7 @@ async def test_live_conductor_waits_for_concluding_goodbye_playout(
         while True:
             message = json.loads(await socket.recv())
             if message.get("delegation_id") == "goodbye_delegation":
+                backend_answers.append(message["content"])
                 break
         if filler:
             await connection.output_stopped.wait()
@@ -691,7 +702,7 @@ async def test_live_conductor_waits_for_concluding_goodbye_playout(
         port = server.sockets[0].getsockname()[1]
         connection = _Connection(ended)
         output_observed = connection.output_observed
-        model = _BackendModel(concluded=True)
+        model = _BackendModel(concluded=True, textless=textless)
         turns = []
         conductor = LiveConductor(
             connection=connection,
@@ -724,6 +735,9 @@ async def test_live_conductor_waits_for_concluding_goodbye_playout(
 
     assert result.ending == expected_ending
     assert observed_targets == [1 if filler else 0]
+    if textless:
+        assert "goal is complete" in backend_answers[-1]
+        assert "without an answer" not in backend_answers[-1]
     if not cancel_goodbye:
         assert close_seen.is_set()
     if cancel_goodbye:

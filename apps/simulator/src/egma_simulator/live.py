@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     LLMContextFrame,
+    LLMTextFrame,
     TTSStoppedFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
@@ -68,6 +69,13 @@ class _ConcludingBackendService(_PersonaLLMService):
 
     async def _process_context(self, context: LLMContext) -> None:
         await super()._process_context(context)
+        if self._end_requested.is_set():
+            await self.push_frame(
+                LLMTextFrame(
+                    "\nThe caller's goal is complete. Say a brief natural goodbye "
+                    "now. The call will end after your goodbye."
+                )
+            )
         reply = self._reply
         if reply is not None and reply.usage is not None:
             await self._observe_usage(reply.usage)

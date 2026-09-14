@@ -1,6 +1,5 @@
 import { loadIngestionSettings } from "@egma/ingestion";
 import { spawn, type ChildProcess } from "node:child_process";
-import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type { Page } from "playwright-core";
 import { expect } from "vitest";
@@ -242,23 +241,16 @@ export function startFullPathWorkers(options: {
   readonly walDirectory: string;
   readonly recordingStore: BlobStore;
   readonly modelKey: string;
-  readonly runtimeProbeFile?: string;
 }): {
   readonly simulator: ChildProcess;
   readonly output: () => string;
   stop(): Promise<void>;
 } {
   let output = "";
-  const entrypoint = options.runtimeProbeFile === undefined
-    ? ["-m", "egma_simulator"]
-    : [path.resolve(options.simulatorDirectory, "../../fixtures/simulation-e2e/simulator_probe.py")];
-  const simulator = spawn("uv", ["run", "--frozen", "python", ...entrypoint], {
+  const simulator = spawn("uv", ["run", "--frozen", "python", "-m", "egma_simulator"], {
     cwd: options.simulatorDirectory,
     env: {
       ...process.env,
-      ...(options.runtimeProbeFile === undefined ? {} : {
-        EGMA_E2E_RUNTIME_PROBE_FILE: options.runtimeProbeFile,
-      }),
       EGMA_SIMULATOR_CONTROL_PLANE_URL: options.apiOrigin,
       EGMA_SIMULATOR_SERVICE_TOKEN: options.serviceToken,
       EGMA_SIMULATOR_CLAIMANT: `${options.claimant}-simulator`,

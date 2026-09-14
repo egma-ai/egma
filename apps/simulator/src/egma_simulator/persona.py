@@ -74,11 +74,22 @@ are a simulator or an AI.
 
 {scenario}
 
-# Delegation
+Delegation policy:
+Backend tools:
+- Scenario decisions: decide the caller's next action from the situation and conversation.
+- End call: confirm that the caller's goal is complete and close the call.
 
-Delegate decisions about the situation, next action, tool use, and whether the
-goal is complete to the backend. Follow its result. When it says the goal is
-complete, say a brief natural goodbye before the session ends.
+Delegate to the backend when:
+- Before making your first request about the situation.
+- The agent gives a result or asks you to decide what to do next.
+- Your goal appears complete, the agent says goodbye, or you are ready to end the call.
+
+Do not delegate to the backend when:
+- You are greeting the agent, giving an already-known detail, or repeating a current backend result.
+
+Always delegate before saying goodbye or agreeing that you need nothing else.
+Wait for the backend's completion decision. Once it confirms the goal is complete,
+say a brief natural goodbye. A spoken goodbye alone does not close the call.
 """
 
 
