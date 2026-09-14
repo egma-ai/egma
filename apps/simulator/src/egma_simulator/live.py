@@ -31,6 +31,7 @@ from .conductor import (
     _INPUT_SOURCE_RANGE,
     AGENT_ENDED,
     CANCEL_DIRECTIVE,
+    DEFAULT_CONDUCT,
     PERSONA_CONCLUDED,
     Conducted,
     _EvidenceRecorder,
@@ -105,6 +106,25 @@ class _ObservedLiveService(OpenAILiveLLMService):
         self._end_requested = end_requested
         self._backend_final_sent = backend_final_sent
         self.session_id: str | None = None
+        self._opening_ready = asyncio.Event()
+        self._opening_activity = asyncio.Event()
+
+    async def prompt_after_opening_wait(self) -> None:
+        """Prompt once after initial silence; an agent greeting needs no nudge."""
+        await self._opening_ready.wait()
+        try:
+            await asyncio.wait_for(
+                self._opening_activity.wait(),
+                timeout=DEFAULT_CONDUCT.agent_opening_seconds,
+            )
+        except TimeoutError:
+            if not self._opening_activity.is_set():
+                self._opening_activity.set()
+                await self.send_client_event(
+                    events.SessionCommentaryAppendEvent(
+                        delegation_id=None, content=OPENING_NUDGE
+                    )
+                )
 
     async def _run_client_delegation(self, delegation):
         await super()._run_client_delegation(delegation)
@@ -119,8 +139,11 @@ class _ObservedLiveService(OpenAILiveLLMService):
         self.session_id = evt.session.id
         self._observe_session_started()
         await super()._handle_evt_session_started(evt)
+        self._opening_ready.set()
 
     async def _handle_evt_transcript_delta(self, evt: events.TranscriptDeltaEvent):
+        if evt.delta.strip():
+            self._opening_activity.set()
         await self._observe_transcript(evt)
         await super()._handle_evt_transcript_delta(evt)
 
@@ -459,10 +482,21 @@ class LiveConductor:
                                 "role": "system",
                                 "content": persona.live_prompt(),
                             },
-                            {"role": "developer", "content": OPENING_NUDGE},
                         ]
                     )
                 )
+            )
+
+            async def wait_for_opening() -> None:
+                nonlocal fault
+                try:
+                    await live.prompt_after_opening_wait()
+                except Exception as error:
+                    fault = error
+                    faulted.set()
+
+            owned_tasks.add(
+                asyncio.create_task(wait_for_opening(), name=f"live-opening:{name}")
             )
 
             duration = asyncio.create_task(asyncio.sleep(max_duration_seconds))

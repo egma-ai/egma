@@ -13,6 +13,7 @@ from pipecat.services.openai.live import llm as live_llm
 from pipecat.services.openai.live.llm import OpenAILiveLLMService
 from websockets.asyncio.server import serve
 
+from egma_simulator import live as live_runtime
 from egma_simulator.contract import validate_spec
 from egma_simulator.conversation import ConversationControls
 from egma_simulator.live import (
@@ -1216,6 +1217,7 @@ async def test_live_conductor_cleans_up_after_provider_failure() -> None:
         and not task.done()
         and (
             task.get_name().startswith("live-pipeline:")
+            or task.get_name().startswith("live-opening:")
             or task.get_name().startswith("turn-gap:")
         )
     ]
@@ -1261,3 +1263,138 @@ async def test_live_conductor_enforces_duration_limit_and_closes_session() -> No
 
     assert result.ending == "limit_reached"
     assert connection.closed
+
+
+@pytest.mark.parametrize("speaker", ["agent", "persona", "silent", "empty"])
+async def test_live_opening_waits_and_prompts_only_a_silent_call(
+    monkeypatch, speaker
+) -> None:
+    ready = asyncio.Event()
+    greeted = asyncio.Event()
+    client_events = []
+    services = []
+    original_started = _ObservedLiveService._handle_evt_session_started
+    original_transcript = _ObservedLiveService._handle_evt_transcript_delta
+    original_send = _ObservedLiveService.send_client_event
+
+    async def started(self, event):
+        await original_started(self, event)
+        services.append(self)
+        ready.set()
+
+    async def transcript(self, event):
+        await original_transcript(self, event)
+        greeted.set()
+
+    async def send(self, event):
+        client_events.append(event.to_payload())
+        await original_send(self, event)
+
+    monkeypatch.setattr(_ObservedLiveService, "_handle_evt_session_started", started)
+    monkeypatch.setattr(
+        _ObservedLiveService, "_handle_evt_transcript_delta", transcript
+    )
+    monkeypatch.setattr(_ObservedLiveService, "send_client_event", send)
+
+    async def provider(socket):
+        await socket.recv()
+        await socket.send(
+            json.dumps(
+                {
+                    "type": "session.started",
+                    "session": {"id": "live_opening", "status": "active"},
+                }
+            )
+        )
+        await ready.wait()
+        if speaker == "silent":
+            greeted.set()
+        else:
+            await socket.send(
+                json.dumps(
+                    {
+                        "type": (
+                            "session.output_transcript.delta"
+                            if speaker == "persona"
+                            else "session.input_transcript.delta"
+                        ),
+                        "delta": ""
+                        if speaker == "empty"
+                        else "Welcome, let me introduce myself.",
+                        "start_ms": 0,
+                        "end_ms": 2000,
+                    }
+                )
+            )
+        await socket.wait_closed()
+
+    async with serve(provider, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        controls = ConversationControls()
+        connection = _Connection(asyncio.Event())
+        model = _BackendModel()
+        conductor = LiveConductor(
+            connection=connection,
+            selection=LiveSelection(
+                provider="openai",
+                model="gpt-live-1",
+                adapter="openai_live",
+                voice_id="marin",
+                key="controlled-key",
+            ),
+            backend_model=model,
+            blobs=_Blobs(),
+            recording_key="opening.wav",
+            speech_volume=1,
+            _base_url=f"ws://127.0.0.1:{port}",
+        )
+        task = asyncio.create_task(
+            conductor.conduct(
+                persona=Persona(
+                    authored=authored(),
+                    scenario_instructions="Ask a question.",
+                    model=model,
+                ),
+                max_turns=8,
+                max_duration_seconds=30,
+                controls=controls,
+                name="opening",
+                on_utterance=lambda *_: asyncio.sleep(0),
+                on_measured=lambda *_: asyncio.sleep(0),
+            )
+        )
+        try:
+            await greeted.wait()
+            assert not [
+                event
+                for event in client_events
+                if event["type"] == "session.commentary.append"
+            ], "The persona was told to speak before the opening wait ended"
+            # Expire the opening window without sleeping or racing a short deadline.
+            monkeypatch.setattr(
+                live_runtime,
+                "DEFAULT_CONDUCT",
+                SimpleNamespace(agent_opening_seconds=0),
+            )
+            await services[0].prompt_after_opening_wait()
+            await services[0].prompt_after_opening_wait()
+            nudges = [
+                event
+                for event in client_events
+                if event["type"] == "session.commentary.append"
+            ]
+            if speaker in {"silent", "empty"}:
+                assert len(nudges) == 1
+                assert "Speak your first turn" in nudges[0]["content"]
+            else:
+                assert nudges == []
+        finally:
+            controls.request_cancel()
+            await task
+        assert connection.closed
+
+    assert not [
+        task
+        for task in asyncio.all_tasks()
+        if not task.done() and task.get_name().startswith("live-opening:")
+    ]

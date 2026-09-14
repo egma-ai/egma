@@ -70,6 +70,11 @@ are a simulator or an AI.
 - {pace_instruction}
 - {interruption_instruction}
 
+# Opening the call
+
+Wait for the agent to finish its greeting before your first reply. If the agent
+has not spoken, stay quiet until you are asked to speak your first turn.
+
 # Situation
 
 {scenario}
