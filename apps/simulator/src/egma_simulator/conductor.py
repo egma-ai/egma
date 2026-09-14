@@ -962,7 +962,6 @@ class _PersonaReplyGate(FrameProcessor):
             ):
                 self._conductor.interruption_canceled("agent_stopped_before_playout")
             elif self._kind == "deliberate" and not reply.text:
-                # Nothing to speak, so nothing will ever reach the gate.
                 self._conductor.interruption_canceled("empty_reply", drain=False)
             elif reply.concluded and not reply.text:
                 self._conductor.persona_concluded_without_speech()
@@ -1184,9 +1183,6 @@ class _InterruptionAudioLimit(FrameProcessor):
             isinstance(frame, (TTSStoppedFrame, InterruptionFrame))
             and self._conductor.discarding_deliberate_audio
         ):
-            # Either frame ends the discarded turn: its own stop frame, or an
-            # interruption, after which Pipecat has cleared every queue and
-            # cancelled the speaking leg, so nothing of that turn can follow.
             self._conductor.deliberate_audio_discarded()
             await self.push_frame(frame, direction)
             return
@@ -1751,12 +1747,6 @@ class VoiceConductor:
         heard_audio = was_delivering and self._deliberate_playout_has_begun()
         began = self._persona_began if heard_audio else None
         ended = self._persona_ended if heard_audio else None
-        # A turn canceled while its speech is still being made has audio on
-        # the way to the gate. Without an interruption frame to clear it, the
-        # gate drops it frame by frame, and the persona keeps the floor until
-        # that turn's stop frame has passed: no ordinary turn may start in
-        # between and be mistaken for the canceled one. A speaking leg that
-        # failed sends no stop frame, so its caller passes drain=False.
         draining = was_ready and not force and drain
         self._interruption_state = "draining" if draining else "listening"
         if not draining:
@@ -2297,7 +2287,6 @@ class VoiceConductor:
         self._pending_silence_follow_up = silence_follow_up
         self._persona_began = None
         self._persona_ended = None
-        # A new turn is never the one being discarded.
         self._discard_deliberate_audio = False
         if deliberate:
             self._interruption_state = "ready"

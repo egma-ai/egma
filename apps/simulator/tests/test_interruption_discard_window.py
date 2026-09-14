@@ -221,8 +221,6 @@ async def test_a_cancel_after_the_gate_does_not_eat_the_next_turn(
         conductor.agent_speech_stopped()
         assert not conductor.deliberate_response_owned
         rig.output.release.set()
-        # The cancel's interruption frame runs the whole line and ends the
-        # discard: nothing of the canceled turn can come after it.
         await asyncio.wait_for(rig.probe.interrupted.wait(), 5)
         assert not conductor.discarding_deliberate_audio
 
@@ -244,8 +242,6 @@ async def test_a_cancel_before_the_gate_keeps_the_interjection_off_the_line(
         conductor = rig.conductor
         conductor.persona_will_speak(INTERJECTION, deliberate=True)
         conductor.agent_speech_stopped()
-        # The persona keeps the floor while the canceled audio drains, so no
-        # ordinary turn can start and be mistaken for it.
         assert conductor.deliberate_response_owned
         assert conductor.discarding_deliberate_audio
         rig.output.release.set()
