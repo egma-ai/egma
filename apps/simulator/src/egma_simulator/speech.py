@@ -956,7 +956,8 @@ def _openai_mouth(
                     await self.remove_audio_context(context_id)
                     return
             except asyncio.CancelledError:
-                await self.remove_audio_context(context_id)
+                # Pipecat cancels the audio context during interruption cleanup.
+                # Closing it here would report an unspoken request as completed.
                 raise
             except Exception as fault:
                 if providers.tts_customer_funded and authentication_rejected(fault):

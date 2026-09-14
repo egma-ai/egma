@@ -34,13 +34,14 @@ class _HeldResponse:
         self.first_sent = asyncio.Event()
         self.middle = asyncio.Event()
         self.ended = asyncio.Event()
+        self.exited = asyncio.Event()
 
     async def __aenter__(self):
         self.entered.set()
         return self
 
     async def __aexit__(self, *_args: object) -> None:
-        return None
+        self.exited.set()
 
     async def text(self) -> str:
         return ""
@@ -293,7 +294,7 @@ async def test_openai_http_tts_completes_on_eof_not_an_idle_gap(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
-async def test_openai_http_tts_cancellation_reaps_the_held_context() -> None:
+async def test_openai_http_tts_cancellation_stops_the_request_and_playback() -> None:
     response = _HeldResponse()
     tts, _create = _openai_tts(response)
     output = _AcceptedOutput()
@@ -320,7 +321,8 @@ async def test_openai_http_tts_cancellation_reaps_the_held_context() -> None:
     await asyncio.wait_for(worker.cancel(), 5)
     await asyncio.wait_for(running, 5)
 
-    assert not tts._audio_contexts
+    assert response.exited.is_set()
+    assert tts._audio_context_task is None
 
 
 @pytest.mark.asyncio
@@ -344,12 +346,11 @@ async def test_openai_interruption_before_audio_has_no_late_completion() -> None
         enable_rtvi=False,
         idle_timeout_secs=None,
     )
-    failed = asyncio.Event()
+    errors: list[ErrorFrame] = []
 
     @worker.event_handler("on_pipeline_error")
     async def on_error(_worker, frame: ErrorFrame) -> None:
-        if frame.fatal:
-            failed.set()
+        errors.append(frame)
 
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(worker)
@@ -366,8 +367,9 @@ async def test_openai_interruption_before_audio_has_no_late_completion() -> None
         await worker.queue_frame(InterruptionFrame())
         await asyncio.wait_for(conductor.interrupted.wait(), 1)
         assert conductor._pending_persona_text is None
-        await asyncio.wait_for(conductor.stopped.wait(), 1)
         await asyncio.wait_for(conductor.interruption_finished.wait(), 1)
+        assert response.exited.is_set()
+        assert conductor.stop_count == 0
         assert conductor.stop_errors == []
         assert not tts._audio_contexts
         assert conductor.turns == []
@@ -388,13 +390,14 @@ async def test_openai_interruption_before_audio_has_no_late_completion() -> None
         await asyncio.wait_for(next_response.ended.wait(), 1)
         await asyncio.wait_for(conductor.stopped.wait(), 1)
         assert conductor.stop_errors == []
-        assert not failed.is_set()
-        assert conductor.stop_count == 2
+        assert conductor.stop_count == 1
         assert conductor.turns == ["Next reply"]
     finally:
         if not running.done():
             await worker.cancel()
         await asyncio.wait_for(running, 1)
+
+    assert errors == [], [frame.error for frame in errors]
 
 
 @pytest.mark.asyncio
