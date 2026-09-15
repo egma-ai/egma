@@ -3833,7 +3833,8 @@ describe("the complete product, walked in order in a second project", () => {
       {
         what: "Create a persona",
         address: at("personas", "new"),
-        says: "Choose the persona's agent architecture",
+        // The setup step's title, as the boards print it.
+        says: "Choose Persona's Agent Architecture",
       },
       {
         what: "Graders",
