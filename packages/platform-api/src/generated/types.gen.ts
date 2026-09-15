@@ -3124,53 +3124,6 @@ export type UpdateOrganizationResponse = UpdateOrganizationResponses[keyof Updat
 export type UsePersonaData = {
     body?: {
         projectId?: string;
-        models?: {
-            mode: 'separate';
-            llm: {
-                provider: string;
-                model: string;
-            };
-            stt: {
-                provider: string;
-                model: string;
-            };
-            tts: {
-                provider: string;
-                model: string;
-                /**
-                 * A voice identifier supported by the selected text-to-speech provider.
-                 */
-                voiceId: string;
-            };
-        } | {
-            mode: 'live';
-            llm: {
-                provider: string;
-                model: string;
-            };
-            live: {
-                provider: 'openai';
-                model: 'gpt-live-1';
-                adapter: 'openai_live';
-                /**
-                 * A built-in voice supported by GPT Live.
-                 */
-                voiceId: string;
-            };
-        };
-        controls?: {
-            language: string;
-            emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
-            accent: string;
-            speechVolume: number;
-            backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
-            backgroundVolume: number;
-            interruptionLevel: 'none' | 'occasional' | 'frequent';
-            /**
-             * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
-             */
-            speechSpeed: 'slow' | 'normal' | 'fast';
-        };
     };
     path: {
         personaId: string;
@@ -3245,7 +3198,7 @@ export type UsePersonaResponses = {
             maximum: number | null;
         }>;
         /**
-         * This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.
+         * This project's saved model and voice settings. Null before first use. Clone the persona to change these settings.
          */
         settings: {
             id: string;
@@ -3266,10 +3219,6 @@ export type UsePersonaResponses = {
                      * A voice identifier supported by the selected text-to-speech provider.
                      */
                     voiceId: string;
-                    /**
-                     * Resolved provider speed for the selected speechSpeed category.
-                     */
-                    readonly speed: number;
                 };
             } | {
                 mode: 'live';
@@ -3289,17 +3238,11 @@ export type UsePersonaResponses = {
             };
             controls: {
                 language: string;
-                emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
-                accent: string;
-                speechVolume: number;
-                readonly executionPolicyVersion: number;
                 backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
-                backgroundVolume: number;
                 interruptionLevel: 'none' | 'occasional' | 'frequent';
-                /**
-                 * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
-                 */
-                speechSpeed: 'slow' | 'normal' | 'fast';
+            } | {
+                language: string;
+                backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
             };
             createdAt: string;
             updatedAt: string;
@@ -3387,7 +3330,7 @@ export type ListPersonasResponses = {
                 maximum: number | null;
             }>;
             /**
-             * This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.
+             * This project's saved model and voice settings. Null before first use. Clone the persona to change these settings.
              */
             settings: {
                 id: string;
@@ -3408,10 +3351,6 @@ export type ListPersonasResponses = {
                          * A voice identifier supported by the selected text-to-speech provider.
                          */
                         voiceId: string;
-                        /**
-                         * Resolved provider speed for the selected speechSpeed category.
-                         */
-                        readonly speed: number;
                     };
                 } | {
                     mode: 'live';
@@ -3431,17 +3370,11 @@ export type ListPersonasResponses = {
                 };
                 controls: {
                     language: string;
-                    emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
-                    accent: string;
-                    speechVolume: number;
-                    readonly executionPolicyVersion: number;
                     backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
-                    backgroundVolume: number;
                     interruptionLevel: 'none' | 'occasional' | 'frequent';
-                    /**
-                     * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
-                     */
-                    speechSpeed: 'slow' | 'normal' | 'fast';
+                } | {
+                    language: string;
+                    backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
                 };
                 createdAt: string;
                 updatedAt: string;
@@ -3509,16 +3442,11 @@ export type CreatePersonaData = {
         };
         controls?: {
             language: string;
-            emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
-            accent: string;
-            speechVolume: number;
             backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
-            backgroundVolume: number;
             interruptionLevel: 'none' | 'occasional' | 'frequent';
-            /**
-             * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
-             */
-            speechSpeed: 'slow' | 'normal' | 'fast';
+        } | {
+            language: string;
+            backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
         };
     };
     path?: never;
@@ -3592,7 +3520,7 @@ export type CreatePersonaResponses = {
             maximum: number | null;
         }>;
         /**
-         * This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.
+         * This project's saved model and voice settings. Null before first use. Clone the persona to change these settings.
          */
         settings: {
             id: string;
@@ -3613,10 +3541,6 @@ export type CreatePersonaResponses = {
                      * A voice identifier supported by the selected text-to-speech provider.
                      */
                     voiceId: string;
-                    /**
-                     * Resolved provider speed for the selected speechSpeed category.
-                     */
-                    readonly speed: number;
                 };
             } | {
                 mode: 'live';
@@ -3636,17 +3560,11 @@ export type CreatePersonaResponses = {
             };
             controls: {
                 language: string;
-                emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
-                accent: string;
-                speechVolume: number;
-                readonly executionPolicyVersion: number;
                 backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
-                backgroundVolume: number;
                 interruptionLevel: 'none' | 'occasional' | 'frequent';
-                /**
-                 * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
-                 */
-                speechSpeed: 'slow' | 'normal' | 'fast';
+            } | {
+                language: string;
+                backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
             };
             createdAt: string;
             updatedAt: string;
@@ -3729,10 +3647,6 @@ export type GetPersonaFormResponses = {
                  * A voice identifier supported by the selected text-to-speech provider.
                  */
                 voiceId: string;
-                /**
-                 * Resolved provider speed for the selected speechSpeed category.
-                 */
-                readonly speed: number;
             };
         } | {
             mode: 'live';
@@ -3817,7 +3731,6 @@ export type GetPersonaCapabilitiesResponses = {
                 source: 'standard' | 'account';
                 presentation: 'male' | 'female' | 'neutral' | 'unknown';
                 languages: Array<string>;
-                accents: Array<string>;
             }>;
             value?: {
                 id: string;
@@ -3825,7 +3738,6 @@ export type GetPersonaCapabilitiesResponses = {
                 source: 'standard' | 'account';
                 presentation: 'male' | 'female' | 'neutral' | 'unknown';
                 languages: Array<string>;
-                accents: Array<string>;
             };
             range?: {
                 minimum: number;
@@ -3838,61 +3750,6 @@ export type GetPersonaCapabilitiesResponses = {
             reason?: string;
             choices?: Array<string>;
             value?: string;
-            range?: {
-                minimum: number;
-                maximum: number;
-                step: number;
-            };
-        };
-        accent: {
-            status: 'supported' | 'fixed' | 'unsupported' | 'unknown';
-            reason?: string;
-            choices?: Array<string>;
-            value?: string;
-            range?: {
-                minimum: number;
-                maximum: number;
-                step: number;
-            };
-        };
-        emotion: {
-            status: 'supported' | 'fixed' | 'unsupported' | 'unknown';
-            reason?: string;
-            choices?: Array<string>;
-            value?: string;
-            range?: {
-                minimum: number;
-                maximum: number;
-                step: number;
-            };
-        };
-        speed: {
-            status: 'supported' | 'fixed' | 'unsupported' | 'unknown';
-            reason?: string;
-            choices?: Array<number>;
-            value?: number;
-            range?: {
-                minimum: number;
-                maximum: number;
-                step: number;
-            };
-        };
-        speechSpeed: {
-            status: 'supported' | 'fixed' | 'unsupported' | 'unknown';
-            reason?: string;
-            choices?: Array<'slow' | 'normal' | 'fast'>;
-            value?: 'slow' | 'normal' | 'fast';
-            range?: {
-                minimum: number;
-                maximum: number;
-                step: number;
-            };
-        };
-        speechVolume: {
-            status: 'supported' | 'fixed' | 'unsupported' | 'unknown';
-            reason?: string;
-            choices?: Array<number>;
-            value?: number;
             range?: {
                 minimum: number;
                 maximum: number;
@@ -4030,7 +3887,7 @@ export type GetPersonaResponses = {
             maximum: number | null;
         }>;
         /**
-         * This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.
+         * This project's saved model and voice settings. Null before first use. Clone the persona to change these settings.
          */
         settings: {
             id: string;
@@ -4051,10 +3908,6 @@ export type GetPersonaResponses = {
                      * A voice identifier supported by the selected text-to-speech provider.
                      */
                     voiceId: string;
-                    /**
-                     * Resolved provider speed for the selected speechSpeed category.
-                     */
-                    readonly speed: number;
                 };
             } | {
                 mode: 'live';
@@ -4074,17 +3927,11 @@ export type GetPersonaResponses = {
             };
             controls: {
                 language: string;
-                emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
-                accent: string;
-                speechVolume: number;
-                readonly executionPolicyVersion: number;
                 backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
-                backgroundVolume: number;
                 interruptionLevel: 'none' | 'occasional' | 'frequent';
-                /**
-                 * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
-                 */
-                speechSpeed: 'slow' | 'normal' | 'fast';
+            } | {
+                language: string;
+                backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
             };
             createdAt: string;
             updatedAt: string;
@@ -4097,215 +3944,6 @@ export type GetPersonaResponses = {
 };
 
 export type GetPersonaResponse = GetPersonaResponses[keyof GetPersonaResponses];
-
-export type UpdatePersonaData = {
-    body?: {
-        projectId?: string;
-        /**
-         * Your team's label in the persona library. The caller does not speak this label.
-         */
-        name?: string;
-        description?: string | null;
-        /**
-         * The human name the caller gives the agent, separate from the library name.
-         */
-        identityName?: string;
-        /**
-         * How the caller behaves and speaks. Put the situation and goal in the test scenario.
-         */
-        personality?: string;
-        models?: {
-            mode: 'separate';
-            llm: {
-                provider: string;
-                model: string;
-            };
-            stt: {
-                provider: string;
-                model: string;
-            };
-            tts: {
-                provider: string;
-                model: string;
-                /**
-                 * A voice identifier supported by the selected text-to-speech provider.
-                 */
-                voiceId: string;
-            };
-        } | {
-            mode: 'live';
-            llm: {
-                provider: string;
-                model: string;
-            };
-            live: {
-                provider: 'openai';
-                model: 'gpt-live-1';
-                adapter: 'openai_live';
-                /**
-                 * A built-in voice supported by GPT Live.
-                 */
-                voiceId: string;
-            };
-        };
-        controls?: {
-            language: string;
-            emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
-            accent: string;
-            speechVolume: number;
-            backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
-            backgroundVolume: number;
-            interruptionLevel: 'none' | 'occasional' | 'frequent';
-            /**
-             * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
-             */
-            speechSpeed: 'slow' | 'normal' | 'fast';
-        };
-        /**
-         * The current versionId from Get a persona. Required when editing identityName or personality. A stale value returns 409 version_conflict.
-         */
-        expectedVersionId?: string;
-    };
-    path: {
-        personaId: string;
-    };
-    query?: never;
-    url: '/v1/personas/{personaId}';
-};
-
-export type UpdatePersonaErrors = {
-    /**
-     * The request was refused.
-     */
-    400: Refusal;
-    /**
-     * The request was refused.
-     */
-    401: Refusal;
-    /**
-     * The request was refused.
-     */
-    403: Refusal;
-    /**
-     * The request was refused.
-     */
-    404: Refusal;
-    /**
-     * The request was refused.
-     */
-    409: Refusal;
-    /**
-     * The request was refused.
-     */
-    422: Refusal;
-    /**
-     * The request rate limit was reached.
-     */
-    429: Refusal;
-};
-
-export type UpdatePersonaError = UpdatePersonaErrors[keyof UpdatePersonaErrors];
-
-export type UpdatePersonaResponses = {
-    /**
-     * The updated persona.
-     */
-    200: {
-        id: string;
-        projectId: string | null;
-        name: string;
-        description: string | null;
-        version: number;
-        versionId: string;
-        /**
-         * The human name the caller gives the agent, separate from the library name.
-         */
-        identityName: string;
-        /**
-         * How the caller behaves and speaks. Put the situation and goal in the test scenario.
-         */
-        personality: string;
-        /**
-         * Historical core language. New persona versions use controls.language and return null here.
-         */
-        language: string | null;
-        parameterContract: Array<{
-            key: string;
-            label: string;
-            valueType: 'integer' | 'number' | 'string';
-            defaultValue: number | string;
-            unit: string | null;
-            minimum: number | null;
-            maximum: number | null;
-        }>;
-        /**
-         * This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.
-         */
-        settings: {
-            id: string;
-            models: {
-                mode: 'separate';
-                llm: {
-                    provider: string;
-                    model: string;
-                };
-                stt: {
-                    provider: string;
-                    model: string;
-                };
-                tts: {
-                    provider: string;
-                    model: string;
-                    /**
-                     * A voice identifier supported by the selected text-to-speech provider.
-                     */
-                    voiceId: string;
-                    /**
-                     * Resolved provider speed for the selected speechSpeed category.
-                     */
-                    readonly speed: number;
-                };
-            } | {
-                mode: 'live';
-                llm: {
-                    provider: string;
-                    model: string;
-                };
-                live: {
-                    provider: 'openai';
-                    model: 'gpt-live-1';
-                    adapter: 'openai_live';
-                    /**
-                     * A built-in voice supported by GPT Live.
-                     */
-                    voiceId: string;
-                };
-            };
-            controls: {
-                language: string;
-                emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
-                accent: string;
-                speechVolume: number;
-                readonly executionPolicyVersion: number;
-                backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
-                backgroundVolume: number;
-                interruptionLevel: 'none' | 'occasional' | 'frequent';
-                /**
-                 * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
-                 */
-                speechSpeed: 'slow' | 'normal' | 'fast';
-            };
-            createdAt: string;
-            updatedAt: string;
-        } | null;
-        owner: 'egma' | 'organization';
-        archivedAt: string | null;
-        createdAt: string;
-        updatedAt: string;
-    };
-};
-
-export type UpdatePersonaResponse = UpdatePersonaResponses[keyof UpdatePersonaResponses];
 
 export type ListPersonaVersionsData = {
     body?: never;
@@ -4516,8 +4154,66 @@ export type GetPersonaVersionResponses = {
 export type GetPersonaVersionResponse = GetPersonaVersionResponses[keyof GetPersonaVersionResponses];
 
 export type ForkPersonaData = {
+    /**
+     * Optional complete overrides for the new clone. Omitted values are copied from the source. Models and controls must be sent together.
+     */
     body?: {
         projectId?: string;
+        /**
+         * Your team's label in the persona library. The caller does not speak this label.
+         */
+        name?: string;
+        description?: string;
+        /**
+         * The human name the caller gives the agent, separate from the library name.
+         */
+        identityName?: string;
+        /**
+         * How the caller behaves and speaks. Put the situation and goal in the test scenario.
+         */
+        personality?: string;
+        models?: {
+            mode: 'separate';
+            llm: {
+                provider: string;
+                model: string;
+            };
+            stt: {
+                provider: string;
+                model: string;
+            };
+            tts: {
+                provider: string;
+                model: string;
+                /**
+                 * A voice identifier supported by the selected text-to-speech provider.
+                 */
+                voiceId: string;
+            };
+        } | {
+            mode: 'live';
+            llm: {
+                provider: string;
+                model: string;
+            };
+            live: {
+                provider: 'openai';
+                model: 'gpt-live-1';
+                adapter: 'openai_live';
+                /**
+                 * A built-in voice supported by GPT Live.
+                 */
+                voiceId: string;
+            };
+        };
+        controls?: {
+            language: string;
+            backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+            interruptionLevel: 'none' | 'occasional' | 'frequent';
+        } | {
+            language: string;
+            backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
+        };
     };
     path: {
         personaId: string;
@@ -4592,7 +4288,7 @@ export type ForkPersonaResponses = {
             maximum: number | null;
         }>;
         /**
-         * This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.
+         * This project's saved model and voice settings. Null before first use. Clone the persona to change these settings.
          */
         settings: {
             id: string;
@@ -4613,10 +4309,6 @@ export type ForkPersonaResponses = {
                      * A voice identifier supported by the selected text-to-speech provider.
                      */
                     voiceId: string;
-                    /**
-                     * Resolved provider speed for the selected speechSpeed category.
-                     */
-                    readonly speed: number;
                 };
             } | {
                 mode: 'live';
@@ -4636,17 +4328,11 @@ export type ForkPersonaResponses = {
             };
             controls: {
                 language: string;
-                emotion: 'neutral' | 'happy' | 'angry' | 'frustrated' | 'sad' | 'anxious';
-                accent: string;
-                speechVolume: number;
-                readonly executionPolicyVersion: number;
                 backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
-                backgroundVolume: number;
                 interruptionLevel: 'none' | 'occasional' | 'frequent';
-                /**
-                 * Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported.
-                 */
-                speechSpeed: 'slow' | 'normal' | 'fast';
+            } | {
+                language: string;
+                backgroundSoundId: 'none' | 'office-v1' | 'cafe-v1' | 'street-traffic-v1' | 'crowd-talking-v1' | 'inside-car-v1' | 'home-tv-v1' | 'wind-v1' | 'rain-v1';
             };
             createdAt: string;
             updatedAt: string;

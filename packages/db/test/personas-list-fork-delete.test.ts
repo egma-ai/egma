@@ -283,21 +283,16 @@ describe("forking a persona", () => {
   it("copies every saved project setting instead of restoring contract defaults", async () => {
     const models = {
       ...RECOMMENDED_PERSONA_MODELS,
-      tts: { ...RECOMMENDED_PERSONA_MODELS.tts, voiceId: "alloy", speed: 1.25 },
+      tts: { ...RECOMMENDED_PERSONA_MODELS.tts, voiceId: "alloy" },
     };
     const configured = await createPersona(actingIn(acme.forking), {
       ...personaNamed("Configured"),
       settings: {
         models,
         language: "en-GB",
-        emotion: "happy",
-        accent: "british",
-        speechVolume: 1.2,
         backgroundSoundId: "rain-v1",
-        backgroundVolume: 0.04,
         interruptionLevel: "occasional",
-        speechSpeed: "normal",
-        executionPolicyVersion: 1,
+        executionPolicyVersion: 2,
       },
     });
 

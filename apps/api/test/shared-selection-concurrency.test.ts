@@ -60,15 +60,6 @@ it.sequential.each(["grader", "persona"] as const)("selects a coherent run after
   };
   await seedPersonaLibrary([isolatedPersona]);
   await request("POST", `/v1/personas/${isolatedPersona.id}/use`, { projectId: who.projectId });
-  await request("PATCH", `/v1/personas/${isolatedPersona.id}`, {
-    projectId: who.projectId,
-    models: {
-      mode: "separate",
-      llm: { provider: "openai", model: "gpt-5.6-terra" },
-      stt: { provider: "openai", model: "gpt-live-transcribe" },
-      tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy", speed: 1 },
-    },
-  });
   const grader = GRADER_DEFINITION_CATALOG.find((one) => one.id === PREDEFINED_GRADERS.expectedBehaviors)!;
   const isolatedGrader = { ...grader, id: fixtureIds.grader, name: "concurrency_proof" };
   await reconcileGraderCatalog([isolatedGrader]);
@@ -93,7 +84,7 @@ it.sequential.each(["grader", "persona"] as const)("selects a coherent run after
     : "select id from project_persona where project_id=$1 and persona_definition_id=$2 for update", [who.projectId, kind === "grader" ? isolatedGrader.id : isolatedPersona.id]);
   const publication = kind === "grader"
     ? reconcileGraderCatalog([{ ...isolatedGrader, prompt: "Judge every expected behavior with exact evidence.", parameterContract: isolatedGrader.parameterContract.map((field) => field.key === "llm_model" ? { ...field, defaultValue: "gpt-4o-mini" } : field) }])
-    : seedPersonaLibrary([{ ...isolatedPersona, versions: [...isolatedPersona.versions, { ...personaCore, version: 2, id: updatedPersonaVersionId, personality: "Wait for a complete answer.", parameterContract: personaCore.parameterContract.map((field) => field.key === "tts_speed" ? { ...field, defaultValue: 1.3 } : field) }] }]);
+    : seedPersonaLibrary([{ ...isolatedPersona, versions: [...isolatedPersona.versions, { ...personaCore, version: 2, id: updatedPersonaVersionId, personality: "Wait for a complete answer.", parameterContract: personaCore.parameterContract.map((field) => field.key === "background_sound_id" ? { ...field, defaultValue: "rain-v1" } : field) }] }]);
   let launch: ReturnType<typeof request> | undefined;
   try {
     const publisherPid = await blockedBy(gatePid);
@@ -115,7 +106,8 @@ it.sequential.each(["grader", "persona"] as const)("selects a coherent run after
     expect(await getSimulation(auth, simulationId)).toMatchObject({ personaVersionId: kind === "persona" ? updatedPersonaVersionId : isolatedPersona.versions[0]!.id });
     const claim = await api.app.inject({ method: "POST", url: CLAIMS_PATH, headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` }, payload: { contract_versions: [5, 6, 7], claimant: "after-concurrent-publication", capacity: 1, wait_seconds: 0 } });
     expect(claim.statusCode, claim.body).toBe(200);
-    expect(claim.json().specs).toMatchObject([{ simulation_id: simulationId, persona: { personality: kind === "persona" ? "Wait for a complete answer." : personaCore.personality }, models: { llm: { model: "gpt-5.6-terra" }, tts: { speed: 1 } } }]);
+    expect(claim.json().specs).toMatchObject([{ simulation_id: simulationId, persona: { personality: kind === "persona" ? "Wait for a complete answer." : personaCore.personality }, models: { mode: "separate" } }]);
+    expect(claim.json().specs[0].models.tts).not.toHaveProperty("speed");
   } finally {
     await gate.sql("rollback");
     await gate.close();

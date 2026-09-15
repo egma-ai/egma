@@ -19,9 +19,7 @@ from pipecat.transports.base_transport import TransportParams
 from pipecat.workers.runner import WorkerRunner
 
 from egma_simulator.background import (
-    DEFAULT_BACKGROUND_VOLUME,
-    MAX_BACKGROUND_VOLUME,
-    MIN_BACKGROUND_VOLUME,
+    BACKGROUND_GAIN,
     BackgroundSound,
     asset_catalog,
     soundfile_mixer,
@@ -87,33 +85,30 @@ def test_all_packaged_assets_are_immutable_readable_files():
     )
 
 
-@pytest.mark.parametrize("volume", [0, float("nan"), 1])
-def test_background_volume_stays_in_the_published_range(volume: float):
-    with pytest.raises(ValueError, match="-36 dB and -12 dB"):
-        BackgroundSound("rain-v1", volume)
+def test_background_sound_has_no_authored_gain() -> None:
+    with pytest.raises(TypeError, match="positional argument"):
+        BackgroundSound("rain-v1", 0.5)  # type: ignore[call-arg]
 
 
-async def test_background_gain_is_independent_and_the_final_mix_clips():
-    quiet = soundfile_mixer(BackgroundSound("rain-v1", MIN_BACKGROUND_VOLUME))
-    loud = soundfile_mixer(BackgroundSound("rain-v1", MAX_BACKGROUND_VOLUME))
-    assert quiet is not None and loud is not None
-    await quiet.start(24_000)
-    await loud.start(24_000)
+async def test_background_gain_is_fixed_at_minus_12_db_and_the_final_mix_clips():
+    mixer = soundfile_mixer(BackgroundSound("rain-v1"))
+    assert mixer is not None
+    assert mixer._volume == pytest.approx(10 ** (-12 / 20))  # type: ignore[attr-defined]
+    assert BACKGROUND_GAIN == pytest.approx(10 ** (-12 / 20))
+    await mixer.start(24_000)
     silence = bytes(24_000 * 2)
-    quiet_samples = array("h", await quiet.mix(silence))
-    loud_samples = array("h", await loud.mix(silence))
-    assert max(map(abs, loud_samples)) > max(map(abs, quiet_samples)) * 10
+    noise = array("h", await mixer.mix(silence))
+    assert max(map(abs, noise)) > 0
 
     hot_speech = array("h", [32_760] * 24_000).tobytes()
-    protected = array("h", await loud.mix(hot_speech))
+    protected = array("h", await mixer.mix(hot_speech))
     assert max(protected) == 32_767
-    await quiet.stop()
-    await loud.stop()
+    await mixer.stop()
 
 
 @pytest.mark.parametrize("speech_frame", [TTSAudioRawFrame, SpeechOutputAudioRawFrame])
 async def test_pipecat_transmits_and_records_one_continuous_protected_mix(speech_frame):
-    mixer = soundfile_mixer(BackgroundSound("rain-v1", DEFAULT_BACKGROUND_VOLUME))
+    mixer = soundfile_mixer(BackgroundSound("rain-v1"))
     assert mixer is not None
     transport = _TransmittedAudio(mixer)
     recorded = _RecordedOutput()

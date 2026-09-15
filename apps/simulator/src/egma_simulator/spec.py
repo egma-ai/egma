@@ -41,14 +41,8 @@ class PersonaParameters:
     """Frozen controls that affect this simulation's persona execution."""
 
     language: str
-    emotion: str = "neutral"
-    accent: str = "voice_default"
-    speech_volume: float = 1.0
     background_sound_id: str = "none"
-    background_volume: float = 0.0631
     interruption_level: str = "off"
-    speech_speed: str = "normal"
-    tts_speed: float = 1.0
     execution_policy_version: int = 1
 
     @classmethod
@@ -65,14 +59,8 @@ class PersonaParameters:
             return cls(language=legacy_language)
         return cls(
             language=parameters["language"],
-            emotion=parameters["emotion"],
-            accent=parameters["accent"],
-            speech_volume=float(parameters["speech_volume"]),
             background_sound_id=parameters.get("background_sound_id", "none"),
-            background_volume=float(parameters.get("background_volume", 0.0631)),
             interruption_level=parameters.get("interruption_level", "off"),
-            speech_speed=parameters.get("speech_speed", "normal"),
-            tts_speed=float(parameters.get("tts_speed", 1.0)),
             execution_policy_version=int(parameters["execution_policy_version"]),
         )
 
@@ -234,7 +222,7 @@ class SelectedModels:
                 key=_provider_key(tts),
                 funding_receipt=tts.get("funding_receipt"),
                 voice_id=tts["voice_id"],
-                speed=float(tts["speed"]),
+                speed=1.0,
             ),
         )
 

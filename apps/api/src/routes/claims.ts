@@ -192,7 +192,7 @@ async function modelsBlock(
   models: PersonaModels,
   source: ProviderCredentialSource,
   claim: SimulationClaim,
-  controls?: Pick<PersonaControls, "language" | "emotion" | "accent" | "speechSpeed">,
+  controls?: Pick<PersonaControls, "language">,
   deploymentSecretEnvironment?: Readonly<Record<string, string>>,
 ): Promise<Record<string, unknown>> {
   const entryFor = <Job extends "llm" | "stt" | "tts" | "live">(
@@ -295,7 +295,7 @@ async function modelsBlock(
       sttProvider: models.stt.provider, sttModel: models.stt.model,
       language: controls.language, voiceId: models.tts.voiceId,
     }, voices);
-    const refusal = personaCapabilityRefusal(capabilities, controls);
+    const refusal = personaCapabilityRefusal(capabilities, { voiceId: models.tts.voiceId });
     if (refusal !== undefined) throw new PersonaCapabilityError(`the pinned persona is incompatible: ${refusal}`);
   }
   const speechKey = (
@@ -634,12 +634,13 @@ async function assembledSpec(
 
   let models: Record<string, unknown>;
   const personaParameters = validatePersonaParameterValues(claim.personaParameterContract ?? personaVersion.parameterContract, claim.personaParameterValues);
+  const personaModels = personaModelsOfParameters(personaParameters);
   const personaControls = Object.hasOwn(personaParameters, "execution_policy_version")
     ? personaControlsOfParameters(personaParameters)
     : undefined;
   const contractVersion = personaControls === undefined
     ? LEGACY_CONTRACT_VERSION
-    : Object.hasOwn(personaParameters, "speech_speed")
+    : Object.hasOwn(personaParameters, "speech_mode")
       ? CURRENT_CONTRACT_VERSION
       : CONTROLLED_CONTRACT_VERSION;
   if (!workerContractVersions.includes(contractVersion))
@@ -651,7 +652,7 @@ async function assembledSpec(
     // restarting either service.
     models = await modelsBlock(
       claim.modality,
-      personaModelsOfParameters(personaParameters),
+      personaModels,
       providerCredentials,
       claim,
       personaControls,
@@ -722,30 +723,30 @@ async function assembledSpec(
       personality: personaVersion.personality,
       ...(personaVersion.language === null ? {} : { language: personaVersion.language }),
       ...(personaControls !== undefined
-        ? { parameters: {
-            language: personaControls.language,
-            emotion: personaControls.emotion,
-            accent: personaControls.accent,
-            speech_volume: personaControls.speechVolume,
-            execution_policy_version: personaControls.executionPolicyVersion,
-            background_sound_id: personaControls.backgroundSoundId,
-            background_volume: personaControls.backgroundVolume,
-            interruption_level:
-              contractVersion === CONTROLLED_CONTRACT_VERSION
-                ? String(personaParameters.interruption_level)
-                : personaControls.interruptionLevel,
-            ...(contractVersion === CURRENT_CONTRACT_VERSION
-              ? {
-                  speech_speed: personaControls.speechSpeed,
-                  tts_speed: Number(personaParameters.tts_speed),
-                }
-              : {}),
-          } }
+        ? { parameters: contractVersion === CURRENT_CONTRACT_VERSION
+          ? {
+              language: personaControls.language,
+              execution_policy_version: personaControls.executionPolicyVersion,
+              background_sound_id: personaControls.backgroundSoundId,
+              ...(personaModels.mode === "separate" ? { interruption_level: personaControls.interruptionLevel } : {}),
+            }
+          : {
+              language: String(personaParameters.language),
+              emotion: String(personaParameters.emotion ?? "neutral"),
+              accent: String(personaParameters.accent ?? "voice_default"),
+              speech_volume: Number(personaParameters.speech_volume ?? 1),
+              execution_policy_version: Number(personaParameters.execution_policy_version),
+              background_sound_id: String(personaParameters.background_sound_id ?? "none"),
+              background_volume: Number(personaParameters.background_volume ?? 0.0631),
+              interruption_level: String(personaParameters.interruption_level ?? "off"),
+            } }
         : {}),
     },
     models:
       contractVersion === CURRENT_CONTRACT_VERSION
-        ? ("mode" in models ? models : { mode: "separate", ...models })
+        ? personaModels.mode === "separate"
+          ? { ...models, mode: "separate", tts: Object.fromEntries(Object.entries(models.tts as Record<string, unknown>).filter(([key]) => key !== "speed")) }
+          : { ...models, mode: "live" }
         : Object.fromEntries(
             Object.entries(models).filter(([key]) => key !== "mode"),
           ),

@@ -1064,13 +1064,7 @@ describe("the exported spec check, which the control plane sends through", () =>
       personality: "Careful and direct.",
       parameters: {
         language: "en-US",
-        emotion: "neutral",
-        accent: "voice_default",
-        speech_speed: "normal",
-        tts_speed: 1,
-        speech_volume: 1,
         background_sound_id: "none",
-        background_volume: 0.0631,
         interruption_level: "none",
         execution_policy_version: 2,
       },
@@ -1099,7 +1093,6 @@ describe("the exported spec check, which the control plane sends through", () =>
           model: "sonic-3.5",
           adapter: "cartesia",
           voice_id: "measured-alto-3",
-          speed: 1,
           key: "fixture-tts-key",
         },
       },
@@ -1113,27 +1106,65 @@ describe("the exported spec check, which the control plane sends through", () =>
     };
 
     expect(specComplaints(separate)).toEqual([]);
-    expect(specComplaints({
+    const liveVoice = {
       ...separate,
       modality: "voice",
+      persona: {
+        ...currentPersona,
+        parameters: {
+          language: "en-US",
+          background_sound_id: "none",
+          execution_policy_version: 2,
+        },
+      },
       models: { mode: "live", llm, live },
-    })).toEqual([]);
+    };
+    expect(specComplaints(liveVoice)).toEqual([]);
     const { key: _liveKey, ...liveWithoutKey } = live;
     expect(specComplaints({
-      ...separate,
+      ...liveVoice,
       modality: "chat",
       models: { mode: "live", llm, live: liveWithoutKey },
     })).toEqual([]);
     expect(specComplaints({
-      ...separate,
+      ...liveVoice,
       modality: "chat",
       models: { mode: "live", llm, live },
     })).toContain("/models/live: must NOT be valid");
     expect(specComplaints({
-      ...separate,
+      ...liveVoice,
       modality: "voice",
       models: { mode: "live", llm, live: liveWithoutKey },
     })).toContain("/models/live: must have required property 'key'");
+
+    for (const retired of [
+      "accent",
+      "emotion",
+      "speech_speed",
+      "tts_speed",
+      "speech_volume",
+      "background_volume",
+    ]) {
+      const candidate = structuredClone(separate);
+      (candidate.persona.parameters as Record<string, unknown>)[retired] = 1;
+      expect(specComplaints(candidate)).toContain(
+        `/persona/parameters: must NOT have additional properties`,
+      );
+    }
+
+    const liveWithInterruption = structuredClone(liveVoice);
+    (liveWithInterruption.persona.parameters as Record<string, unknown>)
+      .interruption_level = "none";
+    expect(specComplaints(liveWithInterruption)).toContain(
+      "/persona/parameters: must NOT be valid",
+    );
+
+    const cascadedWithoutInterruption = structuredClone(separate);
+    delete (cascadedWithoutInterruption.persona.parameters as Record<string, unknown>)
+      .interruption_level;
+    expect(specComplaints(cascadedWithoutInterruption)).toContain(
+      "/persona/parameters: must have required property 'interruption_level'",
+    );
   });
 
   it("has no complaints about any valid golden fixture", async () => {

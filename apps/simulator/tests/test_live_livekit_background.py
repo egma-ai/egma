@@ -26,9 +26,6 @@ from pipecat.workers.runner import WorkerRunner
 from test_voice import spec_for
 
 from egma_simulator.background import (
-    DEFAULT_BACKGROUND_VOLUME,
-    MAX_BACKGROUND_VOLUME,
-    MIN_BACKGROUND_VOLUME,
     BackgroundSound,
     asset_catalog,
     soundfile_mixer,
@@ -304,11 +301,11 @@ async def _observer(server, room_name: str) -> _RemoteCapture:
 
 
 async def _received_mix(
-    server, sound_id: str, volume: float
+    server, sound_id: str
 ) -> tuple[_RemoteCapture, _SubmittedMix, bytearray]:
     room_name = f"egma-background-proof-{uuid.uuid4().hex}"
     remote = await _observer(server, room_name)
-    mixer = soundfile_mixer(BackgroundSound(sound_id, volume))
+    mixer = soundfile_mixer(BackgroundSound(sound_id))
     transport = LiveKitTransport(
         url=server.url,
         token=_token(server.api_key, server.api_secret, room_name, "egma-persona"),
@@ -373,7 +370,6 @@ async def test_every_background_choice_reaches_one_real_caller_microphone_track(
     remote, submitted, _recorded = await _received_mix(
         live_livekit,
         sound_id,
-        DEFAULT_BACKGROUND_VOLUME,
     )
     try:
         assert len(remote.tracks) == 1
@@ -402,76 +398,53 @@ async def test_every_background_choice_reaches_one_real_caller_microphone_track(
         await remote.close()
 
 
-async def test_remote_background_gain_and_recording_follow_submitted_audio(
+async def test_fixed_background_and_recording_follow_submitted_audio(
     live_livekit,
 ):
-    quiet_remote, quiet, _quiet_recorded = await _received_mix(
-        live_livekit, "rain-v1", MIN_BACKGROUND_VOLUME
-    )
-    loud_remote, loud, loud_recorded = await _received_mix(
-        live_livekit, "rain-v1", MAX_BACKGROUND_VOLUME
-    )
+    remote, submitted, recorded = await _received_mix(live_livekit, "rain-v1")
     try:
-        quiet_noise = b"".join(
+        noise = b"".join(
             frame
-            for kind, frame, _ in quiet.frames
+            for kind, frame, _ in submitted.frames
             if not issubclass(kind, TTSAudioRawFrame)
         )
-        loud_noise = b"".join(
+        speech = b"".join(
             frame
-            for kind, frame, _ in loud.frames
-            if not issubclass(kind, TTSAudioRawFrame)
-        )
-        quiet_speech = b"".join(
-            frame
-            for kind, frame, _ in quiet.frames
+            for kind, frame, _ in submitted.frames
             if issubclass(kind, TTSAudioRawFrame)
         )
-        loud_speech = b"".join(
-            frame
-            for kind, frame, _ in loud.frames
-            if issubclass(kind, TTSAudioRawFrame)
-        )
-        quiet_received_before_speech = b"".join(
-            quiet_remote.background_before_speech[-8:]
-        )
-        loud_received_before_speech = b"".join(
-            loud_remote.background_before_speech[-8:]
-        )
+        received_before_speech = b"".join(remote.background_before_speech[-8:])
 
-        assert _rms(loud_noise) > _rms(quiet_noise) * 8
-        assert (
-            _rms(loud_received_before_speech) > _rms(quiet_received_before_speech) * 6
-        )
-        assert 0.8 < _rms(loud_speech) / _rms(quiet_speech) < 1.25
+        assert _rms(noise) > 20
+        assert _rms(speech) > _rms(noise)
+        assert _rms(received_before_speech) > 20
 
         # Background frames are recorded on the same submitted-output clock but
         # retain their non-TTS type. They add recording time without becoming
         # persona speech evidence.
-        submitted_seconds = sum(duration for _kind, _pcm, duration in loud.frames)
+        submitted_seconds = sum(duration for _kind, _pcm, duration in submitted.frames)
         received_active_seconds = sum(
             len(frame) / 2 / SAMPLE_RATE
-            for frame in loud_remote.frames
+            for frame in remote.frames
             if _rms(frame) > 20
         )
-        recorded_seconds = len(loud_recorded) / 2 / SAMPLE_RATE
+        recorded_seconds = len(recorded) / 2 / SAMPLE_RATE
         assert submitted_seconds >= 0.3
         assert received_active_seconds >= 0.3
         assert abs(recorded_seconds - submitted_seconds) < FRAME_SECONDS
         assert any(
             not issubclass(kind, TTSAudioRawFrame)
-            for kind, _pcm, _duration in loud.frames
+            for kind, _pcm, _duration in submitted.frames
         )
         assert (
             sum(
                 issubclass(kind, TTSAudioRawFrame)
-                for kind, _pcm, _duration in loud.frames
+                for kind, _pcm, _duration in submitted.frames
             )
             > 0
         )
     finally:
-        await quiet_remote.close()
-        await loud_remote.close()
+        await remote.close()
 
 
 async def test_real_caller_receives_deliberate_overlap_while_background_continues(
@@ -484,7 +457,7 @@ async def test_real_caller_receives_deliberate_overlap_while_background_continue
     connection = _LiveConductorConnection(
         live_livekit,
         room_name,
-        BackgroundSound("rain-v1", DEFAULT_BACKGROUND_VOLUME),
+        BackgroundSound("rain-v1"),
     )
     spec = spec_for(
         scenario="Interrupt with one brief relevant sentence.",
@@ -614,7 +587,7 @@ async def test_agent_stop_clears_deliberate_audio_queued_before_playout(
     connection = _LiveConductorConnection(
         live_livekit,
         room_name,
-        BackgroundSound("rain-v1", DEFAULT_BACKGROUND_VOLUME),
+        BackgroundSound("rain-v1"),
         accepted,
         queued_lead_seconds=0.75,
     )

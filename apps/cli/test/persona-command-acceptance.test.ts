@@ -12,7 +12,7 @@ import { CLI_ENTRY, makeWorkspace } from "./support/workspace.ts";
 const run = promisify(execFile);
 const KEY = "egma_sk_persona-command-acceptance";
 
-it("uses built-in defaults and preserves them through a one-control update", async () => {
+it("uses built-in defaults and clones changes into a new persona", async () => {
   const [platform, workspace] = await Promise.all([startPlatform(), makeWorkspace()]);
   try {
     platform.signedInWith(KEY);
@@ -32,20 +32,19 @@ it("uses built-in defaults and preserves them through a one-control update", asy
     });
     expect(used.stderr).toBe("");
     const useRequest = platform.records.find((record) => record.path === "/v1/personas/prs_egma_default/use");
-    expect(useRequest?.body).toMatchObject({
-      models: DEFAULT_EXPECTED_MODELS,
-      controls: { ...DEFAULT_EXPECTED_CONTROLS, backgroundSoundId: "none", backgroundVolume: 0.0631 },
-    });
+    expect(useRequest?.body).toEqual({ projectId: platform.projectId });
 
-    const updated = await run(process.execPath, [CLI_ENTRY, "persona", "update", "prs_egma_default", "--background-sound", "rain-v1"], {
+    const cloned = await run(process.execPath, [CLI_ENTRY, "persona", "clone", "prs_egma_default", "--name", "Rain caller", "--background-sound", "rain-v1"], {
       cwd: workspace.dir,
       env: workspace.env(),
     });
-    expect(updated.stderr).toBe("");
-    const updateRequest = platform.records.find((record) => record.method === "PATCH" && record.path === "/v1/personas/prs_egma_default");
-    expect(updateRequest?.body).toMatchObject({
+    expect(cloned.stderr).toBe("");
+    const cloneRequest = platform.records.find((record) => record.method === "POST" && record.path === "/v1/personas/prs_egma_default/fork");
+    expect(cloneRequest?.body).toMatchObject({
+      projectId: platform.projectId,
+      name: "Rain caller",
       models: DEFAULT_EXPECTED_MODELS,
-      controls: { ...DEFAULT_EXPECTED_CONTROLS, backgroundSoundId: "rain-v1", backgroundVolume: 0.0631 },
+      controls: { ...DEFAULT_EXPECTED_CONTROLS, backgroundSoundId: "rain-v1" },
     });
   } finally {
     await Promise.all([platform.close(), workspace.remove()]);
@@ -61,8 +60,6 @@ const DEFAULT_EXPECTED_MODELS = {
 
 const DEFAULT_EXPECTED_CONTROLS = {
   language: "en-US",
-  emotion: "neutral",
-  accent: "voice_default",
-  speechVolume: 1,
   interruptionLevel: "none",
+  backgroundSoundId: "none",
 };

@@ -5,7 +5,6 @@ import {
   RECOMMENDED_ENTRY,
   RECOMMENDED_GRADER_MODEL,
   RECOMMENDED_PERSONA_MODELS,
-  SPEED_RANGE,
   connectionTypeUsesPlatformCarrier,
   connectionOptionMetadata,
   validPersonaModels,
@@ -24,7 +23,7 @@ type JsonObject = Readonly<Record<string, unknown>>;
 const schema = JSON.parse(
   await readFile(
     new URL(
-      "../../../packages/simulation-contract/schemas/simulation-spec.v5.schema.json",
+      "../../../packages/simulation-contract/schemas/simulation-spec.v7.schema.json",
       import.meta.url,
     ),
     "utf8",
@@ -119,17 +118,21 @@ function modelsUsing(entry: ProviderCatalogEntry): PersonaModels {
 
 function contractSpecUsing(entry: ProviderCatalogEntry): Record<string, unknown> {
   const candidate = structuredClone(validVoiceSpec);
+  candidate.contract_version = 7;
+  const persona = candidate.persona as { parameters: Record<string, unknown> };
+  persona.parameters = {
+    language: String(persona.parameters.language),
+    execution_policy_version: 2,
+    background_sound_id: String(persona.parameters.background_sound_id),
+    interruption_level: "none",
+  };
+  const separateModels = candidate.models as Record<string, Record<string, unknown>>;
+  delete separateModels.tts?.speed;
+  candidate.models = { mode: "separate", ...separateModels };
   if (entry.job === "live") {
-    candidate.contract_version = 7;
     candidate.modality = "voice";
-    const persona = candidate.persona as { parameters: Record<string, unknown> };
-    persona.parameters = {
-      ...persona.parameters,
-      speech_speed: "normal",
-      tts_speed: 1,
-      interruption_level: "none",
-      execution_policy_version: 2,
-    };
+    const { interruption_level: _interruptionLevel, ...liveParameters } = persona.parameters;
+    persona.parameters = liveParameters;
     candidate.models = {
       mode: "live",
       llm: (candidate.models as Record<string, unknown>).llm,
@@ -178,13 +181,7 @@ describe("one executable model catalog", () => {
     expect(schemaLiterals(definitions.llm_selection)).toEqual([]);
 
     const tts = object(definitions.tts_selection, "tts selection");
-    const speed = object(
-      object(tts.properties, "tts properties").speed,
-      "tts speed",
-    );
-    expect({ slowest: speed.minimum, fastest: speed.maximum }).toEqual(
-      SPEED_RANGE,
-    );
+    expect(object(tts.properties, "tts properties")).not.toHaveProperty("speed");
 
     for (const job of ["llm", "stt", "tts"] as const) {
       expect(RECOMMENDED_PERSONA_MODELS[job]).toMatchObject({
@@ -194,7 +191,6 @@ describe("one executable model catalog", () => {
     }
     expect(RECOMMENDED_PERSONA_MODELS.tts).toMatchObject({
       voiceId: RECOMMENDED_ENTRY.tts.recommendedVoiceId,
-      speed: RECOMMENDED_ENTRY.tts.recommendedSpeed,
     });
     const graderDefaults = PROVIDER_CATALOG.filter(
       (entry) =>

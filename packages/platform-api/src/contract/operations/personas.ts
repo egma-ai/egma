@@ -76,13 +76,8 @@ const speechSelection = {
       type: "string",
       description: "A voice identifier supported by the selected text-to-speech provider.",
     },
-    speed: {
-      type: "number",
-      readOnly: true,
-      description: "Resolved provider speed for the selected speechSpeed category.",
-    },
   },
-  required: [...modelSelection.required, "voiceId", "speed"],
+  required: [...modelSelection.required, "voiceId"],
 } as const;
 
 const separatePersonaModels = {
@@ -99,21 +94,7 @@ const separatePersonaModels = {
   additionalProperties: false,
 } as const;
 
-const separatePersonaModelsInput = {
-  ...separatePersonaModels,
-  properties: {
-    ...separatePersonaModels.properties,
-    tts: {
-      ...speechSelection,
-      properties: {
-        provider: speechSelection.properties.provider,
-        model: speechSelection.properties.model,
-        voiceId: speechSelection.properties.voiceId,
-      },
-      required: ["provider", "model", "voiceId"],
-    },
-  },
-} as const;
+const separatePersonaModelsInput = separatePersonaModels;
 
 const liveSelection = {
   type: "object",
@@ -138,38 +119,29 @@ const livePersonaModels = {
 const personaModels = { oneOf: [separatePersonaModels, livePersonaModels] } as const;
 const personaModelsInput = { oneOf: [separatePersonaModelsInput, livePersonaModels] } as const;
 
-const personaControls = {
+const sharedControls = {
+  language: { type: "string", minLength: 1 },
+  backgroundSoundId: { type: "string", enum: ["none", "office-v1", "cafe-v1", "street-traffic-v1", "crowd-talking-v1", "inside-car-v1", "home-tv-v1", "wind-v1", "rain-v1"] },
+} as const;
+
+const cascadedPersonaControls = {
   type: "object",
   properties: {
-    language: { type: "string", minLength: 1 },
-    emotion: { type: "string", enum: ["neutral", "happy", "angry", "frustrated", "sad", "anxious"] },
-    accent: { type: "string", minLength: 1 },
-    speechVolume: { type: "number", minimum: 0.5, maximum: 1.5 },
-    executionPolicyVersion: { type: "integer", minimum: 1, readOnly: true },
-    backgroundSoundId: { type: "string", enum: ["none", "office-v1", "cafe-v1", "street-traffic-v1", "crowd-talking-v1", "inside-car-v1", "home-tv-v1", "wind-v1", "rain-v1"] },
-    backgroundVolume: { type: "number", minimum: 0.015848931924611134, maximum: 0.251188643150958 },
+    ...sharedControls,
     interruptionLevel: { type: "string", enum: ["none", "occasional", "frequent"] },
-    speechSpeed: { type: "string", enum: ["slow", "normal", "fast"], description: "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported." },
   },
-  required: ["language", "emotion", "accent", "speechVolume", "executionPolicyVersion", "backgroundSoundId", "backgroundVolume", "interruptionLevel", "speechSpeed"],
+  required: ["language", "backgroundSoundId", "interruptionLevel"],
   additionalProperties: false,
 } as const;
 
-const personaControlsInput = {
+const livePersonaControls = {
   type: "object",
-  properties: {
-    language: personaControls.properties.language,
-    emotion: personaControls.properties.emotion,
-    accent: personaControls.properties.accent,
-    speechVolume: personaControls.properties.speechVolume,
-    backgroundSoundId: personaControls.properties.backgroundSoundId,
-    backgroundVolume: personaControls.properties.backgroundVolume,
-    interruptionLevel: personaControls.properties.interruptionLevel,
-    speechSpeed: personaControls.properties.speechSpeed,
-  },
-  required: ["language", "emotion", "accent", "speechVolume", "backgroundSoundId", "backgroundVolume", "interruptionLevel", "speechSpeed"],
+  properties: sharedControls,
+  required: ["language", "backgroundSoundId"],
   additionalProperties: false,
 } as const;
+const personaControls = { oneOf: [cascadedPersonaControls, livePersonaControls] } as const;
+const personaControlsInput = personaControls;
 
 const parameterContract = arrayOf(graderSettingDefinitionSchema);
 
@@ -191,7 +163,7 @@ const persona = {
     parameterContract,
     settings: {
       ...nullable(projectPersonaSettings),
-      description: "This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version.",
+      description: "This project's saved model and voice settings. Null before first use. Clone the persona to change these settings.",
     },
     owner: { type: "string", enum: ["egma", "organization"] },
     archivedAt: nullable(dateTimeSchema),
@@ -297,16 +269,14 @@ const voiceChoice = {
     id: { type: "string" }, name: { type: "string" },
     source: { type: "string", enum: ["standard", "account"] },
     presentation: { type: "string", enum: ["male", "female", "neutral", "unknown"] },
-    languages: arrayOf({ type: "string" }), accents: arrayOf({ type: "string" }),
-  }, required: ["id", "name", "source", "presentation", "languages", "accents"], additionalProperties: false,
+    languages: arrayOf({ type: "string" }),
+  }, required: ["id", "name", "source", "presentation", "languages"], additionalProperties: false,
 } as const;
 
 const personaCapabilities = {
   type: "object", properties: {
     voices: capabilityState(voiceChoice), language: capabilityState({ type: "string" }),
-    accent: capabilityState({ type: "string" }), emotion: capabilityState({ type: "string" }),
-    speed: capabilityState({ type: "number" }), speechSpeed: capabilityState({ type: "string", enum: ["slow", "normal", "fast"] }), speechVolume: capabilityState({ type: "number" }),
-  }, required: ["voices", "language", "accent", "emotion", "speed", "speechSpeed", "speechVolume"], additionalProperties: false,
+  }, required: ["voices", "language"], additionalProperties: false,
 } as const;
 
 const namedTest = {
@@ -341,6 +311,10 @@ const createPersonaBody = {
     controls: personaControlsInput,
   },
   required: ["name", "identityName", "personality"],
+  dependentRequired: {
+    models: ["controls"],
+    controls: ["models"],
+  },
   additionalProperties: false,
   examples: [{
     name: "Caller in a hurry",
@@ -354,25 +328,18 @@ const createPersonaBody = {
       stt: { provider: "openai", model: "gpt-4o-mini-transcribe" },
       tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy" },
     },
+    controls: {
+      language: "en-US",
+      backgroundSoundId: "none",
+      interruptionLevel: "none",
+    },
   }],
 } as const;
 
-/**
- * Partial persona update. Behavior edits require expectedVersionId in the
- * access layer; omitted fields retain their current values. Metadata and
- * project settings do not create a behavior version.
- */
-const updatePersonaBody = {
-  type: "object",
-  properties: {
-    ...createPersonaBody.properties,
-    description: nullable({ type: "string" }),
-    expectedVersionId: {
-      ...stringIdSchema,
-      description: "The current versionId from Get a persona. Required when editing identityName or personality. A stale value returns 409 version_conflict.",
-    },
-  },
-  additionalProperties: false,
+const forkPersonaBody = {
+  ...createPersonaBody,
+  required: [],
+  description: "Optional complete overrides for the new clone. Omitted values are copied from the source. Models and controls must be sent together.",
 } as const;
 
 const projectBody = {
@@ -398,8 +365,8 @@ const writeRefusals = {
 export const personaOperations = {
   usePersona: defineOperation({
     operationId: "usePersona", method: "POST", path: "/v1/personas/{personaId}/use", summary: "Use a persona", tag: "Personas", security: "credentialed",
-    description: "Save this project's first model settings for the persona. Omit models to use its declared defaults. Repeated use returns the existing settings; use Update a persona to change them.",
-    request: { params: personaParams, body: { type: "object", properties: { projectId: stringIdSchema, models: personaModelsInput, controls: personaControlsInput }, additionalProperties: false }, bodyRequired: false },
+    description: "Use the persona in this project with its declared defaults. Repeated use keeps the saved settings unchanged.",
+    request: { params: personaParams, body: projectBody, bodyRequired: false },
     responses: { 200: { description: "The persona with its saved project settings.", schema: persona }, ...writeRefusals },
   }),
   listPersonas: defineOperation({
@@ -422,7 +389,7 @@ export const personaOperations = {
     path: "/v1/persona-form",
     summary: "Get persona authoring choices",
     description:
-      "Use this response to choose supported models, a recommended voice, and a valid speech rate before creating or updating a persona.",
+      "Use this response to choose supported models and a recommended voice before creating or cloning a persona.",
     tag: "Personas",
     security: "credentialed",
     request: { query: projectQuery },
@@ -512,32 +479,16 @@ export const personaOperations = {
     },
   }),
 
-  updatePersona: defineOperation({
-    operationId: "updatePersona",
-    method: "PATCH",
-    path: "/v1/personas/{personaId}",
-    summary: "Update a persona",
-    description:
-      "Change project model settings or the current custom behavior. Behavior edits require expectedVersionId and create a version when changed. Model settings and display labels create no version. Egma-owned behavior is read-only; its project settings are editable.",
-    tag: "Personas",
-    security: "credentialed",
-    request: { params: personaParams, body: updatePersonaBody },
-    responses: {
-      200: { description: "The updated persona.", schema: persona },
-      ...writeRefusals,
-    },
-  }),
-
   forkPersona: defineOperation({
     operationId: "forkPersona",
     method: "POST",
     path: "/v1/personas/{personaId}/fork",
     summary: "Clone a persona",
     description:
-      "Creates an editable custom copy of the persona's current behavior and model settings. The original persona and tests that select it stay unchanged.",
+      "Creates a changed custom copy of the persona's current behavior and model settings. The original persona and tests that select it stay unchanged.",
     tag: "Personas",
     security: "credentialed",
-    request: { params: personaParams, body: projectBody, bodyRequired: false },
+    request: { params: personaParams, body: forkPersonaBody, bodyRequired: false },
     responses: {
       201: { description: "The new custom persona.", schema: persona },
       ...writeRefusals,

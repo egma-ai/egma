@@ -3,7 +3,6 @@ import {
   GRADER_DEFINITION_CATALOG,
   PERSONA_LIBRARY_CATALOG,
   PREDEFINED_GRADERS,
-  RECOMMENDED_PERSONA_MODELS,
   reconcileGraderCatalog,
   seedPersonaLibrary,
 } from "@egma/db";
@@ -41,12 +40,6 @@ it("publishes shared core changes without reinterpreting project-owned persona s
   const version = persona.versions.at(-1)!;
   const usedPersona = await api.app.inject({ method: "POST", url: `/v1/personas/${persona.id}/use`, headers, payload: {
     projectId: who.projectId,
-    models: { ...RECOMMENDED_PERSONA_MODELS, tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed: 0.85 } },
-    controls: {
-      language: "en-US", emotion: "neutral", accent: "voice_default",
-      speechVolume: 0.85, backgroundSoundId: "none",
-      backgroundVolume: 0.0631, interruptionLevel: "none", speechSpeed: "normal",
-    },
   } });
   expect(usedPersona.statusCode, usedPersona.body).toBe(200);
   const nextPersonaVersionId = newId("prsv");
@@ -54,12 +47,13 @@ it("publishes shared core changes without reinterpreting project-owned persona s
     ...persona,
     versions: [...persona.versions, {
       ...version, id: nextPersonaVersionId, version: version.version + 1,
-      parameterContract: version.parameterContract.map((field) => field.key === "speech_volume" ? { ...field, minimum: 0.9 } : field),
+      parameterContract: version.parameterContract.map((field) => field.key === "background_sound_id" ? { ...field, defaultValue: "rain-v1" } : field),
     }],
   }])).resolves.toEqual([{ id: persona.id, name: persona.name, version: version.version + 1, versionId: nextPersonaVersionId }]);
   const currentPersona = await api.app.inject({ method: "GET", url: `/v1/personas/${persona.id}?projectId=${who.projectId}`, headers });
   expect(currentPersona.statusCode, currentPersona.body).toBe(200);
-  expect(currentPersona.json()).toMatchObject({ version: version.version + 1, versionId: nextPersonaVersionId, settings: { models: { tts: { speed: 1 } } } });
+  expect(currentPersona.json()).toMatchObject({ version: version.version + 1, versionId: nextPersonaVersionId, settings: usedPersona.json().settings });
+  expect(currentPersona.json().settings.models.tts).not.toHaveProperty("speed");
 });
 
 it("refuses changed parameter units without reinterpreting saved grader or persona values", async () => {
@@ -87,12 +81,12 @@ it("refuses changed parameter units without reinterpreting saved grader or perso
   const nextPersonaVersionId = newId("prsv");
   await expect(seedPersonaLibrary([{
     ...persona, versions: [...persona.versions, { ...current, id: nextPersonaVersionId, version: current.version + 1,
-      parameterContract: current.parameterContract.map((field) => field.key === "tts_speed" ? { ...field, unit: "seconds" } : field),
+      parameterContract: current.parameterContract.map((field) => field.key === "background_sound_id" ? { ...field, unit: "sound_id" } : field),
     }],
-  }])).resolves.toEqual([{ id: persona.id, name: persona.name, version: current.version + 1, versionId: nextPersonaVersionId }]);
+  }])).rejects.toThrow(/unit/i);
   const savedPersona = await api.app.inject({ method: "GET", url: `/v1/personas/${persona.id}?projectId=${who.projectId}`, headers });
-  expect(savedPersona.json()).toMatchObject({ version: current.version + 1, versionId: nextPersonaVersionId, settings: usedPersona.json().settings });
+  expect(savedPersona.json()).toMatchObject({ version: current.version, versionId: current.id, settings: usedPersona.json().settings });
   expect((await api.database.sql("select version from persona_definition_version where persona_id=$1 order by version", [persona.id])).rows).toEqual(
-    [...persona.versions.map(({ version }) => ({ version })), { version: current.version + 1 }],
+    persona.versions.map(({ version }) => ({ version })),
   );
 });

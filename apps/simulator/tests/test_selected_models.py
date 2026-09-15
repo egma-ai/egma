@@ -76,6 +76,36 @@ def test_daytona_provider_secret_reference_resolves_only_its_provider_env(monkey
     assert models.llm.key == "daytona-openai-placeholder"
 
 
+def test_current_tts_selection_uses_internal_normal_speed() -> None:
+    models = SelectedModels.from_document(
+        {
+            "mode": "separate",
+            "llm": {
+                "provider": "openai",
+                "model": "gpt",
+                "adapter": "openai_chat_completions",
+                "key": "llm-key",
+            },
+            "stt": {
+                "provider": "deepgram",
+                "model": "nova-3-general",
+                "adapter": "deepgram",
+                "key": "stt-key",
+            },
+            "tts": {
+                "provider": "cartesia",
+                "model": "sonic-3.5",
+                "adapter": "cartesia",
+                "voice_id": "voice-1",
+                "key": "tts-key",
+            },
+        }
+    )
+
+    assert models.tts is not None
+    assert models.tts.speed == 1.0
+
+
 def selected(
     *,
     llm_provider: str = "openai",
@@ -211,34 +241,24 @@ def test_tts_dispatch_uses_adapter_not_provider():
     assert providers.tts == "openai"
 
 
-def test_runtime_controls_reach_the_selected_voice_and_delivery():
+def test_language_reaches_the_selected_voice_with_native_speech_defaults():
     voice = voice_from_models(
         selected(),
-        PersonaParameters(
-            language="es-MX",
-            emotion="angry",
-            accent="spanish",
-            speech_volume=1.25,
-        ),
+        PersonaParameters(language="es-MX"),
     )
 
     assert voice.language == "es-MX"
-    assert voice.speech_volume == 1.25
-    assert tts_delivery_instructions(voice) == (
-        "Speak in es-MX. Use a consistently angry emotional delivery. "
-        "Use a Spanish accent."
-    )
+    assert voice.speed == 1.0
+    assert tts_delivery_instructions(voice) == "Speak in es-MX."
 
 
-async def test_cartesia_36_sends_locale_and_named_accent_on_the_pinned_wire():
+async def test_cartesia_36_sends_locale_with_native_delivery_on_the_pinned_wire():
     models = selected(tts_model="sonic-3.6")
     voice = PersonaVoice(
         voice_id=models.tts.voice_id,
         provider="cartesia",
-        speed=1.1,
+        speed=1.0,
         language="en-US",
-        emotion="anxious",
-        accent="standard-hindi",
     )
     providers = SpeechProviders.from_models(models, vad="silero").checked()
 
@@ -263,27 +283,9 @@ async def test_cartesia_36_sends_locale_and_named_accent_on_the_pinned_wire():
     assert leg._cartesia_version == CARTESIA_API_VERSION  # type: ignore[attr-defined]
     assert frames == [None]
     assert message["locale"] == "en-US"
-    assert message["accent"] == "standard-hindi"
+    assert "accent" not in message
     assert "language" not in message
-    assert message["generation_config"] == {
-        "speed": 1.1,
-        "emotion": "anxious",
-    }
-
-
-def test_cartesia_refuses_a_named_accent_that_its_older_wire_cannot_send():
-    models = selected(tts_model="sonic-3.5")
-    providers = SpeechProviders.from_models(models, vad="silero").checked()
-    voice = PersonaVoice(
-        voice_id=models.tts.voice_id,
-        provider="cartesia",
-        speed=1.0,
-        language="en-US",
-        accent="standard-hindi",
-    )
-
-    with pytest.raises(SpeechFault, match="named Cartesia accents require sonic-3.6"):
-        _mouth(providers, voice)
+    assert message["generation_config"] == {"speed": 1.0}
 
 
 def test_openai_private_voice_requires_customer_funded_credentials():

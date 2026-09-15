@@ -58,7 +58,7 @@ egma persona capabilities
 egma persona use
 egma persona create
 egma persona clone
-egma persona update
+egma persona delete
 egma suite create
 egma suite delete
 egma test delete
@@ -79,14 +79,32 @@ egma agent connection add --help
 The CLI has no wizard or interactive setup state machine. Persona read and
 write commands print JSON so coding agents can use the complete API response.
 
-Persona authoring supports two speech modes. Pass `--speech-mode separate`
-with `--stt-provider`, `--stt-model`, `--tts-provider`, and `--tts-model` to
-choose speech services independently. Pass `--speech-mode live --voice alloy`
-to use OpenAI `gpt-live-1`; the CLI sends no inactive STT or TTS fields. Both
-modes use the independent `--llm-provider` and `--llm-model` reasoning choice.
-Use `egma persona capabilities` before saving and run a simulation to hear the
-result. Speech rate uses `slow`, `normal`, or `fast`, and interruption level
-uses `none`, `occasional`, or `frequent`.
+Saved personas are read-only. Create a persona or clone an existing one when
+you need different behavior, models, or controls. `egma persona settings
+<Persona ID>` reads the saved configuration. It does not open an edit flow.
+
+Persona authoring supports two fixed speech modes. Pass `--speech-mode
+separate` for Cascaded mode, with an STT provider and model, a TTS provider and
+model, and a voice. Cascaded personas also accept `--interruption-level none`,
+`occasional`, or `frequent`. Pass `--speech-mode live --voice alloy` for Live
+mode. Live always uses OpenAI `gpt-live-1` for the conversation and does not
+accept STT, TTS, or interruption flags.
+
+Both modes use the independent `--llm-provider` and `--llm-model` reasoning
+choice. Both also accept `--language` and `--background-sound`. Background
+audio uses a fixed -12 dB gain, so there is no background volume flag. Speech
+uses the selected provider's normal speed and volume. Use `egma persona
+capabilities` to read supported voices and languages before you create a
+persona. Run a simulation to hear the result.
+
+`egma persona use <Persona ID>` adds a built-in persona with its declared
+defaults. `egma persona clone <Persona ID>` creates a custom copy. Clone flags
+are optional and apply in the same request that creates the clone. Omitted
+values copy the source, and the clone keeps the source speech mode.
+
+`egma persona delete <Persona ID>` removes a custom persona from authoring.
+Built-in personas cannot be deleted. Existing run evidence and frozen persona
+versions remain readable.
 
 ## Sign in and initialize a repository
 

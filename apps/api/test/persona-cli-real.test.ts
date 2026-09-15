@@ -12,7 +12,7 @@ import { projectKeyFor, signUp } from "./support/traces.ts";
 
 const run = promisify(execFile);
 
-it("persists CLI interruption and background controls through the authenticated API", async () => {
+it("clones CLI interruption and background controls without changing the source", async () => {
   const instance = await startInstance("persona_cli_real", { web: false });
   const workspace = await makeWorkspace();
   try {
@@ -42,19 +42,27 @@ it("persists CLI interruption and background controls through the authenticated 
     });
     expect(used.stderr).toBe("");
 
-    const updated = await run(process.execPath, [CLI_ENTRY, "persona", "update", persona!.id,
+    const cloned = await run(process.execPath, [CLI_ENTRY, "persona", "clone", persona!.id,
       "--interruption-level", "occasional", "--background-sound", "rain-v1"], {
       cwd: workspace.dir,
       env: workspace.env(),
     });
-    expect(updated.stderr).toBe("");
+    expect(cloned.stderr).toBe("");
+    const clone = JSON.parse(cloned.stdout) as { id: string };
 
-    const read = await fetch(`${instance.origin}/v1/personas/${persona!.id}?projectId=${customer.projectId}`, {
+    const read = await fetch(`${instance.origin}/v1/personas/${clone.id}?projectId=${customer.projectId}`, {
       headers: { authorization: `Bearer ${key}` },
     });
     expect(read.status, await read.clone().text()).toBe(200);
     expect(await read.json()).toMatchObject({
       settings: { controls: { interruptionLevel: "occasional", backgroundSoundId: "rain-v1" } },
+    });
+    const source = await fetch(`${instance.origin}/v1/personas/${persona!.id}?projectId=${customer.projectId}`, {
+      headers: { authorization: `Bearer ${key}` },
+    });
+    expect(source.status, await source.clone().text()).toBe(200);
+    expect(await source.json()).toMatchObject({
+      settings: { controls: { interruptionLevel: "frequent", backgroundSoundId: "none" } },
     });
   } finally {
     await workspace.remove();

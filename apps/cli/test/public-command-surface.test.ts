@@ -93,11 +93,11 @@ const APPROVED_FLAGS = [
   { words: ["project", "api-key", "create"], flags: ["--cwd", "--name"] },
   { words: ["persona", "list"], flags: ["--cwd"] },
   { words: ["persona", "settings"], flags: ["--cwd"] },
-  { words: ["persona", "clone"], flags: ["--cwd"] },
+  { words: ["persona", "clone"], flags: ["--background-sound", "--cwd", "--description", "--identity-name", "--interruption-level", "--language", "--llm-model", "--llm-provider", "--name", "--personality", "--stt-model", "--stt-provider", "--tts-model", "--tts-provider", "--voice"] },
   { words: ["persona", "capabilities"], flags: ["--cwd", "--language", "--speech-mode", "--stt-model", "--stt-provider", "--tts-model", "--tts-provider", "--voice"] },
-  { words: ["persona", "use"], flags: ["--accent", "--background-sound", "--background-volume", "--cwd", "--emotion", "--interruption-level", "--language", "--llm-model", "--llm-provider", "--speech-mode", "--speech-speed", "--speech-volume", "--stt-model", "--stt-provider", "--tts-model", "--tts-provider", "--voice"] },
-  { words: ["persona", "create"], flags: ["--accent", "--background-sound", "--background-volume", "--cwd", "--description", "--emotion", "--identity-name", "--interruption-level", "--language", "--llm-model", "--llm-provider", "--name", "--personality", "--speech-mode", "--speech-speed", "--speech-volume", "--stt-model", "--stt-provider", "--tts-model", "--tts-provider", "--voice"] },
-  { words: ["persona", "update"], flags: ["--accent", "--background-sound", "--background-volume", "--cwd", "--description", "--emotion", "--expected-version", "--identity-name", "--interruption-level", "--language", "--llm-model", "--llm-provider", "--name", "--personality", "--speech-mode", "--speech-speed", "--speech-volume", "--stt-model", "--stt-provider", "--tts-model", "--tts-provider", "--voice"] },
+  { words: ["persona", "use"], flags: ["--cwd"] },
+  { words: ["persona", "create"], flags: ["--background-sound", "--cwd", "--description", "--identity-name", "--interruption-level", "--language", "--llm-model", "--llm-provider", "--name", "--personality", "--speech-mode", "--stt-model", "--stt-provider", "--tts-model", "--tts-provider", "--voice"] },
+  { words: ["persona", "delete"], flags: ["--cwd"] },
   { words: ["suite", "create"], flags: ["--cwd", "--name"] },
   { words: ["suite", "delete"], flags: ["--cwd"] },
   { words: ["test", "delete"], flags: ["--cwd"] },
@@ -165,7 +165,7 @@ describe("the skills-first public command surface", () => {
     expect(result.code).not.toBe(0);
   });
 
-  it.each(["use", "create", "update"])(
+  it.each(["use", "create", "clone"])(
     "refuses --voice-access-proof for persona %s",
     async (command) => {
       const result = await egma(["persona", command, "--voice-access-proof", "proof"]);

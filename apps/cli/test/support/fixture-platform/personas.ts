@@ -23,22 +23,21 @@ export type PersonaControls = {
 const EGMA_PREDEFINED = "Everyday Caller [Male]";
 
 const DEFAULT_MODELS = {
+  mode: "separate",
   llm: { provider: "openai", model: "gpt-4o" },
   stt: { provider: "deepgram", model: "nova-3" },
-  tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy", speed: 1 },
+  tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "alloy" },
 };
 
 const DEFAULT_CONTROLS = {
   language: "en-US",
-  emotion: "neutral",
-  accent: "voice_default",
-  speechVolume: 1,
   backgroundSoundId: "none",
-  backgroundVolume: 0.0631,
+  interruptionLevel: "none",
 };
 
 function parameterContract() {
   return Object.entries({
+    speech_mode: "separate",
     llm_provider: "openai",
     llm_model: "gpt-4o",
     stt_provider: "deepgram",
@@ -46,13 +45,10 @@ function parameterContract() {
     tts_provider: "openai",
     tts_model: "gpt-4o-mini-tts",
     tts_voice_id: "alloy",
-    tts_speed: 1,
     language: "en-US",
-    emotion: "neutral",
-    accent: "voice_default",
-    speech_volume: 1,
+    execution_policy_version: 2,
     background_sound_id: "none",
-    background_volume: 0.0631,
+    interruption_level: "none",
   }).map(([key, defaultValue]) => ({ key, defaultValue }));
 }
 
@@ -157,8 +153,8 @@ export function personaRoutes(options: {
               if (gate !== null) return gate;
               settings = {
                 id: "pps_fixture_default",
-                models: request.body?.models ?? DEFAULT_MODELS,
-                controls: { ...(request.body?.controls as object ?? DEFAULT_CONTROLS), executionPolicyVersion: 1 },
+                models: DEFAULT_MODELS,
+                controls: DEFAULT_CONTROLS,
                 createdAt: "2026-09-10T00:00:00.000Z",
                 updatedAt: "2026-09-10T00:00:00.000Z",
               };
@@ -166,20 +162,56 @@ export function personaRoutes(options: {
             }),
         },
         {
-          method: "PATCH",
-          path: "/v1/personas/:personaId",
+          method: "POST",
+          path: "/v1/personas/:personaId/fork",
           handle: (request) =>
             behind(request, () => {
               const gate = projectGate(given(text(request.body?.projectId)));
               if (gate !== null) return gate;
-              settings = {
+              const source = personas.find((one) => one.id === request.params.personaId);
+              if (source === undefined) return refuse(404, "not_found", "persona not found");
+              const made = controls.add(text(request.body?.name) || `${source.name} Copy`);
+              const forkSettings = {
                 id: "pps_fixture_default",
                 models: request.body?.models ?? DEFAULT_MODELS,
-                controls: { ...(request.body?.controls as object ?? DEFAULT_CONTROLS), executionPolicyVersion: 1 },
+                controls: request.body?.controls ?? DEFAULT_CONTROLS,
                 createdAt: "2026-09-10T00:00:00.000Z",
                 updatedAt: "2026-09-10T00:00:00.000Z",
               };
-              return { status: 200, body: { id: request.params.personaId, settings } };
+              return {
+                status: 201,
+                body: {
+                  ...made,
+                  description: text(request.body?.description) || "A regular conversationalist.",
+                  owner: "project",
+                  visibility: "private",
+                  version: 1,
+                  currentVersionId: "pvr_fixture_fork",
+                  identityName: text(request.body?.identityName) || "Naman",
+                  personality: text(request.body?.personality) || "Speaks clearly and asks one question at a time.",
+                  language: String((forkSettings.controls as { language?: unknown }).language ?? "en-US"),
+                  parameterContract: parameterContract(),
+                  settings: forkSettings,
+                  createdAt: "2026-09-10T00:00:00.000Z",
+                  updatedAt: "2026-09-10T00:00:00.000Z",
+                },
+              };
+            }),
+        },
+        {
+          method: "DELETE",
+          path: "/v1/personas/:personaId",
+          handle: (request) =>
+            behind(request, () => {
+              const gate = projectGate(given(request.url.searchParams.get("projectId")));
+              if (gate !== null) return gate;
+              const at = personas.findIndex((one) => one.id === request.params.personaId);
+              if (at === -1) return refuse(404, "not_found", "persona not found");
+              if (personas[at]?.id === "prs_egma_default") {
+                return refuse(409, "persona_is_builtin", "built-in personas cannot be deleted");
+              }
+              personas.splice(at, 1);
+              return { status: 204 };
             }),
         },
       ],

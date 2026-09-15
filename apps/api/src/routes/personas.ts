@@ -1,9 +1,7 @@
 import {
   createPersona,
   usePersona,
-  PersonaVersionConflictError,
   deletePersona,
-  editPersona,
   forkPersona,
   getPersona,
   getPersonaVersion,
@@ -17,15 +15,12 @@ import {
   ProjectOutsideOrganizationError,
   RECOMMENDED_PERSONA_MODELS,
   personaControlsOfParameters,
-  defaultPersonaParameterValues,
   resolveProviderKeyForAuthoring,
   testsUsingPersona,
   UnprocessableInputError,
   validPersonaModels,
   validPersonaControls,
   PERSONA_EXECUTION_POLICY_VERSION,
-  PERSONA_SPEECH_SPEED_TARGETS,
-  personaSpeechSpeedOfTarget,
   WriteAbortedError,
   type AuthContext,
   type Persona,
@@ -75,11 +70,10 @@ type Query = {
 };
 
 const PERSONA_CONTROL_FIELDS = [
-  "language", "emotion", "accent", "speechVolume", "backgroundSoundId",
-  "backgroundVolume", "interruptionLevel", "speechSpeed",
+  "language", "backgroundSoundId", "interruptionLevel",
 ] as const;
 
-function parsedControls(value: unknown, legacySpeed?: number): ReturnType<typeof validPersonaControls> {
+function parsedControls(value: unknown, mode: "separate" | "live"): ReturnType<typeof validPersonaControls> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new UnprocessableInputError("controls: Send the complete persona controls as an object.");
   }
@@ -89,41 +83,20 @@ function parsedControls(value: unknown, legacySpeed?: number): ReturnType<typeof
   }
   try {
     const held = value as Record<string, unknown>;
-    return validPersonaControls({
-      ...held,
-      interruptionLevel: held.interruptionLevel === "off" ? "none" : held.interruptionLevel,
-      speechSpeed: held.speechSpeed ?? (legacySpeed === undefined ? "normal" : personaSpeechSpeedOfTarget(legacySpeed)),
-      executionPolicyVersion: PERSONA_EXECUTION_POLICY_VERSION,
-    });
+    return validPersonaControls({ ...held, executionPolicyVersion: PERSONA_EXECUTION_POLICY_VERSION }, mode);
   } catch (cause) {
     if (cause instanceof TypeError) throw new UnprocessableInputError(`controls: ${cause.message}`);
     throw cause;
   }
 }
 
-function parsedModels(value: unknown, controls: ReturnType<typeof validPersonaControls> | undefined) {
+function parsedModels(value: unknown) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return validPersonaModels(value);
   const held = value as Record<string, unknown>;
   const tts = held.tts;
   if (typeof tts !== "object" || tts === null || Array.isArray(tts)) return validPersonaModels(value);
-  const legacy = (tts as Record<string, unknown>).speed;
-  if (legacy !== undefined && (typeof legacy !== "number" || !Number.isFinite(legacy) || legacy < 0.25 || legacy > 4)) {
-    throw new UnprocessableInputError("models.tts.speed: Choose a historical numeric value from 0.25 through 4, or use controls.speechSpeed.");
-  }
-  const speechSpeed = controls?.speechSpeed ?? (typeof legacy === "number" ? personaSpeechSpeedOfTarget(legacy) : "normal");
-  return validPersonaModels({ ...held, tts: { ...tts, speed: PERSONA_SPEECH_SPEED_TARGETS[speechSpeed] } });
-}
-
-function legacySpeed(value: unknown): number | undefined {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-  const tts = (value as Record<string, unknown>).tts;
-  if (typeof tts !== "object" || tts === null || Array.isArray(tts)) return undefined;
-  const speed = (tts as Record<string, unknown>).speed;
-  return typeof speed === "number" && Number.isFinite(speed) ? speed : undefined;
-}
-
-function controlsForRetainedSpeed(speed: number) {
-  return validPersonaControls({ language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1, backgroundSoundId: "none", backgroundVolume: 0.0631, interruptionLevel: "none", speechSpeed: personaSpeechSpeedOfTarget(speed), executionPolicyVersion: PERSONA_EXECUTION_POLICY_VERSION });
+  if (Object.hasOwn(tts, "speed")) throw new UnprocessableInputError("models.tts.speed: Speech rate is not an authored persona setting.");
+  return validPersonaModels({ ...held, tts: { ...tts, speed: 1 } });
 }
 
 const voiceCache = new Map<string, { expires: number; voices: readonly PersonaVoice[] }>();
@@ -222,7 +195,7 @@ const REFUSALS = {
    */
   predefinedPersona: (personaId: string): string =>
     `Persona ${personaId} is Predefined. Its core and metadata cannot be changed, and it cannot be deleted. ` +
-    `Clone it to make a Custom persona you can edit.`,
+    `Clone it to make a changed Custom persona.`,
 
   invalidCursor: (cursor: string): string =>
     `Cursor ${cursor} is not valid for this list. Remove it and start from ` +
@@ -321,6 +294,10 @@ function unknownQuery(
  * with technical voice only under TTS.
  */
 function describedPersona(one: Persona): Record<string, unknown> {
+  const publicModels = one.settings?.models.mode === "separate"
+    ? { ...one.settings.models, tts: { provider: one.settings.models.tts.provider, model: one.settings.models.tts.model, voiceId: one.settings.models.tts.voiceId } }
+    : one.settings?.models;
+  const controls = one.settings === null ? null : personaControlsOfParameters(one.settings.parameterValues);
   return {
     id: one.id,
     projectId: one.projectId,
@@ -332,7 +309,17 @@ function describedPersona(one: Persona): Record<string, unknown> {
     personality: one.personality,
     language: one.language,
     parameterContract: one.parameterContract,
-    settings: one.settings === null ? null : { id: one.settings.id, models: one.settings.models, controls: personaControlsOfParameters(one.settings.parameterValues), createdAt: one.settings.createdAt.toISOString(), updatedAt: one.settings.updatedAt.toISOString() },
+    settings: one.settings === null ? null : {
+      id: one.settings.id,
+      models: publicModels,
+      controls: controls === null ? null : {
+        language: controls.language,
+        backgroundSoundId: controls.backgroundSoundId,
+        ...(one.settings.models.mode === "separate" ? { interruptionLevel: controls.interruptionLevel } : {}),
+      },
+      createdAt: one.settings.createdAt.toISOString(),
+      updatedAt: one.settings.updatedAt.toISOString(),
+    },
     owner: one.owner,
     archivedAt: one.archivedAt?.toISOString() ?? null,
     createdAt: one.createdAt.toISOString(),
@@ -352,12 +339,6 @@ function describedVersion(one: PersonaVersion): Record<string, unknown> {
     parameterContract: one.parameterContract,
     createdAt: one.createdAt.toISOString(),
   };
-}
-
-function effectiveControls(one: Persona): ReturnType<typeof validPersonaControls> {
-  return one.settings === null
-    ? personaControlsOfParameters(defaultPersonaParameterValues(one.parameterContract))
-    : personaControlsOfParameters(one.settings.parameterValues);
 }
 
 /* ------------------------------------------------------------ the project */
@@ -456,7 +437,9 @@ export async function personaRoutes(
           ? { recommendedVoiceId: entry.recommendedVoiceId }
           : {}),
       })),
-      recommendedModels: RECOMMENDED_PERSONA_MODELS,
+      recommendedModels: RECOMMENDED_PERSONA_MODELS.mode === "separate"
+        ? { ...RECOMMENDED_PERSONA_MODELS, tts: { provider: RECOMMENDED_PERSONA_MODELS.tts.provider, model: RECOMMENDED_PERSONA_MODELS.tts.model, voiceId: RECOMMENDED_PERSONA_MODELS.tts.voiceId } }
+        : RECOMMENDED_PERSONA_MODELS,
     });
   });
 
@@ -479,7 +462,10 @@ export async function personaRoutes(
       const credential = customer === undefined
         ? await authoringCredential(options, acting.auth, "cartesia")
         : { ...customer, paymentSource: "customer" as const };
-      if (credential === undefined) return reply.send(resolvePersonaCapabilities(selection));
+      if (credential === undefined) {
+        const capabilities = resolvePersonaCapabilities(selection);
+        return reply.send({ voices: capabilities.voices, language: capabilities.language });
+      }
       const cacheKey = `${auth.organizationId}:cartesia:${credential.credentialRef}`;
       const cached = query.refresh === true ? undefined : voiceCache.get(cacheKey);
       if (cached !== undefined && cached.expires > Date.now()) voices = cached.voices;
@@ -489,12 +475,13 @@ export async function personaRoutes(
           voices = customer === undefined ? discovered.filter((voice) => voice.publiclyAccessible === true) : discovered;
         } catch {
           const unresolved = resolvePersonaCapabilities(selection);
-          return reply.send({ ...unresolved, voices: { status: "unknown", reason: "Cartesia voice discovery could not be loaded. Try refresh again." } });
+          return reply.send({ voices: { status: "unknown", reason: "Cartesia voice discovery could not be loaded. Try refresh again." }, language: unresolved.language });
         }
         voiceCache.set(cacheKey, { voices, expires: Date.now() + 5 * 60_000 });
       }
     }
-    return reply.send(resolvePersonaCapabilities(selection, voices));
+    const capabilities = resolvePersonaCapabilities(selection, voices);
+    return reply.send({ voices: capabilities.voices, language: capabilities.language });
   });
 
   /**
@@ -618,19 +605,20 @@ export async function personaRoutes(
       return sendRefusal(reply, "unprocessable", unexpected);
     }
 
-    const retainedSpeed = legacySpeed(body.models);
-    const controls = "controls" in body ? parsedControls(body.controls, retainedSpeed) : retainedSpeed === undefined ? undefined : controlsForRetainedSpeed(retainedSpeed);
-    const models = "models" in body ? parsedModels(body.models, controls) : undefined;
+    if (("models" in body) !== ("controls" in body)) {
+      return sendRefusal(reply, "unprocessable", "models and controls must be sent together when creating a persona with custom settings.");
+    }
+    const models = "models" in body ? parsedModels(body.models) : undefined;
+    const controls = models === undefined ? undefined : parsedControls(body.controls, models.mode);
 
     const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
-    if (controls !== undefined && models === undefined) return sendRefusal(reply, "unprocessable", "models: Send the complete model selection with persona controls.");
     if (models !== undefined) {
       const selectedControls = controls ?? validPersonaControls({
-        language: "en-US", emotion: "neutral", accent: "voice_default", speechVolume: 1,
-        backgroundSoundId: "none", backgroundVolume: 0.0631, interruptionLevel: "none", speechSpeed: "normal",
+        language: "en-US", backgroundSoundId: "none",
+        ...(models.mode === "separate" ? { interruptionLevel: "none" } : {}),
         executionPolicyVersion: PERSONA_EXECUTION_POLICY_VERSION,
-      });
+      }, models.mode);
       const reason = await settingsRefusal(options, acting.auth, models, selectedControls);
       if (reason !== undefined) return sendRefusal(reply, "unprocessable", reason);
     }
@@ -650,84 +638,23 @@ export async function personaRoutes(
     return reply.code(201).send(describedPersona(created));
   });
 
-  /**
-   * Absent fields stay saved. Core edits require the current base; settings
-   * and live metadata save without creating a version.
-   */
-  registerPlatformOperation(app, personaOperations.updatePersona, async (request, reply) => {
-    const { auth } = requesterOf(request);
-    const { personaId } = request.params as { personaId: string };
-    const body = (request.body ?? {}) as Body;
-
-    const refused = mayAuthor(reply, auth, "edit personas");
-    if (refused !== undefined) return refused;
-
-    const unexpected = unknownBody(body, [...PERSONA_BODY_FIELDS, "expectedVersionId"]);
-    if (unexpected !== undefined) {
-      return sendRefusal(reply, "unprocessable", unexpected);
-    }
-
-    const retainedSpeed = legacySpeed(body.models);
-    const controls = "controls" in body ? parsedControls(body.controls, retainedSpeed) : undefined;
-    const models = "models" in body ? parsedModels(body.models, controls) : undefined;
-
-    const acting = await projectFor(auth, given(text(body.projectId)));
-    if ("refusal" in acting) return refuseActing(reply, acting);
-    if (controls !== undefined && models === undefined) return sendRefusal(reply, "unprocessable", "models: Send the complete model selection with persona controls.");
-    if (models !== undefined) {
-      const current = await getPersona(acting.auth, personaId);
-      if (current === undefined) return noSuchPersona(reply, personaId);
-      const reason = await settingsRefusal(options, acting.auth, models, controls ?? effectiveControls(current));
-      if (reason !== undefined) return sendRefusal(reply, "unprocessable", reason);
-    }
-
-    const edited = await editPersona(acting.auth, personaId, {
-      ...("name" in body ? { name: text(body.name) } : {}),
-      ...("description" in body
-        ? { description: given(text(body.description)) ?? null }
-        : {}),
-      ...("identityName" in body
-        ? { identityName: text(body.identityName) }
-        : {}),
-      ...("personality" in body
-        ? { personality: text(body.personality) }
-        : {}),
-      ...(models === undefined || controls !== undefined ? {} : { models }),
-      ...(models === undefined || controls === undefined ? {} : { settings: { models, ...controls } }),
-      ...("expectedVersionId" in body ? { expectedVersionId: text(body.expectedVersionId) } : {}),
-    });
-
-    if (edited === undefined) return noSuchPersona(reply, personaId);
-    return reply.send(describedPersona(edited));
-  });
-
   registerPlatformOperation(app, personaOperations.usePersona, async (request, reply) => {
     const { auth } = requesterOf(request);
     const { personaId } = request.params as { personaId: string };
     const body = (request.body ?? {}) as Body;
     const refused = mayAuthor(reply, auth, "use personas");
     if (refused !== undefined) return refused;
-    const unexpected = unknownBody(body, ["projectId", "models", "controls"]);
+    const unexpected = unknownBody(body, ["projectId"]);
     if (unexpected !== undefined) return sendRefusal(reply, "unprocessable", unexpected);
     const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
-    const retainedSpeed = legacySpeed(body.models);
-    const controls = "controls" in body ? parsedControls(body.controls, retainedSpeed) : undefined;
-    const models = "models" in body ? parsedModels(body.models, controls) : undefined;
-    if (controls !== undefined && models === undefined) return sendRefusal(reply, "unprocessable", "models: Send the complete model selection with persona controls.");
-    if (models !== undefined) {
-      const current = await getPersona(acting.auth, personaId);
-      if (current === undefined) return noSuchPersona(reply, personaId);
-      const reason = await settingsRefusal(options, acting.auth, models, controls ?? effectiveControls(current));
-      if (reason !== undefined) return sendRefusal(reply, "unprocessable", reason);
-    }
-    const one = await usePersona(acting.auth, personaId, models === undefined ? undefined : controls === undefined ? models : { models, ...controls });
+    const one = await usePersona(acting.auth, personaId);
     if (one === undefined) return noSuchPersona(reply, personaId);
     return reply.send(describedPersona(one));
   });
 
   /**
-   * Fork the current persona into an editable Custom persona with its own
+   * Fork the current persona into a changed Custom persona with its own
    * history, including name, description, behavior, and model selections.
    */
   registerPlatformOperation(app, personaOperations.forkPersona, async (request, reply) => {
@@ -741,7 +668,23 @@ export async function personaRoutes(
     const acting = await projectFor(auth, given(text(body.projectId)));
     if ("refusal" in acting) return refuseActing(reply, acting);
 
-    const fork = await forkPersona(acting.auth, personaId);
+    const unexpected = unknownBody(body, PERSONA_BODY_FIELDS);
+    if (unexpected !== undefined) return sendRefusal(reply, "unprocessable", unexpected);
+    if (("models" in body) !== ("controls" in body)) return sendRefusal(reply, "unprocessable", "models and controls must be sent together when a clone changes settings.");
+    const models = "models" in body ? parsedModels(body.models) : undefined;
+    const controls = models === undefined ? undefined : parsedControls(body.controls, models.mode);
+    if (models !== undefined && controls !== undefined) {
+      const reason = await settingsRefusal(options, acting.auth, models, controls);
+      if (reason !== undefined) return sendRefusal(reply, "unprocessable", reason);
+    }
+
+    const fork = await forkPersona(acting.auth, personaId, {
+      ...("name" in body ? { name: text(body.name) } : {}),
+      ...("description" in body ? { description: text(body.description) } : {}),
+      ...("identityName" in body ? { identityName: text(body.identityName) } : {}),
+      ...("personality" in body ? { personality: text(body.personality) } : {}),
+      ...(models === undefined || controls === undefined ? {} : { settings: { models, ...controls } }),
+    });
     if (fork === undefined) return noSuchPersona(reply, personaId);
 
     return reply.code(201).send(describedPersona(fork));
@@ -779,9 +722,6 @@ export async function personaRoutes(
    * fault.
    */
   app.setErrorHandler(async (error, _request, reply) => {
-    if (error instanceof PersonaVersionConflictError) {
-      return sendRefusal(reply, "version_conflict", error.message);
-    }
     if (error instanceof EgmaProvidedPersonaError) {
       return sendRefusal(
         reply,

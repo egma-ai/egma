@@ -2,14 +2,19 @@
 title: "Add a persona"
 ---
 
-Start with **Everyday Caller [Male]**, or create a custom persona when you need different caller behavior.
+Use a built-in persona with its defaults, create a custom persona, or clone an
+existing persona with changes. Saved personas are read-only.
 
 ## Use an existing persona
 
 <Tabs>
   <Tab title="UI">
-    Open **Tests**, select a suite, and edit a test's **Personas** cell. Choose the persona you want to use and select **Done**. For a new test, select **Save test** after completing its other fields.
+    Open **Tests**, select a suite, and edit a test's **Personas** cell. Choose
+    the persona and select **Done**. For a new test, complete the other fields
+    and select **Save test**.
 
+    You can use a built-in persona directly. Its declared defaults supply its
+    models, voice, language, and controls.
   </Tab>
   <Tab title="CLI">
     List the personas available to the repository's project:
@@ -18,36 +23,30 @@ Start with **Everyday Caller [Male]**, or create a custom persona when you need 
     egma persona list
     ```
 
-    Egma includes **Everyday Caller [Male]**, **Everyday Caller [Female]**,
-    **Angry caller**, and **Spanish caller**. Add the name
-    to your test's front matter:
+    Use a built-in persona with its declared defaults:
+
+    ```bash
+    egma persona use prs_...
+    ```
+
+    Add its name to your test's front matter:
 
     ```yaml
     personas:
       - name: Everyday Caller [Male]
     ```
 
-    Every test must name at least one persona. Adding a second persona creates a
-    second simulation for that test in each run.
+    Every test must name at least one persona. Each additional persona creates
+    another simulation for that test in a run.
 
-    On push, Egma resolves a name to its persona ID. Pulled files include that ID.
-    Keep it when you edit the test. If two personas have the same name, use the ID
-    from `egma persona list` to select the one you mean.
-
-    You can also configure personas without a browser. Run `egma persona
-    capabilities --help`, then use `egma persona use`, `create`, `clone`, or
-    `update`. `egma persona settings <Persona ID>` prints the
-    current project settings as JSON.
-
-    Use `--speech-speed slow`, `--speech-speed normal`, or `--speech-speed fast`.
-    These choices resolve to 0.8×, 1.0×, and 1.5× when the selected voice
-    supports them. Use `--interruption-level none`, `occasional`, or `frequent`.
-
-    Selecting a persona for the first time saves its model, voice, language,
-    accent, emotion, interruption level, speech rate, speech volume, background
-    sound, and background level for your project. All tests
-    in that project share those settings. Test files keep only the persona
-    selection; `egma pull` and `egma push` do not copy settings into the file.
+    On push, Egma resolves a name to its persona ID. Pulled files include that
+    ID. Keep it when you edit the test. If two personas have the same name, use
+    the ID from `egma persona list`.
+  </Tab>
+  <Tab title="API">
+    [List personas](/api-reference/list-personas), then [use a
+    persona](/api-reference/use-persona) to add a built-in with its declared
+    defaults. Use the returned ID or an unambiguous name in a test.
   </Tab>
 </Tabs>
 
@@ -55,53 +54,120 @@ Start with **Everyday Caller [Male]**, or create a custom persona when you need 
 
 <Tabs>
   <Tab title="UI">
-    Open **Personas** in your project and select **New persona**.
-
-    1. Enter a **Name** that your team can recognize, such as `Caller in a hurry`.
-    2. Set **Identity name** to the name the caller gives the agent, such as
+    1. Open **Personas** and select **New persona**.
+    2. Choose **Cascaded** or **Live**, then select **Next**. This choice cannot
+       change after you create the persona.
+    3. Enter a **Name** for your team, such as `Caller in a hurry`.
+    4. Set **Identity name** to the name the caller gives the agent, such as
        `Morgan Chen`.
-    3. Write a **Personality** that describes how the caller acts. For example:
-       `Answers briefly, asks for the earliest appointment, and asks the agent to
-       get to the point if it repeats a question. Remains polite.`
-    4. Choose **Separate speech models** to configure speech-to-text and
-       text-to-speech independently, or choose **GPT Live** for one continuous
-       speech model. Then choose the reasoning language model independently.
-       GPT Live uses `gpt-live-1` and a supported built-in OpenAI voice. It does
-       not require speech-to-text or text-to-speech settings or credentials.
-       Choose
-       the language, voice, accent, emotion, interruption level, speech rate,
-       speech volume, and background sound that the selected providers support.
-       New selections use standard OpenAI voices or Cartesia account voices
-       that Egma discovers. Run a full simulation to check how the persona
-       sounds and interrupts.
+    5. Write a **Personality** that describes how the caller acts. For example:
+       `Answers briefly, asks for the earliest appointment, and asks the agent
+       to get to the point if it repeats a question. Remains polite.`
+    6. Choose the models, voice, language, and background sound for that mode.
+    7. Select **Create persona**, then add the persona to a test.
 
-       **Speech rate** uses Slow, Normal, and Fast. A fixed-speed voice permits
-       Normal only and explains the restriction. **Interruptions** uses None,
-       Occasional, and Frequent. None keeps the existing non-interrupting
-       behavior.
+    Keep the caller's goal in the test scenario. Keep lasting traits in the
+    persona. The library **Name** is for your team. **Identity name** is what
+    the agent hears.
+  </Tab>
+  <Tab title="CLI">
+    For Cascaded mode, select the reasoning model, STT model, TTS model, voice,
+    language, background sound, and interruption level:
 
-       Your speech settings remain saved for voice runs. A text simulation uses
-       the selected reasoning model, identity, personality, language, and
-       emotional wording without calling any speech service.
-    5. Select **Create persona**, run `egma persona list`, and add the persona to
-       your test.
+    ```bash
+    egma persona create \
+      --name "Caller in a hurry" \
+      --identity-name "Morgan Chen" \
+      --personality "Answers briefly and asks the agent to get to the point." \
+      --speech-mode separate \
+      --llm-provider openai \
+      --llm-model gpt-5.6-terra \
+      --stt-provider openai \
+      --stt-model gpt-4o-mini-transcribe \
+      --tts-provider openai \
+      --tts-model gpt-4o-mini-tts \
+      --voice alloy \
+      --language en-US \
+      --background-sound none \
+      --interruption-level occasional
+    ```
 
-    Keep the caller's goal in the scenario. Keep lasting traits in the persona.
-    The library **Name** is for your team; **Identity name** is what the agent hears.
-
-    To start from an existing persona, open its menu and select **Clone**. This
-    copies the current behavior and your project's effective settings into an
-    independent custom persona. Select the clone in your tests to use it. Custom
-    personas are available only in the project that owns them.
-
+    Run `egma persona capabilities --help` to read the available voice and
+    language filters before you create the persona.
   </Tab>
   <Tab title="API">
-    Use [Create a persona](/api-reference/create-persona) to create a custom persona in your project. Read [Get persona form](/api-reference/get-persona-form) for the supported fields and choices. Use the returned persona ID in your tests.
-
-    Use [Fork a persona](/api-reference/fork-persona) when starting from an existing persona.
+    Use [Create a persona](/api-reference/create-persona). Send the complete
+    models and controls for the selected mode. Read [Get persona authoring
+    choices](/api-reference/get-persona-form) and [Resolve persona
+    capabilities](/api-reference/get-persona-capabilities) for current choices.
   </Tab>
 </Tabs>
 
-## Next step
+## Choose a speech mode
 
-[Update a persona](/docs/platform/personas/update-a-persona) to choose its models, voice, and speech rate.
+**Cascaded** uses separate STT, reasoning, and TTS models. You also select a TTS
+voice and an interruption level: `none`, `occasional`, or `frequent`.
+
+**Live** uses OpenAI `gpt-live-1` for the continuous voice conversation. You
+select its OpenAI voice. The separate **Reasoning model** still handles
+reasoning, delegation, and the decision to end the call. Live has no STT, TTS,
+or interruption setting.
+
+Both modes have a language and a background sound. Egma mixes the selected
+background at a fixed -12 dB gain. There is no background volume setting.
+Speech uses the provider's normal speed and volume.
+
+Run a full simulation to hear the persona and check turn timing. Text
+simulations use the persona's identity, personality, language, and reasoning
+model without calling a speech service.
+
+## Clone with changes
+
+Saved personas cannot be edited. Clone one when you want to change its
+behavior, models, voice, language, background, or Cascaded interruption level.
+The source and tests that select it stay unchanged.
+
+<Tabs>
+  <Tab title="UI">
+    Open the persona's menu and select **Clone**. Make changes in the draft,
+    then select **Clone persona**. Canceling the draft creates no persona.
+  </Tab>
+  <Tab title="CLI">
+    Pass only the values that you want to change:
+
+    ```bash
+    egma persona clone prs_... \
+      --name "Caller in a hurry, Spanish" \
+      --language es-ES
+    ```
+
+    Omitted values copy the source. The clone keeps the source speech mode.
+  </Tab>
+  <Tab title="API">
+    Use [Clone a persona](/api-reference/fork-persona). Clone overrides are
+    optional and apply in the request that creates the clone. Omitted fields
+    copy the source. If you supply settings, send `models` and `controls`
+    together as complete objects for the source mode.
+  </Tab>
+</Tabs>
+
+## Delete a custom persona
+
+You can delete a custom persona if you no longer want it in authoring lists and
+pickers. Built-in personas cannot be deleted. Existing run evidence and frozen
+persona versions stay readable.
+
+<Tabs>
+  <Tab title="UI">
+    Open the custom persona's menu, select **Delete**, and confirm the deletion.
+  </Tab>
+  <Tab title="CLI">
+    ```bash
+    egma persona delete prs_...
+    ```
+  </Tab>
+  <Tab title="API">
+    Use [Permanently delete a persona from
+    authoring](/api-reference/delete-persona).
+  </Tab>
+</Tabs>

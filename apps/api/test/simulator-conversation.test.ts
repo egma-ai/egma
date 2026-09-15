@@ -1508,6 +1508,11 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           role: "member",
           via: "session",
         };
+        const authoredControls = {
+          language: "en-US",
+          backgroundSoundId: "none",
+          ...(LIVE_PERSONA_MODE ? {} : { interruptionLevel: "none" as const }),
+        };
         const authoredPersona = await call("POST", "/v1/personas", {
           key,
           body: {
@@ -1515,16 +1520,7 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
             name: "Focused caller",
             identityName: NEUTRAL_PERSON.identityName,
             personality: NEUTRAL_PERSON.personality,
-            controls: {
-              language: "en-US",
-              emotion: "neutral",
-              accent: "voice_default",
-              speechSpeed: "normal",
-              speechVolume: 1,
-              backgroundSoundId: "none",
-              backgroundVolume: 0.0631,
-              interruptionLevel: "none",
-            },
+            controls: authoredControls,
             models: LIVE_PERSONA_MODE ? {
               mode: "live",
               llm: { provider: "openai", model: "gpt-4o-mini" },
@@ -1550,8 +1546,20 @@ describe.skipIf(!storage.available)("the shipped simulator against the real API"
           });
         } else {
           expect(authoredPersona.body).toMatchObject({
-            settings: { controls: { speechSpeed: "normal" }, models: { tts: { speed: 1 } } },
+            settings: {
+              controls: authoredControls,
+              models: {
+                tts: {
+                  provider: "openai",
+                  model: "tts-1",
+                  voiceId: "alloy",
+                },
+              },
+            },
           });
+          expect(
+            (authoredPersona.body.settings as { models: { tts: object } }).models.tts,
+          ).not.toHaveProperty("speed");
         }
         const suite = await call("POST", "/v1/test-suites", {
           key,

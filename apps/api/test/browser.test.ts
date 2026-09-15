@@ -3038,17 +3038,20 @@ describe("the complete product, walked in order in a second project", () => {
   );
 
   it(
-    "authors a persona for this project, in the panel over the list",
+    "authors a persona for this project on the full-page flow",
     async () => {
       await walk.goto(at("agents"));
       await walk.getByRole("link", { name: "Personas", exact: true }).first().click();
       await walk.waitForURL(new RegExp(`/projects/${second}/personas$`));
 
-      // **The address does not move.** A persona is created, read and edited
-      // in a side sheet over the list it will join, so what follows happens at
-      // the list's own URL with the list still on screen behind it.
-      const list = walk.url();
-      await walk.getByRole("button", { name: "New persona" }).first().click();
+      await walk.getByRole("link", { name: "New persona" }).first().click();
+      await walk.waitForURL(new RegExp(`/projects/${second}/personas/new$`));
+      await walk.getByRole("button", { name: "Next", exact: true }).waitFor();
+      await walk.screenshot({
+        path: "/tmp/egma-persona-setup-light-desktop.png",
+        fullPage: true,
+      });
+      await walk.getByRole("button", { name: "Next", exact: true }).click();
       await reactHasTakenOver(walk, "form");
 
       await walk.fill("#new-persona-name", "Impatient Rita");
@@ -3068,78 +3071,47 @@ describe("the complete product, walked in order in a second project", () => {
       // Language and every model field are already filled with the release
       // defaults, so authoring a persona is the three things above and nothing
       // chosen.
-      await walk.getByRole("button", { name: "Create persona" }).click();
+      await expect
+        .poll(() => walk.getByRole("button", { name: "Create persona", exact: true }).isEnabled())
+        .toBe(true);
+      await walk.getByRole("button", { name: "Create persona", exact: true }).click();
 
-      // What it made, read back in the same panel: her team name, the kind of
-      // record she is, and the name she will speak.
+      // Submission creates one record and lands on its read-only page.
+      await walk.waitForURL(new RegExp(`/projects/${second}/personas/prs_[^/]+$`));
       await saysWithin(walk, "Impatient Rita");
-      await saysWithin(walk, "Custom · v1");
+      await saysWithin(walk, "Custom");
       await saysWithin(walk, "Rita");
-      expect(walk.url()).toBe(list);
+      expect(await walk.locator("[data-slot='persona-read'] input, [data-slot='persona-read'] select, [data-slot='persona-read'] textarea").count()).toBe(0);
     },
     SETTLE,
   );
 
   it(
-    "mints a version by editing her, then forks and deletes the copy",
+    "reads her, then authors and deletes a clone",
     async () => {
       await walk.goto(at("personas"));
       await reactHasTakenOver(walk, "table");
 
-      // **Changing what a persona *is* mints a version.** The record's own
-      // actions are in the panel's ⋮, which is where every sheet in this
-      // product keeps them.
-      await walk.getByRole("button", { name: "Impatient Rita" }).first().click();
-      await walk
-        .getByRole("button", { name: "Actions for Impatient Rita" })
-        .click();
-      await walk.getByRole("menuitem", { name: "Edit" }).click();
-      await reactHasTakenOver(walk, "form");
-      await walk.fill(
-        "#persona-personality",
-        "Speaks quickly, interrupts, and has stopped apologising for it.",
-      );
-
-      /*
-       * **A click outside the panel asks before it throws the draft away.**
-       * The panel offers three ways out — Escape, the close control, and a
-       * click on the scrim — and all three land on one gate. The first two are
-       * proved in `apps/web/test/personas.test.tsx`; this one is proved here
-       * because the gesture is dispatched from a document listener that
-       * jsdom's synthetic events never reach.
-       */
-      // Well clear of the 440px panel at the right edge, on empty page below
-      // the list. The scrim is what actually takes the press.
-      await walk.mouse.click(600, 600);
-      const keepsIt = walk.getByRole("dialog", {
-        name: "Leave without saving?",
-      });
-      await keepsIt.waitFor();
-      await keepsIt.getByRole("button", { name: "Keep editing" }).click();
-      // Kept: the panel is still open and still holds what was typed into it.
-      expect(await walk.inputValue("#persona-personality")).toContain(
-        "stopped apologising",
-      );
-
-      await walk.getByRole("button", { name: "Save changes" }).click();
-
-      // The new current version stays in the header after saving.
-      await saysWithin(walk, "Custom · v2");
-      await walk.getByRole("button", { name: "Saved", exact: true }).waitFor();
-      await walk.keyboard.press("Escape");
-
-      // Fork copies the current version into a persona this project owns, and
-      // lands in the editor with the copied name ready to be replaced.
+      await walk.getByRole("link", { name: "Impatient Rita" }).first().click();
+      await walk.waitForURL(new RegExp(`/projects/${second}/personas/prs_[^/]+$`));
+      expect(await walk.locator("[data-slot='persona-read'] input, [data-slot='persona-read'] select, [data-slot='persona-read'] textarea").count()).toBe(0);
+      await walk.getByRole("link", { name: "Personas", exact: true }).last().click();
+      await walk.waitForURL(new RegExp(`/projects/${second}/personas$`));
       await walk
         .getByRole("button", { name: "Open the menu for Impatient Rita" })
         .first()
         .click();
       await walk.getByRole("menuitem", { name: "Clone" }).click();
+      await walk.waitForURL(new RegExp(`/projects/${second}/personas/prs_[^/]+/clone$`));
       await reactHasTakenOver(walk, "form");
-      await walk.fill("#persona-name", "Rita, a copy");
-      await walk.getByRole("button", { name: "Save changes" }).click();
+      await walk.fill("#clone-persona-name", "Rita, a copy");
+      await expect
+        .poll(() => walk.getByRole("button", { name: "Clone persona", exact: true }).isEnabled())
+        .toBe(true);
+      await walk.getByRole("button", { name: "Clone persona", exact: true }).click();
+      await walk.waitForURL(new RegExp(`/projects/${second}/personas/prs_[^/]+$`));
       await saysWithin(walk, "Rita, a copy");
-      await walk.keyboard.press("Escape");
+      await walk.getByRole("link", { name: "Personas", exact: true }).last().click();
 
       // **Delete is the product's word, and the confirmation names who it is
       // about.** Nothing names this copy, so it goes without argument.
@@ -3163,7 +3135,7 @@ describe("the complete product, walked in order in a second project", () => {
         .poll(
           async () =>
             await walk
-              .getByRole("button", { name: "Rita, a copy" })
+              .getByRole("link", { name: "Rita, a copy" })
               .count(),
           { timeout: 30_000 },
         )
@@ -3839,15 +3811,12 @@ describe("the complete product, walked in order in a second project", () => {
         lands: suiteAddress,
         says: "Reschedules a booked appointment",
       },
-      /*
-       * **One address for the whole Personas surface.** `personas/new` and
-       * `personas/{id}` were addresses until the 2026-08-25 rework; creating,
-       * reading and editing a persona are all panels over this list now, so
-       * there is nothing else here to reach by URL. The panels are walked
-       * where they are opened — in the authoring step above and in the
-       * keyboard proof below.
-       */
       { what: "Personas", address: at("personas"), says: "Impatient Rita" },
+      {
+        what: "Create a persona",
+        address: at("personas", "new"),
+        says: "Choose the persona's agent architecture",
+      },
       {
         what: "Graders",
         address: at("graders"),
@@ -4995,9 +4964,11 @@ describe("the complete product, walked in order in a second project", () => {
         await walk.goto(at("personas"));
         await reactHasTakenOver(walk, "table");
 
-        // The panel itself opens without a pointer: the page's own action
-        // takes the keyboard, and Enter is what presses it.
-        await walk.getByRole("button", { name: "New persona" }).first().focus();
+        // The full-page setup opens without a pointer. Its default Cascaded
+        // choice stays selected when Enter continues to the editor.
+        await walk.getByRole("link", { name: "New persona" }).first().focus();
+        await walk.keyboard.press("Enter");
+        await walk.getByRole("button", { name: "Next", exact: true }).focus();
         await walk.keyboard.press("Enter");
         await reactHasTakenOver(walk, "form");
 
@@ -5028,11 +4999,15 @@ describe("the complete product, walked in order in a second project", () => {
         await walk.keyboard.type("Sam");
         await walk.locator("#new-persona-personality").focus();
         await walk.keyboard.type("Takes their time and repeats things back.");
+        await expect
+          .poll(() => walk.getByRole("button", { name: "Create persona" }).isEnabled())
+          .toBe(true);
         await walk.locator("#new-persona-name").focus();
         await walk.keyboard.press("Enter");
 
+        await walk.waitForURL(/\/projects\/prj_[^/]+\/personas\/prs_[^/]+$/);
         await saysWithin(walk, "Deliberate Sam");
-        await saysWithin(walk, "Custom · v1");
+        await saysWithin(walk, "Custom");
       },
       SETTLE,
     );
@@ -5388,7 +5363,7 @@ describe("project grader model settings", () => {
 });
 
 it(
-  "edits shared persona settings inline and keeps the current core version visible",
+  "uses read-only persona pages and creates one editable clone",
   async () => {
     const key = await anotherCustomer(
       "settings@personas.example",
@@ -5401,123 +5376,75 @@ it(
       await walk.goto(address);
       await reactHasTakenOver(walk, "table");
       await walk
-        .getByRole("button", { name: "Everyday Caller [Male]", exact: true })
+        .getByRole("link", { name: "Everyday Caller [Male]", exact: true })
         .click();
+      await walk.waitForURL(/\/personas\/prs_[^/]+$/);
+      await walk.locator("[data-slot='persona-read']").waitFor();
+      expect(await walk.locator("[data-slot='persona-read'] input, [data-slot='persona-read'] select, [data-slot='persona-read'] textarea").count()).toBe(0);
+      await walk.getByRole("button", { name: "Advanced" }).click();
+      expect(await walk.getByText("Interruptions", { exact: true }).count()).toBe(1);
+      await walk.evaluate("window.scrollTo(0, 0)");
+      expect(await walk.evaluate("window.scrollY")).toBe(0);
+      await walk.screenshot({
+        path: "/tmp/egma-persona-read-light-desktop.png",
+      });
+
+      await walk.getByRole("link", { name: "Clone", exact: true }).click();
+      await walk.waitForURL(/\/personas\/prs_[^/]+\/clone$/);
       await reactHasTakenOver(walk, "form");
-      expect(await walk.locator("#persona-personality").count()).toBe(0);
-      await walk.selectOption("#persona-llm", "openai::gpt-4o");
-      await walk.selectOption("#persona-stt", "deepgram::nova-3-general");
-      await walk.selectOption("#persona-tts", "openai::tts-1-hd");
-      await walk.selectOption("#persona-tts-speed", "normal");
-      await walk.selectOption("#persona-tts-voice", "alloy");
-      await walk.selectOption("#persona-speech-mode", "live");
-      expect(await walk.locator("#persona-stt").count()).toBe(0);
-      expect(await walk.locator("#persona-tts").count()).toBe(0);
-      expect(await walk.inputValue("#persona-live")).toBe("openai::gpt-live-1");
-      await walk.selectOption("#persona-speech-mode", "separate");
-      expect(await walk.inputValue("#persona-stt")).toBe("deepgram::nova-3-general");
-      expect(await walk.inputValue("#persona-tts")).toBe("openai::tts-1-hd");
-      await walk.selectOption("#persona-interruption-level", "frequent");
-      await walk.selectOption("#persona-background-sound", "office-v1");
-      await walk.fill("#persona-background-volume", "-18");
-      await walk.getByRole("button", { name: "Use persona" }).click();
-      await walk.getByRole("button", { name: "Saved", exact: true }).waitFor();
-      await walk.getByRole("region", { name: "Settings" }).waitFor();
-      expect(await walk.inputValue("#persona-tts-voice")).toBe("alloy");
-      await walk.keyboard.press("Escape");
-      await walk
-        .getByRole("button", { name: "Everyday Caller [Male]", exact: true })
-        .click();
-      await walk.getByRole("region", { name: "Settings" }).waitFor();
-      expect(await walk.inputValue("#persona-llm")).toBe("openai::gpt-4o");
-      expect(await walk.inputValue("#persona-stt")).toBe(
-        "deepgram::nova-3-general",
-      );
-      expect(await walk.inputValue("#persona-tts")).toBe("openai::tts-1-hd");
-      expect(await walk.inputValue("#persona-tts-speed")).toBe("normal");
-      expect(await walk.inputValue("#persona-tts-voice")).toBe(
-        "alloy",
-      );
-      expect(await walk.inputValue("#persona-interruption-level")).toBe("frequent");
-      expect(await walk.inputValue("#persona-background-sound")).toBe("office-v1");
-      expect(await walk.inputValue("#persona-background-volume")).toBe("-18");
-      await walk.locator("#persona-background-sound").scrollIntoViewIfNeeded();
-      await walk.screenshot({
-        path: "/tmp/tasktemporaryfiles/persona-filled-built-in.png",
-        fullPage: true,
-      });
-      await walk.selectOption("#persona-tts", "openai::gpt-4o-mini-tts");
-      await walk.selectOption("#persona-emotion", "angry");
-      await walk.selectOption("#persona-tts", "openai::tts-1-hd");
-      await walk.getByRole("button", { name: "Use Neutral", exact: true }).waitFor();
-      expect(await walk.inputValue("#persona-emotion")).toBe("angry");
-      expect(await walk.getByRole("button", { name: "Save changes" }).isDisabled()).toBe(true);
-      await walk.locator("#persona-emotion").scrollIntoViewIfNeeded();
-      await walk.screenshot({
-        path: "/tmp/tasktemporaryfiles/persona-invalid-draft.png",
-        fullPage: true,
-      });
-      await walk.keyboard.press("Escape");
-      await walk.getByRole("dialog", { name: "Leave without saving?" }).getByRole("button", { name: "Discard changes" }).click();
-      await walk.getByRole("button", { name: "Everyday Caller [Male]", exact: true }).click();
-      await walk
-        .getByRole("button", { name: "Actions for Everyday Caller [Male]" })
-        .click();
-      await walk.getByRole("menuitem", { name: "Clone" }).click();
-      await walk.locator("#persona-name").waitFor();
-      expect(await walk.inputValue("#persona-tts-voice")).toBe(
-        "alloy",
-      );
-      await walk.fill("#persona-name", "Patient Nora");
-      await walk.getByRole("button", { name: "Save changes" }).click();
-      await walk.getByText("Custom · v1", { exact: true }).waitFor();
-      await walk
-        .getByRole("button", { name: "Actions for Patient Nora" })
-        .click();
-      await walk.getByRole("menuitem", { name: "Edit", exact: true }).click();
-      await walk.fill(
-        "#persona-personality",
-        "Asks one question and waits for the answer.",
-      );
-      await walk.getByRole("button", { name: "Save changes" }).click();
-      await walk.getByText("Custom · v2", { exact: true }).waitFor();
-      await walk.getByRole("button", { name: "Saved", exact: true }).waitFor();
-      expect(await walk.getByRole("region", { name: "Versions" }).count()).toBe(0);
-      expect(await walk.getByRole("button", { name: "Read", exact: true }).count()).toBe(0);
-      await walk.getByRole("region", { name: "Settings" }).waitFor();
-      await walk.screenshot({
-        path: "/tmp/egma-persona-settings-light.png",
-        fullPage: true,
-      });
-      await walk
-        .getByRole("button", { name: "Actions for Patient Nora" })
-        .click();
-      await walk.getByRole("menuitem", { name: "Edit", exact: true }).click();
+      expect(await walk.locator("#clone-persona-name").inputValue()).toContain("Everyday Caller [Male]");
+      expect(await walk.locator("#clone-persona-tts-provider").count()).toBe(1);
+      expect(await walk.locator("#clone-persona-tts-model").count()).toBe(1);
+      expect(await walk.locator("#clone-persona-stt-provider").count()).toBe(1);
+      expect(await walk.locator("#clone-persona-stt-model").count()).toBe(1);
+      expect(await walk.locator("#clone-persona-speech-mode").count()).toBe(0);
+      expect(await walk.locator("#clone-persona-emotion, #clone-persona-speech-volume, #clone-persona-background-volume, #clone-persona-tts-speed").count()).toBe(0);
+      await walk.fill("#clone-persona-name", "Patient Nora");
+      await walk.fill("#clone-persona-personality", "Asks one question and waits for the answer.");
+      await walk.getByRole("button", { name: "Advanced" }).click();
+      await walk.selectOption("#clone-persona-interruptions", "frequent");
+      await walk.selectOption("#clone-persona-background-sound", "office-v1");
+
+      // A full-page draft still protects a person's work before navigation.
+      await walk.getByRole("button", { name: "Cancel", exact: true }).click();
+      const guard = walk.getByRole("dialog", { name: "Leave without saving?" });
+      await guard.waitFor();
+      await guard.getByRole("button", { name: "Keep editing" }).click();
+      expect(await walk.inputValue("#clone-persona-name")).toBe("Patient Nora");
+
       await walk.setViewportSize({ width: 390, height: 844 });
+      await walk.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
       await walk.evaluate('document.documentElement.dataset.theme = "dark"');
-      await walk.locator("#persona-tts-voice").focus();
-      await walk.keyboard.press("Tab");
-      expect(await walk.evaluate("document.activeElement?.id")).toBe(
-        "persona-interruption-level",
-      );
       expect(
         await walk.evaluate(
           "document.documentElement.scrollWidth <= window.innerWidth",
         ),
       ).toBe(true);
-      await expect
-        .poll(() =>
-          walk
-            .getByRole("button", { name: "Cancel", exact: true })
-            .evaluate(element => element.ownerDocument.defaultView?.getComputedStyle(element).color),
-        )
-        .toBe("rgb(242, 242, 237)");
+      expect(await walk.evaluate("document.documentElement.dataset.theme")).toBe("dark");
+      const formScroller = walk.locator("[data-slot='page-body-content'] > div");
+      await formScroller.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+      expect(await formScroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      const footer = await walk.locator("[data-slot='page-footer']").boundingBox();
+      expect(footer).not.toBeNull();
+      if (footer === null) throw new Error("the clone footer is not visible");
+      expect(footer.y).toBeGreaterThanOrEqual(0);
+      expect(footer.y + footer.height).toBeLessThanOrEqual(844);
       await walk.screenshot({
-        path: "/tmp/egma-persona-settings-dark-mobile.png",
+        path: "/tmp/egma-persona-clone-dark-mobile.png",
         fullPage: true,
       });
-      await walk.getByRole("button", { name: "Cancel", exact: true }).click();
-      await walk.keyboard.press("Escape");
+      const cloneWrite = walk.waitForResponse((response) =>
+        response.request().method() === "POST" && /\/v1\/personas\/prs_[^/]+\/fork$/u.test(new URL(response.url()).pathname),
+      );
+      await expect
+        .poll(() => walk.getByRole("button", { name: "Clone persona", exact: true }).isEnabled())
+        .toBe(true);
+      await walk.getByRole("button", { name: "Clone persona", exact: true }).click();
+      expect((await cloneWrite).status()).toBe(201);
+      await walk.waitForURL(/\/personas\/prs_[^/]+$/);
+      await walk.locator("[data-slot='persona-read']").waitFor();
+      expect(await walk.locator("[data-slot='persona-read'] input, [data-slot='persona-read'] select, [data-slot='persona-read'] textarea").count()).toBe(0);
+
       await walk.setViewportSize({ width: 1280, height: 900 });
       await walk.goto(`${origin}/projects/${projectId}/tests`);
       await walk.getByRole("button", { name: "Create suite" }).click();
@@ -5565,8 +5492,8 @@ it(
         (persona) => persona.name === "Patient Nora",
       );
       expect(saved.personas.map((persona) => persona.id)).toEqual([cloned?.id]);
-      expect(cloned?.version).toBe(2);
-      expect(cloned?.settings?.models.tts.voiceId).toBe("alloy");
+      expect(cloned?.version).toBe(1);
+      expect(cloned?.settings?.models.tts.voiceId).toBeTruthy();
     } finally {
       await walk.context().close();
     }

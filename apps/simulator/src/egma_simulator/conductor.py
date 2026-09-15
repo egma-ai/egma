@@ -1972,7 +1972,7 @@ class VoiceConductor:
                 replies,
                 self._legs.tts,
                 interruption_limit,
-                SpeechGain(self._legs.voice.speech_volume),
+                SpeechGain(1.0),
                 *media.output,
                 interruption_playout,
                 recorder,

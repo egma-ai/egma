@@ -311,13 +311,13 @@ def test_quiet_and_length_are_measured_from_the_audio():
     assert spoken_seconds(spoken, 16000) == pytest.approx(four_bytes_spoken)
 
 
-def test_the_persona_voice_comes_from_the_pinned_tts_selection():
+def test_the_persona_voice_uses_the_pinned_choice_and_native_speed():
     spec = spec_for(voice=TTS_VOICE)
     voice = voice_from_models(spec.models)
     assert (voice.voice_id, voice.provider, voice.speed) == (
         "warm-alto-2",
         "cartesia",
-        0.9,
+        1.0,
     )
 
     assert spec.persona == AuthoredPersona(
@@ -1544,12 +1544,10 @@ async def test_the_speech_legs_need_no_corpus_and_no_download(
     )
 
 
-async def test_the_speaking_leg_is_built_with_the_pinned_tts_voice(
+async def test_the_speaking_leg_uses_the_pinned_voice_and_native_speed(
     tmp_path: Path,
 ):
-    """The pipeline is assembled from this simulation's own spec, and the
-    pinned persona model selection owns the voice in that spec — so the leg
-    that just spoke a whole exchange holds that exact authored choice."""
+    """The pinned model selection owns the voice; speed stays internal."""
     observed = await voice_simulation(
         tmp_path,
         scenario="One point.",
@@ -1562,7 +1560,7 @@ async def test_the_speaking_leg_is_built_with_the_pinned_tts_voice(
     assert (spoke_with.voice_id, spoke_with.provider, spoke_with.speed) == (
         "brisk-tenor-7",
         "cartesia",
-        1.15,
+        1.0,
     )
 
     # The helper's complete TTS selection is also explicit.
