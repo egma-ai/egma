@@ -5384,7 +5384,9 @@ it(
       await walk.goto(address);
       await reactHasTakenOver(walk, "table");
       const builtIn = walk.getByRole("link", { name: "Everyday Caller [Male]", exact: true });
-      expect(await builtIn.evaluate("link => getComputedStyle(link).textDecorationLine")).toBe("none");
+      expect(await builtIn.evaluate((link) =>
+        link.ownerDocument.defaultView?.getComputedStyle(link).textDecorationLine
+      )).toBe("none");
       await builtIn.click();
       await walk.waitForURL(/\/personas\/prs_[^/]+$/);
       await walk.locator("[data-slot='persona-read']").waitFor();
