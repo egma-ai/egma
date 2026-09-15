@@ -49,25 +49,31 @@ export function PersonaGroupLabel({
  * above it and no toggle. `htmlFor` makes the header the control's own label
  * when the subsection holds one control, as Language does; a reason the
  * choice is invalid then stays outside that label and describes the control
- * instead, so it never joins the control's name.
+ * instead, so it never joins the control's name. A subsection holding several
+ * controls passes `invalidReasonId` and describes the one control the reason
+ * is about with it, as the voice picker does.
  */
 export function PersonaSubsection({
   label,
   htmlFor,
   invalidReason,
+  invalidReasonId,
   surface = "form",
   children,
 }: {
   readonly label: string;
   readonly htmlFor?: string;
   readonly invalidReason?: string;
+  /** The id the reason is drawn under, when a control outside `htmlFor` must point at it. */
+  readonly invalidReasonId?: string;
   readonly surface?: PersonaSurface;
   readonly children: ReactNode;
 }) {
-  const reasonId = useId();
+  const ownId = useId();
+  const reasonId = invalidReasonId ?? ownId;
   const describes = htmlFor !== undefined && invalidReason !== undefined;
   const reason = invalidReason === undefined ? null : (
-    <span className="font-normal text-failure" id={describes ? reasonId : undefined}>
+    <span className="font-normal text-failure" id={reasonId}>
       {" · "}
       {invalidReason}
     </span>

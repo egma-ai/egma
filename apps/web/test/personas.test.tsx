@@ -499,7 +499,10 @@ describe("persona full-page flows", () => {
     const voice = await screen.findByRole("combobox", { name: "Voice*" });
     await waitFor(() => expect(voice).toHaveProperty("textContent", "alloy · Unavailable"));
     expect((screen.getByRole("button", { name: "Create persona" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(voice.getAttribute("aria-describedby")).toBeNull();
+    /* The reason sits in the subsection header, and the picker points at it. */
+    const reason = voice.getAttribute("aria-describedby");
+    expect(reason).not.toBeNull();
+    expect(document.getElementById(reason!)?.textContent).toContain("Choose an available voice");
     expect(screen.queryByText("Choose an available voice before creating this persona.")).toBeNull();
   });
 

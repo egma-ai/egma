@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   getPersonaCapabilities,
   type GetPersonaCapabilitiesResponse,
@@ -21,6 +21,7 @@ import {
   type PersonaModelCatalogEntry,
 } from "@/lib/personas.ts";
 import { platformAnswer, platformClient } from "@/lib/platform-client.ts";
+import { FieldHintContext } from "@/ui/field-hint.ts";
 import { FormRow } from "@/ui/form.tsx";
 import { SearchableSelect } from "@/ui/searchable-select.tsx";
 
@@ -260,6 +261,8 @@ export function ModelFields({
   const [languageSearch, setLanguageSearch] = useState("");
   const [voiceSearch, setVoiceSearch] = useState("");
   const [voiceType, setVoiceType] = useState<"all" | "male" | "female" | "unknown">("all");
+  /* The voice reason is drawn in the subsection header and read from the voice picker. */
+  const voiceReasonId = useId();
   /*
    * The realtime pair the API fixes, so the Realtime LLM dropdowns offer that
    * one catalog row and nothing a choice could change.
@@ -445,7 +448,7 @@ export function ModelFields({
 
       {draft.mode === "separate" ? (
         <>
-          <PersonaSubsection label="Text-to-speech" invalidReason={voiceInvalidReason}>
+          <PersonaSubsection label="Text-to-speech" invalidReason={voiceInvalidReason} invalidReasonId={voiceReasonId}>
             <ProviderModelFields
               prefix={prefix}
               job="tts"
@@ -461,6 +464,7 @@ export function ModelFields({
               value={activeVoiceId}
               displayValue={voiceDisplay}
               valid={voiceAvailable}
+              describedBy={voiceInvalidReason === undefined ? undefined : voiceReasonId}
               loading={capabilities === null && capabilityError === null}
               error={capabilityError}
               options={voices}
@@ -497,7 +501,7 @@ export function ModelFields({
           </PersonaSubsection>
         </>
       ) : (
-        <PersonaSubsection label="Realtime LLM" invalidReason={voiceInvalidReason}>
+        <PersonaSubsection label="Realtime LLM" invalidReason={voiceInvalidReason} invalidReasonId={voiceReasonId}>
           <ProviderModelFields
             prefix={prefix}
             job="live"
@@ -512,6 +516,7 @@ export function ModelFields({
             value={activeVoiceId}
             displayValue={voiceDisplay}
             valid={voiceAvailable}
+            describedBy={voiceInvalidReason === undefined ? undefined : voiceReasonId}
             loading={capabilities === null && capabilityError === null}
             error={capabilityError}
             options={voices}
@@ -587,6 +592,7 @@ function VoiceField({
   value,
   displayValue,
   valid,
+  describedBy,
   loading,
   error,
   options,
@@ -602,6 +608,8 @@ function VoiceField({
   readonly value: string;
   readonly displayValue: string;
   readonly valid: boolean;
+  /** The id of the reason an unavailable voice blocks the form, for the picker to point at. */
+  readonly describedBy?: string;
   readonly loading: boolean;
   readonly error: string | null;
   readonly options: readonly { readonly value: string; readonly label: string; readonly detail: string }[];
@@ -614,6 +622,7 @@ function VoiceField({
 }) {
   return (
     <PersonaField label="Voice*" htmlFor={`${prefix}-voice`}>
+      <FieldHintContext.Provider value={describedBy}>
       <SearchableSelect
         id={`${prefix}-voice`}
         className={DROPDOWN}
@@ -650,6 +659,7 @@ function VoiceField({
         onSearchChange={onSearch}
         onValueChange={onChange}
       />
+      </FieldHintContext.Provider>
     </PersonaField>
   );
 }
