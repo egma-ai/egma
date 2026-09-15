@@ -67,6 +67,7 @@ import {
   evidenceGradeTally,
   recordingSpeakerTimeline,
   RecordingEvidence,
+  simulationHasConversation,
   SimulationEvidenceSummary,
   useSimulationEvidenceRecording,
   waitingForSimulationTranscript,
@@ -575,17 +576,31 @@ function GradersLine({ regrade }: { readonly regrade: RegradeRequest }) {
   );
 }
 
+type WaitingSurface = "results" | "transcript";
+
+/** What a running simulation will send to each tab. Both share the queued wait. */
+const RUNNING_WAIT: Readonly<Record<WaitingSurface, string>> = {
+  results: "The conversation is happening now. Results appear here when it ends.",
+  transcript:
+    "The simulation is happening now. The transcript appears here as Egma receives it.",
+};
+
+const QUEUED_WAIT = "Waiting for a simulator to start.";
+
 /**
- * The panel while the conversation has not happened yet.
+ * The panel while a tab has nothing of its own to show yet.
  *
- * There is no evidence to show, so the panel says which of the two waits this
- * is instead of drawing empty facts. The mark breathes on the status square's
- * own keyframe, so one motion means "still going" everywhere.
+ * Results waits for grades, the transcript waits for its first turn or tool
+ * call, and each says which of the two waits this is instead of drawing empty
+ * facts. The mark breathes on the status square's own keyframe, so one motion
+ * means "still going" everywhere.
  */
 function WaitingForSimulation({
   status,
+  surface,
 }: {
   readonly status: SimulationStatusWord;
+  readonly surface: WaitingSurface;
 }) {
   const running = status === "running";
   return (
@@ -607,9 +622,7 @@ function WaitingForSimulation({
         {running ? "Running" : "Queued"}
       </p>
       <p className="m-0 max-w-[48ch] text-sm text-faint">
-        {running
-          ? "The conversation is happening now. Results appear here when it ends."
-          : "Waiting for a simulator to start."}
+        {running ? RUNNING_WAIT[surface] : QUEUED_WAIT}
       </p>
     </div>
   );
@@ -630,7 +643,7 @@ function ResultSummary({
     ["queued", "claimed", "running"].includes(evidence.status) &&
     evidence.grades.length === 0
   ) {
-    return <WaitingForSimulation status={evidence.status} />;
+    return <WaitingForSimulation status={evidence.status} surface="results" />;
   }
 
   if (evidence.gradingState === "not_requested") {
@@ -706,6 +719,12 @@ function TranscriptAndAudio({
 }) {
   const active = ["queued", "claimed", "running"].includes(evidence.status);
   const recording = useSimulationEvidenceRecording(evidence, evidence.projectId);
+
+  // No turn and no tool call has arrived, so the tab waits here rather than
+  // stack an empty recording over an empty transcript.
+  if (active && !simulationHasConversation(evidence)) {
+    return <WaitingForSimulation status={evidence.status} surface="transcript" />;
+  }
 
   return (
     <div className="flex min-w-0 flex-col gap-6">

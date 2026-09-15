@@ -1525,6 +1525,25 @@ export function simulationToolCalls(
     : transcriptToolCalls(evidence.transcript, simulationTranscriptAttribution(evidence).pov);
 }
 
+/**
+ * Say whether a simulation has a turn or a tool call to show.
+ *
+ * The transcript panel and the run detail's Transcript tab both ask this, so
+ * one answer decides whether evidence is drawn or the wait is shown.
+ */
+export function simulationHasConversation(
+  evidence: SimulationEvidence,
+): boolean {
+  const transcript = evidence.transcript;
+  if (transcript === null) return false;
+  return (
+    transcriptSteps(
+      transcript.turns,
+      simulationTranscriptAttribution(evidence).pov,
+    ).length > 0 || simulationToolCalls(evidence).length > 0
+  );
+}
+
 type TurnConversationEvent = {
   readonly kind: "turn";
   readonly step: EvidenceStep;
@@ -2281,10 +2300,7 @@ export function SimulationTranscript({
   const requiredPov = attribution.pov;
   const transcript = evidence.transcript;
   const toolCalls = useMemo(() => simulationToolCalls(evidence), [evidence]);
-  const hasConversation = transcript !== null && (
-    transcriptSteps(transcript.turns, requiredPov).length > 0 ||
-    toolCalls.length > 0
-  );
+  const hasConversation = simulationHasConversation(evidence);
   if (
     source !== null &&
     !hasConversation &&
