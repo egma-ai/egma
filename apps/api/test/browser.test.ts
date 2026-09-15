@@ -5450,6 +5450,7 @@ it(
       // A dropdown opens beside its trigger without moving the page: the
       // trigger stays where it was, and the list stays inside the window.
       async function opensInPlace(trigger: string): Promise<void> {
+        await walk.locator(trigger).scrollIntoViewIfNeeded();
         const before = await walk.locator(trigger).boundingBox();
         await walk.locator(trigger).click();
         const list = walk.locator("[data-slot='downward-select-content']");

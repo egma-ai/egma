@@ -443,17 +443,15 @@ function AccountMenu({
           "grid-cols-[var(--control-md)_minmax(0,1fr)] min-h-(--control-lg) py-1",
           "px-[calc(var(--space-2)-1px)]",
           "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
-          /* In the sidebar the control is boxed at rest, like the organization control above it. */
-          !compact && "border-border",
           "transition-transform duration-(--duration-press) ease-out",
           "pointer-coarse:min-h-(--tap-target)",
-          "pointer-hover:border-border pointer-hover:bg-surface-soft",
+          "pointer-hover:border-border pointer-hover:bg-surface",
           "[&:active:not(:focus-visible)]:scale-97",
           "motion-reduce:transition-none",
           "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
           compact && "w-(--tap-target) min-h-(--tap-target) grid-cols-[var(--tap-target)] p-0",
         )}
-        openClassName="border-border bg-surface-soft"
+        openClassName="border-border bg-surface"
         placement={placement}
         trigger={
           <>
@@ -680,9 +678,10 @@ function ShellFrame({
         {shown === null ? null : <Navigation projectId={shown} pathname={pathname} />}
         {/*
          * The account band is the organization bar's own 56px, under a
-         * hairline that spans the whole bar, with the boxed account control
-         * centered in it. 8px is the navigation column's inset, so the control
-         * is the same 208px block as a nav row. (Developer decision, 2026-09-15.)
+         * hairline that spans the whole bar, with the account control centered
+         * in it and no box of its own at rest. 8px is the navigation column's
+         * inset, so the control is the same 208px block as a nav row.
+         * (Developer decision, 2026-09-15.)
          */}
         <SidebarFooter className="min-h-(--sidebar-header-height) justify-center border-t border-border px-2 py-1">
           {role !== null && !canAuthor(role) ? (
@@ -790,6 +789,8 @@ export function ProductPage({
 }) {
   return (
     <main
+      /* The document lock in globals.css reads this: a viewport page pins the document. */
+      data-viewport={viewport ? "always" : desktopViewport ? "desktop" : undefined}
       className={cn(
         "flex w-full min-w-0 flex-col",
         "[--page-content-max:var(--page-max)]",

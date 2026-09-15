@@ -28,6 +28,14 @@
   * { box-sizing: border-box; }
   html { min-width: 320px; background: var(--background); text-size-adjust: 100%; }
   body { min-height: 100svh; margin: 0; background: var(--background); color: var(--foreground); font-family: var(--sans); font-size: var(--text-body); font-synthesis: none; font-weight: 400; letter-spacing: var(--tracking-body); line-height: var(--line-body); }
+  /*
+   * A page that owns the viewport pins the document. Its body scrolls inside
+   * the shell, and nothing appended after the shell — a browser extension's
+   * element, a development overlay — can be scrolled to, so a wheel at the
+   * end of a form or an opening dropdown never moves the page.
+   */
+  html:has(main[data-viewport="always"]) { overflow: hidden; }
+  @media (min-width: 901px) { html:has(main[data-viewport="desktop"]) { overflow: hidden; } }
   button, input, select, textarea { color: inherit; font: inherit; font-weight: 400; }
   h1, h2, h3, h4, h5, h6, strong, b { font-weight: 400; }
   a { color: inherit; }
