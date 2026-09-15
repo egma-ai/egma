@@ -188,6 +188,7 @@ function ProviderModelFields({
       </Field>
       <Field label={`${title} model*`} htmlFor={`${prefix}-${job}-model`}>
         <DownwardSelect
+          key={provider}
           id={`${prefix}-${job}-model`}
           value={model}
           disabled={disabled}
