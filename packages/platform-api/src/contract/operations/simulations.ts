@@ -23,6 +23,22 @@ const integerSchema = { type: "integer" } as const;
 const booleanSchema = { type: "boolean" } as const;
 
 
+const waveformChannelSchema = {
+  type: "array",
+  items: { type: "number", minimum: 0, maximum: 1 },
+} as const;
+
+/** The peaks a client draws a recording from, measured once by the simulator. */
+const waveformSchema = {
+  type: "object",
+  properties: {
+    human: waveformChannelSchema,
+    agent: waveformChannelSchema,
+  },
+  required: ["human", "agent"],
+  additionalProperties: false,
+} as const;
+
 const transcriptSchema = {
   type: "object",
   properties: {
@@ -124,6 +140,10 @@ const simulationSchema = {
     endedAt: nullable(dateTimeSchema),
     providerReference: nullable(stringSchema),
     hasRecording: booleanSchema,
+    recordingWaveform: {
+      ...nullable(waveformSchema),
+      description: "The recording measured for drawing: the loudest sample of each equal slice of the recording, over full scale, one list per channel — human first, agent second. Draw the recording from these values instead of downloading and decoding the audio. Null when the simulator measured none, which includes every recording made before Egma measured them.",
+    },
     /** The platform's final agent session or call record is present. */
     agentPovComplete: booleanSchema,
     /** Provider evidence is explicitly degraded, or absent/partial after the bounded wait. */
@@ -258,6 +278,7 @@ const simulationSchema = {
     "endedAt",
     "providerReference",
     "hasRecording",
+    "recordingWaveform",
     "agentPovComplete",
     "agentPovIncomplete",
     "measures",

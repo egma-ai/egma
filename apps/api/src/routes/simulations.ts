@@ -323,6 +323,9 @@ export async function simulationRoutes(
         // A result is read here, so it answers here — never by fetching the
         // run to find out.
         hasRecording: simulation.recordingReference !== null,
+        // The peaks the simulator measured while it wrote the WAV, so the page
+        // draws the graph without fetching the recording a second time.
+        recordingWaveform: simulation.recordingWaveform,
         // Use the grading wait bound to distinguish evidence still arriving
         // from evidence missing after the deadline.
         agentPovComplete: transcript?.agentEvidenceComplete === true,

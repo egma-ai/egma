@@ -249,8 +249,29 @@
           "description": "An opaque reference to the Pipecat-captured, dual-channel recording the simulator wrote to the blob store — human on the first channel and agent on the second, so each speaker can be heard alone when a transcript looks wrong. Resolved by the control plane; never a URL, never carries how to fetch it.",
           "type": "string",
           "minLength": 1
+        },
+        "waveform": {
+          "description": "The recording already measured for drawing, taken by the simulator as it wrote the WAV. Absent when the simulator measured none, and a reader with no waveform shows the player alone.",
+          "$ref": "#/$defs/waveform"
         }
       }
+    },
+    "waveform": {
+      "description": "The recording's peak amplitude per equal slice, one list per channel in the recording's own channel order: human first, agent second. Enough to draw the recording without fetching and decoding it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["human", "agent"],
+      "properties": {
+        "human": { "$ref": "#/$defs/waveform_channel" },
+        "agent": { "$ref": "#/$defs/waveform_channel" }
+      }
+    },
+    "waveform_channel": {
+      "description": "One channel's peaks, in recording order. Each value is the loudest sample of its slice over full scale: 0 for silence, 1 at the loudest a sample can be. Every channel of one recording is cut on the same slices, so the two lists are the same length.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4096,
+      "items": { "type": "number", "minimum": 0, "maximum": 1 }
     }
   }
 }

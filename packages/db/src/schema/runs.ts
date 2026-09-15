@@ -100,6 +100,17 @@ export type SimulationEndingReason =
 export const RUN_EVENT_KINDS = ["run", "simulation"] as const;
 export type RunEventKind = (typeof RUN_EVENT_KINDS)[number];
 
+/**
+ * One voice recording drawn as peaks: the loudest sample of each equal slice
+ * of the recording, over full scale, one list per channel in the recording's
+ * own order. The simulator measures it while it writes the WAV, so a reader
+ * draws the graph without fetching and decoding the audio.
+ */
+export type RecordingWaveform = {
+  readonly human: readonly number[];
+  readonly agent: readonly number[];
+};
+
 /** A quoted value list, as a check's SQL wants one: `('a', 'b', 'c')`. */
 const quoted = (values: readonly string[]) =>
   sql.raw(`(${values.map((value) => `'${value}'`).join(", ")})`);
@@ -381,6 +392,12 @@ export const simulation = pgTable(
     /** The dual-channel recording's reference in the blob store, voice only. */
     recordingReference: text("recording_reference"),
     /**
+     * The recording measured for drawing: the simulator's peaks per channel,
+     * 0 to 1, human first and agent second. Null on a chat row, and null on a
+     * voice row whose recording was written before the simulator measured one.
+     */
+    recordingWaveform: jsonb("recording_waveform").$type<RecordingWaveform>(),
+    /**
      * How many transcript turns the conversation reached, both speakers
      * counted — a terminal fact off the report, kept on the row because it is
      * read alone to answer for one simulation. Null until a landing carries
@@ -516,6 +533,20 @@ export const simulation = pgTable(
       "simulation_audio_facts_are_voice_facts",
       sql`${table.modality} = 'voice'
         or ${table.recordingReference} is null`,
+    ),
+    // The peaks describe a recording, so there is no holding them without one.
+    check(
+      "simulation_waveform_needs_recording",
+      sql`${table.recordingWaveform} is null
+        or ${table.recordingReference} is not null`,
+    ),
+    // One recording is cut on one set of slices, so its two channels hold
+    // the same number of peaks.
+    check(
+      "simulation_waveform_channels_match",
+      sql`${table.recordingWaveform} is null
+        or jsonb_array_length(${table.recordingWaveform}->'human')
+          = jsonb_array_length(${table.recordingWaveform}->'agent')`,
     ),
     // The tenancy triangle, edge by edge, exactly as the run's: project of
     // the organization, agent of the project, connection of the agent — and

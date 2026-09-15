@@ -437,6 +437,7 @@ export {
   type SweptSimulation,
 } from "./runs.ts";
 export type {
+  RecordingWaveform,
   RunEventKind,
   RunStatus,
   RunTrigger,

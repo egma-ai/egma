@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { resolveRequester, type Requester } from "../auth/requester.ts";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
@@ -38,6 +38,23 @@ export function requesterOf(request: FastifyRequest): Requester {
 }
 
 /**
+ * Put the provider's renewed session cookie on the reply.
+ *
+ * Every door that resolves a browser session calls this. The provider renews
+ * the session row on its own and hands the new cookie back with its answer; a
+ * reply that does not carry it leaves the browser on the cookie it was signed
+ * in with, which then dies on the sign-in day however much the person used it.
+ */
+export function sendRenewedCookies(
+  reply: FastifyReply,
+  renewedCookies: readonly string[] | undefined,
+): void {
+  if (renewedCookies === undefined || renewedCookies.length === 0) return;
+  // An array is one `set-cookie` line each, which is what a browser reads.
+  reply.header("set-cookie", [...renewedCookies]);
+}
+
+/**
  * Applied by calling it from inside a route plugin rather than by registering
  * it beside one, so that the hook and the routes it protects share a scope and
  * a route cannot end up outside it by accident.
@@ -65,6 +82,11 @@ export function credentialed(
     if (requester === null) {
       return notAuthenticated(reply);
     }
+
+    // Before the budget check, because the session was renewed while the
+    // question was answered: a request the budget turns away still leaves the
+    // browser holding the cookie the row now matches.
+    sendRenewedCookies(reply, requester.renewedCookies);
 
     const verdict = options.rateLimit.reached(requester.auth.organizationId);
     if (!verdict.allowed) {

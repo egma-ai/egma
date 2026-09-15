@@ -50,6 +50,20 @@
       "when": 1789430400000,
       "tag": "0006_gpt_live_persona_models",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789516800000,
+      "tag": "0007_persona_settings_simplification",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789603200000,
+      "tag": "0008_simulation_recording_waveform",
+      "breakpoints": true
     }
   ]
 }

@@ -20400,6 +20400,40 @@
                     "hasRecording": {
                       "type": "boolean"
                     },
+                    "recordingWaveform": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "human": {
+                              "type": "array",
+                              "items": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              }
+                            },
+                            "agent": {
+                              "type": "array",
+                              "items": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              }
+                            }
+                          },
+                          "required": [
+                            "human",
+                            "agent"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The recording measured for drawing: the loudest sample of each equal slice of the recording, over full scale, one list per channel — human first, agent second. Draw the recording from these values instead of downloading and decoding the audio. Null when the simulator measured none, which includes every recording made before Egma measured them."
+                    },
                     "agentPovComplete": {
                       "type": "boolean"
                     },
@@ -20940,6 +20974,7 @@
                     "endedAt",
                     "providerReference",
                     "hasRecording",
+                    "recordingWaveform",
                     "agentPovComplete",
                     "agentPovIncomplete",
                     "measures",

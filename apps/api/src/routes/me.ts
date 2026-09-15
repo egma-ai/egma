@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { resolveSession } from "../auth/session.ts";
+import { sendRenewedCookies } from "../http/credentialed.ts";
 import { toIdentityRequest } from "../http/web-handler.ts";
 
 /**
@@ -23,6 +24,10 @@ export async function meRoutes(
         .code(401)
         .send({ error: "not_signed_in", message: "no session on this request" });
     }
+
+    // The page a browser asks this on every load, so this is where most
+    // renewals are handed back.
+    sendRenewedCookies(reply, session.renewedCookies);
 
     return reply.send({
       user: { id: session.userId, email: session.email },

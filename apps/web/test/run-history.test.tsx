@@ -1097,7 +1097,7 @@ describe("one run after suites", () => {
     expect(within(panel).getByText("Running")).toBeTruthy();
     expect(
       within(panel).getByText(
-        "The conversation is happening now. Results appear here when it ends.",
+        "The simulation is happening now. Results appear here when it ends.",
       ),
     ).toBeTruthy();
     /* Nothing pretends to be evidence while there is none. */
@@ -1106,6 +1106,119 @@ describe("one run after suites", () => {
     expect(screen.queryByRole("heading", { name: "Graders" })).toBeNull();
     /* The rail is still there: the transcript is live while this runs. */
     expect(screen.getByRole("tab", { name: "Results summary" })).toBeTruthy();
+  });
+
+  /** A run whose one simulation has not settled, with the evidence it has so far. */
+  function unsettledStubs(
+    status: "queued" | "running",
+    evidence: Record<string, unknown>,
+  ): Record<string, Stub | readonly Stub[]> {
+    return detailStubs(
+      runDetail({ status: "running", finishedAt: null }),
+      {
+        status: 200,
+        body: {
+          simulations: [
+            simulation({
+              status,
+              gradingState: null,
+              gradeTally: null,
+              combinedScore: null,
+              endedAt: null,
+            }),
+          ],
+          nextPageToken: null,
+        },
+      },
+      {
+        status: 200,
+        body: simulationEvidence({
+          status,
+          gradingState: "not_requested",
+          grades: [],
+          gradeHistory: [],
+          combinedScore: null,
+          endedAt: null,
+          ...evidence,
+        }),
+      },
+    );
+  }
+
+  /*
+   * The Transcript tab waits under the same mark. A running simulation with no
+   * turn and no tool call has nothing to stream yet, and on Retell nothing
+   * arrives before the simulation ends, so empty blocks would say the work
+   * failed.
+   */
+  it("waits under the Egma mark on the Transcript tab while no turn has arrived", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers(unsettledStubs("running", { transcript: null }));
+    render(<RunDetailPage />);
+
+    const tab = await screen.findByRole("tab", { name: "Transcript" });
+    expect(tab.getAttribute("data-state")).toBe("active");
+    const panel = screen.getByRole("tabpanel", { name: "Transcript" });
+    const mark = panel.querySelector('[data-slot="waiting-mark"]') as HTMLElement;
+    expect(mark).not.toBeNull();
+    expect(mark.getAttribute("alt")).toBe("");
+    expect(mark.getAttribute("src")).toBe("/brand/egma-mark-light.svg");
+    expect(mark.getAttribute("data-motion")).toBe("pulse");
+    expect(mark.className).toContain("size-14");
+    expect(within(panel).getByText("Running")).toBeTruthy();
+    expect(
+      within(panel).getByText(
+        "The simulation is happening now. The transcript appears here as Egma receives it.",
+      ),
+    ).toBeTruthy();
+    /* The tab holds the wait alone: no empty blocks, and no Results sentence. */
+    expect(within(panel).queryByRole("heading", { name: "Recording" })).toBeNull();
+    expect(within(panel).queryByRole("heading", { name: "Conversation" })).toBeNull();
+    expect(within(panel).queryByText(/Results appear here/u)).toBeNull();
+  });
+
+  /* A voice simulation loses its empty recording block for the same wait. */
+  it("holds the recording block back until the voice transcript starts", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers(
+      unsettledStubs("running", { modality: "voice", transcript: null }),
+    );
+    render(<RunDetailPage />);
+
+    const panel = await screen.findByRole("tabpanel", { name: "Transcript & audio" });
+    expect(panel.querySelector('[data-slot="waiting-mark"]')).not.toBeNull();
+    expect(within(panel).queryByRole("heading", { name: "Recording" })).toBeNull();
+    expect(
+      within(panel).queryByText("Recording will be available after the call ends."),
+    ).toBeNull();
+  });
+
+  /* The first turn ends the wait, and the tab streams as it always has. */
+  it("shows the transcript as soon as a running simulation has a turn", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers(unsettledStubs("running", {}));
+    render(<RunDetailPage />);
+
+    const panel = await screen.findByRole("tabpanel", { name: "Transcript" });
+    expect(panel.querySelector('[data-slot="waiting-mark"]')).toBeNull();
+    expect(within(panel).getByRole("heading", { name: "Conversation" })).toBeTruthy();
+    expect(within(panel).getByText("Can you find my appointment?")).toBeTruthy();
+  });
+
+  /* A queued simulation names the wait it is in, on both tabs. */
+  it("names the queued wait on the Transcript tab", async () => {
+    routed.pathname = "/projects/prj_1/runs/run_1";
+    answers(unsettledStubs("queued", { transcript: null }));
+    render(<RunDetailPage />);
+
+    /* Only a running simulation opens on the transcript, so this one is asked for. */
+    fireEvent.click(await screen.findByRole("tab", { name: "Transcript" }));
+    const panel = await screen.findByRole("tabpanel", { name: "Transcript" });
+    expect(panel.querySelector('[data-slot="waiting-mark"]')).not.toBeNull();
+    expect(within(panel).getByText("Queued")).toBeTruthy();
+    expect(
+      within(panel).getByText("Waiting for a simulator to start."),
+    ).toBeTruthy();
   });
 
   it("shows no waiting mark once the simulation has finished", async () => {

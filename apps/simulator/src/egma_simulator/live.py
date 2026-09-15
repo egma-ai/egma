@@ -44,7 +44,7 @@ from .media import VoiceMedia
 from .model import ModelClient
 from .persona import OPENING_NUDGE, Persona
 from .plugs import PlugError, VoiceConnection
-from .recording import AudioFacts, dual_channel_wav
+from .recording import AudioFacts, dual_channel_wav, measured_waveform
 from .spec import LiveSelection
 from .speech import SpeechGain
 from .usage import ProviderUsage, live_duration_usage
@@ -647,15 +647,19 @@ class LiveConductor:
                     if callback_fault is None:
                         callback_fault = error
             if recording_rate and (agent_track or persona_track):
+                persona_audio = bytes(persona_track)
+                agent_audio = bytes(agent_track)
                 try:
                     reference = await self._blobs.write(
                         self._recording_key,
-                        dual_channel_wav(
-                            bytes(persona_track), bytes(agent_track), recording_rate
-                        ),
+                        dual_channel_wav(persona_audio, agent_audio, recording_rate),
                     )
                     started = recorder.started_unix_nano if recorder else opened
-                    self.audio = AudioFacts(reference, started)
+                    self.audio = AudioFacts(
+                        reference,
+                        started,
+                        waveform=measured_waveform(persona_audio, agent_audio),
+                    )
                 except Exception:
                     self.evidence_error = "evidence_collection_error"
             if callback_fault is not None and active_error is None:

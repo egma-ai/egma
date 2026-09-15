@@ -17,6 +17,7 @@ from conftest import (
     SENTINEL_LIVEKIT_ENV,
     SENTINEL_PLATFORM,
     all_terminal,
+    assert_a_drawable_waveform,
     assert_kept_secret,
     assert_one_speaker_to_a_channel,
     has_terminal,
@@ -1092,7 +1093,8 @@ async def test_a_voice_spec_reports_a_whole_exchange_and_its_audio(
     assert facts["provider_reference"] == "loopback-voice-hurried-1"
 
     audio = facts["audio"]
-    assert set(audio) == {"recording"}
+    assert set(audio) == {"recording", "waveform"}
+    assert_a_drawable_waveform(audio["waveform"])
 
     # The reference is a reference: no bytes on the wire, and it resolves.
     assert "://" not in audio["recording"]
@@ -1200,7 +1202,8 @@ async def test_two_voice_simulations_at_once_keep_their_audio_apart(
         )
         facts = terminal["facts"]
         assert facts["audio"] is not None, simulation_id
-        assert set(facts["audio"]) == {"recording"}
+        assert set(facts["audio"]) == {"recording", "waveform"}
+        assert_a_drawable_waveform(facts["audio"]["waveform"])
         references[simulation_id] = facts["audio"]["recording"]
         recording = simulator.blob(references[simulation_id])
         assert_one_speaker_to_a_channel(
@@ -1264,7 +1267,8 @@ async def test_one_scenario_over_chat_and_over_voice_is_one_transcript(
     chat = terminal_event_for(records, "sim-same-chat")["facts"]
     voice = terminal_event_for(records, "sim-same-voice")["facts"]
     assert chat["audio"] is None
-    assert set(voice["audio"]) == {"recording"}
+    assert set(voice["audio"]) == {"recording", "waveform"}
+    assert_a_drawable_waveform(voice["audio"]["waveform"])
 
 
 async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
@@ -1352,7 +1356,8 @@ async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(
     )
 
     audio = facts["audio"]
-    assert set(audio) == {"recording"}
+    assert set(audio) == {"recording", "waveform"}
+    assert_a_drawable_waveform(audio["waveform"])
 
     # The reference is a reference: no bytes on the wire, and it resolves
     # to a recording with one speaker to a channel.

@@ -789,6 +789,10 @@ describe("the two schemas, as one contract", () => {
     expect(audio).toEqual({
       recording:
         "sim_01K3XQ7M4E8YB2FVN0H9TZQWES/dual-channel.wav",
+      waveform: {
+        human: [0.04, 0.61, 0.58, 0.02, 0.0, 0.31],
+        agent: [0.52, 0.03, 0.0, 0.47, 0.49, 0.05],
+      },
     });
     expect(
       validators.report(report),
@@ -810,6 +814,52 @@ describe("the two schemas, as one contract", () => {
       );
       delete audio[property];
     }
+  });
+
+  it("carries a drawn recording as peaks between zero and one, or not at all", async () => {
+    const report = await readJson(
+      "fixtures",
+      "report",
+      "valid",
+      "completed-voice.json",
+    );
+    const event = (report.events as Record<string, unknown>[])[0];
+    if (event === undefined) throw new Error("the completed report has no event");
+    const facts = event.facts as Record<string, unknown>;
+    const audio = facts.audio as Record<string, unknown>;
+    const waveform = audio.waveform as Record<string, number[]>;
+
+    // Full scale is the loudest a peak can be, so anything above it is not a
+    // measurement of this recording.
+    const human = waveform.human as number[];
+    human[0] = 1.5;
+    expect(validators.report(report)).toBe(false);
+    expect(validators.report.errors).toContainEqual(
+      expect.objectContaining({
+        instancePath: "/events/0/facts/audio/waveform/human/0",
+        keyword: "maximum",
+      }),
+    );
+    human[0] = 0.04;
+
+    // The channels are the transcript's two speakers and nobody else.
+    waveform.mixed = [0.5];
+    expect(validators.report(report)).toBe(false);
+    expect(validators.report.errors).toContainEqual(
+      expect.objectContaining({
+        instancePath: "/events/0/facts/audio/waveform",
+        keyword: "additionalProperties",
+        params: { additionalProperty: "mixed" },
+      }),
+    );
+    delete waveform.mixed;
+
+    // A recording nothing measured is still a recording.
+    delete audio.waveform;
+    expect(
+      validators.report(report),
+      JSON.stringify(validators.report.errors),
+    ).toBe(true);
   });
 
   it("gives each terminal status its own endings, sharing none", () => {

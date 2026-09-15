@@ -1009,6 +1009,18 @@ def assert_one_speaker_to_a_channel(
     ]
 
 
+def assert_a_drawable_waveform(waveform: object) -> None:
+    """The peaks a page draws from: one list per channel, all within scale."""
+    from egma_simulator.recording import WAVEFORM_BINS
+
+    assert isinstance(waveform, dict), waveform
+    assert set(waveform) == {"human", "agent"}
+    for channel, peaks in waveform.items():
+        assert len(peaks) == WAVEFORM_BINS, channel
+        assert all(isinstance(peak, float) for peak in peaks), channel
+        assert all(0.0 <= peak <= 1.0 for peak in peaks), channel
+
+
 def speech_in_the_recording(recording: bytes) -> list[tuple[str, int, int]]:
     """Every stretch of speech a listener could find, in sample positions.
 

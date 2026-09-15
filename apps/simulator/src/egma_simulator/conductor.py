@@ -80,7 +80,7 @@ from .persona import SILENCE_FOLLOW_UP_LIMIT, SILENCE_WAIT_SECONDS, Persona, Tur
 from .platform_logging import log_event
 from .plugs import PlugError, VoiceConnection
 from .provider_keys import ProviderKeyUnavailable, authentication_rejected
-from .recording import AudioFacts, dual_channel_wav
+from .recording import AudioFacts, dual_channel_wav, measured_waveform
 from .speech import (
     SCRIPTED_PAIR,
     PersonaVoice,
@@ -2108,14 +2108,12 @@ class VoiceConductor:
             not self._persona_track and not self._agent_track
         ):
             return
+        persona_track = bytes(self._persona_track)
+        agent_track = bytes(self._agent_track)
         try:
             reference = await self._blobs.write(
                 self._recording_key,
-                dual_channel_wav(
-                    bytes(self._persona_track),
-                    bytes(self._agent_track),
-                    self._recording_rate,
-                ),
+                dual_channel_wav(persona_track, agent_track, self._recording_rate),
             )
         except Exception as failure:
             self.evidence_error = "evidence_collection_error"
@@ -2131,6 +2129,7 @@ class VoiceConductor:
         self.audio = AudioFacts(
             recording=reference,
             started_unix_nano=self._recording_began_unix_nano,
+            waveform=measured_waveform(persona_track, agent_track),
         )
 
     async def _run(self) -> None:

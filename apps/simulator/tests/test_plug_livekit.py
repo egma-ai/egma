@@ -1611,7 +1611,7 @@ async def test_a_livekit_spec_conducts_a_whole_simulation_in_a_room(
     assert stamped == sorted(stamped)
 
     audio = assembled.audio
-    assert set(audio) == {"recording"}
+    assert set(audio) == {"recording", "waveform"}
 
     # The reference is a reference: no bytes on the wire, and it resolves
     # to a recording with one speaker to a channel.

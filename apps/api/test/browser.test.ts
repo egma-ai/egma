@@ -1968,19 +1968,22 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
         .toBe(5);
 
       /*
-       * Make storage refuse once to exercise signed-link recovery without waiting
-       * for expiry. The player must request a new link and restore playback position.
+       * Fire the player's own error to exercise signed-link recovery without
+       * waiting for expiry. The page must ask egma for a new link and restore
+       * the playback position; the store itself is left alone, because the
+       * player is now the only thing that fetches the recording and a refused
+       * second link is a failure, not a recovery.
        */
-      let refusals = 0;
-      await page.route(`${running.store.publicUrl}/**`, async (route) => {
-        refusals += 1;
-        if (refusals > 1) return route.continue();
-        return route.fulfill({
-          status: 403,
-          contentType: "application/xml",
-          body: "<Error><Code>AccessDenied</Code><Message>Request has expired</Message></Error>",
-        });
-      });
+      let linksAsked = 0;
+      await page.route(
+        (url) =>
+          url.origin === origin &&
+          /^\/v1\/simulations\/[^/]+\/recording$/u.test(url.pathname),
+        async (route) => {
+          linksAsked += 1;
+          return route.continue();
+        },
+      );
       try {
         await player.evaluate((element) => {
           const audio = element as unknown as {
@@ -1997,8 +2000,8 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
 
         // A second link was asked for, off the same page, with no reload.
         await expect
-          .poll(() => refusals, { timeout: 30_000 })
-          .toBeGreaterThan(1);
+          .poll(() => linksAsked, { timeout: 30_000 })
+          .toBeGreaterThan(0);
 
         // And it plays, from where the listener had got to rather than from the
         // beginning — being thrown back to the start of a recording you were
@@ -2019,11 +2022,10 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
           )
           .toBe(75);
       } finally {
-        // Removed with `behavior: "wait"`, not the default: the player keeps
-        // fetching the store while it plays, so a handler can be mid-continue
-        // at exactly this moment, and a default removal races it over one
-        // request. This is the page's only route here, so removing all of
-        // them is the same removal with the safe semantics.
+        // Removed with `behavior: "wait"`, not the default: a handler can be
+        // mid-continue at exactly this moment, and a default removal races it
+        // over one request. This is the page's only route here, so removing
+        // all of them is the same removal with the safe semantics.
         await page.unrouteAll({ behavior: "wait" });
       }
 
@@ -3460,23 +3462,23 @@ describe("the complete product, walked in order in a second project", () => {
       const evidence = walk.getByRole("tabpanel", {
         name: "Transcript & audio",
       });
-      await evidence
-        .getByRole("heading", { name: "Conversation", exact: true })
-        .waitFor();
+      // Nothing has happened yet, so the tab waits with the Egma mark rather
+      // than stacking an empty recording over an empty transcript.
+      await evidence.locator('[data-slot="waiting-mark"]').waitFor();
 
       const shown = await walk.innerText("main");
-      // It is the conversation it says it is: the test it will execute, and
-      // who will call about it.
+      // It is the simulation it says it is: the test it will execute, and
+      // the persona who will call about it.
       expect(shown).toContain("Reschedules a booked appointment");
       expect(shown).toContain("Impatient Rita");
-      // And nothing has happened yet, said as the compact empty state used by
-      // this evidence surface rather than as a failure.
-      const emptyConversation = evidence.locator(
-        'section[aria-labelledby="run-evidence-conversation"]',
+      expect(await evidence.innerText()).toMatch(
+        /Queued\s+Waiting for a simulator to start\./u,
       );
-      expect(await emptyConversation.innerText()).toMatch(
-        /Conversation\s+No conversation recorded/u,
-      );
+      expect(
+        await evidence
+          .getByRole("heading", { name: "Conversation", exact: true })
+          .count(),
+      ).toBe(0);
       expect(await walk.locator("audio").count()).toBe(0);
     },
     SETTLE,

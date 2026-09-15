@@ -8,6 +8,7 @@ import {
   startSimulation,
   type CompletedEndingReason,
   type FailedEndingReason,
+  type RecordingWaveform,
   type Simulation,
   type SimulationStanding,
   type SimulationSummaryFacts,
@@ -88,6 +89,7 @@ type StatusEvent = {
     readonly turn_count: number;
     readonly audio: {
       readonly recording: string;
+      readonly waveform?: RecordingWaveform;
     } | null;
     readonly provider_reference: string | null;
     readonly evidence_error?: "evidence_collection_error" | null;
@@ -147,7 +149,12 @@ function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
       : { providerReference: facts.provider_reference }),
     ...(facts.audio === null
       ? {}
-      : { recordingReference: facts.audio.recording }),
+      : {
+          recordingReference: facts.audio.recording,
+          // Null when the simulator measured no peaks, so a row never keeps a
+          // waveform its report did not carry.
+          recordingWaveform: facts.audio.waveform ?? null,
+        }),
     // Incoherent times leave measured execution unknown.
     ...(reportedMoments(facts) ?? {}),
   };
@@ -265,6 +272,28 @@ export async function reportRoutes(
     // SAFETY: reportComplaints accepted this value against the closed report
     // schema, which requires simulation_id and permits only status events.
     const report = document as AcceptedReport;
+
+    // One recording is cut on one set of slices, which the schema cannot say
+    // for itself: a waveform whose channels differ in length is refused as a
+    // document, the same way a schema complaint is.
+    const unevenWaveforms = report.events.flatMap((event, at) => {
+      const waveform = event.facts?.audio?.waveform;
+      if (waveform === undefined) return [];
+      if (waveform.human.length === waveform.agent.length) return [];
+      return [
+        `/events/${String(at)}/facts/audio/waveform: the human channel holds ` +
+          `${String(waveform.human.length)} peaks and the agent channel ` +
+          `${String(waveform.agent.length)}, and one recording is cut on one set of slices`,
+      ];
+    });
+    if (unevenWaveforms.length > 0) {
+      return invalid(
+        reply,
+        `this is not a simulation report the contract accepts: ` +
+          `${unevenWaveforms.join("; ")}. Fix the document against the report ` +
+          `schema, contract version 1; resending the same bytes cannot help.`,
+      );
+    }
 
     // A document about another simulation is refused, not rerouted: the URL
     // and the document each name the simulation, and when they disagree

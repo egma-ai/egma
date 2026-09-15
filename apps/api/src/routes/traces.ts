@@ -12,7 +12,7 @@ import {
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
-import { requesterOf } from "../http/credentialed.ts";
+import { requesterOf, sendRenewedCookies } from "../http/credentialed.ts";
 import {
   IngestionUnavailableError,
   type EvidenceGroup,
@@ -612,6 +612,10 @@ export async function traceRoutes(
     if (requester === null) {
       return notAuthenticated(reply);
     }
+
+    // The same renewal the shared hook sends, on the door that spells that
+    // hook out: a browser reaching this route keeps its session alive too.
+    sendRenewedCookies(reply, requester.renewedCookies);
 
     const verdict = options.rateLimit.reached(requester.auth.organizationId);
     if (!verdict.allowed) {

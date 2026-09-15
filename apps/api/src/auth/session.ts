@@ -35,6 +35,11 @@ export type Session = {
   readonly projects: readonly Project[];
   /** Absent for exactly the same reason `organizations` can be empty. */
   readonly auth: AuthContext | undefined;
+  /**
+   * The provider's renewed session cookie, carried out to the route so the
+   * reply can send it. Present only when the provider renewed on this request.
+   */
+  readonly renewedCookies?: readonly string[];
 };
 
 /**
@@ -58,6 +63,13 @@ export async function resolveSession(
   // on them while every product foreign key stays exactly where it is.
   const userId = identity.externalIdentityId;
 
+  // Spread onto every answer below, so a renewal reaches the reply whatever
+  // the person turns out to be a member of.
+  const renewed =
+    identity.renewedCookies === undefined
+      ? {}
+      : { renewedCookies: identity.renewedCookies };
+
   const memberships = await membershipsOf(userId);
 
   // Whatever they are a member of, and at whatever role. The flag is the
@@ -73,6 +85,7 @@ export async function resolveSession(
       organizations: [],
       projects: [],
       auth: undefined,
+      ...renewed,
     };
   }
 
@@ -115,5 +128,6 @@ export async function resolveSession(
     ],
     projects,
     auth,
+    ...renewed,
   };
 }

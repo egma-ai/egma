@@ -270,7 +270,7 @@ async def test_a_web_call_spec_conducts_a_whole_simulation(
 
     # The recording resolves, the way it does for every voice simulation.
     audio = assembled.audio
-    assert set(audio) == {"recording"}
+    assert set(audio) == {"recording", "waveform"}
     assert "://" not in audio["recording"]
     assert (tmp_path / audio["recording"]).read_bytes()
 
