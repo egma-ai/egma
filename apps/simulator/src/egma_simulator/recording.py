@@ -16,6 +16,8 @@ import wave
 from array import array
 from dataclasses import dataclass
 
+import numpy as np
+
 from .speech import SAMPLE_WIDTH_BYTES
 
 RECORDING_NAME = "dual-channel.wav"
@@ -25,6 +27,12 @@ PERSONA_CHANNEL = 0
 AGENT_CHANNEL = 1
 """Who is on which channel of a recording. The transcript's two labels in
 the transcript's own order."""
+
+WAVEFORM_BINS = 360
+"""How many peaks one channel's waveform holds: one per drawn column."""
+
+FULL_SCALE = 32768
+"""The magnitude a signed 16-bit sample is measured against."""
 
 
 @dataclass(frozen=True)
@@ -38,10 +46,19 @@ class AudioFacts:
     VoiceConductor stamps turns as offsets from this instant. The simulator
     emits it as recording trace evidence before the trace is sealed.
     """
+    waveform: dict[str, list[float]] | None = None
+    """The recording drawn as peaks, measured while the WAV was written.
+
+    A reader gets the graph from this rather than by fetching and decoding
+    the whole file. None when nothing measured the recording.
+    """
 
     def as_report(self) -> dict:
         """The contract's audio block, exactly."""
-        return {"recording": self.recording}
+        report: dict = {"recording": self.recording}
+        if self.waveform is not None:
+            report["waveform"] = self.waveform
+        return report
 
 
 def dual_channel_wav(
@@ -62,6 +79,41 @@ def dual_channel_wav(
         out.setframerate(sample_rate_hz)
         out.writeframes(_as_pcm(interleaved))
     return written.getvalue()
+
+
+def waveform_of(
+    persona_audio: bytes, agent_audio: bytes, bins: int = WAVEFORM_BINS
+) -> dict[str, list[float]]:
+    """The recording's loudness per equal slice, one list per channel.
+
+    The slices span the padded frame count ``dual_channel_wav`` writes, so
+    both channels are cut on one grid and a padded tail reads as silence.
+    Each value is the loudest sample of its slice over full scale: 0.0 for
+    quiet, 1.0 at most, rounded to three decimals.
+    """
+    frames = max(len(persona_audio), len(agent_audio)) // SAMPLE_WIDTH_BYTES
+    return {
+        "human": _peaks(persona_audio, frames, bins),
+        "agent": _peaks(agent_audio, frames, bins),
+    }
+
+
+def _peaks(pcm: bytes, frames: int, bins: int) -> list[float]:
+    """One channel's peak per slice, padded with quiet to ``frames``."""
+    if frames == 0:
+        return [0.0] * bins
+    size = -(-frames // bins)
+    samples = np.frombuffer(pcm[: frames * SAMPLE_WIDTH_BYTES], dtype="<i2")
+    padded = np.zeros(bins * size, dtype=np.int16)
+    padded[: len(samples)] = samples
+    slices = padded.reshape(bins, size)
+    # Signed 16-bit holds no positive 32768, so the negative extreme is read
+    # as its own magnitude instead of through abs().
+    loudest = np.maximum(
+        slices.max(axis=1).astype(np.int32),
+        -slices.min(axis=1).astype(np.int32),
+    )
+    return [round(float(peak) / FULL_SCALE, 3) for peak in loudest]
 
 
 def channels_of(wav_bytes: bytes) -> tuple[bytes, bytes, int]:

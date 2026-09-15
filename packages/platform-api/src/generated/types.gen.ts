@@ -5593,6 +5593,13 @@ export type GetSimulationResponses = {
         endedAt: string | null;
         providerReference: string | null;
         hasRecording: boolean;
+        /**
+         * The recording measured for drawing: the loudest sample of each equal slice of the recording, over full scale, one list per channel — human first, agent second. Draw the recording from these values instead of downloading and decoding the audio. Null when the simulator measured none, which includes every recording made before Egma measured them.
+         */
+        recordingWaveform: {
+            human: Array<number>;
+            agent: Array<number>;
+        } | null;
         agentPovComplete: boolean;
         agentPovIncomplete: boolean;
         measures: {

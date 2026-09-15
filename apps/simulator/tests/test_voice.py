@@ -50,8 +50,11 @@ from egma_simulator.plugs import PlugError, failed_ending
 from egma_simulator.recording import (
     AGENT_CHANNEL,
     PERSONA_CHANNEL,
+    WAVEFORM_BINS,
+    AudioFacts,
     channels_of,
     dual_channel_wav,
+    waveform_of,
 )
 from egma_simulator.spec import AuthoredPersona, PersonaParameters, SimulationSpec
 from egma_simulator.speech import (
@@ -420,6 +423,43 @@ def test_a_recording_is_two_channels_in_the_transcripts_own_order():
     assert len(channels[0]) == len(channels[1]) == len(agent)
 
 
+def test_a_recording_is_measured_for_drawing_as_it_is_written():
+    """The peaks the page draws are taken here, once, beside the WAV."""
+    rate = 8000
+    loudest = b"\xff\x7f" * rate
+    persona = loudest + silence(1.0, rate)
+    agent = loudest
+
+    drawn = waveform_of(persona, agent)
+
+    assert set(drawn) == {"human", "agent"}
+    assert len(drawn["human"]) == len(drawn["agent"]) == WAVEFORM_BINS
+    assert all(0.0 <= peak <= 1.0 for channel in drawn.values() for peak in channel)
+    # The persona speaks over the first half of the exchange and then stops.
+    assert drawn["human"][0] == 1.0
+    assert drawn["human"][-1] == 0.0
+    # The agent's shorter channel is padded to the same length, and the WAV's
+    # padding is silence here too.
+    assert drawn["agent"][0] == 1.0
+    assert drawn["agent"][-1] == 0.0
+
+    # Nothing recorded still draws a flat line rather than nothing at all.
+    assert waveform_of(b"", b"") == {
+        "human": [0.0] * WAVEFORM_BINS,
+        "agent": [0.0] * WAVEFORM_BINS,
+    }
+
+    # And the report carries what was measured, beside the reference.
+    reported = AudioFacts(
+        recording="sim-1/dual-channel.wav",
+        started_unix_nano=1,
+        waveform=drawn,
+    ).as_report()
+    assert reported == {"recording": "sim-1/dual-channel.wav", "waveform": drawn}
+    unmeasured = AudioFacts(recording="sim-1/dual-channel.wav", started_unix_nano=1)
+    assert unmeasured.as_report() == {"recording": "sim-1/dual-channel.wav"}
+
+
 # -- A whole exchange --------------------------------------------------------
 
 
@@ -513,7 +553,7 @@ async def test_the_recording_holds_each_speaker_on_their_own_channel(
     assert audio is not None
 
     recording = (tmp_path / audio["recording"]).read_bytes()
-    assert set(audio) == {"recording"}
+    assert set(audio) == {"recording", "waveform"}
     assert channels_of(recording)[2] > 0
 
     # Every transcript turn was carried on its own speaker's channel and on

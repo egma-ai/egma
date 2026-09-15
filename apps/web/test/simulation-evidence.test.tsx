@@ -178,6 +178,7 @@ function evidence(overrides: Record<string, unknown> = {}) {
     agentPovComplete: false,
     agentPovIncomplete: false,
     hasRecording: false,
+    recordingWaveform: null,
     measures: { durationMs: 40_000, turnCount: 2, toolCallCount: 0 },
     metrics: [
       {
@@ -1738,6 +1739,74 @@ describe("recording evidence", () => {
 
     expect(audio.currentTime).toBe(29);
     expect(result.current.currentTime).toBe(29);
+  });
+
+  it("draws the simulator-measured waveform without downloading the recording", async () => {
+    apiAnswers({
+      "/v1/simulations/sim_1/recording": {
+        status: 200,
+        body: {
+          simulationId: "sim_1",
+          url: "https://recordings.example/sim_1.wav",
+          expiresAt: "2026-08-15T11:00:00.000Z",
+        },
+      },
+    });
+    // Any decode at all is a second download of the same bytes, so the only
+    // AudioContext this page could reach is one that refuses to be built.
+    vi.stubGlobal(
+      "AudioContext",
+      class {
+        constructor() {
+          throw new Error("decoded");
+        }
+      },
+    );
+
+    const { result } = renderHook(() =>
+      useSimulationEvidenceRecording(
+        evidence({
+          hasRecording: true,
+          recordingWaveform: { human: [0.2, 0.6], agent: [0.1, 0.4] },
+        }) as never,
+        "prj_1",
+      ),
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current.waveform).toEqual({
+      kind: "stereo",
+      human: [0.2, 0.6],
+      agent: [0.1, 0.4],
+    });
+    expect(result.current.waveformLoading).toBe(false);
+    expect(sent.map((request) => request.path)).toEqual([
+      "/v1/simulations/sim_1/recording",
+    ]);
+  });
+
+  it("keeps the player and its seek bar for a recording measured before waveforms existed", async () => {
+    apiAnswers({
+      "/v1/simulations/sim_1/recording": {
+        status: 200,
+        body: {
+          simulationId: "sim_1",
+          url: "https://recordings.example/sim_1.wav",
+          expiresAt: "2026-08-15T11:00:00.000Z",
+        },
+      },
+    });
+
+    const { result } = renderHook(() =>
+      useSimulationEvidenceRecording(
+        evidence({ hasRecording: true, recordingWaveform: null }) as never,
+        "prj_1",
+      ),
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current.waveform).toBeNull();
+    expect(result.current.waveformLoading).toBe(false);
   });
 
   it("uses one 44px play control and keeps stereo seeking keyboard accessible", () => {

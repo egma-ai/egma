@@ -421,9 +421,11 @@ function waveformOf(
 /**
  * One signed recording controller for the prototype and the shipped page.
  *
- * A failed media request or stereo decode refreshes the short-lived link once.
- * The listener returns to the same point, and a same-second byte-identical URL
- * is loaded explicitly instead of being mistaken for no change.
+ * The graph is drawn from the peaks the simulator measured when it wrote the
+ * recording, so the browser downloads the audio once, through the player.
+ * A failed media request refreshes the short-lived link once. The listener
+ * returns to the same point, and a same-second byte-identical URL is loaded
+ * explicitly instead of being mistaken for no change.
  */
 export function useSimulationEvidenceRecording(
   evidence: SimulationEvidence | null,
@@ -444,18 +446,12 @@ export function useSimulationEvidenceRecording(
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [waveform, setWaveform] = useState<
-    SimulationEvidenceRecording["waveform"]
-  >(null);
-  const [waveformLoading, setWaveformLoading] = useState(false);
   const [asked, setAsked] = useState(0);
   const resumeAt = useRef(0);
   const pendingSeekAt = useRef<number | null>(null);
   const lastClock = useRef(0);
   const isASecondTry = useRef(false);
   const resolvedAttempt = useRef(-1);
-  const mediaReadyAttempt = useRef(-1);
-  const decodeReadyAttempt = useRef(-1);
 
   useEffect(() => {
     let current = true;
@@ -463,7 +459,6 @@ export function useSimulationEvidenceRecording(
     activeRecording.current = recordingId;
     setSource(null);
     setMessage(null);
-    setWaveform(null);
     setPlaying(false);
     if (changed) {
       setCurrentTime(0);
@@ -475,7 +470,6 @@ export function useSimulationEvidenceRecording(
     }
     if (!hasRecording || recordingId === null) {
       setStatus("absent");
-      setWaveformLoading(false);
       return () => {
         current = false;
       };
@@ -500,9 +494,6 @@ export function useSimulationEvidenceRecording(
         }
         if (!current) return;
         resolvedAttempt.current = attempt;
-        mediaReadyAttempt.current = -1;
-        decodeReadyAttempt.current = -1;
-        setWaveformLoading(true);
         setSource({ recordingId, url: answer.value.url });
         setStatus("ready");
       })
@@ -519,53 +510,6 @@ export function useSimulationEvidenceRecording(
       current = false;
     };
   }, [asked, hasRecording, recordingId, projectId]);
-
-  useEffect(() => {
-    if (source === null || source.recordingId !== recordingId) return undefined;
-    let current = true;
-    let context: AudioContext | null = null;
-    const closeContext = (): void => {
-      const ownedContext = context;
-      context = null;
-      if (ownedContext === null) return;
-      try {
-        void ownedContext.close().catch(() => undefined);
-      } catch {
-        // Cleanup must remain safe when the browser already closed the context.
-      }
-    };
-    const attempt = resolvedAttempt.current;
-    setWaveformLoading(true);
-    void fetch(source.url)
-      .then((answer) => {
-        if (!answer.ok) throw new Error("The audio file could not be decoded.");
-        return answer.arrayBuffer();
-      })
-      .then(async (bytes) => {
-        context = new AudioContext();
-        const decoded = await context.decodeAudioData(bytes);
-        if (!current) return;
-        setDuration(decoded.duration);
-        setWaveform(waveformOf(decoded));
-        markReady(attempt, "decode");
-      })
-      .catch(() => {
-        if (!current) return;
-        const retryFailure =
-          isASecondTry.current && attempt === resolvedAttempt.current;
-        setWaveform(null);
-        recoverSignedLink(attempt, "decode");
-        if (retryFailure) markReady(attempt, "decode");
-      })
-      .finally(() => {
-        if (current) setWaveformLoading(false);
-        closeContext();
-      });
-    return () => {
-      current = false;
-      closeContext();
-    };
-  }, [recordingId, source]);
 
   useEffect(() => {
     if (source === null || asked === 0) return;
@@ -587,31 +531,20 @@ export function useSimulationEvidenceRecording(
     return () => cancelAnimationFrame(frame);
   }, [playing]);
 
-  function markReady(attempt: number, part: "decode" | "media"): void {
+  /** The media loaded on this attempt, so a later failure may refresh again. */
+  function markReady(attempt: number): void {
     if (attempt < 0 || attempt !== resolvedAttempt.current) return;
-    if (part === "media") mediaReadyAttempt.current = attempt;
-    else decodeReadyAttempt.current = attempt;
-    if (
-      mediaReadyAttempt.current === attempt &&
-      decodeReadyAttempt.current === attempt
-    ) {
-      isASecondTry.current = false;
-    }
+    isASecondTry.current = false;
   }
 
-  function recoverSignedLink(
-    attempt: number,
-    sourceOfFailure: "decode" | "media",
-  ): void {
+  function recoverSignedLink(attempt: number): void {
     if (attempt < 0 || attempt !== resolvedAttempt.current) return;
     if (isASecondTry.current) {
-      if (sourceOfFailure === "media") {
-        setPlaying(false);
-        setStatus("failed");
-        setMessage(
-          "The recording still could not be played after Egma refreshed its link.",
-        );
-      }
+      setPlaying(false);
+      setStatus("failed");
+      setMessage(
+        "The recording still could not be played after Egma refreshed its link.",
+      );
       return;
     }
     isASecondTry.current = true;
@@ -649,7 +582,7 @@ export function useSimulationEvidenceRecording(
       setCurrentTime(audioRef.current.currentTime);
       resumeAt.current = 0;
     }
-    markReady(attempt, "media");
+    markReady(attempt);
   }
 
   const seek = useCallback((seconds: number, play = false): void => {
@@ -665,6 +598,16 @@ export function useSimulationEvidenceRecording(
     setCurrentTime(audio.currentTime);
     if (play) void audio.play().catch(() => undefined);
   }, []);
+
+  const human = evidence?.recordingWaveform?.human;
+  const agent = evidence?.recordingWaveform?.agent;
+  const waveform = useMemo<SimulationEvidenceRecording["waveform"]>(
+    () =>
+      human === undefined || agent === undefined
+        ? null
+        : { kind: "stereo", human, agent },
+    [agent, human],
+  );
 
   const currentSource =
     source?.recordingId === recordingId ? source.url : null;
@@ -683,11 +626,12 @@ export function useSimulationEvidenceRecording(
     duration,
     playing,
     waveform: currentSource === null ? null : waveform,
-    waveformLoading: currentSource === null ? false : waveformLoading,
+    // The peaks arrive with the simulation, so nothing is ever being drawn.
+    waveformLoading: false,
     seek,
     onTimeUpdate: readClock,
     onLoadedMetadata: readDuration,
-    onError: () => recoverSignedLink(resolvedAttempt.current, "media"),
+    onError: () => recoverSignedLink(resolvedAttempt.current),
     onPlay: () => setPlaying(true),
     onPause: () => setPlaying(false),
   };

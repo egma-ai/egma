@@ -28,6 +28,7 @@ const PERSONA_INTERRUPTION = "0004_persona_interruptions.sql";
 const PERSONA_SPEECH_CATEGORIES = "0005_persona_speech_categories.sql";
 const GPT_LIVE_PERSONA_MODELS = "0006_gpt_live_persona_models.sql";
 const PERSONA_SETTINGS_SIMPLIFICATION = "0007_persona_settings_simplification.sql";
+const SIMULATION_RECORDING_WAVEFORM = "0008_simulation_recording_waveform.sql";
 const SHIPPED_BASELINE_HASH =
   "ea57d012e674f136f4ef74930865a8ccfeafaebcf92d7f628ce53e8deddc084a";
 const CURRENT_MIGRATIONS = [
@@ -39,7 +40,13 @@ const CURRENT_MIGRATIONS = [
   PERSONA_SPEECH_CATEGORIES,
   GPT_LIVE_PERSONA_MODELS,
   PERSONA_SETTINGS_SIMPLIFICATION,
+  SIMULATION_RECORDING_WAVEFORM,
 ];
+/** Everything the settings simplification was written to run after. */
+const BEFORE_SETTINGS_SIMPLIFICATION = CURRENT_MIGRATIONS.slice(
+  0,
+  CURRENT_MIGRATIONS.indexOf(PERSONA_SETTINGS_SIMPLIFICATION),
+);
 let database: EmptyDatabase;
 let store: SingleConnection;
 let directory: string;
@@ -176,7 +183,7 @@ describe("the Postgres migration chain", () => {
     }
 
     expect(await runMigrations(database.url)).toEqual({
-      applied: [RUN_CONCURRENCY, PERSONA_CONTROLS, PERSONA_BACKGROUND, PERSONA_INTERRUPTION, PERSONA_SPEECH_CATEGORIES, GPT_LIVE_PERSONA_MODELS, PERSONA_SETTINGS_SIMPLIFICATION],
+      applied: CURRENT_MIGRATIONS.slice(1),
       alreadyApplied: [BASELINE],
     });
     expect((await store.sql("select id from organization where id = $1", [organizationId])).rows)
@@ -203,7 +210,7 @@ describe("the Postgres migration chain", () => {
   });
 
   it("reduces saved settings without changing a frozen simulation", async () => {
-    for (const name of CURRENT_MIGRATIONS.slice(0, -1)) {
+    for (const name of BEFORE_SETTINGS_SIMPLIFICATION) {
       await copyFile(
         path.join(MIGRATIONS_DIRECTORY, name),
         path.join(directory, name),
@@ -298,7 +305,7 @@ describe("the Postgres migration chain", () => {
     );
     expect(await runMigrations(database.url, directory)).toEqual({
       applied: [PERSONA_SETTINGS_SIMPLIFICATION],
-      alreadyApplied: CURRENT_MIGRATIONS.slice(0, -1),
+      alreadyApplied: BEFORE_SETTINGS_SIMPLIFICATION,
     });
 
     const expectedVersionId = (

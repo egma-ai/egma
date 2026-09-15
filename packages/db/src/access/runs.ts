@@ -54,6 +54,7 @@ import {
   run,
   runEvent,
   simulation,
+  type RecordingWaveform,
   type RunEventKind,
   type RunStatus,
   type RunTrigger,
@@ -200,6 +201,7 @@ export type Simulation = {
   readonly endedAt: Date | null;
   readonly executionEndedAt: Date | null;
   readonly recordingReference: string | null;
+  readonly recordingWaveform: RecordingWaveform | null;
   readonly turnCount: number | null;
   readonly providerReference: string | null;
   readonly createdAt: Date;
@@ -217,6 +219,7 @@ export type SimulationSummaryFacts = {
   readonly turnCount?: number | undefined;
   readonly providerReference?: string | undefined;
   readonly recordingReference?: string | undefined;
+  readonly recordingWaveform?: RecordingWaveform | undefined;
   readonly startedAt?: Date | undefined;
   readonly endedAt?: Date | undefined;
   readonly evidenceError?: "evidence_collection_error" | undefined;
@@ -281,6 +284,7 @@ const SIMULATION_COLUMNS = {
   endedAt: simulation.endedAt,
   executionEndedAt: simulation.executionEndedAt,
   recordingReference: simulation.recordingReference,
+  recordingWaveform: simulation.recordingWaveform,
   turnCount: simulation.turnCount,
   providerReference: simulation.providerReference,
   createdAt: simulation.createdAt,
@@ -346,6 +350,9 @@ function summaryFactsWrite(facts: SimulationSummaryFacts): Record<string, unknow
   if (facts.recordingReference !== undefined) {
     write.recordingReference = facts.recordingReference.trim() || null;
   }
+  if (facts.recordingWaveform !== undefined) {
+    write.recordingWaveform = drawableWaveform(facts.recordingWaveform);
+  }
   if (facts.startedAt !== undefined) write.startedAt = facts.startedAt;
   if (facts.endedAt !== undefined) write.endedAt = facts.endedAt;
   if (
@@ -357,6 +364,29 @@ function summaryFactsWrite(facts: SimulationSummaryFacts): Record<string, unknow
     write.executionEndedAt = facts.endedAt;
   }
   return write;
+}
+
+/**
+ * One waveform safe to retain: a peak list per channel, each peak a finite
+ * fraction of full scale. The report contract bounds the same shape on the
+ * wire, and this bounds it for every other caller that writes a row.
+ */
+function drawableWaveform(waveform: RecordingWaveform): RecordingWaveform {
+  for (const peaks of [waveform.human, waveform.agent]) {
+    if (!Array.isArray(peaks) || peaks.length === 0 || peaks.length > 4096) {
+      throw new Error(
+        "a recording waveform holds between 1 and 4096 peaks for each of its two channels",
+      );
+    }
+    for (const peak of peaks) {
+      if (!Number.isFinite(peak) || peak < 0 || peak > 1) {
+        throw new Error(
+          "a recording waveform peak is a fraction of full scale, 0 to 1",
+        );
+      }
+    }
+  }
+  return waveform;
 }
 
 /** One non-empty sentence safe to retain as a simulation execution failure. */

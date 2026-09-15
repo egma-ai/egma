@@ -88,6 +88,10 @@ type StatusEvent = {
     readonly turn_count: number;
     readonly audio: {
       readonly recording: string;
+      readonly waveform?: {
+        readonly human: readonly number[];
+        readonly agent: readonly number[];
+      };
     } | null;
     readonly provider_reference: string | null;
     readonly evidence_error?: "evidence_collection_error" | null;
@@ -147,7 +151,12 @@ function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
       : { providerReference: facts.provider_reference }),
     ...(facts.audio === null
       ? {}
-      : { recordingReference: facts.audio.recording }),
+      : {
+          recordingReference: facts.audio.recording,
+          ...(facts.audio.waveform === undefined
+            ? {}
+            : { recordingWaveform: facts.audio.waveform }),
+        }),
     // Incoherent times leave measured execution unknown.
     ...(reportedMoments(facts) ?? {}),
   };

@@ -808,10 +808,15 @@ describe("the lifecycle lands", () => {
       versionId,
     );
 
+    const waveform = {
+      human: [0.04, 0.61, 0.58, 0.02, 0, 0.31],
+      agent: [0.52, 0.03, 0, 0.47, 0.49, 0.05],
+    };
     const answered = await report(simulationId, [
       terminalEvent("completed", "agent_ended", {
         audio: {
           recording: `${simulationId}/dual-channel.wav`,
+          waveform,
         },
         provider_reference: "CA7e2b9c1d4f6a8e0b",
         turn_count: 22,
@@ -821,9 +826,75 @@ describe("the lifecycle lands", () => {
 
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
     expect(row?.recordingReference).toBe(`${simulationId}/dual-channel.wav`);
+    expect(row?.recordingWaveform).toEqual(waveform);
     expect(row?.turnCount).toBe(22);
     expect(row?.providerReference).toBe("CA7e2b9c1d4f6a8e0b");
     expect(row?.executionEndedAt?.toISOString()).toBe("2026-08-05T09:02:10.551Z");
+
+    // The reader gets the peaks it draws from, so it never fetches the
+    // recording a second time to find them.
+    const read = await ask(
+      api.app,
+      "GET",
+      `/v1/simulations/${simulationId}`,
+      key,
+    );
+    expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
+    expect(read.body.recordingWaveform).toEqual(waveform);
+  });
+
+  it("refuses a waveform peak louder than full scale, and leaves a recording measured by nobody null", async () => {
+    const { ada, key, agentId, versionId } = await aCustomerReadyToRun(
+      "reports_voice_waveform",
+      { carrierRoute: PHONE_IS_SET_UP },
+    );
+    const attached = await ask(api.app, "POST", `/v1/agents/${agentId}/connections`, key, {
+      agentPlatform: null,
+      connectionType: "phone_number",
+      accessVariant: "phone_number.public_e164",
+      modality: "voice",
+      config: { phoneNumber: "+15551234567" },
+    });
+    expect(attached.statusCode, JSON.stringify(attached.body)).toBe(201);
+    const voiceConnection = (attached.body.connection as { id: string }).id;
+    const { simulationId } = await aRunningSimulation(
+      key,
+      voiceConnection,
+      versionId,
+    );
+
+    const refused = await report(simulationId, [
+      terminalEvent("completed", "agent_ended", {
+        audio: {
+          recording: `${simulationId}/dual-channel.wav`,
+          waveform: { human: [1.5], agent: [0.5] },
+        },
+      }),
+    ]);
+    expect(refused.statusCode).toBe(400);
+    expect(refused.body.error).toBe("invalid_request");
+    expect(String(refused.body.message)).toContain(
+      "/events/0/facts/audio/waveform/human/0",
+    );
+
+    // The same recording, reported by a simulator that measured no peaks.
+    const answered = await report(simulationId, [
+      terminalEvent("completed", "agent_ended", {
+        audio: { recording: `${simulationId}/dual-channel.wav` },
+      }),
+    ]);
+    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
+
+    const row = await getSimulation(contextFor(ada, "member"), simulationId);
+    expect(row?.recordingReference).toBe(`${simulationId}/dual-channel.wav`);
+    expect(row?.recordingWaveform).toBeNull();
+    const read = await ask(
+      api.app,
+      "GET",
+      `/v1/simulations/${simulationId}`,
+      key,
+    );
+    expect(read.body.recordingWaveform).toBeNull();
   });
 
   it("refuses recording facts for a chat conversation", async () => {

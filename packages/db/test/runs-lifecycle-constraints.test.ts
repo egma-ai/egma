@@ -550,6 +550,30 @@ describe("a simulation's shape", () => {
     ).resolves.toBeDefined();
   });
 
+  it("refuses peaks that describe no recording", async () => {
+    await expect(
+      insertSimulation("completed", {
+        modality: "voice",
+        recording_waveform: JSON.stringify({ human: [0.2], agent: [0.1] }),
+      }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+  });
+
+  it("keeps a voice recording's peaks beside its reference", async () => {
+    await expect(
+      insertSimulation("completed", {
+        modality: "voice",
+        recording_reference: "recordings/one.flac",
+        recording_waveform: JSON.stringify({
+          human: [0, 0.25, 1],
+          agent: [1, 0.5, 0],
+        }),
+      }),
+    ).resolves.toBeDefined();
+  });
+
   it("refuses an identifier carrying the wrong prefix", async () => {
     await expect(insertSimulation("queued", { id: newId("tst") })).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
