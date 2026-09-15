@@ -3059,8 +3059,14 @@ describe("the complete product, walked in order in a second project", () => {
       expect(await walk.locator("#new-persona-name").getAttribute("placeholder")).toBe("Ex Angry Spanish caller");
       expect(await walk.locator("#new-persona-identity-name").getAttribute("placeholder")).toBe("John Doe");
       expect(await walk.locator("#new-persona-description").getAttribute("placeholder")).toBeNull();
-      for (const section of ["Language", "Text to speech", "Speech to text", "Reasoning", "Advanced"]) {
-        expect(await walk.getByRole("button", { name: section, exact: true }).getAttribute("aria-expanded")).toBe("false");
+      // Three groups head the page, and Settings is one open run of plain
+      // subsection headers: nothing folds, and there is no tips block. The
+      // form's Language header is the control's own label, star and all.
+      for (const group of ["Metadata", "Who they are", "Settings"]) {
+        expect(await walk.getByRole("heading", { name: new RegExp(`^${group}$`, "iu"), level: 2 }).count()).toBe(1);
+      }
+      for (const section of ["Language*", "Text-to-speech", "Speech-to-text", "LLM", "Advanced"]) {
+        expect(await walk.getByRole("region", { name: section, exact: true }).count()).toBe(1);
       }
       expect(await walk.getByText("Tips for a useful persona", { exact: true }).count()).toBe(0);
 
@@ -3115,10 +3121,12 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.waitForURL(new RegExp(`/projects/${second}/personas/prs_[^/]+/clone$`));
       await reactHasTakenOver(walk, "form");
       await walk.fill("#clone-persona-name", "Rita, a copy");
+      // A clone is a new persona filled in from an old one, so its page ends
+      // in the same act, under the same word.
       await expect
-        .poll(() => walk.getByRole("button", { name: "Clone persona", exact: true }).isEnabled())
+        .poll(() => walk.getByRole("button", { name: "Create persona", exact: true }).isEnabled())
         .toBe(true);
-      await walk.getByRole("button", { name: "Clone persona", exact: true }).click();
+      await walk.getByRole("button", { name: "Create persona", exact: true }).click();
       await walk.waitForURL(new RegExp(`/projects/${second}/personas/prs_[^/]+$`));
       await saysWithin(walk, "Rita, a copy");
       await walk.getByRole("link", { name: "Personas", exact: true }).last().click();
@@ -4988,6 +4996,10 @@ describe("the complete product, walked in order in a second project", () => {
           .evaluateAll((controls) =>
             controls
               .filter((control) => {
+                // Radix keeps a native select behind every dropdown for the
+                // form's sake, hidden from assistive technology; the trigger
+                // beside it is the control a screen reader names.
+                if (control.getAttribute("aria-hidden") === "true") return false;
                 const named =
                   control.getAttribute("aria-label") ??
                   control.getAttribute("aria-labelledby");
@@ -5393,11 +5405,12 @@ it(
       await walk.waitForURL(/\/personas\/prs_[^/]+$/);
       await walk.locator("[data-slot='persona-read']").waitFor();
       expect(await walk.locator("[data-slot='persona-read'] input, [data-slot='persona-read'] select, [data-slot='persona-read'] textarea").count()).toBe(0);
-      for (const section of ["Language", "Text to speech", "Speech to text", "Reasoning", "Advanced"]) {
-        expect(await walk.getByRole("button", { name: section, exact: true }).getAttribute("aria-expanded")).toBe("false");
+      // Every subsection is open on the read page, under a plain header.
+      for (const section of ["Language", "Text-to-speech", "Speech-to-text", "LLM", "Advanced"]) {
+        expect(await walk.getByRole("region", { name: section, exact: true }).count()).toBe(1);
       }
-      expect(await walk.getByRole("link", { name: "Clone", exact: true }).count()).toBe(0);
-      await walk.getByRole("button", { name: "Advanced" }).click();
+      // A persona is changed by cloning it, so Clone is the title bar's one action.
+      expect(await walk.getByRole("link", { name: "Clone", exact: true }).getAttribute("href")).toMatch(/\/personas\/prs_[^/]+\/clone$/u);
       expect(await walk.getByText("Interruptions", { exact: true }).count()).toBe(1);
       await walk.evaluate("window.scrollTo(0, 0)");
       expect(await walk.evaluate("window.scrollY")).toBe(0);
@@ -5413,13 +5426,11 @@ it(
       await walk.waitForURL(/\/personas\/prs_[^/]+\/clone$/);
       await reactHasTakenOver(walk, "form");
       expect(await walk.locator("#clone-persona-name").inputValue()).toContain("Everyday Caller [Male]");
-      for (const section of ["Language", "Text to speech", "Speech to text", "Reasoning", "Advanced"]) {
-        expect(await walk.getByRole("button", { name: section, exact: true }).getAttribute("aria-expanded")).toBe("false");
+      for (const section of ["Language*", "Text-to-speech", "Speech-to-text", "LLM", "Advanced"]) {
+        expect(await walk.getByRole("region", { name: section, exact: true }).count()).toBe(1);
       }
-      await walk.getByRole("button", { name: "Text to speech", exact: true }).click();
       expect(await walk.locator("#clone-persona-tts-provider").count()).toBe(1);
       expect(await walk.locator("#clone-persona-tts-model").count()).toBe(1);
-      await walk.getByRole("button", { name: "Speech to text", exact: true }).click();
       expect(await walk.locator("#clone-persona-stt-provider").count()).toBe(1);
       expect(await walk.locator("#clone-persona-stt-model").count()).toBe(1);
       expect(await walk.locator("#clone-persona-speech-mode").count()).toBe(0);
@@ -5427,7 +5438,6 @@ it(
       expect(await walk.getByText("Tips for a useful persona", { exact: true }).count()).toBe(0);
       await walk.fill("#clone-persona-name", "Patient Nora");
       await walk.fill("#clone-persona-personality", "Asks one question and waits for the answer.");
-      await walk.getByRole("button", { name: "Advanced" }).click();
       await walk.locator("#clone-persona-interruptions").click();
       expect(await walk.locator("[data-slot='downward-select-content']").getAttribute("data-side")).toBe("bottom");
       await walk.getByRole("option", { name: "Frequent", exact: true }).click();
@@ -5467,9 +5477,9 @@ it(
         response.request().method() === "POST" && /\/v1\/personas\/prs_[^/]+\/fork$/u.test(new URL(response.url()).pathname),
       );
       await expect
-        .poll(() => walk.getByRole("button", { name: "Clone persona", exact: true }).isEnabled())
+        .poll(() => walk.getByRole("button", { name: "Create persona", exact: true }).isEnabled())
         .toBe(true);
-      await walk.getByRole("button", { name: "Clone persona", exact: true }).click();
+      await walk.getByRole("button", { name: "Create persona", exact: true }).click();
       expect((await cloneWrite).status()).toBe(201);
       await walk.waitForURL(/\/personas\/prs_[^/]+$/);
       await walk.locator("[data-slot='persona-read']").waitFor();
