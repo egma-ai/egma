@@ -212,12 +212,7 @@ async def test_the_simulator_dials_a_real_number_and_holds_a_conversation(
         spec["persona"].pop("language", None)
         spec["persona"]["parameters"] = {
             "language": "en-US",
-            "emotion": "neutral",
-            "accent": "voice_default",
-            "speech_speed": "normal",
-            "tts_speed": 1,
-            "speech_volume": 1,
-            "interruption_level": "none",
+            "background_sound_id": "none",
             "execution_policy_version": 2,
         }
     await workbench.offer(spec)

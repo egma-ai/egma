@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -10,6 +10,9 @@ import {
   readMigrations,
   runMigrations,
 } from "../src/migrate.ts";
+import {
+  preCategoricalPersonaParameterContract,
+} from "../src/persona-library/parameters.ts";
 import {
   createEmptyDatabase,
   openSingleConnection,
@@ -24,6 +27,7 @@ const PERSONA_BACKGROUND = "0003_persona_background_sound.sql";
 const PERSONA_INTERRUPTION = "0004_persona_interruptions.sql";
 const PERSONA_SPEECH_CATEGORIES = "0005_persona_speech_categories.sql";
 const GPT_LIVE_PERSONA_MODELS = "0006_gpt_live_persona_models.sql";
+const PERSONA_SETTINGS_SIMPLIFICATION = "0007_persona_settings_simplification.sql";
 const SHIPPED_BASELINE_HASH =
   "ea57d012e674f136f4ef74930865a8ccfeafaebcf92d7f628ce53e8deddc084a";
 const CURRENT_MIGRATIONS = [
@@ -34,6 +38,7 @@ const CURRENT_MIGRATIONS = [
   PERSONA_INTERRUPTION,
   PERSONA_SPEECH_CATEGORIES,
   GPT_LIVE_PERSONA_MODELS,
+  PERSONA_SETTINGS_SIMPLIFICATION,
 ];
 let database: EmptyDatabase;
 let store: SingleConnection;
@@ -171,7 +176,7 @@ describe("the Postgres migration chain", () => {
     }
 
     expect(await runMigrations(database.url)).toEqual({
-      applied: [RUN_CONCURRENCY, PERSONA_CONTROLS, PERSONA_BACKGROUND, PERSONA_INTERRUPTION, PERSONA_SPEECH_CATEGORIES, GPT_LIVE_PERSONA_MODELS],
+      applied: [RUN_CONCURRENCY, PERSONA_CONTROLS, PERSONA_BACKGROUND, PERSONA_INTERRUPTION, PERSONA_SPEECH_CATEGORIES, GPT_LIVE_PERSONA_MODELS, PERSONA_SETTINGS_SIMPLIFICATION],
       alreadyApplied: [BASELINE],
     });
     expect((await store.sql("select id from organization where id = $1", [organizationId])).rows)
@@ -195,6 +200,152 @@ describe("the Postgres migration chain", () => {
     expect(
       (await store.sql("select name from egma_meta.migration order by name")).rows,
     ).toEqual(CURRENT_MIGRATIONS.map((name) => ({ name })));
+  });
+
+  it("reduces saved settings without changing a frozen simulation", async () => {
+    for (const name of CURRENT_MIGRATIONS.slice(0, -1)) {
+      await copyFile(
+        path.join(MIGRATIONS_DIRECTORY, name),
+        path.join(directory, name),
+      );
+    }
+    await runMigrations(database.url, directory);
+
+    const organizationId = newId("org");
+    const projectId = newId("prj");
+    const personaId = newId("prs");
+    const oldVersionId = newId("prsv");
+    const projectPersonaId = newId("ppr");
+    const simulationId = newId("sim");
+    const oldContract = [
+      { key: "speech_mode", label: "Speech mode", valueType: "string" as const, defaultValue: "separate", unit: null, minimum: null, maximum: null },
+      ...preCategoricalPersonaParameterContract({
+        mode: "separate",
+        llm: { provider: "openai", model: "gpt-4o" },
+        stt: { provider: "deepgram", model: "nova-3" },
+        tts: { provider: "cartesia", model: "sonic-3.5", voiceId: "voice_before", speed: 1.5 },
+      }, {
+        language: "en-US",
+        emotion: "angry",
+        accent: "british",
+        speechVolume: 1.4,
+        executionPolicyVersion: 2,
+        backgroundSoundId: "rain-v1",
+        backgroundVolume: 0.1,
+        interruptionLevel: "frequent",
+      }).map((field) => field.key === "execution_policy_version" ? { ...field, maximum: 2 } : field),
+      { key: "speech_speed", label: "Speech speed", valueType: "string" as const, defaultValue: "fast", unit: null, minimum: null, maximum: null },
+    ];
+    const oldValues = {
+      ...Object.fromEntries(oldContract.map((field) => [field.key, field.defaultValue])),
+      speech_speed: "fast",
+      tts_speed: 1.5,
+      emotion: "angry",
+      accent: "british",
+      speech_volume: 1.4,
+      background_sound_id: "rain-v1",
+      background_volume: 0.1,
+      interruption_level: "frequent",
+    };
+
+    await store.sql("begin");
+    try {
+      await store.sql(
+        "insert into organization (id, name, slug) values ($1, 'Migration proof', 'migration-proof')",
+        [organizationId],
+      );
+      await store.sql(
+        "insert into project (id, organization_id, name, slug, revision) values ($1, $2, 'Project', 'project', $3)",
+        [projectId, organizationId, newId("rev")],
+      );
+      await store.sql(
+        `insert into persona_definition
+          (id, organization_id, project_id, name, current_version_id)
+          values ($1, $2, $3, 'Custom caller', $4)`,
+        [personaId, organizationId, projectId, oldVersionId],
+      );
+      await store.sql(
+        `insert into persona_definition_version
+          (id, persona_id, version, identity_name, personality, language, parameter_contract)
+          values ($1, $2, 1, 'Taylor', 'Tests a frozen call.', null, $3::jsonb)`,
+        [oldVersionId, personaId, JSON.stringify(oldContract)],
+      );
+      await store.sql(
+        `insert into project_persona
+          (id, organization_id, project_id, persona_definition_id, parameter_values, parameter_contract)
+          values ($1, $2, $3, $4, $5::jsonb, $6::jsonb)`,
+        [projectPersonaId, organizationId, projectId, personaId, JSON.stringify(oldValues), JSON.stringify(oldContract)],
+      );
+      await store.sql("set local session_replication_role = replica");
+      await store.sql(
+        `insert into simulation
+          (id, run_id, organization_id, project_id, agent_id, connection_id,
+           persona_id, persona_version_id, test_id, test_version_id, position,
+           modality, status, persona_parameter_values, persona_parameter_contract, connection_type)
+          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1,
+                  'voice', 'queued', $11::jsonb, $12::jsonb, 'retell_web_call')`,
+        [simulationId, newId("run"), organizationId, projectId, newId("agt"), newId("con"), personaId, oldVersionId, newId("tst"), newId("tstv"), JSON.stringify(oldValues), JSON.stringify(oldContract)],
+      );
+      await store.sql("commit");
+    } catch (cause) {
+      await store.sql("rollback");
+      throw cause;
+    }
+
+    await copyFile(
+      path.join(MIGRATIONS_DIRECTORY, PERSONA_SETTINGS_SIMPLIFICATION),
+      path.join(directory, PERSONA_SETTINGS_SIMPLIFICATION),
+    );
+    expect(await runMigrations(database.url, directory)).toEqual({
+      applied: [PERSONA_SETTINGS_SIMPLIFICATION],
+      alreadyApplied: CURRENT_MIGRATIONS.slice(0, -1),
+    });
+
+    const expectedVersionId = (
+      await store.sql<{ id: string }>(
+        "select 'prsv_' || upper(substr(md5($1 || ':1:persona-settings-simplification'), 1, 26)) as id",
+        [personaId],
+      )
+    ).rows[0]!.id;
+    expect(
+      (await store.sql(
+        `select definition.current_version_id, version.version, saved.parameter_values,
+                jsonb_array_length(saved.parameter_contract) as contract_size
+           from persona_definition definition
+           join persona_definition_version version on version.id = definition.current_version_id
+           join project_persona saved on saved.persona_definition_id = definition.id
+          where definition.id = $1`,
+        [personaId],
+      )).rows,
+    ).toEqual([{
+      current_version_id: expectedVersionId,
+      version: 2,
+      parameter_values: {
+        speech_mode: "separate",
+        llm_provider: "openai",
+        llm_model: "gpt-4o",
+        stt_provider: "deepgram",
+        stt_model: "nova-3",
+        tts_provider: "cartesia",
+        tts_model: "sonic-3.5",
+        tts_voice_id: "voice_before",
+        language: "en-US",
+        execution_policy_version: 2,
+        background_sound_id: "rain-v1",
+        interruption_level: "frequent",
+      },
+      contract_size: 12,
+    }]);
+    expect(
+      (await store.sql(
+        "select persona_version_id, persona_parameter_values, persona_parameter_contract from simulation where id = $1",
+        [simulationId],
+      )).rows,
+    ).toEqual([{
+      persona_version_id: oldVersionId,
+      persona_parameter_values: oldValues,
+      persona_parameter_contract: oldContract,
+    }]);
   });
 
   it("applies once when API instances boot concurrently", async () => {

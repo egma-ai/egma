@@ -94,7 +94,6 @@ def assemble(
     if spec.modality == "voice" and persona_parameters is not None:
         registration["background"] = BackgroundSound(
             persona_parameters.background_sound_id,
-            persona_parameters.background_volume,
         )
     plug = factory(
         modality=spec.modality,
@@ -128,7 +127,6 @@ def assemble(
     if spec.models.mode == "live":
         if spec.models.live is None or backend_model is None:
             raise PlugError("the GPT Live work order has no executable model selection")
-        volume = 1.0 if persona_parameters is None else persona_parameters.speech_volume
         return Assembled(
             conductor=LiveConductor(
                 connection=plug,
@@ -136,7 +134,6 @@ def assemble(
                 backend_model=backend_model,
                 blobs=blobs,
                 recording_key=f"{spec.simulation_id}/{RECORDING_NAME}",
-                speech_volume=volume,
             ),
             mock_tools=mock_tools,
         )

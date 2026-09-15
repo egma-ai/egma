@@ -19,7 +19,6 @@
 - [Keep your tests in code](https://docs.egma.ai/docs/platform/tests/write-a-test.md)
 - [What is a persona?](https://docs.egma.ai/docs/platform/personas.md)
 - [Add a persona](https://docs.egma.ai/docs/platform/personas/add-a-persona.md)
-- [Update a persona](https://docs.egma.ai/docs/platform/personas/update-a-persona.md)
 - [What is a run?](https://docs.egma.ai/docs/platform/runs/overview.md)
 - [What is a simulation?](https://docs.egma.ai/docs/platform/runs/simulation.md)
 - [Start a run](https://docs.egma.ai/docs/platform/runs/start-and-follow-a-run.md)
@@ -95,18 +94,17 @@
 - [Update a test](https://docs.egma.ai/api-reference/update-test.md): Omitted fields keep their current values. Content changes create an immutable version and require expectedVersionId from the last read. Name and description changes keep the content version. Existing simulations retain their original evidence.
 - [Permanently delete a test from authoring](https://docs.egma.ai/api-reference/delete-test.md): The test leaves authoring permanently only while expectedVersionId and expectedRevision are both still current. Existing run evidence stays readable.
 - [List test versions](https://docs.egma.ai/api-reference/list-test-versions.md)
-- [Use a persona](https://docs.egma.ai/api-reference/use-persona.md): Save this project's first model settings for the persona. Omit models to use its declared defaults. Repeated use returns the existing settings; use Update a persona to change them.
+- [Use a persona](https://docs.egma.ai/api-reference/use-persona.md): Use the persona in this project with its declared defaults. Repeated use keeps the saved settings unchanged.
 - [List personas](https://docs.egma.ai/api-reference/list-personas.md)
 - [Create a persona](https://docs.egma.ai/api-reference/create-persona.md): Create a project-owned persona with its first behavior version and complete model settings. Omit models to use the declared defaults. Add its ID or unambiguous name to a test to use it.
-- [Get persona authoring choices](https://docs.egma.ai/api-reference/get-persona-form.md): Use this response to choose supported models, a recommended voice, and a valid speech rate before creating or updating a persona.
+- [Get persona authoring choices](https://docs.egma.ai/api-reference/get-persona-form.md): Use this response to choose supported models and a recommended voice before creating or cloning a persona.
 - [Resolve persona capabilities](https://docs.egma.ai/api-reference/get-persona-capabilities.md): Resolve the selected provider, model, voice, and language combination. Status and reason values are authoritative for authoring and voice execution.
 - [Get a persona](https://docs.egma.ai/api-reference/get-persona.md)
-- [Update a persona](https://docs.egma.ai/api-reference/update-persona.md): Change project model settings or the current custom behavior. Behavior edits require expectedVersionId and create a version when changed. Model settings and display labels create no version. Egma-owned behavior is read-only; its project settings are editable.
 - [Permanently delete a persona from authoring](https://docs.egma.ai/api-reference/delete-persona.md): The persona leaves every authoring list and picker permanently. Existing run evidence stays readable.
 - [List persona versions](https://docs.egma.ai/api-reference/list-persona-versions.md)
 - [Get a persona's test usage](https://docs.egma.ai/api-reference/get-persona-usage.md)
 - [Get a persona version](https://docs.egma.ai/api-reference/get-persona-version.md)
-- [Clone a persona](https://docs.egma.ai/api-reference/fork-persona.md): Creates an editable custom copy of the persona's current behavior and model settings. The original persona and tests that select it stay unchanged.
+- [Clone a persona](https://docs.egma.ai/api-reference/fork-persona.md): Creates a changed custom copy of the persona's current behavior and model settings. The original persona and tests that select it stay unchanged.
 - [Get a simulation](https://docs.egma.ai/api-reference/get-simulation.md): Read a simulation’s test, persona, connection, metrics, transcript, and grades. Execution status and gradingState are separate: a completed simulation may still be grading.
 - [Regrade a simulation](https://docs.egma.ai/api-reference/regrade-simulation.md): Grade a completed simulation again with its original grader selection and recorded evidence. Later grader settings do not apply. Send no body, then follow gradingState with Get a simulation.
 - [List traces](https://docs.egma.ai/api-reference/list-traces.md)

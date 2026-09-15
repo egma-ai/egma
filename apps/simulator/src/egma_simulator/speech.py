@@ -79,7 +79,7 @@ A speed outside this range is refused. The adapter never changes the value
 selected by the pinned TTS model."""
 
 CARTESIA_API_VERSION = "2026-08-14"
-"""The Cartesia API shape used for locale and named accent steering."""
+"""The Cartesia API shape used for locale steering."""
 
 OPENAI_REALTIME_PROXY_OPEN_SECONDS = 30.0
 """How long a proxied OpenAI Realtime socket may take to open."""
@@ -107,9 +107,6 @@ class PersonaVoice:
     provider: str | None
     speed: float | None
     language: str | None = None
-    emotion: str = "neutral"
-    accent: str = "voice_default"
-    speech_volume: float = 1.0
 
 
 def voice_from_models(
@@ -121,44 +118,12 @@ def voice_from_models(
         provider=models.tts.provider,
         speed=models.tts.speed,
         language=None if parameters is None else parameters.language,
-        emotion="neutral" if parameters is None else parameters.emotion,
-        accent="voice_default" if parameters is None else parameters.accent,
-        speech_volume=1.0 if parameters is None else parameters.speech_volume,
     )
 
 
 def tts_delivery_instructions(voice: PersonaVoice) -> str | None:
     """Stable delivery instructions for an instruction-capable TTS model."""
-    emotions = {
-        "neutral": None,
-        "happy": "Use a consistently happy emotional delivery.",
-        "angry": "Use a consistently angry emotional delivery.",
-        "frustrated": "Use a consistently frustrated emotional delivery.",
-        "sad": "Use a consistently sad emotional delivery.",
-        "anxious": "Use a consistently anxious emotional delivery.",
-    }
-    accents = {
-        "voice_default": None,
-        "american": "Use an American accent.",
-        "british": "Use a British accent.",
-        "australian": "Use an Australian accent.",
-        "indian": "Use an Indian accent.",
-        "irish": "Use an Irish accent.",
-        "scottish": "Use a Scottish accent.",
-        "spanish": "Use a Spanish accent.",
-        "french": "Use a French accent.",
-        "german": "Use a German accent.",
-    }
-    if voice.emotion not in emotions or voice.accent not in accents:
-        raise SpeechFault("the resolved TTS delivery controls are not supported")
-    parts: list[str] = []
-    if voice.language:
-        parts.append(f"Speak in {voice.language}.")
-    if emotions[voice.emotion]:
-        parts.append(emotions[voice.emotion])
-    if accents[voice.accent]:
-        parts.append(accents[voice.accent])
-    return " ".join(parts) or None
+    return None if voice.language is None else f"Speak in {voice.language}."
 
 
 def apply_pcm_gain(pcm: bytes, gain: float) -> bytes:
@@ -812,8 +777,6 @@ def _cartesia_mouth(
                 message.pop("language", None)
                 if spoken_with.language:
                     message["locale"] = spoken_with.language
-                if spoken_with.accent != "voice_default":
-                    message["accent"] = spoken_with.accent
             return json.dumps(message)
 
         async def _websocket_connect(self, uri: str, **kwargs: Any):
@@ -847,13 +810,6 @@ def _cartesia_mouth(
             "the cartesia speaking leg received a speed outside its supported "
             f"range {CARTESIA_SPEED_RANGE[0]}–{CARTESIA_SPEED_RANGE[1]}"
         )
-    if (
-        voice.accent != "voice_default"
-        and not providers.tts_model.startswith("sonic-3.6")
-    ):
-        raise SpeechFault(
-            "named Cartesia accents require sonic-3.6 or a newer compatible model"
-        )
     spoken_with = voice
     settings = CartesiaTTSService.Settings(
         model=providers.tts_model,
@@ -862,7 +818,6 @@ def _cartesia_mouth(
     )
     settings.generation_config = GenerationConfig(
         speed=spoken_with.speed,
-        emotion=None if spoken_with.emotion == "neutral" else spoken_with.emotion,
     )
 
     leg = CartesiaTTSService(

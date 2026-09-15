@@ -1,15 +1,5 @@
 /** Provider-aware authoring facts shared by save validation and execution. */
 
-export const PERSONA_EMOTIONS = [
-  "neutral",
-  "happy",
-  "angry",
-  "frustrated",
-  "sad",
-  "anxious",
-] as const;
-
-export type PersonaEmotion = (typeof PERSONA_EMOTIONS)[number];
 export type CapabilityStatus = "supported" | "fixed" | "unsupported" | "unknown";
 
 export type PersonaVoice = {
@@ -18,7 +8,6 @@ export type PersonaVoice = {
   readonly source: "standard" | "account";
   readonly presentation: "male" | "female" | "neutral" | "unknown";
   readonly languages: readonly string[];
-  readonly accents: readonly string[];
   readonly isProfessional?: boolean;
   readonly modelIds?: readonly string[];
   readonly publiclyAccessible?: boolean;
@@ -47,45 +36,20 @@ export type PersonaCapabilitySelection = {
 export type PersonaCapabilities = {
   readonly voices: Capability<PersonaVoice>;
   readonly language: Capability<string>;
-  readonly accent: Capability<string>;
-  readonly emotion: Capability<PersonaEmotion>;
-  readonly speed: Capability<number>;
-  readonly speechSpeed: Capability<"slow" | "normal" | "fast">;
-  readonly speechVolume: Capability<number>;
 };
-
-function categoricalSpeed(speed: Capability<number>): Capability<"slow" | "normal" | "fast"> {
-  if (speed.status === "fixed") return { status: "fixed", value: "normal", ...(speed.reason === undefined ? {} : { reason: speed.reason }) };
-  if (speed.status !== "supported") return { status: speed.status, ...(speed.reason === undefined ? {} : { reason: speed.reason }) };
-  const targets = { slow: 0.8, normal: 1, fast: 1.5 } as const;
-  const choices = (Object.keys(targets) as Array<keyof typeof targets>).filter((choice) => speed.range === undefined || (targets[choice] >= speed.range.minimum && targets[choice] <= speed.range.maximum));
-  return { status: "supported", choices };
-}
 
 export function personaCapabilityRefusal(
   capabilities: PersonaCapabilities,
-  selected: { readonly emotion: string; readonly accent: string; readonly speechSpeed: "slow" | "normal" | "fast"; readonly voiceId?: string; readonly voiceField?: "models.tts.voiceId" | "models.live.voiceId" },
+  selected: { readonly voiceId?: string; readonly voiceField?: "models.tts.voiceId" | "models.live.voiceId" },
 ): string | undefined {
-  for (const [field, capability] of Object.entries(capabilities)) {
-    if (field === "speed") continue;
-    const publicField = field === "speechSpeed" ? "controls.speechSpeed" : field;
-    if (capability.status === "unsupported") return `${publicField}: ${capability.reason ?? "unsupported"}`;
+  for (const [field, capability] of Object.entries({ voices: capabilities.voices, language: capabilities.language })) {
+    if (capability.status === "unsupported") return `${field}: ${capability.reason ?? "unsupported"}`;
     if (capability.status === "unknown")
-      return `${publicField}: ${capability.reason ?? "support could not be verified"}`;
+      return `${field}: ${capability.reason ?? "support could not be verified"}`;
   }
   if (selected.voiceId !== undefined && capabilities.voices.choices !== undefined &&
       !capabilities.voices.choices.some((voice) => voice.id === selected.voiceId))
     return `${selected.voiceField ?? "models.tts.voiceId"}: Choose one of the available voices.`;
-  if (capabilities.emotion.status === "fixed" && selected.emotion !== capabilities.emotion.value)
-    return `emotion: ${capabilities.emotion.reason}`;
-  if (capabilities.accent.status === "fixed" && selected.accent !== capabilities.accent.value)
-    return `accent: ${capabilities.accent.reason}`;
-  if (capabilities.accent.choices !== undefined && !capabilities.accent.choices.includes(selected.accent))
-    return "accent: Choose one of the supported accents.";
-  if (capabilities.speechSpeed.status === "fixed" && selected.speechSpeed !== capabilities.speechSpeed.value)
-    return `controls.speechSpeed: ${capabilities.speechSpeed.reason ?? "Choose the fixed speech speed."}`;
-  if (capabilities.speechSpeed.choices !== undefined && !capabilities.speechSpeed.choices.includes(selected.speechSpeed))
-    return `controls.speechSpeed: ${capabilities.speechSpeed.reason ?? "Choose one of the supported speech speeds."}`;
   return undefined;
 }
 
@@ -96,7 +60,6 @@ function openAiVoice(id: string): PersonaVoice {
     source: "standard",
     presentation: id === "cedar" ? "male" : id === "coral" ? "female" : "unknown",
     languages: [],
-    accents: [],
   };
 }
 
@@ -121,10 +84,6 @@ const OPENAI_TTS_MODELS = new Set([
 
 export const OPENAI_TTS_LANGUAGES = [
   "af", "ar", "hy", "az", "be", "bs", "bg", "ca", "zh", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "gl", "de", "el", "he", "hi", "hu", "is", "id", "it", "ja", "kn", "kk", "ko", "lv", "lt", "mk", "ms", "mr", "mi", "ne", "no", "fa", "pl", "pt", "ro", "ru", "sr", "sk", "sl", "es", "sw", "sv", "tl", "ta", "th", "tr", "uk", "ur", "vi", "cy",
-] as const;
-
-export const OPENAI_INSTRUCTION_ACCENTS = [
-  "voice_default", "american", "british", "australian", "indian", "irish", "scottish", "spanish", "french", "german",
 ] as const;
 
 const OPENAI_STT_MODELS = new Set([
@@ -173,42 +132,35 @@ function sttSupportsLanguage(selection: PersonaCapabilitySelection): boolean {
 }
 
 /** Resolve the complete selected combination. No caller may relax this result. */
-function resolveNumericPersonaCapabilities(
+export function resolvePersonaCapabilities(
   selection: PersonaCapabilitySelection,
   accountVoices: readonly PersonaVoice[] = [],
-): Omit<PersonaCapabilities, "speechSpeed"> {
+): PersonaCapabilities {
   if (selection.mode === "live") {
     if (selection.liveProvider !== "openai" || selection.liveModel !== "gpt-live-1") {
       const reason = `Live speech ${selection.liveProvider ?? ""}/${selection.liveModel ?? ""} is not available in this release.`;
-      return { voices: unsupported(reason), language: unsupported(reason), accent: unsupported(reason), emotion: unsupported(reason), speed: unsupported(reason), speechVolume: unsupported(reason) };
+      return { voices: unsupported(reason), language: unsupported(reason) };
     }
     return {
       voices: { status: "supported", choices: OPENAI_LIVE_VOICES },
       language: { status: "supported", choices: OPENAI_TTS_LANGUAGES },
-      accent: { status: "supported", choices: OPENAI_INSTRUCTION_ACCENTS },
-      emotion: { status: "supported", choices: PERSONA_EMOTIONS },
-      speed: { status: "supported", range: { minimum: 0.8, maximum: 1.5, step: 0.1 } },
-      speechVolume: { status: "supported", range: { minimum: 0.5, maximum: 1.5, step: 0.1 } },
     };
   }
   if (!sttSupports(selection)) {
     const reason = `Speech recognition ${selection.sttProvider}/${selection.sttModel} is not available in this release.`;
     return {
-      voices: unsupported(reason), language: unsupported(reason), accent: unsupported(reason),
-      emotion: unsupported(reason), speed: unsupported(reason), speechVolume: unsupported(reason),
+      voices: unsupported(reason), language: unsupported(reason),
     };
   }
   if (!sttSupportsLanguage(selection)) {
     const reason = `Speech recognition ${selection.sttProvider}/${selection.sttModel} does not support ${selection.language}.`;
     return {
-      voices: unsupported(reason), language: unsupported(reason), accent: unsupported(reason),
-      emotion: unsupported(reason), speed: unsupported(reason), speechVolume: unsupported(reason),
+      voices: unsupported(reason), language: unsupported(reason),
     };
   }
 
   if (selection.ttsProvider === "openai" && OPENAI_TTS_MODELS.has(selection.ttsModel ?? "")) {
-    const instructional = selection.ttsModel?.startsWith("gpt-4o-mini-tts") === true;
-    const standardVoices = instructional
+    const standardVoices = selection.ttsModel?.startsWith("gpt-4o-mini-tts") === true
       ? OPENAI_STANDARD_VOICES
       : OPENAI_STANDARD_VOICES.filter((voice) => OPENAI_LEGACY_VOICE_IDS.has(voice.id));
     const selectedLanguage = selection.language?.toLowerCase().split("-")[0];
@@ -218,14 +170,6 @@ function resolveNumericPersonaCapabilities(
     return {
       voices: { status: "supported", choices: [...standardVoices, ...accountVoices] },
       language,
-      accent: instructional
-        ? { status: "supported", choices: OPENAI_INSTRUCTION_ACCENTS }
-        : { status: "fixed", value: "voice_default", reason: "This model does not accept delivery instructions." },
-      emotion: instructional
-        ? { status: "supported", choices: PERSONA_EMOTIONS }
-        : { status: "fixed", value: "neutral", reason: "This model does not accept delivery instructions." },
-      speed: { status: "supported", range: { minimum: 0.25, maximum: 4, step: 0.05 } },
-      speechVolume: { status: "supported", range: { minimum: 0.5, maximum: 1.5, step: 0.1 } },
     };
   }
 
@@ -234,16 +178,13 @@ function resolveNumericPersonaCapabilities(
     const languages = selection.ttsModel === "sonic-3.5"
       ? CARTESIA_SONIC_36_LANGUAGES.filter((language) => language !== "or" && language !== "ur")
       : CARTESIA_SONIC_36_LANGUAGES;
-    const accents = selectedVoice?.accents ?? [];
-    const acceptsAccentSteering = selection.ttsModel === "sonic-3.6" || selection.ttsModel === "sonic-3.6-2026-08-27";
     const languageMatches = selection.language === undefined || languages.some((language) => language === selection.language!.toLowerCase().split("-")[0]);
     const professional = selectedVoice?.isProfessional === true;
     if (professional && selectedVoice.modelIds === undefined) {
       const reason = "Cartesia did not return model compatibility for this professional clone. Refresh the voice catalog before saving.";
       return {
         voices: { status: "supported", choices: accountVoices },
-        language: unknown(reason), accent: unknown(reason), emotion: unknown(reason), speed: unknown(reason),
-        speechVolume: { status: "supported", range: { minimum: 0.5, maximum: 1.5, step: 0.1 } },
+        language: unknown(reason),
       };
     }
     const supportsModel = selectedVoice?.modelIds === undefined || selectedVoice.modelIds.includes(selection.ttsModel ?? "");
@@ -252,8 +193,7 @@ function resolveNumericPersonaCapabilities(
         ? "Cartesia professional clones do not support Sonic 3.6 Preview. Choose a compatible model from the voice metadata."
         : "The selected Cartesia voice does not support this model.";
       return {
-        voices: { status: "supported", choices: accountVoices }, language: unsupported(reason), accent: unsupported(reason),
-        emotion: unsupported(reason), speed: unsupported(reason), speechVolume: { status: "supported", range: { minimum: 0.5, maximum: 1.5, step: 0.1 } },
+        voices: { status: "supported", choices: accountVoices }, language: unsupported(reason),
       };
     }
     return {
@@ -261,36 +201,13 @@ function resolveNumericPersonaCapabilities(
       language: !languageMatches
         ? unsupported(`Cartesia ${selection.ttsModel} does not support ${selection.language}.`)
         : { status: "supported", choices: languages },
-      accent: !acceptsAccentSteering
-        ? { status: "fixed", value: "voice_default", reason: `Cartesia ${selection.ttsModel} does not support named accent steering.` }
-        : selectedVoice === undefined
-        ? unknown("Choose a Cartesia voice to resolve its accent metadata.")
-        : accents.length > 0
-        ? { status: "supported", choices: ["voice_default", ...accents] }
-        : { status: "fixed", value: "voice_default", reason: "Cartesia did not return accent metadata, so named accent steering is unverified." },
-      emotion: selection.language?.toLowerCase().startsWith("en")
-        ? { status: "supported", choices: PERSONA_EMOTIONS }
-        : { status: "fixed", value: "neutral", reason: "Cartesia emotion tags are supported only for English." },
-      speed: professional
-        ? { status: "fixed", value: 1, reason: "Cartesia professional clones ignore native speed." }
-        : { status: "supported", range: { minimum: 0.6, maximum: 1.5, step: 0.1 } },
-      speechVolume: { status: "supported", range: { minimum: 0.5, maximum: 1.5, step: 0.1 } },
     };
   }
 
   const reason = `Text-to-speech ${selection.ttsProvider}/${selection.ttsModel} is not available in this release.`;
   return {
-    voices: unsupported(reason), language: unsupported(reason), accent: unsupported(reason),
-    emotion: unsupported(reason), speed: unsupported(reason), speechVolume: unsupported(reason),
+    voices: unsupported(reason), language: unsupported(reason),
   };
-}
-
-export function resolvePersonaCapabilities(
-  selection: PersonaCapabilitySelection,
-  accountVoices: readonly PersonaVoice[] = [],
-): PersonaCapabilities {
-  const capabilities = resolveNumericPersonaCapabilities(selection, accountVoices);
-  return { ...capabilities, speechSpeed: categoricalSpeed(capabilities.speed) };
 }
 
 export type CartesiaVoiceFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -346,7 +263,6 @@ export async function discoverCartesiaVoices(
       const country = typeof raw.country === "string" ? raw.country.toUpperCase() : undefined;
       const presentation = raw.gender === "masculine" ? "male" : raw.gender === "feminine" ? "female" : raw.gender === "gender_neutral" ? "neutral" : "unknown";
       const accentMetadata = Array.isArray(raw.accents) ? raw.accents : [];
-      const accents = accentMetadata.flatMap((one) => typeof one === "object" && one !== null && "accent" in one && typeof one.accent === "string" ? [one.accent] : []);
       const locales = accentMetadata.flatMap((one) => typeof one === "object" && one !== null && "locale" in one && typeof one.locale === "string" ? [one.locale] : []);
       const fineTunes = Array.isArray(raw.fine_tunes) ? raw.fine_tunes : [];
       const modelIds = fineTunes.flatMap((one) => typeof one === "object" && one !== null && "public_model_id" in one && typeof one.public_model_id === "string" ? [one.public_model_id] : []);
@@ -356,7 +272,6 @@ export async function discoverCartesiaVoices(
         source: raw.access === "private" || raw.visibility === "owner" || raw.is_owner === true ? "account" : "standard",
         presentation,
         languages: locales.length > 0 ? locales : language === undefined ? [] : [language],
-        accents,
         ...(raw.is_pro === true ? { isProfessional: true } : {}),
         ...(modelIds.length === 0 ? {} : { modelIds }),
         ...(raw.access === "public" && raw.visibility === "all" ? { publiclyAccessible: true } : {}),

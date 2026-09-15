@@ -57,9 +57,9 @@ function pointerIn(document: unknown, pointer: string): unknown {
 }
 
 describe("the platform API operation registry", () => {
-  it("contains one unique definition for each of the 80 current operations", () => {
+  it("contains one unique definition for each of the 79 current operations", () => {
     const operations = Object.values(platformOperations);
-    expect(operations).toHaveLength(80);
+    expect(operations).toHaveLength(79);
     expect(new Set(operations.map((operation) => operation.operationId)).size).toBe(
       operations.length,
     );
@@ -67,26 +67,34 @@ describe("the platform API operation registry", () => {
       .toBe(operations.length);
   });
 
-  it("uses the shared interruption level on persona settings writes and reads", () => {
+  it("keeps persona controls reduced and makes interruptions Cascaded-only", () => {
     const savedControls = platformOperations.getPersona.responses[200].schema
       .properties.settings.anyOf[0].properties.controls;
-    const inputControls = platformOperations.updatePersona.request.body.properties
-      .controls;
+    const inputControls = platformOperations.createPersona.request.body.properties.controls;
     for (const controls of [savedControls, inputControls] as const) {
-      expect(controls.properties.interruptionLevel).toEqual({
+      expect(controls.oneOf[0].properties.interruptionLevel).toEqual({
         type: "string",
         enum: ["none", "occasional", "frequent"],
       });
-      expect(controls.required).toContain("interruptionLevel");
-      expect(controls.properties.speechSpeed).toMatchObject({ enum: ["slow", "normal", "fast"] });
-      expect(controls.required).toContain("speechSpeed");
-      expect(controls.additionalProperties).toBe(false);
+      expect(controls.oneOf[0].required).toContain("interruptionLevel");
+      expect(controls.oneOf[1].properties).not.toHaveProperty("interruptionLevel");
+      for (const shape of controls.oneOf) {
+        expect(shape.properties).not.toHaveProperty("emotion");
+        expect(shape.properties).not.toHaveProperty("accent");
+        expect(shape.properties).not.toHaveProperty("speechVolume");
+        expect(shape.properties).not.toHaveProperty("backgroundVolume");
+        expect(shape.properties).not.toHaveProperty("speechSpeed");
+      }
     }
-    expect(savedControls.properties.executionPolicyVersion).toMatchObject({
-      readOnly: true,
-      minimum: 1,
+    expect(platformOperations.createPersona.request.body.dependentRequired).toEqual({
+      models: ["controls"],
+      controls: ["models"],
     });
-    expect(inputControls.properties).not.toHaveProperty("executionPolicyVersion");
+    expect(platformOperations.forkPersona.request.body.dependentRequired).toEqual({
+      models: ["controls"],
+      controls: ["models"],
+    });
+    expect(platformOperations).not.toHaveProperty("updatePersona");
   });
 
   it("lets a LiveKit agent reserve one active worker key inside one project", () => {

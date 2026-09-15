@@ -33,23 +33,19 @@ import {
 import { project } from "../schema/tenancy.ts";
 import {
   defaultPersonaParameterValues,
-  currentPersonaParameterDefaults,
   historicalPersonaControls,
+  PERSONA_EXECUTION_POLICY_VERSION,
   PERSONA_PARAMETER_CONTRACT,
   personaParameterContract,
   personaControlsOfParameters,
-  personaModelParameterValues,
   personaModelsOfParameters,
   personaParametersOfSettings,
-  personaSpeechSpeedOfTarget,
-  PERSONA_SPEECH_SPEED_TARGETS,
   validatePersonaParameterContract,
   validatePersonaParameterValues,
   type PersonaParameterValues,
   type PersonaSettings,
 } from "../persona-library/parameters.ts";
 import type { GraderParameter } from "../grader-library/parameters.ts";
-import { validateUnchangedParameterUnits } from "../grader-library/parameters.ts";
 import {
   ensureProjectPersonaOn,
   readProjectPersonaSettingsOn,
@@ -152,6 +148,14 @@ export type PersonaChanges = {
   readonly models?: PersonaModels;
   readonly settings?: PersonaSettings;
   readonly expectedVersionId?: string;
+};
+
+export type PersonaForkOverrides = {
+  readonly name?: string;
+  readonly description?: string | undefined;
+  readonly identityName?: string;
+  readonly personality?: string;
+  readonly settings?: PersonaSettings;
 };
 
 /** One version, frozen: the persona exactly as some simulation met them. */
@@ -385,29 +389,13 @@ export async function seedPersonaLibraryInternal(
         .where(eq(projectPersona.personaDefinitionId, entry.id))
         .orderBy(projectPersona.id)
         .for("update", { of: projectPersona });
-      const currentDefaults = currentPersonaParameterDefaults(current.parameterContract, {
-        ...(current.language === null ? {} : { language: current.language }),
-      });
       const expandedSettings = savedSettings.map((row) => {
-        if (row.parameterContract.some((field) => field.key === "speech_mode")) {
-          return { id: row.id, values: validatePersonaParameterValues(row.parameterContract, row.parameterValues), contract: row.parameterContract };
-        }
-        const installedContract = row.parameterContract;
-        const oldValues = validatePersonaParameterValues(installedContract, row.parameterValues);
-        validateUnchangedParameterUnits(installedContract, currentDefaults.contract);
-        const defaults = currentDefaults.values;
-        const speechSpeed = personaSpeechSpeedOfTarget(Number(oldValues.tts_speed));
-        const values = {
-          ...defaults,
-          ...oldValues,
-          ...(oldValues.language === undefined && installed?.language !== null && installed?.language !== undefined
-            ? { language: installed.language }
-            : {}),
-          ...(currentDefaults.contract.some((field) => field.key === "speech_speed") && !installedContract.some((field) => field.key === "speech_speed")
-            ? { speech_speed: speechSpeed, tts_speed: PERSONA_SPEECH_SPEED_TARGETS[speechSpeed], interruption_level: historicalPersonaControls(oldValues).interruptionLevel, execution_policy_version: 2 }
-            : {}),
-        };
-        return { id: row.id, values: validatePersonaParameterValues(currentDefaults.contract, values), contract: currentDefaults.contract };
+        const oldValues = validatePersonaParameterValues(row.parameterContract, row.parameterValues);
+        const models = personaModelsOfParameters(oldValues);
+        const controls = historicalPersonaControls(oldValues, installed?.language === null || installed?.language === undefined ? {} : { language: installed.language });
+        const contract = personaParameterContract(models, controls);
+        const values = personaParametersOfSettings({ models, ...controls });
+        return { id: row.id, values, contract };
       });
       const versionInsertions = await tx.insert(personaVersion).values(entry.versions.map((version) => ({
         id: version.id,
@@ -458,19 +446,27 @@ export async function seedPersonaLibraryInternal(
       const [saved] = await tx.select({ id: projectPersona.id, parameterValues: projectPersona.parameterValues, parameterContract: projectPersona.parameterContract })
         .from(projectPersona).where(eq(projectPersona.personaDefinitionId, definition.id)).limit(1).for("update", { of: projectPersona });
       if (saved === undefined) continue;
-      if (saved.parameterContract.some((field) => field.key === "speech_speed")) continue;
       const oldValues = validatePersonaParameterValues(saved.parameterContract, saved.parameterValues);
       const retainedValues = oldValues.language === undefined && definition.language !== null
         ? { ...oldValues, language: definition.language }
         : oldValues;
-      const speechSpeed = personaSpeechSpeedOfTarget(Number(oldValues.tts_speed));
       const controls = historicalPersonaControls(retainedValues);
       const models = personaModelsOfParameters(retainedValues);
-      if (models.mode !== "separate") throw new Error("a historical numeric persona must use separate speech models");
-      const resolvedModels = { ...models, tts: { ...models.tts, speed: PERSONA_SPEECH_SPEED_TARGETS[speechSpeed] } };
-      const nextControls = { ...controls, speechSpeed, executionPolicyVersion: 2 };
-      const nextContract = personaParameterContract(resolvedModels, nextControls);
-      const nextValues = personaParametersOfSettings({ models: resolvedModels, ...nextControls });
+      const nextContract = personaParameterContract(models, controls);
+      const nextValues = personaParametersOfSettings({ models, ...controls });
+      if (isDeepStrictEqual(saved.parameterContract, nextContract) && isDeepStrictEqual(saved.parameterValues, nextValues)) continue;
+      const nextVersionId = newId("prsv");
+      await tx.insert(personaVersion).values({
+        id: nextVersionId,
+        personaId: definition.id,
+        version: definition.version + 1,
+        identityName: definition.identityName,
+        personality: definition.personality,
+        language: null,
+        parameterContract: nextContract,
+        createdBy: null,
+      });
+      await tx.update(persona).set({ currentVersionId: nextVersionId, updatedAt: new Date() }).where(eq(persona.id, definition.id));
       await tx.update(projectPersona).set({ parameterValues: nextValues, parameterContract: nextContract, updatedAt: new Date() }).where(eq(projectPersona.id, saved.id));
     }
     return seeded;
@@ -584,14 +580,9 @@ export async function createPersona(
     const settings = input.settings ?? {
       models: selectedModels,
       language: input.language,
-      emotion: "neutral" as const,
-      accent: "voice_default",
-      speechVolume: 1,
-      executionPolicyVersion: 1,
+      executionPolicyVersion: PERSONA_EXECUTION_POLICY_VERSION,
       backgroundSoundId: "none" as const,
-      backgroundVolume: 0.0631,
-      interruptionLevel: "none" as const,
-      speechSpeed: selectedModels.mode === "separate" ? personaSpeechSpeedOfTarget(selectedModels.tts.speed) : "normal",
+      ...(selectedModels.mode === "separate" ? { interruptionLevel: "none" as const } : {}),
     };
     return insertPersona(
       tx,
@@ -795,47 +786,17 @@ export async function editPersona(
           undefined,
           true,
         );
-        legacyUpgrade = !settings.parameterContract.some(
-          (field) => field.key === "speech_speed",
+        legacyUpgrade = current.parameterContract.some((field) =>
+          ["tts_speed", "emotion", "accent", "speech_volume", "background_volume", "speech_speed"].includes(field.key),
         );
-        if (!legacyUpgrade) {
-          const existingControls = personaControlsOfParameters(settings.parameterValues);
-          const selectedModels = askedModels === undefined || askedModels.mode === "live"
-            ? askedModels
-            : { ...askedModels, tts: { ...askedModels.tts, speed: PERSONA_SPEECH_SPEED_TARGETS[existingControls.speechSpeed] } };
-          const selectedSettings: PersonaSettings = askedSettings === undefined
-            ? { models: selectedModels!, ...existingControls }
-            : { models: personaModelsOfParameters(askedSettings), ...personaControlsOfParameters(askedSettings) };
-          const selectedContract = personaParameterContract(selectedSettings.models, selectedSettings);
-          const selectedValues = personaParametersOfSettings(selectedSettings);
-          if (JSON.stringify(settings.parameterValues) !== JSON.stringify(selectedValues)) {
-            settingsUpdate = { id: settings.id, parameterValues: selectedValues, parameterContract: selectedContract };
-          }
-        } else {
-          const candidateBeforeSpeed = askedSettings ?? {
-            ...defaultPersonaParameterValues(
-              personaParameterContract(askedModels),
-            ),
-            ...settings.parameterValues,
-            ...(current.language === null
-              ? {}
-              : { language: current.language }),
-            ...personaModelParameterValues(askedModels!),
-          };
-          const requestedSpeechSpeed = personaSpeechSpeedOfTarget(Number(candidateBeforeSpeed.tts_speed));
-          const candidate = nextContract.some((field) => field.key === "speech_speed")
-            ? { ...candidateBeforeSpeed, speech_speed: requestedSpeechSpeed, tts_speed: PERSONA_SPEECH_SPEED_TARGETS[requestedSpeechSpeed], interruption_level: candidateBeforeSpeed.interruption_level === "off" ? "none" : candidateBeforeSpeed.interruption_level, execution_policy_version: 2 }
-            : candidateBeforeSpeed;
-          nextContract = personaParameterContract(
-            personaModelsOfParameters(candidate),
-            personaControlsOfParameters(candidate),
-          );
-          const values = validatePersonaParameterValues(nextContract, candidate);
-          if (
-            JSON.stringify(settings.parameterValues) !== JSON.stringify(values)
-          ) {
-            settingsUpdate = { id: settings.id, parameterValues: values, parameterContract: nextContract };
-          }
+        const selectedSettings: PersonaSettings = askedSettings === undefined
+          ? { models: askedModels!, ...personaControlsOfParameters(settings.parameterValues) }
+          : { models: personaModelsOfParameters(askedSettings), ...personaControlsOfParameters(askedSettings) };
+        const selectedContract = personaParameterContract(selectedSettings.models, selectedSettings);
+        const selectedValues = personaParametersOfSettings(selectedSettings);
+        if (legacyUpgrade) nextContract = selectedContract;
+        if (JSON.stringify(settings.parameterValues) !== JSON.stringify(selectedValues)) {
+          settingsUpdate = { id: settings.id, parameterValues: selectedValues, parameterContract: selectedContract };
         }
       }
       let versionId = current.id;
@@ -922,16 +883,11 @@ export async function usePersona(
         ? undefined
         : "models" in selection
           ? personaParametersOfSettings(selection)
-          : (() => {
-              const speed = selection.mode === "separate" ? personaSpeechSpeedOfTarget(selection.tts.speed) : "normal";
-              const resolved = selection.mode === "separate" ? { ...selection, tts: { ...selection.tts, speed: PERSONA_SPEECH_SPEED_TARGETS[speed] } } : selection;
-              return personaParametersOfSettings({
-                models: resolved,
-                ...personaControlsOfParameters(defaultPersonaParameterValues(found.parameterContract)),
-                speechSpeed: speed,
-                executionPolicyVersion: 2,
-              });
-            })();
+          : personaParametersOfSettings({
+              models: selection,
+              ...personaControlsOfParameters(defaultPersonaParameterValues(found.parameterContract)),
+              executionPolicyVersion: 2,
+            });
       await ensureProjectPersonaOn(tx, auth, projectId, id, values);
       return readPersonaOn(tx, auth, id);
     }),
@@ -1133,6 +1089,7 @@ export async function resolvePersonaNames(
 export async function forkPersona(
   auth: AuthContext,
   id: string,
+  overrides?: PersonaForkOverrides,
 ): Promise<Persona | undefined> {
   authorize(auth, "author_definitions", here(auth));
 
@@ -1161,7 +1118,9 @@ export async function forkPersona(
       .limit(1)
       .for("share", { of: persona });
     if (source === undefined) return undefined;
-    validateName(source.name);
+    validateName(overrides?.name ?? source.name);
+    if (overrides?.identityName !== undefined) stated(overrides.identityName, NEEDS_AN_IDENTITY_NAME);
+    if (overrides?.personality !== undefined) stated(overrides.personality, "a persona needs a personality");
 
     const [current] = await tx
       .select({ id: personaVersion.id, ...BEHAVIOR_COLUMNS })
@@ -1173,20 +1132,27 @@ export async function forkPersona(
     }
 
     const sourceSettings = await ensureProjectPersonaOn(tx, auth, projectId, id, undefined, true);
-    const forkControls = personaControlsOfParameters(sourceSettings.parameterValues);
     const sourceModels = personaModelsOfParameters(sourceSettings.parameterValues);
-    const forkModels: PersonaModels = sourceModels.mode === "separate" ? { ...sourceModels, tts: { ...sourceModels.tts, speed: PERSONA_SPEECH_SPEED_TARGETS[forkControls.speechSpeed] } } : sourceModels;
-    const forkContract = personaParameterContract(forkModels, forkControls);
-    const forkValues = personaParametersOfSettings({ models: forkModels, ...forkControls });
+    const selectedSettings = overrides?.settings ?? { models: sourceModels, ...personaControlsOfParameters(sourceSettings.parameterValues) };
+    if (selectedSettings.models.mode !== sourceModels.mode) {
+      throw new UnprocessableInputError("a cloned persona must keep the source speech mode");
+    }
+    const forkValues = personaParametersOfSettings(selectedSettings);
+    const forkContract = personaParameterContract(selectedSettings.models, selectedSettings);
+    const behavior = normalizedBehavior({
+      identityName: overrides?.identityName ?? current.identityName,
+      personality: overrides?.personality ?? current.personality,
+      language: null,
+    });
     return insertPersona(
       tx,
       auth,
       projectId,
       {
-        name: source.name,
-        description: source.description ?? undefined,
+        name: overrides?.name ?? source.name,
+        description: overrides?.description ?? source.description ?? undefined,
       },
-      normalizedBehavior(current),
+      behavior,
       forkContract,
       forkValues,
     );

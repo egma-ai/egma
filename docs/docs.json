@@ -66,8 +66,7 @@
                 "group": "Personas",
                 "pages": [
                   "docs/platform/personas",
-                  "docs/platform/personas/add-a-persona",
-                  "docs/platform/personas/update-a-persona"
+                  "docs/platform/personas/add-a-persona"
                 ]
               },
               {
@@ -242,7 +241,6 @@
               "api-reference/get-persona-form",
               "api-reference/get-persona-capabilities",
               "api-reference/get-persona",
-              "api-reference/update-persona",
               "api-reference/delete-persona",
               "api-reference/list-persona-versions",
               "api-reference/get-persona-usage",

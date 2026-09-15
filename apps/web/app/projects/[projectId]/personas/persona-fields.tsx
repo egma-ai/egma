@@ -1,41 +1,34 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { getPersonaCapabilities, type GetPersonaCapabilitiesResponse } from "@egma/platform-api/client";
+import {
+  getPersonaCapabilities,
+  type GetPersonaCapabilitiesResponse,
+} from "@egma/platform-api/client";
 
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  modelPairFrom,
-  modelPairKey,
-  modelSaid,
   BACKGROUND_SOUNDS,
-  decibelsToGain,
   type BehaviorDraft,
   type ModelsDraft,
   type PersonaForm,
-  type PersonaModelCatalogEntry,
-} from "../../../../lib/personas.ts";
-import { platformAnswer, platformClient } from "../../../../lib/platform-client.ts";
-import { Button } from "@/components/ui/button";
-import { Field } from "../../../../ui/form.tsx";
-import { NumberField } from "../../../../ui/number-field.tsx";
-import { SheetSection } from "./sheet-parts.tsx";
+} from "@/lib/personas.ts";
+import { platformAnswer, platformClient } from "@/lib/platform-client.ts";
+import { Field, FormRow } from "@/ui/form.tsx";
+import { SearchableSelect } from "@/ui/searchable-select.tsx";
 
-/**
- * Share persona fields between create and edit sheets. Prefix control IDs
- * because both sheets can overlap during transitions. Required labels must
- * also carry aria-required; optional labels use the product's optional marker.
- */
+import { PersonaGroupLabel, PersonaSection } from "./sheet-parts.tsx";
 
-/** Which sheet these fields are in, and so which ids they answer to. */
-export type FieldPrefix = "persona" | "new-persona";
+export type FieldPrefix = "new-persona" | "clone-persona";
 
-/** One explanatory line, quieter than the fields it is about. */
-function Note({ children }: { readonly children: ReactNode }) {
+function Note({ children, bad = false }: { readonly children: ReactNode; readonly bad?: boolean }) {
   return (
-    <p className="m-0 text-sm leading-(--line-normal) text-faint">{children}</p>
+    <p className={bad ? "m-0 text-sm text-failure" : "m-0 text-sm text-faint"}>
+      {children}
+    </p>
   );
 }
 
@@ -45,31 +38,19 @@ function languageLabel(value: string): string {
     const languages = new Intl.DisplayNames(["en"], { type: "language" });
     const regions = new Intl.DisplayNames(["en"], { type: "region" });
     const language = languages.of(locale.language) ?? locale.language;
-    return locale.region === undefined ? language : `${language} (${regions.of(locale.region) ?? locale.region})`;
+    return locale.region === undefined
+      ? language
+      : `${language} (${regions.of(locale.region) ?? locale.region})`;
   } catch {
     return value;
   }
 }
 
-function accentLabel(value: string): string {
-  return value === "voice_default"
-    ? "Voice default"
-    : value.replaceAll("_", " ").replace(/^./u, (letter) => letter.toUpperCase());
-}
-
-/**
- * The team's word for this persona, and the line people pick them by.
- *
- * Neither is versioned, and the sheet that can mint a version says so here —
- * before somebody has typed into the fields below, which are the ones that do.
- */
 export function NameFields({
   prefix,
   name,
   description,
   disabled = false,
-  /** Said by the edit sheet, where a version is a thing that can be minted. */
-  note,
   onName,
   onDescription,
 }: {
@@ -77,21 +58,19 @@ export function NameFields({
   readonly name: string;
   readonly description: string;
   readonly disabled?: boolean;
-  readonly note?: string;
   readonly onName: (value: string) => void;
   readonly onDescription: (value: string) => void;
 }) {
   return (
-    <div className="flex flex-col gap-4">
+    <FormRow>
       <Field label="Name*" htmlFor={`${prefix}-name`}>
         <Input
           id={`${prefix}-name`}
           value={name}
           disabled={disabled}
-          placeholder="What your team will call them. Names are not unique."
+          placeholder="What your team will call them"
           aria-required="true"
           autoComplete="off"
-          spellCheck={false}
           onChange={(event) => onName(event.target.value)}
         />
       </Field>
@@ -100,25 +79,15 @@ export function NameFields({
           id={`${prefix}-description`}
           value={description}
           disabled={disabled}
-          placeholder="One line for the people who select this persona"
+          placeholder="One line for people who select them"
           autoComplete="off"
-          spellCheck={false}
           onChange={(event) => onDescription(event.target.value)}
         />
       </Field>
-      {note === undefined ? null : <Note>{note}</Note>}
-    </div>
+    </FormRow>
   );
 }
 
-/**
- * Who this persona is — the whole of the versioned half except the models.
- *
- * The identity name is the one field on this surface that is new, and it is the
- * reason the effort exists: it is the name the persona gives the agent, so the
- * same test hears the same person on every run instead of whatever the model
- * invented that morning.
- */
 export function BehaviorFields({
   prefix,
   draft,
@@ -131,38 +100,37 @@ export function BehaviorFields({
   readonly onChange: (draft: BehaviorDraft) => void;
 }) {
   return (
-    <SheetSection label="Who they are">
+    <>
+      <PersonaGroupLabel>Who they are</PersonaGroupLabel>
       <div className="flex flex-col gap-4">
         <Field
           label="Identity name*"
           htmlFor={`${prefix}-identity-name`}
-          hint="A human name, such as Priya. Spoken in every simulation."
+          hint="The human name they give the agent in every simulation."
         >
           <Input
             id={`${prefix}-identity-name`}
             value={draft.identityName}
             disabled={disabled}
-            placeholder="The name they give the agent"
+            placeholder="For example, Priya"
             aria-required="true"
             autoComplete="off"
-            spellCheck={false}
             onChange={(event) =>
               onChange({ ...draft, identityName: event.target.value })
             }
           />
         </Field>
-
         <Field
           label="Personality*"
           htmlFor={`${prefix}-personality`}
-          hint="Who they are. What they want belongs to the test."
+          hint="Describe who they are and how they speak. Put their situation and goal in the test scenario."
         >
           <Textarea
             id={`${prefix}-personality`}
             value={draft.personality}
             disabled={disabled}
-            rows={3}
-            placeholder="Who they are: age, temperament, how they speak, what they know."
+            rows={5}
+            placeholder="Age, temperament, speech style, and what they know"
             aria-required="true"
             onChange={(event) =>
               onChange({ ...draft, personality: event.target.value })
@@ -170,71 +138,94 @@ export function BehaviorFields({
           />
         </Field>
       </div>
-    </SheetSection>
+    </>
   );
 }
 
-/**
- * Edit model settings for the persona in this project. Each engine control
- * selects a catalog provider/model pair. Changing the speech engine also
- * selects a catalog provider/model pair. Draft voice choices are never reset.
- */
-function EngineField({
+function ProviderModelFields({
   prefix,
   job,
-  label,
-  selection,
+  title,
+  provider,
+  model,
   form,
   disabled,
-  onSelect,
+  modelPlaceholder,
+  onChange,
 }: {
   readonly prefix: FieldPrefix;
-  readonly job: PersonaModelCatalogEntry["job"];
-  readonly label: string;
-  readonly selection: { readonly provider: string; readonly model: string };
+  readonly job: "llm" | "stt" | "tts";
+  readonly title: string;
+  readonly provider: string;
+  readonly model: string;
   readonly form: PersonaForm;
   readonly disabled: boolean;
-  readonly onSelect: (entry: PersonaModelCatalogEntry) => void;
+  readonly modelPlaceholder?: string;
+  readonly onChange: (provider: string, model: string) => void;
 }) {
   const offered = form.modelCatalog.filter((entry) => entry.job === job);
-  const chosen = modelPairKey(selection);
-  /*
-   * A persona can name a pair this deployment has stopped offering. Showing an
-   * empty select would be a form quietly proposing to rewrite a choice nobody
-   * made, so the stored pair is offered too, said in the same words the read
-   * view says it in.
-   */
-  const stored = offered.some((entry) => modelPairKey(entry) === chosen);
-
+  const providers = [...new Map(offered.map((entry) => [entry.provider, entry.label])).entries()];
+  const models = offered.filter((entry) => entry.provider === provider);
+  const chosenModel = models.some((entry) => entry.model === model);
   return (
-    <Field label={`${label}*`} htmlFor={`${prefix}-${job}`}>
-      <Select
-        id={`${prefix}-${job}`}
-        value={chosen}
-        disabled={disabled}
-        aria-required="true"
-        onChange={(event) => {
-          const entry = modelPairFrom(
-            form.modelCatalog,
-            job,
-            event.target.value,
-          );
-          if (entry !== undefined) onSelect(entry);
-        }}
-      >
-        {stored ? null : (
-          <option value={chosen}>
-            {modelSaid(form.modelCatalog, job, selection)}
-          </option>
-        )}
-        {offered.map((entry) => (
-          <option key={modelPairKey(entry)} value={modelPairKey(entry)}>
-            {modelSaid(form.modelCatalog, job, entry)}
-          </option>
-        ))}
-      </Select>
-    </Field>
+    <FormRow>
+      <Field label={`${title} provider*`} htmlFor={`${prefix}-${job}-provider`}>
+        <Select
+          id={`${prefix}-${job}-provider`}
+          value={provider}
+          disabled={disabled}
+          aria-required="true"
+          onChange={(event) => {
+            const next = offered.find((entry) => entry.provider === event.target.value);
+            if (next !== undefined) onChange(next.provider, next.model);
+          }}
+        >
+          {providers.some(([id]) => id === provider) ? null : (
+            <option value={provider}>{provider} · Unavailable</option>
+          )}
+          {providers.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </Select>
+      </Field>
+      <Field label={`${title} model*`} htmlFor={`${prefix}-${job}-model`}>
+        <Select
+          id={`${prefix}-${job}-model`}
+          value={model}
+          disabled={disabled}
+          aria-required="true"
+          onChange={(event) => onChange(provider, event.target.value)}
+        >
+          {modelPlaceholder === undefined ? null : (
+            <option value="" disabled>{modelPlaceholder}</option>
+          )}
+          {chosenModel ? null : <option value={model}>{model} · Unavailable</option>}
+          {models.map((entry) => (
+            <option key={entry.model} value={entry.model}>
+              {entry.modelLabel ?? entry.model}
+            </option>
+          ))}
+        </Select>
+      </Field>
+    </FormRow>
   );
+}
+
+function changeSelection(
+  draft: ModelsDraft,
+  job: "llm" | "stt" | "tts",
+  provider: string,
+  model: string,
+): ModelsDraft {
+  if (job === "llm") return { ...draft, llmProvider: provider, llmModel: model };
+  if (job === "stt") return { ...draft, sttProvider: provider, sttModel: model };
+  return { ...draft, ttsProvider: provider, ttsModel: model };
+}
+
+function capabilityMessage(
+  label: string,
+  state: { readonly status: string; readonly reason?: string },
+): ReactNode {
+  if (state.status === "supported") return null;
+  return <Note bad={state.status === "unsupported"}>{label}: {state.reason ?? state.status}</Note>;
 }
 
 export function ModelFields({
@@ -242,191 +233,364 @@ export function ModelFields({
   draft,
   form,
   disabled = false,
-  onChange,
   projectId,
+  onChange,
   onValidityChange,
 }: {
   readonly prefix: FieldPrefix;
   readonly draft: ModelsDraft;
   readonly form: PersonaForm;
   readonly disabled?: boolean;
-  readonly onChange: (draft: ModelsDraft) => void;
   readonly projectId: string;
+  readonly onChange: (draft: ModelsDraft) => void;
   readonly onValidityChange?: (valid: boolean) => void;
 }) {
   const [capabilities, setCapabilities] = useState<GetPersonaCapabilitiesResponse | null>(null);
   const [capabilityError, setCapabilityError] = useState<string | null>(null);
+  const [languageSearch, setLanguageSearch] = useState("");
   const [voiceSearch, setVoiceSearch] = useState("");
-  const [voiceType, setVoiceType] = useState("all");
+  const [voiceType, setVoiceType] = useState<"all" | "male" | "female" | "unknown">("all");
   const request = useRef(0);
-
-  function change(next: ModelsDraft): void {
-    if (next.ttsProvider !== draft.ttsProvider || next.ttsModel !== draft.ttsModel || next.sttProvider !== draft.sttProvider || next.sttModel !== draft.sttModel || next.language !== draft.language || next.voiceId !== draft.voiceId) {
-      setCapabilities(null);
-    }
-    onChange(next);
-  }
-
+  const reportValidity = useRef(onValidityChange);
+  reportValidity.current = onValidityChange;
 
   useEffect(() => {
     const turn = request.current + 1;
     request.current = turn;
     setCapabilities(null);
     setCapabilityError(null);
-    void platformAnswer(getPersonaCapabilities(draft.mode === "live" ? {
-      projectId, mode: "live", liveProvider: "openai", liveModel: "gpt-live-1",
-      language: draft.language, voiceId: draft.liveVoiceId,
-    } : {
-      projectId, mode: "separate",
-      ttsProvider: draft.ttsProvider, ttsModel: draft.ttsModel,
-      sttProvider: draft.sttProvider, sttModel: draft.sttModel,
-      language: draft.language, voiceId: draft.separateVoiceId,
-    }, { client: platformClient })).then((answer) => {
+    reportValidity.current?.(false);
+    void platformAnswer(
+      getPersonaCapabilities(
+        draft.mode === "live"
+          ? {
+              projectId,
+              mode: "live",
+              liveProvider: "openai",
+              liveModel: "gpt-live-1",
+              language: draft.language,
+              voiceId: draft.liveVoiceId,
+            }
+          : {
+              projectId,
+              mode: "separate",
+              ttsProvider: draft.ttsProvider,
+              ttsModel: draft.ttsModel,
+              sttProvider: draft.sttProvider,
+              sttModel: draft.sttModel,
+              language: draft.language,
+              voiceId: draft.separateVoiceId,
+            },
+        { client: platformClient },
+      ),
+    ).then((answer) => {
       if (request.current !== turn) return;
       if (answer.status === "ready") setCapabilities(answer.value);
-      else if (answer.status !== "signed-out") setCapabilityError(answer.refusal.message);
+      else if (answer.status === "signed-out") window.location.replace("/sign-in");
+      else setCapabilityError(answer.refusal.message);
     });
-    return undefined;
-  }, [projectId, draft.mode, draft.ttsProvider, draft.ttsModel, draft.sttProvider, draft.sttModel, draft.language, draft.separateVoiceId, draft.liveVoiceId]);
+  }, [
+    projectId,
+    draft.mode,
+    draft.ttsProvider,
+    draft.ttsModel,
+    draft.sttProvider,
+    draft.sttModel,
+    draft.language,
+    draft.separateVoiceId,
+    draft.liveVoiceId,
+  ]);
 
   const activeVoiceId = draft.mode === "live" ? draft.liveVoiceId : draft.separateVoiceId;
+  const allVoices = capabilities?.voices.choices ?? [];
+  const voiceAvailable =
+    capabilities?.voices.status === "fixed"
+      ? capabilities.voices.value?.id === activeVoiceId
+      : allVoices.some((voice) => voice.id === activeVoiceId);
+  const languageChoices = capabilities?.language.choices ?? [];
+  const selectedLanguageBase = draft.language.toLocaleLowerCase().split("-")[0];
+  const languageAvailable =
+    capabilities?.language.status === "fixed"
+      ? capabilities.language.value === draft.language
+      : languageChoices.some((value) =>
+          value === draft.language ||
+          (selectedLanguageBase !== undefined && value.toLocaleLowerCase() === selectedLanguageBase),
+        );
+  const valid = capabilities !== null && languageAvailable && voiceAvailable;
+
+  useEffect(() => reportValidity.current?.(valid), [valid]);
+
+  const languages = useMemo(() => {
+    const query = languageSearch.trim().toLocaleLowerCase();
+    return languageChoices
+      .map((value) => ({ value, label: languageLabel(value), detail: value }))
+      .filter((option) => `${option.label} ${option.value}`.toLocaleLowerCase().includes(query));
+  }, [languageChoices, languageSearch]);
 
   const voices = useMemo(() => {
-    const all = capabilities?.voices.choices ?? [];
-    const query = voiceSearch.trim().toLowerCase();
-    return all.filter((voice) => {
-      const presentation = voice.presentation;
-      const matchesType = voiceType === "all" || presentation === voiceType || presentation === "unknown";
-      return matchesType && (query === "" || `${voice.name} ${voice.id}`.toLowerCase().includes(query));
-    });
-  }, [capabilities, voiceSearch, voiceType]);
-  function accepts(state: { status: string; choices?: readonly (string | number)[]; value?: string | number; range?: { minimum: number; maximum: number } }, value: string | number, unsupportedValue: string | number): boolean {
-    if (state.status === "unknown") return false;
-    if (state.status === "fixed") return value === state.value;
-    if (state.status === "unsupported") return value === unsupportedValue;
-    if (state.choices !== undefined) return state.choices.includes(value);
-    if (state.range !== undefined) return typeof value === "number" && value >= state.range.minimum && value <= state.range.maximum;
-    return true;
-  }
-  function acceptsLanguage(state: GetPersonaCapabilitiesResponse["language"], value: string): boolean {
-    if (accepts(state, value, "en-US")) return true;
-    if (state.status !== "supported" || state.choices === undefined) return false;
-    const base = value.toLowerCase().split("-")[0];
-    return state.choices.some((choice) => choice.toLowerCase().split("-")[0] === base);
-  }
-  const catalogHasVoice = capabilities?.voices.status === "supported"
-    && (capabilities.voices.choices ?? []).some((voice) => voice.id === activeVoiceId);
-  const valid = capabilities !== null
-    && acceptsLanguage(capabilities.language, draft.language)
-    && accepts(capabilities.accent, draft.accent, "voice_default")
-    && accepts(capabilities.emotion, draft.emotion, "neutral")
-    && accepts(capabilities.speechSpeed, draft.speechSpeed, "normal")
-    && accepts(capabilities.speechVolume, Number(draft.speechVolume), 1)
-    && Number.isFinite(Number(draft.backgroundVolumeDb))
-    && Number(draft.backgroundVolumeDb) >= -36
-    && Number(draft.backgroundVolumeDb) <= -12
-    && (capabilities.voices.status === "supported"
-      ? catalogHasVoice
-      : capabilities.voices.status === "fixed" && capabilities.voices.value?.id === activeVoiceId);
-  useEffect(() => {
-    if (capabilities !== null || capabilityError !== null) onValidityChange?.(valid);
-  }, [valid, capabilities, capabilityError, onValidityChange]);
+    const query = voiceSearch.trim().toLocaleLowerCase();
+    return allVoices
+      .filter((voice) => {
+        const presentation = voice.presentation === "neutral" ? "unknown" : voice.presentation;
+        return (voiceType === "all" || presentation === voiceType) &&
+          `${voice.name} ${voice.id}`.toLocaleLowerCase().includes(query);
+      })
+      .map((voice) => ({
+        value: voice.id,
+        label: voice.name,
+        detail: voice.presentation === "male" ? "Male" : voice.presentation === "female" ? "Female" : "Unknown",
+      }));
+  }, [allVoices, voiceSearch, voiceType]);
 
-  const stateNote = (label: string, state: { status: string; reason?: string }) => state.status === "supported" ? null : <Note>{label}: {state.status}. {state.reason ?? "The provider did not explain this capability."}</Note>;
+  function change(next: ModelsDraft): void {
+    onChange(next);
+  }
+
+  const languageDisplay = capabilities === null || languageAvailable
+    ? languageLabel(draft.language)
+    : `${languageLabel(draft.language)} · Unavailable`;
+  const selectedVoice = allVoices.find((voice) => voice.id === activeVoiceId) ?? capabilities?.voices.value;
+  const voiceDisplay = capabilities === null || voiceAvailable
+    ? selectedVoice?.name ?? activeVoiceId
+    : `${activeVoiceId} · Unavailable`;
+
   return (
-    <SheetSection label="Settings">
-      <div className="flex flex-col gap-4">
-        <Field label="Speech mode*" htmlFor={`${prefix}-speech-mode`} hint="Separate uses speech recognition and generation services. GPT Live combines both.">
-          <Select id={`${prefix}-speech-mode`} value={draft.mode} aria-required="true" disabled={disabled} onChange={(event) => change({ ...draft, mode: event.target.value as ModelsDraft["mode"], voiceId: event.target.value === "live" ? draft.liveVoiceId : draft.separateVoiceId })}>
-            <option value="separate">Separate speech models</option>
-            <option value="live">GPT Live</option>
-          </Select>
+    <>
+      <PersonaGroupLabel>Settings</PersonaGroupLabel>
+      {capabilityError === null ? null : <Note bad>{capabilityError}</Note>}
+      <PersonaSection label="Language">
+        <Field
+          label="Language*"
+          htmlFor={`${prefix}-language`}
+          hint={!languageAvailable && capabilities !== null ? "Choose an available language before creating this persona." : undefined}
+        >
+          <SearchableSelect
+            id={`${prefix}-language`}
+            value={draft.language}
+            displayValue={languageDisplay}
+            options={languages}
+            search={languageSearch}
+            searchLabel="Choose a language"
+            searchPlaceholder="Search languages"
+            disabled={disabled || capabilities?.language.status === "fixed"}
+            required
+            invalid={capabilities !== null && !languageAvailable}
+            loading={capabilities === null && capabilityError === null}
+            error={capabilityError}
+            empty="No languages found"
+            emptyDetail="Try another search."
+            onSearchChange={setLanguageSearch}
+            onValueChange={(language) => change({ ...draft, language })}
+          />
         </Field>
-        {draft.mode === "live" ? <EngineField prefix={prefix} job="live" label="Live speech model" selection={{ provider: "openai", model: "gpt-live-1" }} form={form} disabled={true} onSelect={() => undefined} /> : <><EngineField
-          prefix={prefix}
-          job="stt"
-          label="Speech-to-text"
-          selection={{ provider: draft.sttProvider, model: draft.sttModel }}
-          form={form}
-          disabled={disabled}
-          onSelect={(entry) =>
-            change({
-              ...draft,
-              sttProvider: entry.provider,
-              sttModel: entry.model,
-            })
-          }
-        />
+        {capabilities === null ? null : capabilityMessage("Language", capabilities.language)}
+      </PersonaSection>
 
-        <EngineField
-          prefix={prefix}
-          job="tts"
-          label="Text-to-speech"
-          selection={{ provider: draft.ttsProvider, model: draft.ttsModel }}
-          form={form}
-          disabled={disabled}
-          onSelect={(entry) =>
-            change({
-              ...draft,
-              ttsProvider: entry.provider,
-              ttsModel: entry.model,
-            })
-          }
-        /></>}
-        <EngineField prefix={prefix} job="llm" label="Language model" selection={{ provider: draft.llmProvider, model: draft.llmModel }} form={form} disabled={disabled} onSelect={(entry) => change({ ...draft, llmProvider: entry.provider, llmModel: entry.model })} />
-        {capabilityError === null ? null : <p role="alert" className="m-0 text-sm text-failure">{capabilityError}</p>}
-        <Field label="Language*" htmlFor={`${prefix}-language`}>
-          <Select id={`${prefix}-language`} value={draft.language} aria-required="true" disabled={disabled || capabilities?.language.status === "fixed"} onChange={(event) => change({ ...draft, language: event.target.value })}>
-            {capabilities?.language.choices?.includes(draft.language) === false ? <option value={draft.language}>{languageLabel(draft.language)} · Saved locale</option> : null}
-            {(capabilities?.language.choices ?? [draft.language]).map((value) => <option key={value} value={value}>{languageLabel(value)}</option>)}
-          </Select>
-        </Field>
-        {capabilities === null ? <Note>Loading voice capabilities…</Note> : stateNote("Language", capabilities.language)}
-        <Field label="Find a voice" htmlFor={`${prefix}-voice-search`}><Input id={`${prefix}-voice-search`} value={voiceSearch} disabled={disabled} placeholder="Search the full voice catalog" onChange={(event) => setVoiceSearch(event.target.value)} /></Field>
-        <Field label="Voice type" htmlFor={`${prefix}-voice-type`}><Select id={`${prefix}-voice-type`} value={voiceType} disabled={disabled} onChange={(event) => setVoiceType(event.target.value)}><option value="all">All</option><option value="male">Male</option><option value="female">Female</option></Select></Field>
-        <Field label="Voice*" htmlFor={`${prefix}-tts-voice`}><Select id={`${prefix}-tts-voice`} value={activeVoiceId} aria-required="true" disabled={disabled || capabilities?.voices.status !== "supported"} onChange={(event) => change({ ...draft, voiceId: event.target.value, ...(draft.mode === "live" ? { liveVoiceId: event.target.value } : { separateVoiceId: event.target.value }) })}>{voices.some((voice) => voice.id === activeVoiceId) ? null : <option value={activeVoiceId}>{activeVoiceId}</option>}{voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name} · {voice.presentation === "unknown" ? "Type unknown" : voice.presentation}</option>)}</Select></Field>
-        {capabilities === null ? null : stateNote("Voice", capabilities.voices)}
-        <Field label="Accent*" htmlFor={`${prefix}-accent`}>
-          <Select id={`${prefix}-accent`} value={draft.accent} aria-required="true" disabled={disabled || capabilities?.accent.status !== "supported"} onChange={(event) => change({ ...draft, accent: event.target.value })}>
-            {(capabilities?.accent.choices ?? [draft.accent]).map((value) => <option key={value} value={value}>{accentLabel(value)}</option>)}
-          </Select>
-        </Field>
-        {capabilities === null ? null : stateNote("Accent", capabilities.accent)}
-        {capabilities?.accent.status === "fixed" && draft.accent !== capabilities.accent.value && capabilities.accent.value === "voice_default" ? <Button type="button" variant="secondary" disabled={disabled} onClick={() => change({ ...draft, accent: "voice_default" })}>Use voice default</Button> : null}
-        <Field label="Emotion*" htmlFor={`${prefix}-emotion`}>
-          <Select id={`${prefix}-emotion`} value={draft.emotion} aria-required="true" disabled={disabled || capabilities?.emotion.status !== "supported"} onChange={(event) => change({ ...draft, emotion: event.target.value as ModelsDraft["emotion"] })}>
-            {(capabilities?.emotion.choices ?? [draft.emotion]).map((value) => <option key={value} value={value}>{value[0]?.toUpperCase()}{value.slice(1)}</option>)}
-          </Select>
-        </Field>
-        {capabilities === null ? null : stateNote("Emotion", capabilities.emotion)}
-        {capabilities?.emotion.status === "fixed" && draft.emotion !== capabilities.emotion.value && capabilities.emotion.value === "neutral" ? <Button type="button" variant="secondary" disabled={disabled} onClick={() => change({ ...draft, emotion: "neutral" })}>Use Neutral</Button> : null}
-        <Field label="Interruptions*" htmlFor={`${prefix}-interruption-level`} hint="An interruption finishes one brief sentence, then the caller listens again.">
-          <Select id={`${prefix}-interruption-level`} value={draft.interruptionLevel} aria-required="true" disabled={disabled} onChange={(event) => change({ ...draft, interruptionLevel: event.target.value as ModelsDraft["interruptionLevel"] })}>
-            <option value="none">None</option>
-            <option value="occasional">Occasional</option>
-            <option value="frequent">Frequent</option>
-          </Select>
-        </Field>
-        <Field label="Speech rate*" htmlFor={`${prefix}-tts-speed`}>
-          <Select id={`${prefix}-tts-speed`} value={draft.speechSpeed} aria-required="true" disabled={disabled} onChange={(event) => change({ ...draft, speechSpeed: event.target.value as ModelsDraft["speechSpeed"] })}>
-            <option value="slow" disabled={capabilities?.speechSpeed.status === "fixed" || capabilities?.speechSpeed.choices?.includes("slow") === false}>Slow</option>
-            <option value="normal">Normal</option>
-            <option value="fast" disabled={capabilities?.speechSpeed.status === "fixed" || capabilities?.speechSpeed.choices?.includes("fast") === false}>Fast</option>
-          </Select>
-        </Field>
-        {capabilities === null ? null : stateNote("Speech rate", capabilities.speechSpeed)}
+      {draft.mode === "separate" ? (
+        <>
+          <PersonaSection label="Text to speech">
+            <div className="flex flex-col gap-4">
+              <ProviderModelFields
+                prefix={prefix}
+                job="tts"
+                title="Voice"
+                provider={draft.ttsProvider}
+                model={draft.ttsModel}
+                form={form}
+                disabled={disabled}
+                onChange={(provider, model) => change(changeSelection(draft, "tts", provider, model))}
+              />
+              <VoiceField
+                prefix={prefix}
+                disabled={disabled}
+                value={activeVoiceId}
+                displayValue={voiceDisplay}
+                valid={voiceAvailable}
+                loading={capabilities === null && capabilityError === null}
+                error={capabilityError}
+                options={voices}
+                search={voiceSearch}
+                type={voiceType}
+                onSearch={setVoiceSearch}
+                onType={setVoiceType}
+                onClear={() => { setVoiceSearch(""); setVoiceType("all"); }}
+                onChange={(separateVoiceId) => change({ ...draft, separateVoiceId })}
+              />
+              {capabilities === null ? null : capabilityMessage("Voice", capabilities.voices)}
+            </div>
+          </PersonaSection>
+          <PersonaSection label="Speech to text">
+            <ProviderModelFields
+              prefix={prefix}
+              job="stt"
+              title="Transcription"
+              provider={draft.sttProvider}
+              model={draft.sttModel}
+              form={form}
+              disabled={disabled}
+              onChange={(provider, model) => change(changeSelection(draft, "stt", provider, model))}
+            />
+          </PersonaSection>
+          <PersonaSection label="Reasoning">
+            <ProviderModelFields
+              prefix={prefix}
+              job="llm"
+              title="Reasoning"
+              provider={draft.llmProvider}
+              model={draft.llmModel}
+              form={form}
+              disabled={disabled}
+              modelPlaceholder="GPT 5.6 Terra"
+              onChange={(provider, model) => change(changeSelection(draft, "llm", provider, model))}
+            />
+          </PersonaSection>
+        </>
+      ) : (
+        <PersonaSection label="Realtime voice">
+          <div className="flex flex-col gap-4">
+            <VoiceField
+              prefix={prefix}
+              disabled={disabled}
+              value={activeVoiceId}
+              displayValue={voiceDisplay}
+              valid={voiceAvailable}
+              loading={capabilities === null && capabilityError === null}
+              error={capabilityError}
+              options={voices}
+              search={voiceSearch}
+              type={voiceType}
+              onSearch={setVoiceSearch}
+              onType={setVoiceType}
+              onClear={() => { setVoiceSearch(""); setVoiceType("all"); }}
+              onChange={(liveVoiceId) => change({ ...draft, liveVoiceId })}
+            />
+            <ProviderModelFields
+              prefix={prefix}
+              job="llm"
+              title="Reasoning"
+              provider={draft.llmProvider}
+              model={draft.llmModel}
+              form={form}
+              disabled={disabled}
+              modelPlaceholder="GPT 5.6 Terra"
+              onChange={(provider, model) => change(changeSelection(draft, "llm", provider, model))}
+            />
+          </div>
+        </PersonaSection>
+      )}
 
-        <NumberField id={`${prefix}-speech-volume`} label="Speech volume*" value={draft.speechVolume} disabled={disabled || capabilities?.speechVolume.status !== "supported"} required onChange={(speechVolume) => change({ ...draft, speechVolume })} />
-        {capabilities === null ? null : stateNote("Speech volume", capabilities.speechVolume)}
+      <PersonaSection label="Advanced" open={false}>
+        <div className="flex flex-col gap-4">
+          <Field label="Background sound*" htmlFor={`${prefix}-background-sound`}>
+            <Select
+              id={`${prefix}-background-sound`}
+              value={draft.backgroundSoundId}
+              disabled={disabled}
+              aria-required="true"
+              onChange={(event) => change({
+                ...draft,
+                backgroundSoundId: event.target.value as ModelsDraft["backgroundSoundId"],
+              })}
+            >
+              {BACKGROUND_SOUNDS.map((sound) => <option key={sound.id} value={sound.id}>{sound.label}</option>)}
+            </Select>
+          </Field>
+          {draft.mode === "separate" ? (
+            <Field label="Interruptions*" htmlFor={`${prefix}-interruptions`}>
+              <Select
+                id={`${prefix}-interruptions`}
+                value={draft.interruptionLevel}
+                disabled={disabled}
+                aria-required="true"
+                onChange={(event) => change({
+                  ...draft,
+                  interruptionLevel: event.target.value as ModelsDraft["interruptionLevel"],
+                })}
+              >
+                <option value="none">None</option>
+                <option value="occasional">Occasional</option>
+                <option value="frequent">Frequent</option>
+              </Select>
+            </Field>
+          ) : null}
+        </div>
+      </PersonaSection>
+    </>
+  );
+}
 
-        <Field label="Background sound*" htmlFor={`${prefix}-background-sound`}>
-          <Select id={`${prefix}-background-sound`} value={draft.backgroundSoundId} aria-required="true" disabled={disabled} onChange={(event) => change({ ...draft, backgroundSoundId: event.target.value as ModelsDraft["backgroundSoundId"] })}>
-            {BACKGROUND_SOUNDS.map((sound) => <option key={sound.id} value={sound.id}>{sound.label}</option>)}
-          </Select>
-        </Field>
-        {draft.backgroundSoundId === "none" ? null : <NumberField id={`${prefix}-background-volume`} label="Background level*" value={draft.backgroundVolumeDb} disabled={disabled} required min={-36} max={-12} step={1} unit="dB" hint="Independent of speech volume." onChange={(backgroundVolumeDb) => change({ ...draft, backgroundVolumeDb, backgroundVolume: decibelsToGain(backgroundVolumeDb) })} />}
-
-      </div>
-    </SheetSection>
+function VoiceField({
+  prefix,
+  disabled,
+  value,
+  displayValue,
+  valid,
+  loading,
+  error,
+  options,
+  search,
+  type,
+  onSearch,
+  onType,
+  onClear,
+  onChange,
+}: {
+  readonly prefix: FieldPrefix;
+  readonly disabled: boolean;
+  readonly value: string;
+  readonly displayValue: string;
+  readonly valid: boolean;
+  readonly loading: boolean;
+  readonly error: string | null;
+  readonly options: readonly { readonly value: string; readonly label: string; readonly detail: string }[];
+  readonly search: string;
+  readonly type: "all" | "male" | "female" | "unknown";
+  readonly onSearch: (value: string) => void;
+  readonly onType: (value: "all" | "male" | "female" | "unknown") => void;
+  readonly onClear: () => void;
+  readonly onChange: (value: string) => void;
+}) {
+  return (
+    <Field
+      label="Voice*"
+      htmlFor={`${prefix}-voice`}
+      hint={!valid && !loading ? "Choose an available voice before creating this persona." : undefined}
+    >
+      <SearchableSelect
+        id={`${prefix}-voice`}
+        value={value}
+        displayValue={displayValue}
+        options={options}
+        search={search}
+        searchLabel="Choose a voice"
+        searchPlaceholder="Search voices"
+        disabled={disabled}
+        required
+        invalid={!valid && !loading}
+        loading={loading}
+        error={error}
+        toolbar={
+          <div className="grid w-full grid-cols-4 border-b border-border bg-surface-soft p-1" role="group" aria-label="Filter voice type">
+            {(["all", "male", "female", "unknown"] as const).map((one) => (
+              <button
+                key={one}
+                type="button"
+                className="relative min-h-(--control-sm) w-full border border-transparent bg-transparent px-3 text-sm text-muted-foreground data-[selected=true]:bg-surface data-[selected=true]:font-medium data-[selected=true]:text-foreground data-[selected=true]:before:absolute data-[selected=true]:before:inset-x-0 data-[selected=true]:before:-top-px data-[selected=true]:before:h-0.5 data-[selected=true]:before:bg-brand pointer-coarse:min-h-(--tap-target)"
+                data-selected={type === one ? "true" : undefined}
+                aria-pressed={type === one}
+                onClick={() => onType(one)}
+              >
+                {one[0]!.toUpperCase() + one.slice(1)}
+              </button>
+            ))}
+          </div>
+        }
+        empty="No voices found"
+        emptyDetail="Try another search or clear the filters."
+        emptyAction={<Button type="button" size="sm" variant="secondary" onClick={onClear}>Clear search and filters</Button>}
+        onSearchChange={onSearch}
+        onValueChange={onChange}
+      />
+    </Field>
   );
 }

@@ -44,9 +44,8 @@ from egma_simulator.usage import ProviderUsage, live_duration_usage
 def authored(**changes) -> AuthoredPersona:
     fields = {
         "language": "English",
-        "emotion": "anxious",
-        "accent": "irish",
-        "interruption_level": "none",
+        "background_sound_id": "none",
+        "execution_policy_version": 2,
     }
     fields.update(changes)
     return AuthoredPersona(
@@ -57,25 +56,18 @@ def authored(**changes) -> AuthoredPersona:
     )
 
 
-def test_live_prompt_keeps_conversation_controls_and_delegates_scenario() -> None:
+def test_live_prompt_keeps_persona_logic_without_retired_controls() -> None:
     prompt = compose_live_prompt(authored(), "Ask to move the appointment to Thursday.")
 
     assert "Mara" in prompt
     assert "Careful and direct" in prompt
     assert "English" in prompt
-    assert "anxious" in prompt
-    assert "irish accent" in prompt
-    assert "Wait quietly" in prompt
-    assert "Do not overlap" in prompt
     assert "Ask to move the appointment to Thursday." in prompt
     assert "Delegation policy:" in prompt
     assert "End call: confirm that the caller" in prompt
     assert "Always delegate before saying goodbye" in prompt
-
-    fast_prompt = compose_live_prompt(
-        authored(speech_speed="fast", tts_speed=1.5), "Ask about an appointment."
-    )
-    assert "about 1.5x" in fast_prompt
+    for removed in ("accent", "emotional delivery", "pace", "interrupt", "overlap"):
+        assert removed not in prompt.lower()
 
 
 async def test_live_transcript_preserves_source_intervals_and_overlap() -> None:
@@ -216,12 +208,7 @@ def test_v7_live_work_order_needs_no_stt_or_tts() -> None:
             "personality": "Careful",
             "parameters": {
                 "language": "English",
-                "emotion": "neutral",
-                "accent": "voice_default",
-                "speech_speed": "normal",
-                "tts_speed": 1,
-                "speech_volume": 1,
-                "interruption_level": "none",
+                "background_sound_id": "none",
                 "execution_policy_version": 2,
             },
         },
@@ -463,7 +450,6 @@ async def test_live_conductor_uses_backend_and_final_cumulative_usage() -> None:
             backend_model=model,
             blobs=blobs,
             recording_key="sim/dual-channel.wav",
-            speech_volume=0.5,
             _base_url=f"ws://127.0.0.1:{port}",
         )
         turns = []
@@ -557,7 +543,6 @@ async def test_live_conductor_cancels_both_workers_without_false_transcript() ->
             backend_model=_BackendModel(),
             blobs=_Blobs(),
             recording_key="sim/canceled.wav",
-            speech_volume=1,
             _base_url=f"ws://127.0.0.1:{port}",
         )
         task = asyncio.create_task(
@@ -717,7 +702,6 @@ async def test_live_conductor_waits_for_concluding_goodbye_playout(
             backend_model=model,
             blobs=_Blobs(),
             recording_key="sim/goodbye.wav",
-            speech_volume=1,
             _base_url=f"ws://127.0.0.1:{port}",
         )
         result = await conductor.conduct(
@@ -955,7 +939,6 @@ async def test_live_conclusion_keeps_end_call_baseline_through_final_delegation(
             backend_model=model,
             blobs=_Blobs(),
             recording_key="sim/baseline.wav",
-            speech_volume=1,
             _base_url=f"ws://127.0.0.1:{port}",
         )
         result = await conductor.conduct(
@@ -1019,7 +1002,6 @@ async def test_live_conductor_reports_media_failure_while_open_is_blocked() -> N
             backend_model=model,
             blobs=_Blobs(),
             recording_key="sim/open-failed.wav",
-            speech_volume=1,
             _base_url=f"ws://127.0.0.1:{port}",
         )
         conducting = asyncio.create_task(
@@ -1132,7 +1114,6 @@ async def test_live_conductor_reports_media_failure(
             backend_model=model,
             blobs=_Blobs(),
             recording_key="sim/media-failed.wav",
-            speech_volume=1,
             _base_url=f"ws://127.0.0.1:{port}",
         )
         with pytest.raises(PlugError) as lost:
@@ -1187,7 +1168,6 @@ async def test_live_conductor_cleans_up_after_provider_failure() -> None:
             backend_model=model,
             blobs=_Blobs(),
             recording_key="sim/failed.wav",
-            speech_volume=1,
             _base_url=f"ws://127.0.0.1:{port}",
         )
         usages = []
@@ -1246,7 +1226,6 @@ async def test_live_conductor_enforces_duration_limit_and_closes_session() -> No
             backend_model=model,
             blobs=_Blobs(),
             recording_key="sim/duration.wav",
-            speech_volume=1,
             _base_url=f"ws://127.0.0.1:{port}",
         )
         result = await conductor.conduct(
@@ -1345,7 +1324,6 @@ async def test_live_opening_waits_and_prompts_only_a_silent_call(
             backend_model=model,
             blobs=_Blobs(),
             recording_key="opening.wav",
-            speech_volume=1,
             _base_url=f"ws://127.0.0.1:{port}",
         )
         task = asyncio.create_task(

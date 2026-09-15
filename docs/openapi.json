@@ -11365,7 +11365,7 @@
       "post": {
         "operationId": "usePersona",
         "summary": "Use a persona",
-        "description": "Save this project's first model settings for the persona. Omit models to use its declared defaults. Repeated use returns the existing settings; use Update a persona to change them.",
+        "description": "Use the persona in this project with its declared defaults. Repeated use keeps the saved settings unchanged.",
         "tags": [
           "Personas"
         ],
@@ -11398,226 +11398,6 @@
                   "projectId": {
                     "type": "string",
                     "minLength": 1
-                  },
-                  "models": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "enum": [
-                              "separate"
-                            ]
-                          },
-                          "llm": {
-                            "type": "object",
-                            "properties": {
-                              "provider": {
-                                "type": "string"
-                              },
-                              "model": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "provider",
-                              "model"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "stt": {
-                            "type": "object",
-                            "properties": {
-                              "provider": {
-                                "type": "string"
-                              },
-                              "model": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "provider",
-                              "model"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "tts": {
-                            "type": "object",
-                            "properties": {
-                              "provider": {
-                                "type": "string"
-                              },
-                              "model": {
-                                "type": "string"
-                              },
-                              "voiceId": {
-                                "type": "string",
-                                "description": "A voice identifier supported by the selected text-to-speech provider."
-                              }
-                            },
-                            "required": [
-                              "provider",
-                              "model",
-                              "voiceId"
-                            ],
-                            "additionalProperties": false
-                          }
-                        },
-                        "required": [
-                          "mode",
-                          "llm",
-                          "stt",
-                          "tts"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "description": "A GPT Live speech selection and an independently selected reasoning model.",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "enum": [
-                              "live"
-                            ]
-                          },
-                          "llm": {
-                            "type": "object",
-                            "properties": {
-                              "provider": {
-                                "type": "string"
-                              },
-                              "model": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "provider",
-                              "model"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "live": {
-                            "type": "object",
-                            "properties": {
-                              "provider": {
-                                "type": "string",
-                                "enum": [
-                                  "openai"
-                                ]
-                              },
-                              "model": {
-                                "type": "string",
-                                "enum": [
-                                  "gpt-live-1"
-                                ]
-                              },
-                              "adapter": {
-                                "type": "string",
-                                "enum": [
-                                  "openai_live"
-                                ]
-                              },
-                              "voiceId": {
-                                "type": "string",
-                                "description": "A built-in voice supported by GPT Live."
-                              }
-                            },
-                            "required": [
-                              "provider",
-                              "model",
-                              "adapter",
-                              "voiceId"
-                            ],
-                            "additionalProperties": false
-                          }
-                        },
-                        "required": [
-                          "mode",
-                          "llm",
-                          "live"
-                        ],
-                        "additionalProperties": false
-                      }
-                    ]
-                  },
-                  "controls": {
-                    "type": "object",
-                    "properties": {
-                      "language": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "emotion": {
-                        "type": "string",
-                        "enum": [
-                          "neutral",
-                          "happy",
-                          "angry",
-                          "frustrated",
-                          "sad",
-                          "anxious"
-                        ]
-                      },
-                      "accent": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "speechVolume": {
-                        "type": "number",
-                        "minimum": 0.5,
-                        "maximum": 1.5
-                      },
-                      "backgroundSoundId": {
-                        "type": "string",
-                        "enum": [
-                          "none",
-                          "office-v1",
-                          "cafe-v1",
-                          "street-traffic-v1",
-                          "crowd-talking-v1",
-                          "inside-car-v1",
-                          "home-tv-v1",
-                          "wind-v1",
-                          "rain-v1"
-                        ]
-                      },
-                      "backgroundVolume": {
-                        "type": "number",
-                        "minimum": 0.015848931924611134,
-                        "maximum": 0.251188643150958
-                      },
-                      "interruptionLevel": {
-                        "type": "string",
-                        "enum": [
-                          "none",
-                          "occasional",
-                          "frequent"
-                        ]
-                      },
-                      "speechSpeed": {
-                        "type": "string",
-                        "enum": [
-                          "slow",
-                          "normal",
-                          "fast"
-                        ],
-                        "description": "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported."
-                      }
-                    },
-                    "required": [
-                      "language",
-                      "emotion",
-                      "accent",
-                      "speechVolume",
-                      "backgroundSoundId",
-                      "backgroundVolume",
-                      "interruptionLevel",
-                      "speechSpeed"
-                    ],
-                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false
@@ -11825,18 +11605,12 @@
                                         "voiceId": {
                                           "type": "string",
                                           "description": "A voice identifier supported by the selected text-to-speech provider."
-                                        },
-                                        "speed": {
-                                          "type": "number",
-                                          "readOnly": true,
-                                          "description": "Resolved provider speed for the selected speechSpeed category."
                                         }
                                       },
                                       "required": [
                                         "provider",
                                         "model",
-                                        "voiceId",
-                                        "speed"
+                                        "voiceId"
                                       ],
                                       "additionalProperties": false
                                     }
@@ -11920,86 +11694,73 @@
                               ]
                             },
                             "controls": {
-                              "type": "object",
-                              "properties": {
-                                "language": {
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "emotion": {
-                                  "type": "string",
-                                  "enum": [
-                                    "neutral",
-                                    "happy",
-                                    "angry",
-                                    "frustrated",
-                                    "sad",
-                                    "anxious"
-                                  ]
-                                },
-                                "accent": {
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "speechVolume": {
-                                  "type": "number",
-                                  "minimum": 0.5,
-                                  "maximum": 1.5
-                                },
-                                "executionPolicyVersion": {
-                                  "type": "integer",
-                                  "minimum": 1,
-                                  "readOnly": true
-                                },
-                                "backgroundSoundId": {
-                                  "type": "string",
-                                  "enum": [
-                                    "none",
-                                    "office-v1",
-                                    "cafe-v1",
-                                    "street-traffic-v1",
-                                    "crowd-talking-v1",
-                                    "inside-car-v1",
-                                    "home-tv-v1",
-                                    "wind-v1",
-                                    "rain-v1"
-                                  ]
-                                },
-                                "backgroundVolume": {
-                                  "type": "number",
-                                  "minimum": 0.015848931924611134,
-                                  "maximum": 0.251188643150958
-                                },
-                                "interruptionLevel": {
-                                  "type": "string",
-                                  "enum": [
-                                    "none",
-                                    "occasional",
-                                    "frequent"
-                                  ]
-                                },
-                                "speechSpeed": {
-                                  "type": "string",
-                                  "enum": [
-                                    "slow",
-                                    "normal",
-                                    "fast"
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "language": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "backgroundSoundId": {
+                                      "type": "string",
+                                      "enum": [
+                                        "none",
+                                        "office-v1",
+                                        "cafe-v1",
+                                        "street-traffic-v1",
+                                        "crowd-talking-v1",
+                                        "inside-car-v1",
+                                        "home-tv-v1",
+                                        "wind-v1",
+                                        "rain-v1"
+                                      ]
+                                    },
+                                    "interruptionLevel": {
+                                      "type": "string",
+                                      "enum": [
+                                        "none",
+                                        "occasional",
+                                        "frequent"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "language",
+                                    "backgroundSoundId",
+                                    "interruptionLevel"
                                   ],
-                                  "description": "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported."
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "language": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "backgroundSoundId": {
+                                      "type": "string",
+                                      "enum": [
+                                        "none",
+                                        "office-v1",
+                                        "cafe-v1",
+                                        "street-traffic-v1",
+                                        "crowd-talking-v1",
+                                        "inside-car-v1",
+                                        "home-tv-v1",
+                                        "wind-v1",
+                                        "rain-v1"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "language",
+                                    "backgroundSoundId"
+                                  ],
+                                  "additionalProperties": false
                                 }
-                              },
-                              "required": [
-                                "language",
-                                "emotion",
-                                "accent",
-                                "speechVolume",
-                                "executionPolicyVersion",
-                                "backgroundSoundId",
-                                "backgroundVolume",
-                                "interruptionLevel",
-                                "speechSpeed"
-                              ],
-                              "additionalProperties": false
+                              ]
                             },
                             "createdAt": {
                               "type": "string",
@@ -12023,7 +11784,7 @@
                           "type": "null"
                         }
                       ],
-                      "description": "This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version."
+                      "description": "This project's saved model and voice settings. Null before first use. Clone the persona to change these settings."
                     },
                     "owner": {
                       "type": "string",
@@ -12404,18 +12165,12 @@
                                               "voiceId": {
                                                 "type": "string",
                                                 "description": "A voice identifier supported by the selected text-to-speech provider."
-                                              },
-                                              "speed": {
-                                                "type": "number",
-                                                "readOnly": true,
-                                                "description": "Resolved provider speed for the selected speechSpeed category."
                                               }
                                             },
                                             "required": [
                                               "provider",
                                               "model",
-                                              "voiceId",
-                                              "speed"
+                                              "voiceId"
                                             ],
                                             "additionalProperties": false
                                           }
@@ -12499,86 +12254,73 @@
                                     ]
                                   },
                                   "controls": {
-                                    "type": "object",
-                                    "properties": {
-                                      "language": {
-                                        "type": "string",
-                                        "minLength": 1
-                                      },
-                                      "emotion": {
-                                        "type": "string",
-                                        "enum": [
-                                          "neutral",
-                                          "happy",
-                                          "angry",
-                                          "frustrated",
-                                          "sad",
-                                          "anxious"
-                                        ]
-                                      },
-                                      "accent": {
-                                        "type": "string",
-                                        "minLength": 1
-                                      },
-                                      "speechVolume": {
-                                        "type": "number",
-                                        "minimum": 0.5,
-                                        "maximum": 1.5
-                                      },
-                                      "executionPolicyVersion": {
-                                        "type": "integer",
-                                        "minimum": 1,
-                                        "readOnly": true
-                                      },
-                                      "backgroundSoundId": {
-                                        "type": "string",
-                                        "enum": [
-                                          "none",
-                                          "office-v1",
-                                          "cafe-v1",
-                                          "street-traffic-v1",
-                                          "crowd-talking-v1",
-                                          "inside-car-v1",
-                                          "home-tv-v1",
-                                          "wind-v1",
-                                          "rain-v1"
-                                        ]
-                                      },
-                                      "backgroundVolume": {
-                                        "type": "number",
-                                        "minimum": 0.015848931924611134,
-                                        "maximum": 0.251188643150958
-                                      },
-                                      "interruptionLevel": {
-                                        "type": "string",
-                                        "enum": [
-                                          "none",
-                                          "occasional",
-                                          "frequent"
-                                        ]
-                                      },
-                                      "speechSpeed": {
-                                        "type": "string",
-                                        "enum": [
-                                          "slow",
-                                          "normal",
-                                          "fast"
+                                    "oneOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "language": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "backgroundSoundId": {
+                                            "type": "string",
+                                            "enum": [
+                                              "none",
+                                              "office-v1",
+                                              "cafe-v1",
+                                              "street-traffic-v1",
+                                              "crowd-talking-v1",
+                                              "inside-car-v1",
+                                              "home-tv-v1",
+                                              "wind-v1",
+                                              "rain-v1"
+                                            ]
+                                          },
+                                          "interruptionLevel": {
+                                            "type": "string",
+                                            "enum": [
+                                              "none",
+                                              "occasional",
+                                              "frequent"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "language",
+                                          "backgroundSoundId",
+                                          "interruptionLevel"
                                         ],
-                                        "description": "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported."
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "language": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "backgroundSoundId": {
+                                            "type": "string",
+                                            "enum": [
+                                              "none",
+                                              "office-v1",
+                                              "cafe-v1",
+                                              "street-traffic-v1",
+                                              "crowd-talking-v1",
+                                              "inside-car-v1",
+                                              "home-tv-v1",
+                                              "wind-v1",
+                                              "rain-v1"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "language",
+                                          "backgroundSoundId"
+                                        ],
+                                        "additionalProperties": false
                                       }
-                                    },
-                                    "required": [
-                                      "language",
-                                      "emotion",
-                                      "accent",
-                                      "speechVolume",
-                                      "executionPolicyVersion",
-                                      "backgroundSoundId",
-                                      "backgroundVolume",
-                                      "interruptionLevel",
-                                      "speechSpeed"
-                                    ],
-                                    "additionalProperties": false
+                                    ]
                                   },
                                   "createdAt": {
                                     "type": "string",
@@ -12602,7 +12344,7 @@
                                 "type": "null"
                               }
                             ],
-                            "description": "This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version."
+                            "description": "This project's saved model and voice settings. Null before first use. Clone the persona to change these settings."
                           },
                           "owner": {
                             "type": "string",
@@ -12929,80 +12671,73 @@
                     ]
                   },
                   "controls": {
-                    "type": "object",
-                    "properties": {
-                      "language": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "emotion": {
-                        "type": "string",
-                        "enum": [
-                          "neutral",
-                          "happy",
-                          "angry",
-                          "frustrated",
-                          "sad",
-                          "anxious"
-                        ]
-                      },
-                      "accent": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "speechVolume": {
-                        "type": "number",
-                        "minimum": 0.5,
-                        "maximum": 1.5
-                      },
-                      "backgroundSoundId": {
-                        "type": "string",
-                        "enum": [
-                          "none",
-                          "office-v1",
-                          "cafe-v1",
-                          "street-traffic-v1",
-                          "crowd-talking-v1",
-                          "inside-car-v1",
-                          "home-tv-v1",
-                          "wind-v1",
-                          "rain-v1"
-                        ]
-                      },
-                      "backgroundVolume": {
-                        "type": "number",
-                        "minimum": 0.015848931924611134,
-                        "maximum": 0.251188643150958
-                      },
-                      "interruptionLevel": {
-                        "type": "string",
-                        "enum": [
-                          "none",
-                          "occasional",
-                          "frequent"
-                        ]
-                      },
-                      "speechSpeed": {
-                        "type": "string",
-                        "enum": [
-                          "slow",
-                          "normal",
-                          "fast"
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "language": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "backgroundSoundId": {
+                            "type": "string",
+                            "enum": [
+                              "none",
+                              "office-v1",
+                              "cafe-v1",
+                              "street-traffic-v1",
+                              "crowd-talking-v1",
+                              "inside-car-v1",
+                              "home-tv-v1",
+                              "wind-v1",
+                              "rain-v1"
+                            ]
+                          },
+                          "interruptionLevel": {
+                            "type": "string",
+                            "enum": [
+                              "none",
+                              "occasional",
+                              "frequent"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "language",
+                          "backgroundSoundId",
+                          "interruptionLevel"
                         ],
-                        "description": "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported."
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "language": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "backgroundSoundId": {
+                            "type": "string",
+                            "enum": [
+                              "none",
+                              "office-v1",
+                              "cafe-v1",
+                              "street-traffic-v1",
+                              "crowd-talking-v1",
+                              "inside-car-v1",
+                              "home-tv-v1",
+                              "wind-v1",
+                              "rain-v1"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "language",
+                          "backgroundSoundId"
+                        ],
+                        "additionalProperties": false
                       }
-                    },
-                    "required": [
-                      "language",
-                      "emotion",
-                      "accent",
-                      "speechVolume",
-                      "backgroundSoundId",
-                      "backgroundVolume",
-                      "interruptionLevel",
-                      "speechSpeed"
-                    ],
-                    "additionalProperties": false
+                    ]
                   }
                 },
                 "required": [
@@ -13010,6 +12745,14 @@
                   "identityName",
                   "personality"
                 ],
+                "dependentRequired": {
+                  "models": [
+                    "controls"
+                  ],
+                  "controls": [
+                    "models"
+                  ]
+                },
                 "additionalProperties": false,
                 "examples": [
                   {
@@ -13032,6 +12775,11 @@
                         "model": "gpt-4o-mini-tts",
                         "voiceId": "alloy"
                       }
+                    },
+                    "controls": {
+                      "language": "en-US",
+                      "backgroundSoundId": "none",
+                      "interruptionLevel": "none"
                     }
                   }
                 ]
@@ -13239,18 +12987,12 @@
                                         "voiceId": {
                                           "type": "string",
                                           "description": "A voice identifier supported by the selected text-to-speech provider."
-                                        },
-                                        "speed": {
-                                          "type": "number",
-                                          "readOnly": true,
-                                          "description": "Resolved provider speed for the selected speechSpeed category."
                                         }
                                       },
                                       "required": [
                                         "provider",
                                         "model",
-                                        "voiceId",
-                                        "speed"
+                                        "voiceId"
                                       ],
                                       "additionalProperties": false
                                     }
@@ -13334,86 +13076,73 @@
                               ]
                             },
                             "controls": {
-                              "type": "object",
-                              "properties": {
-                                "language": {
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "emotion": {
-                                  "type": "string",
-                                  "enum": [
-                                    "neutral",
-                                    "happy",
-                                    "angry",
-                                    "frustrated",
-                                    "sad",
-                                    "anxious"
-                                  ]
-                                },
-                                "accent": {
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "speechVolume": {
-                                  "type": "number",
-                                  "minimum": 0.5,
-                                  "maximum": 1.5
-                                },
-                                "executionPolicyVersion": {
-                                  "type": "integer",
-                                  "minimum": 1,
-                                  "readOnly": true
-                                },
-                                "backgroundSoundId": {
-                                  "type": "string",
-                                  "enum": [
-                                    "none",
-                                    "office-v1",
-                                    "cafe-v1",
-                                    "street-traffic-v1",
-                                    "crowd-talking-v1",
-                                    "inside-car-v1",
-                                    "home-tv-v1",
-                                    "wind-v1",
-                                    "rain-v1"
-                                  ]
-                                },
-                                "backgroundVolume": {
-                                  "type": "number",
-                                  "minimum": 0.015848931924611134,
-                                  "maximum": 0.251188643150958
-                                },
-                                "interruptionLevel": {
-                                  "type": "string",
-                                  "enum": [
-                                    "none",
-                                    "occasional",
-                                    "frequent"
-                                  ]
-                                },
-                                "speechSpeed": {
-                                  "type": "string",
-                                  "enum": [
-                                    "slow",
-                                    "normal",
-                                    "fast"
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "language": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "backgroundSoundId": {
+                                      "type": "string",
+                                      "enum": [
+                                        "none",
+                                        "office-v1",
+                                        "cafe-v1",
+                                        "street-traffic-v1",
+                                        "crowd-talking-v1",
+                                        "inside-car-v1",
+                                        "home-tv-v1",
+                                        "wind-v1",
+                                        "rain-v1"
+                                      ]
+                                    },
+                                    "interruptionLevel": {
+                                      "type": "string",
+                                      "enum": [
+                                        "none",
+                                        "occasional",
+                                        "frequent"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "language",
+                                    "backgroundSoundId",
+                                    "interruptionLevel"
                                   ],
-                                  "description": "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported."
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "language": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "backgroundSoundId": {
+                                      "type": "string",
+                                      "enum": [
+                                        "none",
+                                        "office-v1",
+                                        "cafe-v1",
+                                        "street-traffic-v1",
+                                        "crowd-talking-v1",
+                                        "inside-car-v1",
+                                        "home-tv-v1",
+                                        "wind-v1",
+                                        "rain-v1"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "language",
+                                    "backgroundSoundId"
+                                  ],
+                                  "additionalProperties": false
                                 }
-                              },
-                              "required": [
-                                "language",
-                                "emotion",
-                                "accent",
-                                "speechVolume",
-                                "executionPolicyVersion",
-                                "backgroundSoundId",
-                                "backgroundVolume",
-                                "interruptionLevel",
-                                "speechSpeed"
-                              ],
-                              "additionalProperties": false
+                              ]
                             },
                             "createdAt": {
                               "type": "string",
@@ -13437,7 +13166,7 @@
                           "type": "null"
                         }
                       ],
-                      "description": "This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version."
+                      "description": "This project's saved model and voice settings. Null before first use. Clone the persona to change these settings."
                     },
                     "owner": {
                       "type": "string",
@@ -13574,7 +13303,7 @@
       "get": {
         "operationId": "getPersonaForm",
         "summary": "Get persona authoring choices",
-        "description": "Use this response to choose supported models, a recommended voice, and a valid speech rate before creating or updating a persona.",
+        "description": "Use this response to choose supported models and a recommended voice before creating or cloning a persona.",
         "tags": [
           "Personas"
         ],
@@ -13703,18 +13432,12 @@
                                 "voiceId": {
                                   "type": "string",
                                   "description": "A voice identifier supported by the selected text-to-speech provider."
-                                },
-                                "speed": {
-                                  "type": "number",
-                                  "readOnly": true,
-                                  "description": "Resolved provider speed for the selected speechSpeed category."
                                 }
                               },
                               "required": [
                                 "provider",
                                 "model",
-                                "voiceId",
-                                "speed"
+                                "voiceId"
                               ],
                               "additionalProperties": false
                             }
@@ -14045,12 +13768,6 @@
                                 "items": {
                                   "type": "string"
                                 }
-                              },
-                              "accents": {
-                                "type": "array",
-                                "items": {
-                                  "type": "string"
-                                }
                               }
                             },
                             "required": [
@@ -14058,8 +13775,7 @@
                               "name",
                               "source",
                               "presentation",
-                              "languages",
-                              "accents"
+                              "languages"
                             ],
                             "additionalProperties": false
                           }
@@ -14094,12 +13810,6 @@
                               "items": {
                                 "type": "string"
                               }
-                            },
-                            "accents": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
                             }
                           },
                           "required": [
@@ -14107,8 +13817,7 @@
                             "name",
                             "source",
                             "presentation",
-                            "languages",
-                            "accents"
+                            "languages"
                           ],
                           "additionalProperties": false
                         },
@@ -14187,276 +13896,11 @@
                         "status"
                       ],
                       "additionalProperties": false
-                    },
-                    "accent": {
-                      "type": "object",
-                      "properties": {
-                        "status": {
-                          "type": "string",
-                          "enum": [
-                            "supported",
-                            "fixed",
-                            "unsupported",
-                            "unknown"
-                          ]
-                        },
-                        "reason": {
-                          "type": "string"
-                        },
-                        "choices": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          }
-                        },
-                        "value": {
-                          "type": "string"
-                        },
-                        "range": {
-                          "type": "object",
-                          "properties": {
-                            "minimum": {
-                              "type": "number"
-                            },
-                            "maximum": {
-                              "type": "number"
-                            },
-                            "step": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "minimum",
-                            "maximum",
-                            "step"
-                          ],
-                          "additionalProperties": false
-                        }
-                      },
-                      "required": [
-                        "status"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "emotion": {
-                      "type": "object",
-                      "properties": {
-                        "status": {
-                          "type": "string",
-                          "enum": [
-                            "supported",
-                            "fixed",
-                            "unsupported",
-                            "unknown"
-                          ]
-                        },
-                        "reason": {
-                          "type": "string"
-                        },
-                        "choices": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          }
-                        },
-                        "value": {
-                          "type": "string"
-                        },
-                        "range": {
-                          "type": "object",
-                          "properties": {
-                            "minimum": {
-                              "type": "number"
-                            },
-                            "maximum": {
-                              "type": "number"
-                            },
-                            "step": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "minimum",
-                            "maximum",
-                            "step"
-                          ],
-                          "additionalProperties": false
-                        }
-                      },
-                      "required": [
-                        "status"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "speed": {
-                      "type": "object",
-                      "properties": {
-                        "status": {
-                          "type": "string",
-                          "enum": [
-                            "supported",
-                            "fixed",
-                            "unsupported",
-                            "unknown"
-                          ]
-                        },
-                        "reason": {
-                          "type": "string"
-                        },
-                        "choices": {
-                          "type": "array",
-                          "items": {
-                            "type": "number"
-                          }
-                        },
-                        "value": {
-                          "type": "number"
-                        },
-                        "range": {
-                          "type": "object",
-                          "properties": {
-                            "minimum": {
-                              "type": "number"
-                            },
-                            "maximum": {
-                              "type": "number"
-                            },
-                            "step": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "minimum",
-                            "maximum",
-                            "step"
-                          ],
-                          "additionalProperties": false
-                        }
-                      },
-                      "required": [
-                        "status"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "speechSpeed": {
-                      "type": "object",
-                      "properties": {
-                        "status": {
-                          "type": "string",
-                          "enum": [
-                            "supported",
-                            "fixed",
-                            "unsupported",
-                            "unknown"
-                          ]
-                        },
-                        "reason": {
-                          "type": "string"
-                        },
-                        "choices": {
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "enum": [
-                              "slow",
-                              "normal",
-                              "fast"
-                            ]
-                          }
-                        },
-                        "value": {
-                          "type": "string",
-                          "enum": [
-                            "slow",
-                            "normal",
-                            "fast"
-                          ]
-                        },
-                        "range": {
-                          "type": "object",
-                          "properties": {
-                            "minimum": {
-                              "type": "number"
-                            },
-                            "maximum": {
-                              "type": "number"
-                            },
-                            "step": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "minimum",
-                            "maximum",
-                            "step"
-                          ],
-                          "additionalProperties": false
-                        }
-                      },
-                      "required": [
-                        "status"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "speechVolume": {
-                      "type": "object",
-                      "properties": {
-                        "status": {
-                          "type": "string",
-                          "enum": [
-                            "supported",
-                            "fixed",
-                            "unsupported",
-                            "unknown"
-                          ]
-                        },
-                        "reason": {
-                          "type": "string"
-                        },
-                        "choices": {
-                          "type": "array",
-                          "items": {
-                            "type": "number"
-                          }
-                        },
-                        "value": {
-                          "type": "number"
-                        },
-                        "range": {
-                          "type": "object",
-                          "properties": {
-                            "minimum": {
-                              "type": "number"
-                            },
-                            "maximum": {
-                              "type": "number"
-                            },
-                            "step": {
-                              "type": "number"
-                            }
-                          },
-                          "required": [
-                            "minimum",
-                            "maximum",
-                            "step"
-                          ],
-                          "additionalProperties": false
-                        }
-                      },
-                      "required": [
-                        "status"
-                      ],
-                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "voices",
-                    "language",
-                    "accent",
-                    "emotion",
-                    "speed",
-                    "speechSpeed",
-                    "speechVolume"
+                    "language"
                   ],
                   "additionalProperties": false
                 }
@@ -14770,18 +14214,12 @@
                                         "voiceId": {
                                           "type": "string",
                                           "description": "A voice identifier supported by the selected text-to-speech provider."
-                                        },
-                                        "speed": {
-                                          "type": "number",
-                                          "readOnly": true,
-                                          "description": "Resolved provider speed for the selected speechSpeed category."
                                         }
                                       },
                                       "required": [
                                         "provider",
                                         "model",
-                                        "voiceId",
-                                        "speed"
+                                        "voiceId"
                                       ],
                                       "additionalProperties": false
                                     }
@@ -14865,896 +14303,73 @@
                               ]
                             },
                             "controls": {
-                              "type": "object",
-                              "properties": {
-                                "language": {
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "emotion": {
-                                  "type": "string",
-                                  "enum": [
-                                    "neutral",
-                                    "happy",
-                                    "angry",
-                                    "frustrated",
-                                    "sad",
-                                    "anxious"
-                                  ]
-                                },
-                                "accent": {
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "speechVolume": {
-                                  "type": "number",
-                                  "minimum": 0.5,
-                                  "maximum": 1.5
-                                },
-                                "executionPolicyVersion": {
-                                  "type": "integer",
-                                  "minimum": 1,
-                                  "readOnly": true
-                                },
-                                "backgroundSoundId": {
-                                  "type": "string",
-                                  "enum": [
-                                    "none",
-                                    "office-v1",
-                                    "cafe-v1",
-                                    "street-traffic-v1",
-                                    "crowd-talking-v1",
-                                    "inside-car-v1",
-                                    "home-tv-v1",
-                                    "wind-v1",
-                                    "rain-v1"
-                                  ]
-                                },
-                                "backgroundVolume": {
-                                  "type": "number",
-                                  "minimum": 0.015848931924611134,
-                                  "maximum": 0.251188643150958
-                                },
-                                "interruptionLevel": {
-                                  "type": "string",
-                                  "enum": [
-                                    "none",
-                                    "occasional",
-                                    "frequent"
-                                  ]
-                                },
-                                "speechSpeed": {
-                                  "type": "string",
-                                  "enum": [
-                                    "slow",
-                                    "normal",
-                                    "fast"
-                                  ],
-                                  "description": "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported."
-                                }
-                              },
-                              "required": [
-                                "language",
-                                "emotion",
-                                "accent",
-                                "speechVolume",
-                                "executionPolicyVersion",
-                                "backgroundSoundId",
-                                "backgroundVolume",
-                                "interruptionLevel",
-                                "speechSpeed"
-                              ],
-                              "additionalProperties": false
-                            },
-                            "createdAt": {
-                              "type": "string",
-                              "format": "date-time"
-                            },
-                            "updatedAt": {
-                              "type": "string",
-                              "format": "date-time"
-                            }
-                          },
-                          "required": [
-                            "id",
-                            "models",
-                            "controls",
-                            "createdAt",
-                            "updatedAt"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ],
-                      "description": "This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version."
-                    },
-                    "owner": {
-                      "type": "string",
-                      "enum": [
-                        "egma",
-                        "organization"
-                      ]
-                    },
-                    "archivedAt": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "format": "date-time"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "createdAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "updatedAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "projectId",
-                    "name",
-                    "description",
-                    "version",
-                    "versionId",
-                    "identityName",
-                    "personality",
-                    "language",
-                    "parameterContract",
-                    "settings",
-                    "owner",
-                    "archivedAt",
-                    "createdAt",
-                    "updatedAt"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "The request rate limit was reached.",
-            "headers": {
-              "Retry-After": {
-                "description": "Seconds to wait before trying again.",
-                "schema": {
-                  "type": "integer",
-                  "minimum": 1
-                }
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "operationId": "updatePersona",
-        "summary": "Update a persona",
-        "description": "Change project model settings or the current custom behavior. Behavior edits require expectedVersionId and create a version when changed. Model settings and display labels create no version. Egma-owned behavior is read-only; its project settings are editable.",
-        "tags": [
-          "Personas"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "personaId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "name": {
-                    "type": "string",
-                    "description": "Your team's label in the persona library. The caller does not speak this label."
-                  },
-                  "description": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "identityName": {
-                    "type": "string",
-                    "description": "The human name the caller gives the agent, separate from the library name."
-                  },
-                  "personality": {
-                    "type": "string",
-                    "description": "How the caller behaves and speaks. Put the situation and goal in the test scenario."
-                  },
-                  "models": {
-                    "oneOf": [
-                      {
-                        "type": "object",
-                        "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "enum": [
-                              "separate"
-                            ]
-                          },
-                          "llm": {
-                            "type": "object",
-                            "properties": {
-                              "provider": {
-                                "type": "string"
-                              },
-                              "model": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "provider",
-                              "model"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "stt": {
-                            "type": "object",
-                            "properties": {
-                              "provider": {
-                                "type": "string"
-                              },
-                              "model": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "provider",
-                              "model"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "tts": {
-                            "type": "object",
-                            "properties": {
-                              "provider": {
-                                "type": "string"
-                              },
-                              "model": {
-                                "type": "string"
-                              },
-                              "voiceId": {
-                                "type": "string",
-                                "description": "A voice identifier supported by the selected text-to-speech provider."
-                              }
-                            },
-                            "required": [
-                              "provider",
-                              "model",
-                              "voiceId"
-                            ],
-                            "additionalProperties": false
-                          }
-                        },
-                        "required": [
-                          "mode",
-                          "llm",
-                          "stt",
-                          "tts"
-                        ],
-                        "additionalProperties": false
-                      },
-                      {
-                        "type": "object",
-                        "description": "A GPT Live speech selection and an independently selected reasoning model.",
-                        "properties": {
-                          "mode": {
-                            "type": "string",
-                            "enum": [
-                              "live"
-                            ]
-                          },
-                          "llm": {
-                            "type": "object",
-                            "properties": {
-                              "provider": {
-                                "type": "string"
-                              },
-                              "model": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "provider",
-                              "model"
-                            ],
-                            "additionalProperties": false
-                          },
-                          "live": {
-                            "type": "object",
-                            "properties": {
-                              "provider": {
-                                "type": "string",
-                                "enum": [
-                                  "openai"
-                                ]
-                              },
-                              "model": {
-                                "type": "string",
-                                "enum": [
-                                  "gpt-live-1"
-                                ]
-                              },
-                              "adapter": {
-                                "type": "string",
-                                "enum": [
-                                  "openai_live"
-                                ]
-                              },
-                              "voiceId": {
-                                "type": "string",
-                                "description": "A built-in voice supported by GPT Live."
-                              }
-                            },
-                            "required": [
-                              "provider",
-                              "model",
-                              "adapter",
-                              "voiceId"
-                            ],
-                            "additionalProperties": false
-                          }
-                        },
-                        "required": [
-                          "mode",
-                          "llm",
-                          "live"
-                        ],
-                        "additionalProperties": false
-                      }
-                    ]
-                  },
-                  "controls": {
-                    "type": "object",
-                    "properties": {
-                      "language": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "emotion": {
-                        "type": "string",
-                        "enum": [
-                          "neutral",
-                          "happy",
-                          "angry",
-                          "frustrated",
-                          "sad",
-                          "anxious"
-                        ]
-                      },
-                      "accent": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "speechVolume": {
-                        "type": "number",
-                        "minimum": 0.5,
-                        "maximum": 1.5
-                      },
-                      "backgroundSoundId": {
-                        "type": "string",
-                        "enum": [
-                          "none",
-                          "office-v1",
-                          "cafe-v1",
-                          "street-traffic-v1",
-                          "crowd-talking-v1",
-                          "inside-car-v1",
-                          "home-tv-v1",
-                          "wind-v1",
-                          "rain-v1"
-                        ]
-                      },
-                      "backgroundVolume": {
-                        "type": "number",
-                        "minimum": 0.015848931924611134,
-                        "maximum": 0.251188643150958
-                      },
-                      "interruptionLevel": {
-                        "type": "string",
-                        "enum": [
-                          "none",
-                          "occasional",
-                          "frequent"
-                        ]
-                      },
-                      "speechSpeed": {
-                        "type": "string",
-                        "enum": [
-                          "slow",
-                          "normal",
-                          "fast"
-                        ],
-                        "description": "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported."
-                      }
-                    },
-                    "required": [
-                      "language",
-                      "emotion",
-                      "accent",
-                      "speechVolume",
-                      "backgroundSoundId",
-                      "backgroundVolume",
-                      "interruptionLevel",
-                      "speechSpeed"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "expectedVersionId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "The current versionId from Get a persona. Required when editing identityName or personality. A stale value returns 409 version_conflict."
-                  }
-                },
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The updated persona.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "projectId": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "description": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "version": {
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "versionId": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "identityName": {
-                      "type": "string",
-                      "description": "The human name the caller gives the agent, separate from the library name."
-                    },
-                    "personality": {
-                      "type": "string",
-                      "description": "How the caller behaves and speaks. Put the situation and goal in the test scenario."
-                    },
-                    "language": {
-                      "anyOf": [
-                        {
-                          "type": "string"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ],
-                      "description": "Historical core language. New persona versions use controls.language and return null here."
-                    },
-                    "parameterContract": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "key": {
-                            "type": "string"
-                          },
-                          "label": {
-                            "type": "string"
-                          },
-                          "valueType": {
-                            "type": "string",
-                            "enum": [
-                              "integer",
-                              "number",
-                              "string"
-                            ]
-                          },
-                          "defaultValue": {
-                            "oneOf": [
-                              {
-                                "type": "number"
-                              },
-                              {
-                                "type": "string"
-                              }
-                            ]
-                          },
-                          "unit": {
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "minimum": {
-                            "anyOf": [
-                              {
-                                "type": "number"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "maximum": {
-                            "anyOf": [
-                              {
-                                "type": "number"
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          }
-                        },
-                        "required": [
-                          "key",
-                          "label",
-                          "valueType",
-                          "defaultValue",
-                          "unit",
-                          "minimum",
-                          "maximum"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "settings": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            "models": {
                               "oneOf": [
                                 {
                                   "type": "object",
-                                  "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
                                   "properties": {
-                                    "mode": {
+                                    "language": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "backgroundSoundId": {
                                       "type": "string",
                                       "enum": [
-                                        "separate"
+                                        "none",
+                                        "office-v1",
+                                        "cafe-v1",
+                                        "street-traffic-v1",
+                                        "crowd-talking-v1",
+                                        "inside-car-v1",
+                                        "home-tv-v1",
+                                        "wind-v1",
+                                        "rain-v1"
                                       ]
                                     },
-                                    "llm": {
-                                      "type": "object",
-                                      "properties": {
-                                        "provider": {
-                                          "type": "string"
-                                        },
-                                        "model": {
-                                          "type": "string"
-                                        }
-                                      },
-                                      "required": [
-                                        "provider",
-                                        "model"
-                                      ],
-                                      "additionalProperties": false
-                                    },
-                                    "stt": {
-                                      "type": "object",
-                                      "properties": {
-                                        "provider": {
-                                          "type": "string"
-                                        },
-                                        "model": {
-                                          "type": "string"
-                                        }
-                                      },
-                                      "required": [
-                                        "provider",
-                                        "model"
-                                      ],
-                                      "additionalProperties": false
-                                    },
-                                    "tts": {
-                                      "type": "object",
-                                      "properties": {
-                                        "provider": {
-                                          "type": "string"
-                                        },
-                                        "model": {
-                                          "type": "string"
-                                        },
-                                        "voiceId": {
-                                          "type": "string",
-                                          "description": "A voice identifier supported by the selected text-to-speech provider."
-                                        },
-                                        "speed": {
-                                          "type": "number",
-                                          "readOnly": true,
-                                          "description": "Resolved provider speed for the selected speechSpeed category."
-                                        }
-                                      },
-                                      "required": [
-                                        "provider",
-                                        "model",
-                                        "voiceId",
-                                        "speed"
-                                      ],
-                                      "additionalProperties": false
+                                    "interruptionLevel": {
+                                      "type": "string",
+                                      "enum": [
+                                        "none",
+                                        "occasional",
+                                        "frequent"
+                                      ]
                                     }
                                   },
                                   "required": [
-                                    "mode",
-                                    "llm",
-                                    "stt",
-                                    "tts"
+                                    "language",
+                                    "backgroundSoundId",
+                                    "interruptionLevel"
                                   ],
                                   "additionalProperties": false
                                 },
                                 {
                                   "type": "object",
-                                  "description": "A GPT Live speech selection and an independently selected reasoning model.",
                                   "properties": {
-                                    "mode": {
+                                    "language": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "backgroundSoundId": {
                                       "type": "string",
                                       "enum": [
-                                        "live"
+                                        "none",
+                                        "office-v1",
+                                        "cafe-v1",
+                                        "street-traffic-v1",
+                                        "crowd-talking-v1",
+                                        "inside-car-v1",
+                                        "home-tv-v1",
+                                        "wind-v1",
+                                        "rain-v1"
                                       ]
-                                    },
-                                    "llm": {
-                                      "type": "object",
-                                      "properties": {
-                                        "provider": {
-                                          "type": "string"
-                                        },
-                                        "model": {
-                                          "type": "string"
-                                        }
-                                      },
-                                      "required": [
-                                        "provider",
-                                        "model"
-                                      ],
-                                      "additionalProperties": false
-                                    },
-                                    "live": {
-                                      "type": "object",
-                                      "properties": {
-                                        "provider": {
-                                          "type": "string",
-                                          "enum": [
-                                            "openai"
-                                          ]
-                                        },
-                                        "model": {
-                                          "type": "string",
-                                          "enum": [
-                                            "gpt-live-1"
-                                          ]
-                                        },
-                                        "adapter": {
-                                          "type": "string",
-                                          "enum": [
-                                            "openai_live"
-                                          ]
-                                        },
-                                        "voiceId": {
-                                          "type": "string",
-                                          "description": "A built-in voice supported by GPT Live."
-                                        }
-                                      },
-                                      "required": [
-                                        "provider",
-                                        "model",
-                                        "adapter",
-                                        "voiceId"
-                                      ],
-                                      "additionalProperties": false
                                     }
                                   },
                                   "required": [
-                                    "mode",
-                                    "llm",
-                                    "live"
+                                    "language",
+                                    "backgroundSoundId"
                                   ],
                                   "additionalProperties": false
                                 }
                               ]
-                            },
-                            "controls": {
-                              "type": "object",
-                              "properties": {
-                                "language": {
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "emotion": {
-                                  "type": "string",
-                                  "enum": [
-                                    "neutral",
-                                    "happy",
-                                    "angry",
-                                    "frustrated",
-                                    "sad",
-                                    "anxious"
-                                  ]
-                                },
-                                "accent": {
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "speechVolume": {
-                                  "type": "number",
-                                  "minimum": 0.5,
-                                  "maximum": 1.5
-                                },
-                                "executionPolicyVersion": {
-                                  "type": "integer",
-                                  "minimum": 1,
-                                  "readOnly": true
-                                },
-                                "backgroundSoundId": {
-                                  "type": "string",
-                                  "enum": [
-                                    "none",
-                                    "office-v1",
-                                    "cafe-v1",
-                                    "street-traffic-v1",
-                                    "crowd-talking-v1",
-                                    "inside-car-v1",
-                                    "home-tv-v1",
-                                    "wind-v1",
-                                    "rain-v1"
-                                  ]
-                                },
-                                "backgroundVolume": {
-                                  "type": "number",
-                                  "minimum": 0.015848931924611134,
-                                  "maximum": 0.251188643150958
-                                },
-                                "interruptionLevel": {
-                                  "type": "string",
-                                  "enum": [
-                                    "none",
-                                    "occasional",
-                                    "frequent"
-                                  ]
-                                },
-                                "speechSpeed": {
-                                  "type": "string",
-                                  "enum": [
-                                    "slow",
-                                    "normal",
-                                    "fast"
-                                  ],
-                                  "description": "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported."
-                                }
-                              },
-                              "required": [
-                                "language",
-                                "emotion",
-                                "accent",
-                                "speechVolume",
-                                "executionPolicyVersion",
-                                "backgroundSoundId",
-                                "backgroundVolume",
-                                "interruptionLevel",
-                                "speechSpeed"
-                              ],
-                              "additionalProperties": false
                             },
                             "createdAt": {
                               "type": "string",
@@ -15778,7 +14393,7 @@
                           "type": "null"
                         }
                       ],
-                      "description": "This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version."
+                      "description": "This project's saved model and voice settings. Null before first use. Clone the persona to change these settings."
                     },
                     "owner": {
                       "type": "string",
@@ -15860,16 +14475,6 @@
             }
           },
           "404": {
-            "description": "The request was refused.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Refusal"
-                }
-              }
-            }
-          },
-          "409": {
             "description": "The request was refused.",
             "content": {
               "application/json": {
@@ -16688,7 +15293,7 @@
       "post": {
         "operationId": "forkPersona",
         "summary": "Clone a persona",
-        "description": "Creates an editable custom copy of the persona's current behavior and model settings. The original persona and tests that select it stay unchanged.",
+        "description": "Creates a changed custom copy of the persona's current behavior and model settings. The original persona and tests that select it stay unchanged.",
         "tags": [
           "Personas"
         ],
@@ -16721,9 +15326,276 @@
                   "projectId": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Your team's label in the persona library. The caller does not speak this label."
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "identityName": {
+                    "type": "string",
+                    "description": "The human name the caller gives the agent, separate from the library name."
+                  },
+                  "personality": {
+                    "type": "string",
+                    "description": "How the caller behaves and speaks. Put the situation and goal in the test scenario."
+                  },
+                  "models": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "description": "The complete language, speech recognition, and speech synthesis selections. Read /v1/persona-form for available choices and recommendations.",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "separate"
+                            ]
+                          },
+                          "llm": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "stt": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "tts": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              },
+                              "voiceId": {
+                                "type": "string",
+                                "description": "A voice identifier supported by the selected text-to-speech provider."
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model",
+                              "voiceId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "llm",
+                          "stt",
+                          "tts"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "description": "A GPT Live speech selection and an independently selected reasoning model.",
+                        "properties": {
+                          "mode": {
+                            "type": "string",
+                            "enum": [
+                              "live"
+                            ]
+                          },
+                          "llm": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string"
+                              },
+                              "model": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "live": {
+                            "type": "object",
+                            "properties": {
+                              "provider": {
+                                "type": "string",
+                                "enum": [
+                                  "openai"
+                                ]
+                              },
+                              "model": {
+                                "type": "string",
+                                "enum": [
+                                  "gpt-live-1"
+                                ]
+                              },
+                              "adapter": {
+                                "type": "string",
+                                "enum": [
+                                  "openai_live"
+                                ]
+                              },
+                              "voiceId": {
+                                "type": "string",
+                                "description": "A built-in voice supported by GPT Live."
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "model",
+                              "adapter",
+                              "voiceId"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "mode",
+                          "llm",
+                          "live"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "controls": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "language": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "backgroundSoundId": {
+                            "type": "string",
+                            "enum": [
+                              "none",
+                              "office-v1",
+                              "cafe-v1",
+                              "street-traffic-v1",
+                              "crowd-talking-v1",
+                              "inside-car-v1",
+                              "home-tv-v1",
+                              "wind-v1",
+                              "rain-v1"
+                            ]
+                          },
+                          "interruptionLevel": {
+                            "type": "string",
+                            "enum": [
+                              "none",
+                              "occasional",
+                              "frequent"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "language",
+                          "backgroundSoundId",
+                          "interruptionLevel"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "language": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "backgroundSoundId": {
+                            "type": "string",
+                            "enum": [
+                              "none",
+                              "office-v1",
+                              "cafe-v1",
+                              "street-traffic-v1",
+                              "crowd-talking-v1",
+                              "inside-car-v1",
+                              "home-tv-v1",
+                              "wind-v1",
+                              "rain-v1"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "language",
+                          "backgroundSoundId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
                   }
                 },
-                "additionalProperties": false
+                "required": [],
+                "dependentRequired": {
+                  "models": [
+                    "controls"
+                  ],
+                  "controls": [
+                    "models"
+                  ]
+                },
+                "additionalProperties": false,
+                "examples": [
+                  {
+                    "name": "Caller in a hurry",
+                    "description": "A caller who wants a brief appointment booking conversation.",
+                    "identityName": "Morgan Chen",
+                    "personality": "Answers briefly, asks for the earliest appointment, and stays polite when asking the agent to get to the point.",
+                    "models": {
+                      "mode": "separate",
+                      "llm": {
+                        "provider": "openai",
+                        "model": "gpt-4o-mini"
+                      },
+                      "stt": {
+                        "provider": "openai",
+                        "model": "gpt-4o-mini-transcribe"
+                      },
+                      "tts": {
+                        "provider": "openai",
+                        "model": "gpt-4o-mini-tts",
+                        "voiceId": "alloy"
+                      }
+                    },
+                    "controls": {
+                      "language": "en-US",
+                      "backgroundSoundId": "none",
+                      "interruptionLevel": "none"
+                    }
+                  }
+                ],
+                "description": "Optional complete overrides for the new clone. Omitted values are copied from the source. Models and controls must be sent together."
               }
             }
           }
@@ -16928,18 +15800,12 @@
                                         "voiceId": {
                                           "type": "string",
                                           "description": "A voice identifier supported by the selected text-to-speech provider."
-                                        },
-                                        "speed": {
-                                          "type": "number",
-                                          "readOnly": true,
-                                          "description": "Resolved provider speed for the selected speechSpeed category."
                                         }
                                       },
                                       "required": [
                                         "provider",
                                         "model",
-                                        "voiceId",
-                                        "speed"
+                                        "voiceId"
                                       ],
                                       "additionalProperties": false
                                     }
@@ -17023,86 +15889,73 @@
                               ]
                             },
                             "controls": {
-                              "type": "object",
-                              "properties": {
-                                "language": {
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "emotion": {
-                                  "type": "string",
-                                  "enum": [
-                                    "neutral",
-                                    "happy",
-                                    "angry",
-                                    "frustrated",
-                                    "sad",
-                                    "anxious"
-                                  ]
-                                },
-                                "accent": {
-                                  "type": "string",
-                                  "minLength": 1
-                                },
-                                "speechVolume": {
-                                  "type": "number",
-                                  "minimum": 0.5,
-                                  "maximum": 1.5
-                                },
-                                "executionPolicyVersion": {
-                                  "type": "integer",
-                                  "minimum": 1,
-                                  "readOnly": true
-                                },
-                                "backgroundSoundId": {
-                                  "type": "string",
-                                  "enum": [
-                                    "none",
-                                    "office-v1",
-                                    "cafe-v1",
-                                    "street-traffic-v1",
-                                    "crowd-talking-v1",
-                                    "inside-car-v1",
-                                    "home-tv-v1",
-                                    "wind-v1",
-                                    "rain-v1"
-                                  ]
-                                },
-                                "backgroundVolume": {
-                                  "type": "number",
-                                  "minimum": 0.015848931924611134,
-                                  "maximum": 0.251188643150958
-                                },
-                                "interruptionLevel": {
-                                  "type": "string",
-                                  "enum": [
-                                    "none",
-                                    "occasional",
-                                    "frequent"
-                                  ]
-                                },
-                                "speechSpeed": {
-                                  "type": "string",
-                                  "enum": [
-                                    "slow",
-                                    "normal",
-                                    "fast"
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "language": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "backgroundSoundId": {
+                                      "type": "string",
+                                      "enum": [
+                                        "none",
+                                        "office-v1",
+                                        "cafe-v1",
+                                        "street-traffic-v1",
+                                        "crowd-talking-v1",
+                                        "inside-car-v1",
+                                        "home-tv-v1",
+                                        "wind-v1",
+                                        "rain-v1"
+                                      ]
+                                    },
+                                    "interruptionLevel": {
+                                      "type": "string",
+                                      "enum": [
+                                        "none",
+                                        "occasional",
+                                        "frequent"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "language",
+                                    "backgroundSoundId",
+                                    "interruptionLevel"
                                   ],
-                                  "description": "Speech pace. Slow resolves to 0.8x, Normal to 1.0x, and Fast to 1.5x when supported."
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "language": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "backgroundSoundId": {
+                                      "type": "string",
+                                      "enum": [
+                                        "none",
+                                        "office-v1",
+                                        "cafe-v1",
+                                        "street-traffic-v1",
+                                        "crowd-talking-v1",
+                                        "inside-car-v1",
+                                        "home-tv-v1",
+                                        "wind-v1",
+                                        "rain-v1"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "language",
+                                    "backgroundSoundId"
+                                  ],
+                                  "additionalProperties": false
                                 }
-                              },
-                              "required": [
-                                "language",
-                                "emotion",
-                                "accent",
-                                "speechVolume",
-                                "executionPolicyVersion",
-                                "backgroundSoundId",
-                                "backgroundVolume",
-                                "interruptionLevel",
-                                "speechSpeed"
-                              ],
-                              "additionalProperties": false
+                              ]
                             },
                             "createdAt": {
                               "type": "string",
@@ -17126,7 +15979,7 @@
                           "type": "null"
                         }
                       ],
-                      "description": "This project's saved model and voice settings. Null before first use. Settings changes do not create a behavior version."
+                      "description": "This project's saved model and voice settings. Null before first use. Clone the persona to change these settings."
                     },
                     "owner": {
                       "type": "string",

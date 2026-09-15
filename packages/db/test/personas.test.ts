@@ -233,14 +233,9 @@ describe("editing a persona's personality", () => {
     const settings = {
       models: RECOMMENDED_PERSONA_MODELS,
       language: "es-ES",
-      emotion: "happy" as const,
-      accent: "voice_default",
-      speechVolume: 1.1,
-      executionPolicyVersion: 1,
+      executionPolicyVersion: 2,
       backgroundSoundId: "office-v1" as const,
-      backgroundVolume: 0.0631,
       interruptionLevel: "occasional" as const,
-      speechSpeed: "normal" as const,
     };
     const upgraded = await editPersona(actingAsAcme(), created.id, { settings });
 
@@ -248,12 +243,8 @@ describe("editing a persona's personality", () => {
     expect(upgraded?.settings?.models).toEqual(settings.models);
     expect(upgraded?.settings?.parameterValues).toMatchObject({
       language: "es-ES",
-      emotion: "happy",
-      accent: "voice_default",
-      speech_volume: 1.1,
       execution_policy_version: 2,
       background_sound_id: "office-v1",
-      background_volume: 0.0631,
       interruption_level: "occasional",
     });
     const legacy = await getPersonaVersion(actingAsAcme(), legacyVersionId);
@@ -261,7 +252,7 @@ describe("editing a persona's personality", () => {
     expect(legacy?.parameterContract).toEqual(legacyContract);
     const current = await getPersonaVersion(actingAsAcme(), upgraded!.versionId);
     expect(current).toMatchObject({ version: 3, language: null });
-    expect(current?.parameterContract).toHaveLength(18);
+    expect(current?.parameterContract).toHaveLength(12);
   });
 
   it("creates version 2, moves the pointer, and leaves version 1 untouched", async () => {
@@ -410,14 +401,9 @@ describe("editing a persona's model selection", () => {
       settings: {
         models: RECOMMENDED_PERSONA_MODELS,
         language: "es-ES",
-        emotion: "angry",
-        accent: "spanish",
-        speechVolume: 1.3,
         backgroundSoundId: "cafe-v1",
-        backgroundVolume: 0.08,
         interruptionLevel: "frequent",
-        speechSpeed: "normal",
-        executionPolicyVersion: 1,
+        executionPolicyVersion: 2,
       },
     });
     const nextModels = {
@@ -433,8 +419,7 @@ describe("editing a persona's model selection", () => {
     expect(edited?.version).toBe(1);
     expect(edited?.settings?.models).toEqual(nextModels);
     expect(edited?.settings?.parameterValues).toMatchObject({
-      language: "es-ES", emotion: "angry", accent: "spanish", speech_volume: 1.3,
-      background_sound_id: "cafe-v1", background_volume: 0.08, interruption_level: "frequent",
+      language: "es-ES", background_sound_id: "cafe-v1", interruption_level: "frequent",
     });
     expect(await getPersonaVersion(actingAsAcme(), created.versionId)).not.toHaveProperty("models");
   });
@@ -448,11 +433,11 @@ describe("editing a persona's model selection", () => {
 
     expect(used?.settings?.models).toEqual(models);
     expect(used?.settings?.parameterValues).toMatchObject({
-      language: "es-ES", emotion: "neutral", background_sound_id: "none", interruption_level: "none",
+      language: "es-ES", background_sound_id: "none", interruption_level: "none",
     });
   });
 
-  it("updates speaking speed without creating a core version", async () => {
+  it("uses the native speaking speed without storing an authored speed", async () => {
     const created = await createPersona(actingAsAcme(), rita);
 
     const edited = await editPersona(actingAsAcme(), created.id, {
@@ -465,7 +450,8 @@ describe("editing a persona's model selection", () => {
 
     expect(edited?.version).toBe(1);
     expect(edited?.settings?.models).toMatchObject({ tts: { speed: 1 } });
-    expect(edited?.settings?.parameterValues.speech_speed).toBe("normal");
+    expect(edited?.settings?.parameterValues).not.toHaveProperty("speech_speed");
+    expect(edited?.settings?.parameterValues).not.toHaveProperty("tts_speed");
   });
 
   it("refuses an unsupported provider/model pair before writing", async () => {
@@ -855,20 +841,18 @@ describe("project persona storage boundaries", () => {
     const settings = created.settings;
     if (settings === null) throw new Error("creation saved no settings");
     const complete = defaultPersonaParameterValues(PERSONA_PARAMETER_CONTRACT);
-    expect(Object.keys(complete)).toHaveLength(18);
+    expect(Object.keys(complete)).toHaveLength(12);
     expect(complete.interruption_level).toBe("none");
-    expect(complete.speech_speed).toBe("normal");
-    const { tts_speed: _speed, ...missing } = complete;
+    const { tts_model: _model, ...missing } = complete;
     for (const values of [
       missing,
       { ...complete, unrecognized: 1 },
-      { ...complete, tts_speed: "1" },
+      { ...complete, tts_speed: 1 },
       { ...complete, tts_voice_id: " " },
       { ...complete, interruption_level: "constant" },
       { ...complete, interruption_level: 1 },
       { ...complete, execution_policy_version: 1 },
-      { ...complete, speech_speed: "quick" },
-      { ...complete, speech_speed: "fast", tts_speed: 1 },
+      { ...complete, speech_speed: "fast" },
     ]) {
       await expect(
         database.sql(

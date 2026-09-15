@@ -998,6 +998,24 @@ export function PageBody({ children }: { readonly children: ReactNode }) {
   );
 }
 
+/** Keep a full-page form's actions visible below its scrolling body. */
+export function PageFooter({ children }: { readonly children: ReactNode }) {
+  return (
+    <div
+      className={cn(
+        "flex min-h-(--space-10) flex-none items-center border-t border-border",
+        "bg-surface px-(--page-gutter) py-2",
+        "max-[900px]:px-4",
+      )}
+      data-slot="page-footer"
+    >
+      <PageContentFrame className="items-center" slot="page-footer-content">
+        {children}
+      </PageContentFrame>
+    </div>
+  );
+}
+
 /**
  * A request state inside the signed-in product.
  *

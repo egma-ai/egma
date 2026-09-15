@@ -49,7 +49,6 @@ Your name is {name}. Give that name when the agent asks who is calling, and use 
 
 - Stay in character’s personality for the whole exchange. Never mention being a simulator, or an AI.
 - The roleplay language is {language}
-- Express a consistent {emotion} emotional state in your wording for the whole exchange.
 - You are allowed to make up details in order to fulfill the scenario unless explicitly stated otherwise. Examples include appointment details, or other details that someone in your situation might have handy. Your name is not one of them: it is given above, and you never answer to another.
 - Pursue what you came for until it is concluded to your satisfaction, and let your personality decide how patiently.
 - When your goal is concluded and nothing further is needed, say a brief goodbye and end your reply with the `end_call` tool
@@ -65,10 +64,6 @@ are a simulator or an AI.
 
 - Your personality is: {personality}
 - Speak in {language}.
-- Keep a consistent {emotion} emotional delivery.
-- {accent_instruction}
-- {pace_instruction}
-- {interruption_instruction}
 
 # Opening the call
 
@@ -100,37 +95,11 @@ say a brief natural goodbye. A spoken goodbye alone does not close the call.
 
 def compose_live_prompt(authored: AuthoredPersona, scenario_instructions: str) -> str:
     """Conversation-only instructions for GPT Live's continuous voice layer."""
-    parameters = authored.parameters
-    speed = "normal" if parameters is None else getattr(parameters, "speech_speed", "normal")
-    interruption = (
-        "none" if parameters is None else parameters.interruption_level
-    )
-    pace = {
-        "slow": "Speak slowly, aiming for about 0.8x the normal conversational pace.",
-        "normal": "Speak at about 1.0x the normal conversational pace.",
-        "fast": "Speak quickly and clearly, aiming for about 1.5x the normal conversational pace.",
-    }[speed]
-    interruptions = {
-        "off": "Wait quietly while the agent speaks. Do not overlap it or make listening sounds.",
-        "none": "Wait quietly while the agent speaks. Do not overlap it or make listening sounds.",
-        "occasional": "Occasionally interrupt when a human with this personality naturally would.",
-        "frequent": "Interrupt readily and frequently when it fits the conversation.",
-    }[interruption]
-    accent = "voice_default" if parameters is None else parameters.accent
-    accent_instruction = (
-        "Use the selected voice's natural accent."
-        if accent == "voice_default"
-        else f"Speak with a {accent} accent."
-    )
     return _LIVE_PROMPT_FRAME.format(
         name=authored.name,
         personality=authored.personality,
         scenario=scenario_instructions,
         language=authored.language,
-        emotion="neutral" if parameters is None else parameters.emotion,
-        accent_instruction=accent_instruction,
-        pace_instruction=pace,
-        interruption_instruction=interruptions,
     )
 
 
@@ -141,11 +110,6 @@ def compose_system_prompt(authored: AuthoredPersona, scenario_instructions: str)
         personality=authored.personality,
         scenario=scenario_instructions,
         language=authored.language,
-        emotion=(
-            authored.parameters.emotion
-            if authored.parameters is not None
-            else "neutral"
-        ),
     )
 
 

@@ -1,34 +1,62 @@
 "use client";
 
+import { ChevronRightIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { ownerSaid, type Persona } from "../../../../lib/personas.ts";
 
 /**
- * Persona-specific content built from shared sheet primitives and theme
+ * Persona-specific content built from shared page primitives and theme
  * values. Use the design system's type and spacing scale.
  */
 
-/** A labelled group, separated from the previous group by a hairline. */
-export function SheetSection({
+/** A labelled settings group that keeps its fields reachable by keyboard. */
+export function PersonaSection({
   label,
+  open = true,
   children,
 }: {
   readonly label: string;
+  readonly open?: boolean;
   readonly children: ReactNode;
 }) {
   return (
-    <section
-      className="flex min-w-0 flex-col gap-4 border-border not-first:border-t not-first:pt-5"
-      aria-label={label}
+    <Collapsible
+      className="border-t border-border pt-2 first:border-t-0"
+      defaultOpen={open}
+      asChild
     >
-      <h3 className="m-0 text-sm font-medium text-foreground">
-        {label}
-      </h3>
+      <section aria-label={label}>
+        <h3 className="m-0">
+          <CollapsibleTrigger className="group/collapsible flex min-h-(--control-lg) w-full items-center justify-between border-0 bg-transparent p-0 text-left text-base font-medium text-foreground">
+            <span>{label}</span>
+            <ChevronRightIcon
+              className="size-4 text-faint transition-transform duration-(--duration-hover) ease-out group-data-[state=open]/collapsible:rotate-90 motion-reduce:transition-none"
+              aria-hidden="true"
+            />
+          </CollapsibleTrigger>
+        </h3>
+        <CollapsibleContent className="pb-4 pt-3">
+          {children}
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
+  );
+}
+
+/** The divider heading above identity fields or persona settings. */
+export function PersonaGroupLabel({ children }: { readonly children: ReactNode }) {
+  return (
+    <h2 className="m-0 border-t border-border pt-4 text-sm font-medium text-foreground uppercase">
       {children}
-    </section>
+    </h2>
   );
 }
 

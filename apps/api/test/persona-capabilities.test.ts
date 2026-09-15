@@ -38,11 +38,9 @@ describe("persona capability resolution", () => {
     }).voices.choices).toEqual(OPENAI_LIVE_VOICES);
   });
 
-  it("fixes instruction-only controls for legacy OpenAI TTS", () => {
+  it("exposes only language and voices for legacy OpenAI TTS", () => {
     const result = resolvePersonaCapabilities({ ...selection, ttsModel: "tts-1" });
-    expect(result.emotion).toMatchObject({ status: "fixed", value: "neutral" });
-    expect(result.accent).toMatchObject({ status: "fixed", value: "voice_default" });
-    expect(result.speed.range).toEqual({ minimum: 0.25, maximum: 4, step: 0.05 });
+    expect(Object.keys(result).sort()).toEqual(["language", "voices"]);
     expect(result.voices.choices?.map((voice) => voice.id)).toEqual(["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]);
   });
 
@@ -57,67 +55,42 @@ describe("persona capability resolution", () => {
     expect(result.language.reason).toContain("deepgram/nova-3-general");
   });
 
-  it("returns Cartesia voice language and accent without locale inference", () => {
+  it("returns Cartesia language choices without delivery controls", () => {
     const result = resolvePersonaCapabilities(
       { ...selection, ttsProvider: "cartesia", ttsModel: "sonic-3.6", voiceId: "voice-a", language: "en-GB" },
-      [{ id: "voice-a", name: "A", source: "account", presentation: "female", languages: ["en-GB"], accents: ["GB"] }],
+      [{ id: "voice-a", name: "A", source: "account", presentation: "female", languages: ["en-GB"] }],
     );
     expect(result.language).toMatchObject({ status: "supported" });
     expect(result.language.choices).toContain("en");
     expect(result.language.choices).toContain("es");
-    expect(result.accent).toEqual({ status: "supported", choices: ["voice_default", "GB"] });
-    expect(result.speed).toMatchObject({ status: "supported" });
+    expect(Object.keys(result).sort()).toEqual(["language", "voices"]);
   });
 
-  it("uses voice default when Cartesia omits accent metadata", () => {
+  it("does not expose Cartesia accent metadata as an authoring capability", () => {
     const result = resolvePersonaCapabilities(
       { ...selection, ttsProvider: "cartesia", ttsModel: "sonic-3.6", voiceId: "voice-a", language: "en-US" },
-      [{ id: "voice-a", name: "A", source: "standard", presentation: "unknown", languages: [], accents: [] }],
+      [{ id: "voice-a", name: "A", source: "standard", presentation: "unknown", languages: [] }],
     );
-    expect(result.accent).toEqual({
-      status: "fixed",
-      value: "voice_default",
-      reason: "Cartesia did not return accent metadata, so named accent steering is unverified.",
-    });
-  });
-
-  it("does not offer named accent steering on Cartesia models that cannot execute it", () => {
-    const result = resolvePersonaCapabilities(
-      { ...selection, ttsProvider: "cartesia", ttsModel: "sonic-3.5", voiceId: "voice-a", language: "en-US" },
-      [{ id: "voice-a", name: "A", source: "standard", presentation: "unknown", languages: [], accents: ["general-american"] }],
-    );
-    expect(result.accent).toEqual({
-      status: "fixed",
-      value: "voice_default",
-      reason: "Cartesia sonic-3.5 does not support named accent steering.",
-    });
+    expect(Object.keys(result).sort()).toEqual(["language", "voices"]);
   });
 
   it("does not assume a professional clone supports a model when compatibility metadata is missing", () => {
     const result = resolvePersonaCapabilities(
       { ...selection, ttsProvider: "cartesia", ttsModel: "sonic-3.6", voiceId: "pro", language: "en-US" },
-      [{ id: "pro", name: "Pro", source: "account", presentation: "unknown", languages: [], accents: [], isProfessional: true }],
+      [{ id: "pro", name: "Pro", source: "account", presentation: "unknown", languages: [], isProfessional: true }],
     );
     expect(result.language).toMatchObject({ status: "unknown", reason: expect.stringContaining("Refresh") });
-    expect(result.speed.status).toBe("unknown");
+    expect(Object.keys(result).sort()).toEqual(["language", "voices"]);
   });
 
-  it("offers only Normal for a compatible professional clone and refuses Fast by category", () => {
+  it("refuses a voice outside the resolved catalog", () => {
     const result = resolvePersonaCapabilities(
       { ...selection, ttsProvider: "cartesia", ttsModel: "sonic-3.6", voiceId: "pro", language: "en-US" },
-      [{ id: "pro", name: "Pro", source: "account", presentation: "unknown", languages: ["en"], accents: [], isProfessional: true, modelIds: ["sonic-3.6"] }],
+      [{ id: "pro", name: "Pro", source: "account", presentation: "unknown", languages: ["en"], isProfessional: true, modelIds: ["sonic-3.6"] }],
     );
-    expect(result.speechSpeed).toEqual({
-      status: "fixed",
-      value: "normal",
-      reason: "Cartesia professional clones ignore native speed.",
-    });
     expect(personaCapabilityRefusal(result, {
-      emotion: "neutral",
-      accent: "voice_default",
-      speechSpeed: "fast",
-      voiceId: "pro",
-    })).toBe("controls.speechSpeed: Cartesia professional clones ignore native speed.");
+      voiceId: "missing",
+    })).toBe("models.tts.voiceId: Choose one of the available voices.");
   });
 });
 
@@ -137,8 +110,8 @@ describe("Cartesia discovery", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
     expect(String(fetcher.mock.calls[1]![0])).toContain("starting_after=public");
     expect(voices).toEqual([
-      { id: "public", name: "Public", source: "standard", presentation: "male", languages: ["en-US", "hi-IN"], accents: ["general-american", "hindi"], publiclyAccessible: true },
-      { id: "private", name: "Private", source: "account", presentation: "female", languages: ["es-ES"], accents: [] },
+      { id: "public", name: "Public", source: "standard", presentation: "male", languages: ["en-US", "hi-IN"], publiclyAccessible: true },
+      { id: "private", name: "Private", source: "account", presentation: "female", languages: ["es-ES"] },
     ]);
   });
 

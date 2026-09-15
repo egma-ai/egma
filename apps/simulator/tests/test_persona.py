@@ -62,7 +62,6 @@ Your name is {AUTHORED.name}. Give that name when the agent asks who is calling,
 
 - Stay in character’s personality for the whole exchange. Never mention being a simulator, or an AI.
 - The roleplay language is {AUTHORED.language}
-- Express a consistent neutral emotional state in your wording for the whole exchange.
 - You are allowed to make up details in order to fulfill the scenario unless explicitly stated otherwise. Examples include appointment details, or other details that someone in your situation might have handy. Your name is not one of them: it is given above, and you never answer to another.
 - Pursue what you came for until it is concluded to your satisfaction, and let your personality decide how patiently.
 - When your goal is concluded and nothing further is needed, say a brief goodbye and end your reply with the `end_call` tool
@@ -98,18 +97,19 @@ def test_the_system_prompt_carries_no_technical_settings():
     assert '"models"' not in prompt
 
 
-def test_new_parameters_drive_language_and_fixed_emotional_wording():
+def test_new_parameters_drive_language_while_personality_stays_authored():
     authored = AuthoredPersona(
         name="Margaret",
         personality=AUTHORED.personality,
         language="es-MX",
-        parameters=PersonaParameters(language="es-MX", emotion="frustrated"),
+        parameters=PersonaParameters(language="es-MX"),
     )
 
     prompt = compose_system_prompt(authored, SCENARIO)
 
     assert "roleplay language is es-MX" in prompt
-    assert "consistent frustrated emotional state" in prompt
+    assert AUTHORED.personality in prompt
+    assert "emotional state" not in prompt
 
 
 def test_the_prompt_offers_one_way_to_conclude_and_not_the_retired_marker():

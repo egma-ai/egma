@@ -20,22 +20,12 @@
         "parameters": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["language", "emotion", "accent", "speech_speed", "tts_speed", "speech_volume", "interruption_level", "execution_policy_version"],
-          "dependentRequired": {
-            "background_sound_id": ["background_volume"],
-            "background_volume": ["background_sound_id"]
-          },
+          "required": ["language", "background_sound_id", "execution_policy_version"],
           "properties": {
             "language": { "type": "string", "minLength": 1, "pattern": "\\S" },
-            "emotion": { "enum": ["neutral", "happy", "angry", "frustrated", "sad", "anxious"] },
-            "accent": { "type": "string", "minLength": 1 },
-            "speech_speed": { "enum": ["slow", "normal", "fast"] },
-            "tts_speed": { "enum": [0.8, 1, 1.5] },
-            "speech_volume": { "type": "number", "minimum": 0.5, "maximum": 1.5 },
             "interruption_level": { "enum": ["none", "occasional", "frequent"] },
             "execution_policy_version": { "const": 2 },
-            "background_sound_id": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/persona/properties/parameters/properties/background_sound_id" },
-            "background_volume": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/persona/properties/parameters/properties/background_volume" }
+            "background_sound_id": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/persona/properties/parameters/properties/background_sound_id" }
           }
         }
       }
@@ -58,7 +48,7 @@
             "mode": { "const": "separate" },
             "llm": { "$ref": "urn:egma:simulation-contract:spec:v6#/$defs/llm_selection" },
             "stt": { "$ref": "urn:egma:simulation-contract:spec:v6#/$defs/stt_selection" },
-            "tts": { "$ref": "urn:egma:simulation-contract:spec:v6#/$defs/tts_selection" }
+            "tts": { "$ref": "#/$defs/tts_selection" }
           }
         },
         {
@@ -75,6 +65,20 @@
     }
   },
   "$defs": {
+    "tts_selection": {
+      "description": "The persona mouth. The provider and model own the selected voice; speech uses the provider's normal speed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "model", "adapter", "voice_id"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "model": { "type": "string", "minLength": 1 },
+        "adapter": { "type": "string", "minLength": 1 },
+        "voice_id": { "type": "string", "minLength": 1 },
+        "key": { "type": "string", "minLength": 1 },
+        "funding_receipt": { "type": "string", "minLength": 1 }
+      }
+    },
     "live_selection": {
       "type": "object",
       "additionalProperties": false,
@@ -114,6 +118,14 @@
           }
         }
       }
+    },
+    {
+      "if": { "type": "object", "properties": { "models": { "type": "object", "properties": { "mode": { "const": "separate" } }, "required": ["mode"] } }, "required": ["models"] },
+      "then": { "type": "object", "properties": { "persona": { "type": "object", "properties": { "parameters": { "type": "object", "properties": { "interruption_level": {} }, "required": ["interruption_level"] } } } } }
+    },
+    {
+      "if": { "type": "object", "properties": { "models": { "type": "object", "properties": { "mode": { "const": "live" } }, "required": ["mode"] } }, "required": ["models"] },
+      "then": { "type": "object", "properties": { "persona": { "type": "object", "properties": { "parameters": { "type": "object", "not": { "properties": { "interruption_level": {} }, "required": ["interruption_level"] } } } } } }
     }
   ]
 }

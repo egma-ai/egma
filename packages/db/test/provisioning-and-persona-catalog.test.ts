@@ -182,7 +182,7 @@ describe("the Predefined persona", () => {
     expect(persona).toMatchObject({
       owner: "egma",
       projectId: null,
-      version: 5,
+      version: 6,
       identityName: "Alex Morgan",
       personality:
         "Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
@@ -193,19 +193,17 @@ describe("the Predefined persona", () => {
   it("migrates project settings without changing built-in core history", async () => {
     const before = await getPersona(globex.auth, EGMA_PROVIDED_PERSONAS.defaultPersona);
     expect(before).toMatchObject({
-      version: 5,
-      versionId: "prsv_01K4R000000000000000000016",
+      version: 6,
+      versionId: "prsv_01K4R000000000000000000021",
       settings: null,
     });
 
     const used = await usePersona(globex.auth, EGMA_PROVIDED_PERSONAS.defaultPersona);
     expect(used).toMatchObject({
-      version: 5,
-      versionId: "prsv_01K4R000000000000000000016",
+      version: 6,
+      versionId: "prsv_01K4R000000000000000000021",
       settings: { parameterValues: {
         speech_mode: "separate",
-        speech_speed: "normal",
-        tts_speed: 1,
         interruption_level: "none",
         execution_policy_version: 2,
       } },
@@ -227,17 +225,17 @@ describe("the Predefined persona", () => {
     expect(await seedPersonaLibrary()).toEqual([]);
     expect(await seedPersonaLibrary()).toEqual([]);
     expect(await getPersona(globex.auth, EGMA_PROVIDED_PERSONAS.defaultPersona)).toMatchObject({
-      version: 5,
-      versionId: "prsv_01K4R000000000000000000016",
-      settings: { parameterValues: { language: "en-US", speech_mode: "separate", speech_speed: "normal", tts_speed: 1, interruption_level: "none" } },
+      version: 6,
+      versionId: "prsv_01K4R000000000000000000021",
+      settings: { parameterValues: { language: "en-US", speech_mode: "separate", interruption_level: "none" } },
     });
     const { rows } = await database.sql<{ id: string; version: number }>(
       "select id, version from persona_definition_version where persona_id = $1 order by version",
       [EGMA_PROVIDED_PERSONAS.defaultPersona],
     );
-    expect(rows).toHaveLength(5);
-    expect(rows.at(-1)).toEqual({ id: "prsv_01K4R000000000000000000016", version: 5 });
-    expect(rows.map((row) => row.id)).not.toContain("prsv_01K4R000000000000000000021");
+    expect(rows).toHaveLength(6);
+    expect(rows.at(-1)).toEqual({ id: "prsv_01K4R000000000000000000021", version: 6 });
+    expect(rows.map((row) => row.id)).toContain("prsv_01K4R000000000000000000016");
   });
 
   it("cannot be edited or deleted", async () => {
@@ -308,7 +306,7 @@ describe("forking a persona", () => {
     expect(edited?.settings?.models).toEqual(source.settings!.models);
     expect(
       (await getPersona(acme.auth, EGMA_PROVIDED_PERSONAS.defaultPersona))?.version,
-    ).toBe(5);
+    ).toBe(6);
   });
 
   it("copies the source version that wins the source-row lock", async () => {
@@ -395,11 +393,11 @@ describe("catalog integrity", () => {
       const historical = defaultPersonaParameterValues(contract);
       const expectedModels = personaModelsOfParameters(historical);
       const completed = currentPersonaParameterDefaults(contract, { language: "es-ES" });
-      expect(completed.contract).toHaveLength(18);
+      expect(completed.contract).toHaveLength(12);
       expect(personaModelsOfParameters(completed.values)).toEqual({
         ...expectedModels,
         ...(expectedModels.mode === "separate"
-          ? { tts: { ...expectedModels.tts, speed: 1 } }
+          ? { tts: { ...expectedModels.tts, speed: expectedModels.tts.speed } }
           : {}),
       });
       expect(completed.values).toMatchObject({
@@ -446,16 +444,13 @@ describe("catalog integrity", () => {
     const upgraded = await getPersona(acme.auth, made.id);
     expect(upgraded).toMatchObject({
       id: made.id,
-      version: 2,
-      versionId: legacyVersionId,
+      version: 3,
       identityName: made.identityName,
       personality: made.personality,
       language: "es-ES",
       settings: {
         parameterValues: {
           language: "es-ES",
-          speech_speed: "normal",
-          tts_speed: 1,
           interruption_level: "none",
           execution_policy_version: 2,
         },
@@ -465,10 +460,9 @@ describe("catalog integrity", () => {
 
     await seedPersonaLibrary();
     expect(await getPersona(acme.auth, made.id)).toMatchObject({
-      version: 2,
-      versionId: legacyVersionId,
+      version: 3,
       language: "es-ES",
-      settings: { parameterValues: { language: "es-ES", speech_speed: "normal", tts_speed: 1 } },
+      settings: { parameterValues: { language: "es-ES", interruption_level: "none" } },
     });
   });
 
@@ -490,16 +484,16 @@ describe("catalog integrity", () => {
     if (before?.settings === null || before?.settings === undefined) {
       throw new Error("legacy settings were not created");
     }
+    const oldContract = legacy.versions.at(-1)!.parameterContract;
     const chosen = {
-      ...before.settings.parameterValues,
+      ...defaultPersonaParameterValues(oldContract),
       tts_speed: 0.8,
-      speech_speed: "slow",
       emotion: "happy",
       speech_volume: 1.2,
     };
     await database.sql(
-      "update project_persona set parameter_values = $1 where id = $2",
-      [JSON.stringify(chosen), before.settings.id],
+      "update project_persona set parameter_values = $1, parameter_contract = $2 where id = $3",
+      [JSON.stringify(chosen), JSON.stringify(oldContract), before.settings.id],
     );
 
     const current = source.versions[3];
@@ -516,13 +510,13 @@ describe("catalog integrity", () => {
 
     const after = await getPersona(acme.auth, legacy.id);
     expect(after?.settings?.parameterValues).toMatchObject({
-      ...chosen,
       language: "en-US",
-      accent: "voice_default",
       execution_policy_version: 2,
       background_sound_id: "none",
-      background_volume: 0.0631,
+      interruption_level: "none",
     });
+    expect(after?.settings?.parameterValues).not.toHaveProperty("emotion");
+    expect(after?.settings?.parameterValues).not.toHaveProperty("tts_speed");
     expect(after?.language).toBe("en-US");
   });
 
@@ -544,18 +538,18 @@ describe("catalog integrity", () => {
     if (before?.settings === null || before?.settings === undefined) {
       throw new Error("ticket 02 settings were not created");
     }
+    const oldContract = prior.versions.at(-1)!.parameterContract;
     const chosen = {
-      ...before.settings.parameterValues,
+      ...defaultPersonaParameterValues(oldContract),
       tts_speed: 0.8,
-      speech_speed: "slow",
       emotion: "happy",
       speech_volume: 1.2,
       background_sound_id: "rain-v1",
       background_volume: 0.1,
     };
     await database.sql(
-      "update project_persona set parameter_values = $1 where id = $2",
-      [JSON.stringify(chosen), before.settings.id],
+      "update project_persona set parameter_values = $1, parameter_contract = $2 where id = $3",
+      [JSON.stringify(chosen), JSON.stringify(oldContract), before.settings.id],
     );
 
     const current = source.versions[4];
@@ -565,8 +559,11 @@ describe("catalog integrity", () => {
       versions: [...prior.versions, { ...current, id: newId("prsv") }],
     }]);
 
-    expect((await getPersona(acme.auth, prior.id))?.settings?.parameterValues).toEqual({
-      ...chosen,
+    expect((await getPersona(acme.auth, prior.id))?.settings?.parameterValues).toMatchObject({
+      speech_mode: "separate",
+      language: "en-US",
+      background_sound_id: "rain-v1",
+      execution_policy_version: 2,
       interruption_level: "none",
     });
   });
@@ -586,14 +583,9 @@ describe("catalog integrity", () => {
     for (const [name, values] of defaults) {
       expect(values).toMatchObject({
         tts_voice_id: name === "Everyday Caller [Female]" ? "coral" : "cedar",
-        tts_speed: 1,
         language: name === "Spanish caller" ? "es-ES" : "en-US",
-        emotion: name === "Angry caller" ? "angry" : "neutral",
-        speech_volume: 1,
         background_sound_id: "none",
-        background_volume: 0.0631,
         interruption_level: name === "Interruptive caller" ? "frequent" : "none",
-        speech_speed: "normal",
         execution_policy_version: 2,
       });
     }
@@ -602,7 +594,7 @@ describe("catalog integrity", () => {
   it("carries an identity name and one complete models value in every fixed version", () => {
     expect(PERSONA_LIBRARY_CATALOG).toHaveLength(5);
     const versions = PERSONA_LIBRARY_CATALOG[0]?.versions;
-    expect(versions).toHaveLength(5);
+    expect(versions).toHaveLength(6);
     expect(versions?.[0]).toMatchObject({
       id: "prsv_01M0E4J0BBE1FVDVTZ1BSS5C97",
       version: 1,
@@ -627,6 +619,10 @@ describe("catalog integrity", () => {
     });
     expect(versions?.[4]).toMatchObject({
       version: 5,
+      language: null,
+    });
+    expect(versions?.[5]).toMatchObject({
+      version: 6,
       language: null,
     });
     expect(versions?.[2]?.identityName).not.toBe(PERSONA_LIBRARY_CATALOG[0]?.name);

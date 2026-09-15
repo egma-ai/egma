@@ -202,7 +202,7 @@ export class WriteAbortedError extends Error {
 
 /**
  * An Egma-provided persona cannot be edited or deleted by a project.
- * Fork it to create an editable Custom persona.
+ * Fork it to create an independent Custom persona.
  */
 export class EgmaProvidedPersonaError extends Error {
   readonly personaId: string;
@@ -210,7 +210,7 @@ export class EgmaProvidedPersonaError extends Error {
 
   constructor(personaId: string, personaName: string) {
     super(
-      `persona ${personaId} (${personaName}) is Predefined: Egma builds it, and no project can change or delete one; fork it to make a Custom persona you can edit`,
+      `persona ${personaId} (${personaName}) is Predefined: Egma builds it, and no project can change or delete one; fork it to make an independent Custom persona`,
     );
     this.name = "EgmaProvidedPersonaError";
     this.personaId = personaId;

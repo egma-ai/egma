@@ -278,6 +278,10 @@
   --page-gutter: var(--space-6);
   --page-max: 1200px;
   --page-max-wide: 1440px;
+  /* The approved full-page persona flow: form, tips, and their shared frame. */
+  --persona-form-width: 720px;
+  --persona-tips-width: 440px;
+  --searchable-select-min-width: 20rem;
   --grade-fact-min: 150px;
 
   /*

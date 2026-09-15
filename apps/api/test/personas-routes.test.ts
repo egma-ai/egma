@@ -3,8 +3,7 @@ import {
   createTest,
   createTestSuite,
   EGMA_PROVIDED_PERSONAS,
-  RECOMMENDED_PERSONA_MODELS,
-  type PersonaModels,
+  RECOMMENDED_PERSONA_MODELS as INTERNAL_RECOMMENDED_PERSONA_MODELS,
 } from "@egma/db";
 import { newId } from "@egma/ids";
 import { afterEach, describe, expect, it } from "vitest";
@@ -38,13 +37,23 @@ const BEHAVIOR = {
 
 const CONTROLS = {
   language: "en-US",
-  emotion: "neutral",
-  accent: "voice_default",
-  speechVolume: 1.2,
   backgroundSoundId: "rain-v1",
-  backgroundVolume: 0.04,
   interruptionLevel: "occasional",
-  speechSpeed: "normal",
+} as const;
+
+const DEFAULT_CONTROLS = {
+  language: "en-US",
+  backgroundSoundId: "none",
+  interruptionLevel: "none",
+} as const;
+
+const RECOMMENDED_PERSONA_MODELS = {
+  ...INTERNAL_RECOMMENDED_PERSONA_MODELS,
+  tts: {
+    provider: INTERNAL_RECOMMENDED_PERSONA_MODELS.tts.provider,
+    model: INTERNAL_RECOMMENDED_PERSONA_MODELS.tts.model,
+    voiceId: INTERNAL_RECOMMENDED_PERSONA_MODELS.tts.voiceId,
+  },
 } as const;
 
 type Behavior = {
@@ -86,7 +95,7 @@ type WirePersona = {
   identityName: string;
   personality: string;
   language: string;
-  settings: { id: string; models: PersonaModels; controls: typeof CONTROLS & { executionPolicyVersion: number } } | null;
+  settings: { id: string; models: typeof RECOMMENDED_PERSONA_MODELS; controls: { language: string; backgroundSoundId: string; interruptionLevel?: string } } | null;
 };
 
 function personaIn(answer: Answer): WirePersona {
@@ -104,6 +113,7 @@ async function createPersonaThrough(
     name,
     ...behavior,
     models: RECOMMENDED_PERSONA_MODELS,
+    controls: DEFAULT_CONTROLS,
   });
   expect(made.statusCode, JSON.stringify(made.body)).toBe(201);
   return personaIn(made);
@@ -118,7 +128,7 @@ function predefinedRefusal(personaId: string): Record<string, unknown> {
     error: "egma_provided_persona",
     message:
       `Persona ${personaId} is Predefined. Its core and metadata cannot be changed, and it cannot be deleted. ` +
-      "Clone it to make a Custom persona you can edit.",
+      "Clone it to make a changed Custom persona.",
   };
 }
 
@@ -131,7 +141,8 @@ describe("creating and reading a persona", () => {
       llm: { provider: "openai", model: "gpt-5.6-sol" },
       live: { provider: "openai" as const, model: "gpt-live-1" as const, adapter: "openai_live" as const, voiceId: "beacon" },
     };
-    const made = await browse("POST", "/v1/personas", ada, { projectId: ada.projectId, name: "Live caller", ...BEHAVIOR, models, controls: CONTROLS });
+    const liveControls = { language: "en-US", backgroundSoundId: "rain-v1" } as const;
+    const made = await browse("POST", "/v1/personas", ada, { projectId: ada.projectId, name: "Live caller", ...BEHAVIOR, models, controls: liveControls });
     expect(made.statusCode, JSON.stringify(made.body)).toBe(201);
     expect(personaIn(made).settings?.models).toEqual(models);
     expect(personaIn(made).settings?.models).not.toHaveProperty("stt");
@@ -144,7 +155,7 @@ describe("creating and reading a persona", () => {
       name: "Invalid Live voice",
       ...BEHAVIOR,
       models: { ...models, live: { ...models.live, voiceId: "nova" } },
-      controls: CONTROLS,
+      controls: liveControls,
     });
     expect(refused.statusCode).toBe(422);
     expect(refused.body).toMatchObject({ message: expect.stringContaining("models.live.voiceId") });
@@ -239,7 +250,6 @@ describe("creating and reading a persona", () => {
       projectId: ada.projectId,
       name: "   ",
       ...BEHAVIOR,
-      models: RECOMMENDED_PERSONA_MODELS,
     });
     expect(nameless.statusCode).toBe(422);
     expect(nameless.body).toEqual({
@@ -252,7 +262,6 @@ describe("creating and reading a persona", () => {
       name: "No name to give",
       ...BEHAVIOR,
       identityName: "   ",
-      models: RECOMMENDED_PERSONA_MODELS,
     });
     expect(anonymous.statusCode).toBe(422);
     expect(anonymous.body).toEqual({
@@ -267,7 +276,6 @@ describe("creating and reading a persona", () => {
       name: "Fast Freddie",
       ...BEHAVIOR,
       personality: "   ",
-      models: RECOMMENDED_PERSONA_MODELS,
     });
     expect(blankPersonality.statusCode).toBe(422);
     expect(blankPersonality.body).toEqual({
@@ -280,7 +288,6 @@ describe("creating and reading a persona", () => {
       name: "Default English language",
       identityName: BEHAVIOR.identityName,
       personality: BEHAVIOR.personality,
-      models: RECOMMENDED_PERSONA_MODELS,
     });
     expect(defaultLanguage.statusCode).toBe(201);
     expect(personaIn(defaultLanguage).language).toBe("en-US");
@@ -301,10 +308,49 @@ describe("creating and reading a persona", () => {
         ...RECOMMENDED_PERSONA_MODELS,
         stt: { provider: "openai", model: "nova-3-general" },
       },
+      controls: DEFAULT_CONTROLS,
     });
     expect(mismatchedStt.statusCode).toBe(422);
     expect(String(mismatchedStt.body.message)).toContain(
       "openai/nova-3-general",
+    );
+
+    const modelsOnly = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
+      name: "No discarded models",
+      ...BEHAVIOR,
+      models: RECOMMENDED_PERSONA_MODELS,
+    });
+    expect(modelsOnly.statusCode).toBe(422);
+    expect(modelsOnly.body).toEqual({
+      error: "unprocessable",
+      message:
+        "models and controls must be sent together when creating a persona with custom settings.",
+    });
+
+    const controlsOnly = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
+      name: "No discarded controls",
+      ...BEHAVIOR,
+      controls: DEFAULT_CONTROLS,
+    });
+    expect(controlsOnly.statusCode).toBe(422);
+    expect(controlsOnly.body).toEqual({
+      error: "unprocessable",
+      message:
+        "models and controls must be sent together when creating a persona with custom settings.",
+    });
+
+    const listed = await browse(
+      "GET",
+      `/v1/personas?projectId=${ada.projectId}`,
+      ada,
+    );
+    expect(listed.body.personas).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "No discarded models" }),
+        expect.objectContaining({ name: "No discarded controls" }),
+      ]),
     );
   });
 
@@ -349,17 +395,13 @@ describe("creating and reading a persona", () => {
         message: `a persona has no key "${field}"; ${carries}`,
       });
 
-      const edited = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
-        projectId: ada.projectId,
-        name: `No ${field}`,
-        [field]: value,
-      });
-      expect(edited.statusCode, field).toBe(422);
-      expect(edited.body, field).toEqual({
-        error: "unprocessable",
-        message: `a persona has no key "${field}"; ${carries.slice(0, -1)}, expectedVersionId.`,
-      });
     }
+
+    const retiredUpdate = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
+      projectId: ada.projectId,
+      name: "No saved edits",
+    });
+    expect(retiredUpdate.statusCode).toBe(404);
 
     // Nothing landed: the name is still the one it was created with.
     const still = await browse(
@@ -370,11 +412,11 @@ describe("creating and reading a persona", () => {
     expect(personaIn(still).name).toBe("Shapely Sam");
   });
 
-  it("maps retained numeric speaking speeds to categorical simulator targets", async () => {
+  it("refuses the retired numeric speaking speed", async () => {
     api = await createApi("personas_speed_range");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
 
-    for (const [speed, target] of [[0.25, 0.8], [4, 1.5]] as const) {
+    for (const speed of [0.25, 1, 4]) {
       const made = await browse("POST", "/v1/personas", ada, {
         projectId: ada.projectId,
         name: `Speed ${speed}`,
@@ -383,29 +425,12 @@ describe("creating and reading a persona", () => {
           ...RECOMMENDED_PERSONA_MODELS,
           tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed },
         },
+        controls: DEFAULT_CONTROLS,
       });
-      expect(made.statusCode, JSON.stringify(made.body)).toBe(201);
-      expect(personaIn(made).settings?.models).toMatchObject({ tts: { speed: target } });
-    }
-
-    for (const speed of [
-      0.2499,
-      4.0001,
-    ]) {
-      const refused = await browse("POST", "/v1/personas", ada, {
-        projectId: ada.projectId,
-        name: `Speed ${speed}`,
-        ...BEHAVIOR,
-        models: {
-          ...RECOMMENDED_PERSONA_MODELS,
-          tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed },
-        },
-      });
-      expect(refused.statusCode).toBe(422);
-      expect(refused.body).toEqual({
+      expect(made.statusCode).toBe(422);
+      expect(made.body).toEqual({
         error: "unprocessable",
-        message:
-          "models.tts.speed: Choose a historical numeric value from 0.25 through 4, or use controls.speechSpeed.",
+        message: "models.tts.speed: Speech rate is not an authored persona setting.",
       });
     }
   });
@@ -423,6 +448,7 @@ describe("creating and reading a persona", () => {
       name: "No-thinking Nina",
       ...BEHAVIOR,
       models: terra,
+      controls: DEFAULT_CONTROLS,
     });
     expect(made.statusCode, JSON.stringify(made.body)).toBe(201);
     expect(personaIn(made).settings?.models.llm).toEqual({
@@ -438,6 +464,7 @@ describe("creating and reading a persona", () => {
         ...terra,
         llm: { ...terra.llm, reasoningEffort: "high" },
       },
+      controls: DEFAULT_CONTROLS,
     });
     expect(refused.statusCode).toBe(422);
     expect(String(refused.body.message)).toMatch(
@@ -460,7 +487,7 @@ describe("creating and reading a persona", () => {
     expect(found).toMatchObject({
       name: "Everyday Caller [Male]",
       description: "Regular conversationalist persona",
-      version: 5,
+      version: 6,
       owner: "egma",
       // Catalog content, and the whole point of it: nobody ever hears
       // "Hi, I'm Everyday Caller [Male]."
@@ -480,8 +507,7 @@ describe("creating and reading a persona", () => {
         name: "The one everybody starts with",
       },
     );
-    expect(refused.statusCode).toBe(422);
-    expect(refused.body).toEqual(predefinedRefusal(PREDEFINED_PERSONA));
+    expect(refused.statusCode).toBe(404);
   });
 });
 
@@ -570,13 +596,17 @@ describe("the list", () => {
     // thing for a project to hold. Nothing refuses it, and nothing has to
     // guess which one an address means.
     const first = await createPersonaThrough(ada, "Impatient caller");
-    const second = await createPersonaThrough(ada, "Impatient caller");
-    expect(second.id).not.toBe(first.id);
-
-    await browse("PATCH", `/v1/personas/${second.id}`, ada, {
+    const secondAnswer = await browse("POST", "/v1/personas", ada, {
       projectId: ada.projectId,
+      name: "Impatient caller",
       description: "The second one.",
+      ...BEHAVIOR,
+      models: RECOMMENDED_PERSONA_MODELS,
+      controls: DEFAULT_CONTROLS,
     });
+    expect(secondAnswer.statusCode).toBe(201);
+    const second = personaIn(secondAnswer);
+    expect(second.id).not.toBe(first.id);
 
     const one = await browse(
       "GET",
@@ -681,144 +711,32 @@ describe("the list", () => {
   });
 });
 
-describe("editing a persona", () => {
-  it("writes name and description in place, minting no version", async () => {
-    api = await createApi("personas_rename");
+describe("saved personas are read-only", () => {
+  it("does not register an update route and leaves the saved persona unchanged", async () => {
+    api = await createApi("personas_read_only");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const made = await createPersonaThrough(ada, "Renamed Rowan");
+    const made = await createPersonaThrough(ada, "Read-only Rowan");
 
-    const renamed = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
+    const refused = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
       projectId: ada.projectId,
-      name: "Rowan",
-      description: "Somebody who calls about a bill.",
+      name: "Changed Rowan",
+      personality: "Changed behavior.",
+      models: RECOMMENDED_PERSONA_MODELS,
+      controls: CONTROLS,
     });
+    expect(refused.statusCode).toBe(404);
 
-    expect(renamed.statusCode).toBe(200);
-    const now = personaIn(renamed);
-    expect(now.name).toBe("Rowan");
-    expect(now.description).toBe("Somebody who calls about a bill.");
-    expect(now.version).toBe(1);
-    expect(now.versionId).toBe(made.versionId);
-    // The name the agent hears did not move because the label on the shelf did.
-    expect(now.identityName).toBe(made.identityName);
-  });
-
-  it("mints a version for each changed behavior field, and nothing for an identical save", async () => {
-    api = await createApi("personas_version");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const made = await createPersonaThrough(ada, "Versioned Vera");
-
-    const changed = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
-      projectId: ada.projectId,
-      personality: "Vera, after a long wait.",
-      expectedVersionId: made.versionId,
-    });
-    expect(changed.statusCode).toBe(200);
-    expect(personaIn(changed).version).toBe(2);
-    expect(personaIn(changed).personality).toBe("Vera, after a long wait.");
-
-    // The name the agent hears is versioned exactly like the personality is.
-    const renamedIdentity = await browse(
-      "PATCH",
-      `/v1/personas/${made.id}`,
-      ada,
-      { projectId: ada.projectId, identityName: "Vera Lindqvist", expectedVersionId: personaIn(changed).versionId },
-    );
-    expect(renamedIdentity.statusCode).toBe(200);
-    expect(personaIn(renamedIdentity).version).toBe(3);
-    expect(personaIn(renamedIdentity).identityName).toBe("Vera Lindqvist");
-
-    const identical = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
-      projectId: ada.projectId,
-      identityName: "Vera Lindqvist",
-      personality: "Vera, after a long wait.",
-      expectedVersionId: personaIn(renamedIdentity).versionId,
-    });
-    expect(identical.statusCode).toBe(200);
-    expect(personaIn(identical).version).toBe(3);
-    expect(personaIn(identical).versionId).toBe(
-      personaIn(renamedIdentity).versionId,
-    );
-
-    const history = await browse(
-      "GET",
-      `/v1/personas/${made.id}/versions?projectId=${ada.projectId}`,
-      ada,
-    );
-    expect(
-      (history.body.versions as { version: number }[]).map((v) => v.version),
-    ).toEqual([3, 2, 1]);
-    // Every frozen version answers with the person it pinned, flat.
-    expect(history.body.versions).toMatchObject([
-      { version: 3, identityName: "Vera Lindqvist" },
-      { version: 2, identityName: BEHAVIOR.identityName },
-      { version: 1, identityName: BEHAVIOR.identityName },
-    ]);
-  });
-
-  it("saves complete project models without changing core history", async () => {
-    api = await createApi("personas_models_version");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const made = await createPersonaThrough(ada, "Modelled Maya");
-    const models: PersonaModels = {
-      ...RECOMMENDED_PERSONA_MODELS,
-      tts: {
-        provider: "openai",
-        model: "gpt-4o-mini-tts",
-        voiceId: "alloy",
-        speed: 1.25,
-      },
-    };
-
-    const changed = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
-      projectId: ada.projectId,
-      models,
-    });
-
-    expect(changed.statusCode).toBe(200);
-    expect(personaIn(changed)).toMatchObject({ version: 1, settings: { models: { ...models, tts: { ...models.tts, speed: 1 } } } });
-    expect(personaIn(changed).versionId).toBe(made.versionId);
-
-    const history = await browse(
-      "GET",
-      `/v1/personas/${made.id}/versions?projectId=${ada.projectId}`,
-      ada,
-    );
-    expect(history.body.versions).toMatchObject([{ version: 1, ...BEHAVIOR, language: null }]);
-    expect((history.body.versions as Record<string, unknown>[])[0]).not.toHaveProperty("models");
-    expect((history.body.versions as Record<string, unknown>[])[0]).not.toHaveProperty("settings");
-  });
-
-  /** Metadata writes remain independent of immutable core version changes. */
-  it("takes a second metadata edit without requiring a core version", async () => {
-    api = await createApi("personas_last_write_wins");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const made = await createPersonaThrough(ada, "Contested Cora");
-
-    const once = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
-      projectId: ada.projectId,
-      name: "Cora, renamed once",
-    });
-    expect(once.statusCode).toBe(200);
-
-    // The second tab, holding the persona exactly as it read before that.
-    const twice = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
-      projectId: ada.projectId,
-      name: "Cora, renamed twice",
-    });
-    expect(twice.statusCode).toBe(200);
-
-    const now = await browse(
+    const read = await browse(
       "GET",
       `/v1/personas/${made.id}?projectId=${ada.projectId}`,
       ada,
     );
-    expect(personaIn(now).name).toBe("Cora, renamed twice");
+    expect(personaIn(read)).toEqual(made);
   });
 });
 
 describe("forking a persona", () => {
-  it("makes an editable project persona from the current definition, with no history", async () => {
+  it("makes an independent project persona from the current definition, with no history", async () => {
     api = await createApi("personas_fork");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const made = personaIn(
@@ -845,7 +763,7 @@ describe("forking a persona", () => {
       mode: "separate",
       llm: { provider: "openai", model: "gpt-4o-mini" },
       stt: { provider: "openai", model: "gpt-4o-mini-transcribe" },
-      tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "cedar", speed: 1 },
+      tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "cedar" },
     });
     expect(fork.owner).toBe("organization");
     // Its own history, starting over: the source's versions are the source's.
@@ -865,7 +783,7 @@ describe("forking a persona", () => {
     const ada = await signUp(api.app, "complete@acme.example", "Acme");
     const models = {
       ...RECOMMENDED_PERSONA_MODELS,
-      tts: { ...RECOMMENDED_PERSONA_MODELS.tts, voiceId: "alloy", speed: 1.25 },
+      tts: { ...RECOMMENDED_PERSONA_MODELS.tts, voiceId: "alloy" },
     };
 
     const createdAnswer = await browse("POST", "/v1/personas", ada, {
@@ -877,20 +795,19 @@ describe("forking a persona", () => {
     });
     expect(createdAnswer.statusCode, JSON.stringify(createdAnswer.body)).toBe(201);
     const created = personaIn(createdAnswer);
-    const resolvedModels = { ...models, tts: { ...models.tts, speed: 1 } };
-    expect(created.settings).toMatchObject({ models: resolvedModels, controls: { ...CONTROLS, executionPolicyVersion: 2 } });
+    expect(created.settings).toMatchObject({ models, controls: CONTROLS });
 
     const forkedAnswer = await browse("POST", `/v1/personas/${created.id}/fork`, ada, {
       projectId: ada.projectId,
     });
     expect(forkedAnswer.statusCode, JSON.stringify(forkedAnswer.body)).toBe(201);
     expect(personaIn(forkedAnswer).settings).toMatchObject({
-      models: resolvedModels,
-      controls: { ...CONTROLS, executionPolicyVersion: 2 },
+      models,
+      controls: CONTROLS,
     });
   });
 
-  it("validates models-only writes against voice access and retained controls", async () => {
+  it("validates complete model and control overrides on a clone", async () => {
     api = await createApi("personas_models_only_validation");
     const ada = await signUp(api.app, "model-validation@acme.example", "Acme");
     const privateVoice = await browse("POST", "/v1/personas", ada, {
@@ -901,12 +818,14 @@ describe("forking a persona", () => {
         ...RECOMMENDED_PERSONA_MODELS,
         tts: { ...RECOMMENDED_PERSONA_MODELS.tts, voiceId: "customer-private-voice" },
       },
+      controls: DEFAULT_CONTROLS,
     });
     expect(privateVoice.statusCode).toBe(422);
     expect(privateVoice.body.message).toBe("models.tts.voiceId: Choose one of the available voices.");
     const incompatibleStandard = await browse("POST", "/v1/personas", ada, {
       projectId: ada.projectId, name: "Invalid standard voice", ...BEHAVIOR,
-      models: { ...RECOMMENDED_PERSONA_MODELS, tts: { provider: "openai", model: "tts-1", voiceId: "cedar", speed: 1 } },
+      models: { ...RECOMMENDED_PERSONA_MODELS, tts: { provider: "openai", model: "tts-1", voiceId: "cedar" } },
+      controls: DEFAULT_CONTROLS,
     });
     expect(incompatibleStandard.statusCode).toBe(422);
     expect(incompatibleStandard.body.message).toBe("models.tts.voiceId: cedar is not supported by tts-1.");
@@ -917,32 +836,73 @@ describe("forking a persona", () => {
     });
     expect(retained.statusCode, JSON.stringify(retained.body)).toBe(201);
     const changedModels = { ...RECOMMENDED_PERSONA_MODELS, llm: { provider: "openai", model: "gpt-5.6-terra" } };
-    const changed = await browse("PATCH", `/v1/personas/${personaIn(retained).id}`, ada, {
-      projectId: ada.projectId, models: changedModels,
+    const changed = await browse("POST", `/v1/personas/${personaIn(retained).id}/fork`, ada, {
+      projectId: ada.projectId,
+      name: "Changed model clone",
+      description: "",
+      identityName: "Morgan Chen",
+      personality: "Asks for a short answer and stays calm.",
+      models: changedModels,
+      controls: CONTROLS,
     });
-    expect(changed.statusCode, JSON.stringify(changed.body)).toBe(200);
+    expect(changed.statusCode, JSON.stringify(changed.body)).toBe(201);
     expect(personaIn(changed).settings).toMatchObject({
       models: changedModels,
-      controls: { ...CONTROLS, executionPolicyVersion: 2 },
+      controls: CONTROLS,
     });
+    expect(personaIn(changed)).toMatchObject({
+      name: "Changed model clone",
+      description: "",
+      identityName: "Morgan Chen",
+      personality: "Asks for a short answer and stays calm.",
+    });
+    const source = await browse(
+      "GET",
+      `/v1/personas/${personaIn(retained).id}?projectId=${ada.projectId}`,
+      ada,
+    );
+    expect(personaIn(source).settings?.models).toEqual(RECOMMENDED_PERSONA_MODELS);
 
-    const configured = await browse("POST", "/v1/personas", ada, {
+    const incomplete = await browse("POST", `/v1/personas/${personaIn(retained).id}/fork`, ada, {
       projectId: ada.projectId,
-      name: "Expressive caller",
+      models: changedModels,
+    });
+    expect(incomplete.statusCode).toBe(422);
+    expect(incomplete.body.message).toContain("models and controls must be sent together");
+  });
+
+  it("keeps the source speech mode and refuses interruptions for Live clones", async () => {
+    api = await createApi("personas_clone_mode_lock");
+    const ada = await signUp(api.app, "clone-mode@acme.example", "Acme");
+    const liveModels = {
+      mode: "live" as const,
+      llm: { provider: "openai", model: "gpt-5.6-sol" },
+      live: { provider: "openai" as const, model: "gpt-live-1" as const, adapter: "openai_live" as const, voiceId: "beacon" },
+    };
+    const source = await browse("POST", "/v1/personas", ada, {
+      projectId: ada.projectId,
+      name: "Live source",
       ...BEHAVIOR,
-      models: RECOMMENDED_PERSONA_MODELS,
-      controls: { ...CONTROLS, emotion: "happy", accent: "british" },
+      models: liveModels,
+      controls: { language: "en-US", backgroundSoundId: "none" },
     });
-    expect(configured.statusCode, JSON.stringify(configured.body)).toBe(201);
-    const incompatible = await browse("PATCH", `/v1/personas/${personaIn(configured).id}`, ada, {
+    expect(source.statusCode).toBe(201);
+
+    const changedMode = await browse("POST", `/v1/personas/${personaIn(source).id}/fork`, ada, {
       projectId: ada.projectId,
-      models: {
-        ...RECOMMENDED_PERSONA_MODELS,
-        tts: { provider: "openai", model: "tts-1", voiceId: "alloy", speed: 1 },
-      },
+      models: RECOMMENDED_PERSONA_MODELS,
+      controls: CONTROLS,
     });
-    expect(incompatible.statusCode).toBe(422);
-    expect(incompatible.body.message).toContain("emotion:");
+    expect(changedMode.statusCode).toBe(422);
+    expect(changedMode.body.message).toContain("must keep the source speech mode");
+
+    const interruptedLive = await browse("POST", `/v1/personas/${personaIn(source).id}/fork`, ada, {
+      projectId: ada.projectId,
+      models: liveModels,
+      controls: { language: "en-US", backgroundSoundId: "none", interruptionLevel: "none" },
+    });
+    expect(interruptedLive.statusCode).toBe(422);
+    expect(interruptedLive.body.message).toContain("live personas do not support interruptions");
   });
 
   it("returns 422 for invalid controls and leaves saved settings unchanged", async () => {
@@ -954,11 +914,11 @@ describe("forking a persona", () => {
       controls: { ...CONTROLS, speechVolume: 99 },
     });
     expect(invalidCreate.statusCode).toBe(422);
-    expect(invalidCreate.body.message).toContain("speech volume");
+    expect(invalidCreate.body.message).toContain("controls.speechVolume");
 
     const created = await createPersonaThrough(ada, "Stable settings");
     const before = created.settings;
-    const invalidUpdate = await browse("PATCH", `/v1/personas/${created.id}`, ada, {
+    const invalidUpdate = await browse("POST", `/v1/personas/${created.id}/fork`, ada, {
       projectId: ada.projectId,
       models: RECOMMENDED_PERSONA_MODELS,
       controls: { ...CONTROLS, executionPolicyVersion: 9 },
@@ -1128,7 +1088,7 @@ describe("what a viewer is refused", () => {
     expect(history.statusCode).toBe(200);
 
     const writes: readonly [
-      "POST" | "PATCH" | "DELETE",
+      "POST" | "DELETE",
       string,
       Record<string, unknown> | undefined,
       string,
@@ -1143,12 +1103,6 @@ describe("what a viewer is refused", () => {
           models: RECOMMENDED_PERSONA_MODELS,
         },
         "create personas",
-      ],
-      [
-        "PATCH",
-        `/v1/personas/${made.id}`,
-        { projectId: ada.projectId, name: "Nope" },
-        "edit personas",
       ],
       [
         "POST",
@@ -1189,22 +1143,10 @@ describe("what a viewer is refused", () => {
 });
 
 describe("history and usage", () => {
-  it("reads one older version on its own, and says what uses the persona now", async () => {
+  it("reads the immutable version on its own, and says what uses the persona now", async () => {
     api = await createApi("personas_history_usage");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
     const made = await createPersonaThrough(ada, "Historic Hana");
-
-    const moved = await browse("PATCH", `/v1/personas/${made.id}`, ada, {
-      projectId: ada.projectId,
-      personality: "Hana has waited too long and is now blunt.",
-      expectedVersionId: made.versionId,
-    });
-    // The persona really moved on, so reading version 1 below is reading
-    // something the persona has left behind rather than where they still are.
-    // Without this the whole test would pass if editing stopped minting.
-    expect(moved.statusCode).toBe(200);
-    expect(personaIn(moved).version).toBe(2);
-    expect(personaIn(moved).versionId).not.toBe(made.versionId);
 
     const older = await browse(
       "GET",

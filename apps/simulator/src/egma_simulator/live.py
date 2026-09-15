@@ -295,7 +295,6 @@ class LiveConductor:
         backend_model: ModelClient,
         blobs: BlobStore,
         recording_key: str,
-        speech_volume: float,
         _base_url: str = "wss://api.openai.com/v1/live/sessions",
     ) -> None:
         self._connection = connection
@@ -305,7 +304,6 @@ class LiveConductor:
         self._backend_model = backend_model
         self._blobs = blobs
         self._recording_key = recording_key
-        self._speech_volume = speech_volume
         self._base_url = _base_url
         self.audio: AudioFacts | None = None
         self.evidence_error: str | None = None
@@ -446,7 +444,7 @@ class LiveConductor:
                 [
                     *media.input,
                     live,
-                    SpeechGain(self._speech_volume),
+                    SpeechGain(1.0),
                     *media.output,
                     evidence,
                     recorder,

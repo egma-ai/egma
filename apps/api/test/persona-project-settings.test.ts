@@ -1,385 +1,154 @@
-import {
-  createProject,
-  createTestSuite,
-  EGMA_PROVIDED_PERSONAS,
-  PERSONA_LIBRARY_CATALOG,
-  RECOMMENDED_PERSONA_MODELS,
-} from "@egma/db";
+import { createProject, createTestSuite, EGMA_PROVIDED_PERSONAS, PERSONA_LIBRARY_CATALOG, RECOMMENDED_PERSONA_MODELS } from "@egma/db";
 import { afterEach, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
 import { contextFor, signUp, type Customer } from "./support/traces.ts";
 
 let api: TestApi;
-afterEach(async () => {
-  await api?.close();
-});
+afterEach(async () => { await api?.close(); });
 
-const DEFAULT_CONTROLS = {
-  language: "en-US",
-  emotion: "neutral",
-  accent: "voice_default",
-  speechVolume: 1,
-  backgroundSoundId: "none",
-  backgroundVolume: 0.0631,
-  interruptionLevel: "none",
-  speechSpeed: "normal",
+const CURRENT_MODELS = {
+  mode: "separate",
+  llm: RECOMMENDED_PERSONA_MODELS.llm,
+  stt: RECOMMENDED_PERSONA_MODELS.stt,
+  tts: { provider: RECOMMENDED_PERSONA_MODELS.tts.provider, model: RECOMMENDED_PERSONA_MODELS.tts.model, voiceId: RECOMMENDED_PERSONA_MODELS.tts.voiceId },
 } as const;
+const DEFAULT_CONTROLS = { language: "en-US", backgroundSoundId: "none", interruptionLevel: "none" } as const;
 
-async function request(
-  who: Customer,
-  method: "GET" | "POST" | "PATCH",
-  url: string,
-  payload?: object,
-) {
-  return api.app.inject({
-    method,
-    url,
-    headers: { cookie: who.cookie },
-    ...(payload === undefined ? {} : { payload }),
-  });
+async function request(who: Customer, method: "GET" | "POST" | "PATCH", url: string, payload?: object) {
+  return api.app.inject({ method, url, headers: { cookie: who.cookie }, ...(payload === undefined ? {} : { payload }) });
 }
 
-it("saves independent shared-persona settings, clones current behavior, and rejects stale core edits", async () => {
+it("keeps shared personas read-only and applies complete overrides only to a clone", async () => {
   api = await createApi("persona_project_settings");
   const who = await signUp(api.app, "personas@project.example", "Personas");
-  const other = await createProject(contextFor(who, "admin"), {
-    name: "Other",
-  });
+  const other = await createProject(contextFor(who, "admin"), { name: "Other" });
   const personaId = EGMA_PROVIDED_PERSONAS.defaultPersona;
-  const first = await request(who, "POST", `/v1/personas/${personaId}/use`, {
-    projectId: who.projectId,
-  });
+  const first = await request(who, "POST", `/v1/personas/${personaId}/use`, { projectId: who.projectId });
   expect(first.statusCode, first.body).toBe(200);
   const saved = first.json();
   expect(saved.settings.models.tts.voiceId).toBeTruthy();
-  const models = {
-    ...RECOMMENDED_PERSONA_MODELS,
-    tts: {
-      ...RECOMMENDED_PERSONA_MODELS.tts,
-      voiceId: "coral",
-      speed: 0.85,
-    },
-  };
-  const usedAgain = await request(
-    who,
-    "POST",
-    `/v1/personas/${personaId}/use`,
-    { projectId: who.projectId },
-  );
-  expect(usedAgain.json().settings.id).toBe(saved.settings.id);
-  const second = await request(who, "POST", `/v1/personas/${personaId}/use`, {
-    projectId: other.id,
-    models,
-  });
-  expect(second.statusCode, second.body).toBe(200);
-  expect(second.json().settings.models).toEqual({ ...models, tts: { ...models.tts, speed: 0.8 } });
-  const firstRead = await request(
-    who,
-    "GET",
-    `/v1/personas/${personaId}?projectId=${who.projectId}`,
-  );
-  expect(firstRead.json().settings.models).toEqual(saved.settings.models);
+  const usedAgain = await request(who, "POST", `/v1/personas/${personaId}/use`, { projectId: who.projectId });
+  expect(usedAgain.json().settings).toEqual(saved.settings);
+  const otherUse = await request(who, "POST", `/v1/personas/${personaId}/use`, { projectId: other.id });
+  expect(otherUse.statusCode, otherUse.body).toBe(200);
 
-  const clone = await request(who, "POST", `/v1/personas/${personaId}/fork`, {
-    projectId: other.id,
-  });
+  const models = { ...CURRENT_MODELS, tts: { ...CURRENT_MODELS.tts, voiceId: "coral" } };
+  const controls = { language: "en-US", backgroundSoundId: "rain-v1", interruptionLevel: "occasional" } as const;
+  const clone = await request(who, "POST", `/v1/personas/${personaId}/fork`, { projectId: other.id, personality: "Asks one question, then waits.", models, controls });
   expect(clone.statusCode, clone.body).toBe(201);
-  const custom = clone.json();
-  expect(custom.settings.models).toEqual({ ...models, tts: { ...models.tts, speed: 0.8 } });
-  const moved = await request(who, "PATCH", `/v1/personas/${custom.id}`, {
-    projectId: other.id,
-    expectedVersionId: custom.versionId,
-    personality: "Asks one question, then waits.",
-  });
-  expect(moved.statusCode, moved.body).toBe(200);
-  expect(moved.json().version).toBe(2);
-  const settingsOnly = await request(
-    who,
-    "PATCH",
-    `/v1/personas/${custom.id}`,
-    { projectId: other.id, models: RECOMMENDED_PERSONA_MODELS },
-  );
-  expect(settingsOnly.statusCode, settingsOnly.body).toBe(200);
-  expect(settingsOnly.json().version).toBe(2);
-  const stale = await request(who, "PATCH", `/v1/personas/${custom.id}`, {
-    projectId: other.id,
-    expectedVersionId: custom.versionId,
-    personality: custom.personality,
-  });
-  expect(stale.statusCode).toBe(409);
-  const unguarded = await request(who, "PATCH", `/v1/personas/${custom.id}`, {
-    projectId: other.id,
-    personality: custom.personality,
-  });
-  expect(unguarded.statusCode).toBe(422);
-  const history = await request(
-    who,
-    "GET",
-    `/v1/personas/${custom.id}/versions?projectId=${other.id}`,
-  );
-  expect(history.json().versions).toHaveLength(2);
-  expect(history.json().versions[1]).not.toHaveProperty("models");
-  expect(history.json().versions[1]).not.toHaveProperty("settings");
-  const foreign = await request(
-    who,
-    "GET",
-    `/v1/personas/${custom.id}?projectId=${who.projectId}`,
-  );
+  expect(clone.json()).toMatchObject({ version: 1, personality: "Asks one question, then waits.", settings: { models, controls } });
+  const source = await request(who, "GET", `/v1/personas/${personaId}?projectId=${other.id}`);
+  expect(source.json().settings).toEqual(otherUse.json().settings);
+  const edit = await request(who, "PATCH", `/v1/personas/${clone.json().id}`, { projectId: other.id, personality: "This route is retired." });
+  expect(edit.statusCode).toBe(404);
+  const history = await request(who, "GET", `/v1/personas/${clone.json().id}/versions?projectId=${other.id}`);
+  expect(history.json().versions).toHaveLength(1);
+  const foreign = await request(who, "GET", `/v1/personas/${clone.json().id}?projectId=${who.projectId}`);
   expect(foreign.statusCode).toBe(404);
 });
 
-it("keeps a shared persona's categorical speed during a models-only edit", async () => {
-  api = await createApi("shared_persona_models_keep_speed");
-  const who = await signUp(api.app, "shared-speed@project.example", "Shared speed");
+it("does not expose internal speech speed when cloning model choices", async () => {
+  api = await createApi("shared_persona_models_no_speed");
+  const who = await signUp(api.app, "shared-speed@project.example", "Shared models");
   const personaId = EGMA_PROVIDED_PERSONAS.defaultPersona;
   const core = PERSONA_LIBRARY_CATALOG.find((persona) => persona.id === personaId)?.versions.at(-1);
   if (core === undefined) throw new Error("the shared persona core is missing");
-  expect(core.parameterContract.map((field) => field.key)).not.toContain("speech_speed");
-  const selected = {
-    ...RECOMMENDED_PERSONA_MODELS,
-    tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed: 0.85 },
-  };
-  const used = await request(who, "POST", `/v1/personas/${personaId}/use`, {
-    projectId: who.projectId,
-    models: selected,
-  });
+  expect(core.parameterContract.map((field) => field.key)).not.toContain("tts_speed");
+  const used = await request(who, "POST", `/v1/personas/${personaId}/use`, { projectId: who.projectId });
   expect(used.statusCode, used.body).toBe(200);
-  expect(used.json().settings).toMatchObject({
-    models: { tts: { speed: 0.8 } },
-    controls: { speechSpeed: "slow" },
-  });
-  const versionId = used.json().versionId;
-
-  const edited = await request(who, "PATCH", `/v1/personas/${personaId}`, {
-    projectId: who.projectId,
-    models: {
-      ...RECOMMENDED_PERSONA_MODELS,
-      llm: { provider: "openai", model: "gpt-5.6-terra" },
-      tts: {
-        provider: RECOMMENDED_PERSONA_MODELS.tts.provider,
-        model: RECOMMENDED_PERSONA_MODELS.tts.model,
-        voiceId: RECOMMENDED_PERSONA_MODELS.tts.voiceId,
-      },
-    },
-  });
-
-  expect(edited.statusCode, edited.body).toBe(200);
-  expect(edited.json()).toMatchObject({
-    versionId,
-    settings: {
-      models: { llm: { model: "gpt-5.6-terra" }, tts: { speed: 0.8 } },
-      controls: { speechSpeed: "slow" },
-    },
-  });
+  expect(used.json().settings.models.tts).not.toHaveProperty("speed");
+  expect(used.json().settings.controls).toEqual(DEFAULT_CONTROLS);
+  const models = { ...CURRENT_MODELS, llm: { provider: "openai", model: "gpt-5.6-terra" } } as const;
+  const cloned = await request(who, "POST", `/v1/personas/${personaId}/fork`, { projectId: who.projectId, models, controls: DEFAULT_CONTROLS });
+  expect(cloned.statusCode, cloned.body).toBe(201);
+  expect(cloned.json().settings).toEqual(expect.objectContaining({ models, controls: DEFAULT_CONTROLS }));
+  expect(cloned.json().settings.models.tts).not.toHaveProperty("speed");
+  const source = await request(who, "GET", `/v1/personas/${personaId}?projectId=${who.projectId}`);
+  expect(source.json().settings).toEqual(used.json().settings);
 });
 
-it("rejects incomplete, unknown and invalid settings without creating a partial persona", async () => {
+it("rejects incomplete, unknown, and retired settings without creating a partial persona", async () => {
   api = await createApi("persona_invalid_settings");
-  const who = await signUp(
-    api.app,
-    "invalid@personas.example",
-    "Invalid personas",
-  );
-  const fields = {
-    projectId: who.projectId,
-    name: "Unwritten",
-    identityName: "Nora",
-    personality: "Patient",
-    controls: DEFAULT_CONTROLS,
-  };
-  for (const models of [{ llm: { provider: "openai" } }, { extra: true }]) {
-    const rejected = await request(who, "POST", "/v1/personas", {
-      ...fields,
-      models,
-    });
+  const who = await signUp(api.app, "invalid@personas.example", "Invalid personas");
+  const fields = { projectId: who.projectId, name: "Unwritten", identityName: "Nora", personality: "Patient", controls: DEFAULT_CONTROLS };
+  const invalidModels = [
+    { llm: { provider: "openai" } },
+    { extra: true },
+    { ...CURRENT_MODELS, tts: { ...CURRENT_MODELS.tts, voiceId: " " } },
+    { ...CURRENT_MODELS, tts: { ...CURRENT_MODELS.tts, speed: 1 } },
+  ];
+  for (const models of invalidModels) {
+    const rejected = await request(who, "POST", "/v1/personas", { ...fields, models });
     expect(rejected.statusCode, rejected.body).toBe(422);
   }
-  const badVoice = await request(who, "POST", "/v1/personas", {
-    ...fields,
-    models: {
-      ...RECOMMENDED_PERSONA_MODELS,
-      tts: { ...RECOMMENDED_PERSONA_MODELS.tts, voiceId: " " },
-    },
-  });
-  expect(badVoice.statusCode).toBe(422);
-  const listed = await request(
-    who,
-    "GET",
-    `/v1/personas?projectId=${who.projectId}`,
-  );
-  expect(
-    listed.json().personas.map((one: { name: string }) => one.name),
-  ).not.toContain("Unwritten");
+  const listed = await request(who, "GET", `/v1/personas?projectId=${who.projectId}`);
+  expect(listed.json().personas.map((one: { name: string }) => one.name)).not.toContain("Unwritten");
 });
 
-it("serializes first use and current core edits without duplicate settings or lost behavior", async () => {
+it("serializes first use and creates concurrent clones without changing the source", async () => {
   api = await createApi("persona_concurrent_settings");
-  const who = await signUp(
-    api.app,
-    "concurrent@personas.example",
-    "Concurrent personas",
-  );
+  const who = await signUp(api.app, "concurrent@personas.example", "Concurrent personas");
   const shared = EGMA_PROVIDED_PERSONAS.defaultPersona;
-  const uses = await Promise.all(
-    ["alloy", "coral", "echo"].map((voiceId) =>
-      request(who, "POST", `/v1/personas/${shared}/use`, {
-        projectId: who.projectId,
-        models: {
-          ...RECOMMENDED_PERSONA_MODELS,
-          tts: { ...RECOMMENDED_PERSONA_MODELS.tts, voiceId },
-        },
-      }),
-    ),
-  );
+  const uses = await Promise.all(Array.from({ length: 3 }, () => request(who, "POST", `/v1/personas/${shared}/use`, { projectId: who.projectId })));
   for (const used of uses) expect(used.statusCode, used.body).toBe(200);
   const selections = uses.map((used) => used.json().settings);
   expect(new Set(selections.map((settings) => settings.id)).size).toBe(1);
-  expect(
-    new Set(selections.map((settings) => settings.models.tts.voiceId)).size,
-  ).toBe(1);
-  const clone = await request(who, "POST", `/v1/personas/${shared}/fork`, {
-    projectId: who.projectId,
-  });
-  const original = clone.json();
-  const edits = await Promise.all(
-    ["Patient and quiet.", "Firm and direct."].map((personality) =>
-      request(who, "PATCH", `/v1/personas/${original.id}`, {
-        projectId: who.projectId,
-        expectedVersionId: original.versionId,
-        personality,
-      }),
-    ),
-  );
-  expect(edits.map((edit) => edit.statusCode).sort()).toEqual([200, 409]);
-  const history = await request(
-    who,
-    "GET",
-    `/v1/personas/${original.id}/versions?projectId=${who.projectId}`,
-  );
-  expect(history.json().versions).toHaveLength(2);
-  expect(history.json().versions[0].personality).toBe(
-    edits.find((edit) => edit.statusCode === 200)?.json().personality,
-  );
+  const personalities = ["Patient and quiet.", "Firm and direct."];
+  const clones = await Promise.all(personalities.map((personality) => request(who, "POST", `/v1/personas/${shared}/fork`, { projectId: who.projectId, personality })));
+  expect(clones.map((clone) => clone.statusCode)).toEqual([201, 201]);
+  expect(new Set(clones.map((clone) => clone.json().id)).size).toBe(2);
+  expect(clones.map((clone) => clone.json().personality).sort()).toEqual([...personalities].sort());
+  const source = await request(who, "GET", `/v1/personas/${shared}?projectId=${who.projectId}`);
+  expect(source.json().settings).toEqual(selections[0]);
 });
 
-it("refuses another project's custom persona at every write and history door", async () => {
+it("refuses another project's custom persona at every read, clone, use, and selection door", async () => {
   api = await createApi("persona_settings_ownership");
   const who = await signUp(api.app, "owner@personas.example", "Owners");
-  const stranger = await signUp(
-    api.app,
-    "stranger@personas.example",
-    "Strangers",
-  );
-  const other = await createProject(contextFor(who, "admin"), {
-    name: "Other project",
-  });
-  const created = await request(who, "POST", "/v1/personas", {
-    projectId: who.projectId,
-    name: "Private Nora",
-    identityName: "Nora",
-    personality: "Patient and clear.",
-    models: RECOMMENDED_PERSONA_MODELS,
-    controls: DEFAULT_CONTROLS,
-  });
+  const stranger = await signUp(api.app, "stranger@personas.example", "Strangers");
+  const other = await createProject(contextFor(who, "admin"), { name: "Other project" });
+  const created = await request(who, "POST", "/v1/personas", { projectId: who.projectId, name: "Private Nora", identityName: "Nora", personality: "Patient and clear.", models: CURRENT_MODELS, controls: DEFAULT_CONTROLS });
   expect(created.statusCode, created.body).toBe(201);
   const persona = created.json();
-  for (const [reader, projectId] of [
-    [who, other.id],
-    [stranger, stranger.projectId],
-  ] as const) {
-    for (const path of [
-      `/v1/personas/${persona.id}`,
-      `/v1/personas/${persona.id}/versions`,
-      `/v1/persona-versions/${persona.versionId}`,
-    ]) {
-      const refused = await request(
-        reader,
-        "GET",
-        `${path}?projectId=${projectId}`,
-      );
+  for (const [reader, projectId] of [[who, other.id], [stranger, stranger.projectId]] as const) {
+    for (const path of [`/v1/personas/${persona.id}`, `/v1/personas/${persona.id}/versions`, `/v1/persona-versions/${persona.versionId}`]) {
+      const refused = await request(reader, "GET", `${path}?projectId=${projectId}`);
       expect(refused.statusCode, refused.body).toBe(404);
     }
     for (const suffix of ["use", "fork"]) {
-      const refused = await request(
-        reader,
-        "POST",
-        `/v1/personas/${persona.id}/${suffix}`,
-        { projectId },
-      );
+      const refused = await request(reader, "POST", `/v1/personas/${persona.id}/${suffix}`, { projectId });
       expect(refused.statusCode, refused.body).toBe(404);
     }
-    const edit = await request(reader, "PATCH", `/v1/personas/${persona.id}`, {
-      projectId,
-      models: RECOMMENDED_PERSONA_MODELS,
-    });
-    expect(edit.statusCode, edit.body).toBe(404);
-    const suite = await createTestSuite(
-      { ...contextFor(reader, "admin"), projectId },
-      { name: "Own suite" },
-    );
-    const selection = await request(reader, "POST", "/v1/tests", {
-      projectId,
-      suiteId: suite.id,
-      name: "Foreign caller",
-      scenario: "Asks for a time.",
-      expectedBehaviors: ["Answers the time."],
-      personas: [persona.id],
-    });
+    const retiredEdit = await request(reader, "PATCH", `/v1/personas/${persona.id}`, { projectId, personality: "No edit" });
+    expect(retiredEdit.statusCode).toBe(404);
+    const suite = await createTestSuite({ ...contextFor(reader, "admin"), projectId }, { name: "Own suite" });
+    const selection = await request(reader, "POST", "/v1/tests", { projectId, suiteId: suite.id, name: "Foreign caller", scenario: "Asks for a time.", expectedBehaviors: ["Answers the time."], personas: [persona.id] });
     expect(selection.statusCode, selection.body).toBe(422);
   }
-  const crossOrganization = await request(
-    stranger,
-    "POST",
-    `/v1/personas/${EGMA_PROVIDED_PERSONAS.defaultPersona}/use`,
-    { projectId: who.projectId },
-  );
+  const crossOrganization = await request(stranger, "POST", `/v1/personas/${EGMA_PROVIDED_PERSONAS.defaultPersona}/use`, { projectId: who.projectId });
   expect(crossOrganization.statusCode).toBe(404);
-  const original = await request(
-    who,
-    "GET",
-    `/v1/personas/${persona.id}?projectId=${who.projectId}`,
-  );
+  const original = await request(who, "GET", `/v1/personas/${persona.id}?projectId=${who.projectId}`);
   expect(original.json()).toEqual(persona);
 });
 
-it("refuses invalid settings saves before changing any current project values", async () => {
-  api = await createApi("persona_settings_invalid_save");
-  const who = await signUp(api.app, "save@personas.example", "Settings saves");
+it("rejects invalid clone overrides before changing the source persona", async () => {
+  api = await createApi("persona_settings_invalid_clone");
+  const who = await signUp(api.app, "save@personas.example", "Clone validation");
   const id = EGMA_PROVIDED_PERSONAS.defaultPersona;
-  const used = await request(who, "POST", `/v1/personas/${id}/use`, {
-    projectId: who.projectId,
-  });
-  const settings = used.json().settings;
+  const used = await request(who, "POST", `/v1/personas/${id}/use`, { projectId: who.projectId });
+  const source = used.json();
   const invalid = [
-    { llm: RECOMMENDED_PERSONA_MODELS.llm },
-    { ...RECOMMENDED_PERSONA_MODELS, extra: true },
-    {
-      ...RECOMMENDED_PERSONA_MODELS,
-      stt: { provider: "openai", model: "nova-3-general" },
-    },
-    { ...RECOMMENDED_PERSONA_MODELS, llm: { provider: 4, model: "gpt-4o" } },
-    ...["1", 0.24, 4.01].map((speed) => ({
-      ...RECOMMENDED_PERSONA_MODELS,
-      tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed },
-    })),
-    {
-      ...RECOMMENDED_PERSONA_MODELS,
-      tts: { ...RECOMMENDED_PERSONA_MODELS.tts, voiceId: " " },
-    },
+    { models: CURRENT_MODELS },
+    { controls: DEFAULT_CONTROLS },
+    { models: { ...CURRENT_MODELS, tts: { ...CURRENT_MODELS.tts, speed: 1 } }, controls: DEFAULT_CONTROLS },
+    { models: { ...CURRENT_MODELS, llm: { provider: 4, model: "gpt-4o" } }, controls: DEFAULT_CONTROLS },
+    { models: { mode: "live", llm: CURRENT_MODELS.llm, live: { provider: "openai", model: "gpt-live-1", adapter: "openai_live", voiceId: "alloy" } }, controls: DEFAULT_CONTROLS },
   ];
-  for (const models of invalid) {
-    const rejected = await request(who, "PATCH", `/v1/personas/${id}`, {
-      projectId: who.projectId,
-      models,
-    });
+  for (const overrides of invalid) {
+    const rejected = await request(who, "POST", `/v1/personas/${id}/fork`, { projectId: who.projectId, ...overrides });
     expect(rejected.statusCode, rejected.body).toBe(422);
   }
-  const read = await request(
-    who,
-    "GET",
-    `/v1/personas/${id}?projectId=${who.projectId}`,
-  );
-  expect(read.json().settings).toEqual(settings);
-  expect(read.json().versionId).toBe(used.json().versionId);
+  const read = await request(who, "GET", `/v1/personas/${id}?projectId=${who.projectId}`);
+  expect(read.json()).toEqual(source);
 });

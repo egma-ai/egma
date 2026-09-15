@@ -4,28 +4,21 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 
-DEFAULT_BACKGROUND_VOLUME = 0.0631
-MIN_BACKGROUND_VOLUME = 10 ** (-36 / 20)
-MAX_BACKGROUND_VOLUME = 10 ** (-12 / 20)
+BACKGROUND_GAIN = 10 ** (-12 / 20)
+"""Fixed gain for every selected background sound."""
 
 
 @dataclass(frozen=True)
 class BackgroundSound:
     sound_id: str
-    volume: float
 
     def __post_init__(self) -> None:
         if not self.sound_id:
             raise ValueError("background sound ID is required")
-        if not math.isfinite(self.volume) or not (
-            MIN_BACKGROUND_VOLUME <= self.volume <= MAX_BACKGROUND_VOLUME
-        ):
-            raise ValueError("background volume must be between -36 dB and -12 dB")
 
 
 def _asset_root() -> Path:
@@ -58,7 +51,7 @@ def soundfile_mixer(background: BackgroundSound):
     return SoundfileMixer(
         sound_files={background.sound_id: str(path)},
         default_sound=background.sound_id,
-        volume=background.volume,
+        volume=BACKGROUND_GAIN,
         mixing=True,
         loop=True,
     )
