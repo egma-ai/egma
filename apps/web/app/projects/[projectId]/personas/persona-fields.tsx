@@ -365,7 +365,12 @@ export function ModelFields({
           </Button>
         </div>
       )}
-      <PersonaSection label="Language">
+      <PersonaSection
+        label="Language"
+        invalidReason={capabilities !== null && !languageAvailable
+          ? "Choose an available language"
+          : undefined}
+      >
         <Field label="Language*" htmlFor={`${prefix}-language`}>
           <SearchableSelect
             id={`${prefix}-language`}
@@ -391,7 +396,12 @@ export function ModelFields({
 
       {draft.mode === "separate" ? (
         <>
-          <PersonaSection label="Text to speech">
+          <PersonaSection
+            label="Text to speech"
+            invalidReason={capabilities !== null && !voiceAvailable
+              ? "Choose an available voice"
+              : undefined}
+          >
             <div className="flex flex-col gap-4">
               <ProviderModelFields
                 prefix={prefix}
@@ -449,7 +459,12 @@ export function ModelFields({
           </PersonaSection>
         </>
       ) : (
-        <PersonaSection label="Realtime voice">
+        <PersonaSection
+          label="Realtime voice"
+          invalidReason={capabilities !== null && !voiceAvailable
+            ? "Choose an available voice"
+            : undefined}
+        >
           <div className="flex flex-col gap-4">
             <VoiceField
               prefix={prefix}
