@@ -1709,8 +1709,14 @@ describe("API keys", () => {
     const create = await screen.findByRole("button", { name: "Create key" });
     expect(create.hasAttribute("disabled")).toBe(false);
     expect((screen.getByLabelText("Name") as HTMLInputElement).disabled).toBe(false);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open the menu for My laptop" }),
+    );
     expect(
-      screen.getByRole("button", { name: "Revoke" }).hasAttribute("disabled"),
+      (await screen.findByRole("menuitem", { name: "Revoke" })).hasAttribute(
+        "disabled",
+      ),
     ).toBe(false);
   });
 
@@ -1848,7 +1854,12 @@ describe("API keys", () => {
     renderApiKeysSettings();
 
     const table = await screen.findByRole("table", { name: "Your API keys" });
-    fireEvent.click(within(table).getByRole("button", { name: "Revoke" }));
+    fireEvent.click(
+      within(table).getByRole("button", {
+        name: "Open the menu for My laptop",
+      }),
+    );
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Revoke" }));
 
     const dialog = await screen.findByRole("dialog", {
       name: "Revoke API key “My laptop”?",
