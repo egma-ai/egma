@@ -20,7 +20,7 @@ import { ownerSaid, type Persona } from "../../../../lib/personas.ts";
 /** A labelled settings group that keeps its fields reachable by keyboard. */
 export function PersonaSection({
   label,
-  open = true,
+  open = false,
   children,
 }: {
   readonly label: string;
@@ -29,18 +29,17 @@ export function PersonaSection({
 }) {
   return (
     <Collapsible
-      className="border-t border-border pt-2 first:border-t-0"
       defaultOpen={open}
       asChild
     >
       <section aria-label={label}>
         <h3 className="m-0">
-          <CollapsibleTrigger className="group/collapsible flex min-h-(--control-lg) w-full items-center justify-between border-0 bg-transparent p-0 text-left text-base font-medium text-foreground">
-            <span>{label}</span>
+          <CollapsibleTrigger className="group/collapsible flex min-h-(--control-lg) w-full items-center justify-start gap-2 border-0 bg-transparent p-0 text-left text-base font-medium text-foreground">
             <ChevronRightIcon
               className="size-4 text-faint transition-transform duration-(--duration-hover) ease-out group-data-[state=open]/collapsible:rotate-90 motion-reduce:transition-none"
               aria-hidden="true"
             />
+            <span>{label}</span>
           </CollapsibleTrigger>
         </h3>
         <CollapsibleContent className="pb-4 pt-3">

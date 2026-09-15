@@ -242,7 +242,8 @@ The measurements, all of them theme values:
 | Table body row, minimum | 52px |
 | Table row-menu slot | 48px |
 | Toolbar row | 52px |
-| Persona form, persona tips | 720px, 440px |
+| Persona form | 720px |
+| Dropdown menu, maximum height | 288px |
 | Side sheet | 440px |
 | Wide reading sheet | 640px |
 | Production trace reading sheet | 640-760px |
@@ -263,7 +264,7 @@ The measurements, all of them theme values:
 - Quiet action: text only, with an optional small Ember arrow.
 - Destructive actions require confirmation and say what will happen. The action that opens the confirmation is a text action in the failure colour, kept at the opposite edge of a footer from the normal save. The button inside the confirmation is a filled failure-colour button.
 - Pointer press feedback uses a subtle scale. Keyboard activation is immediate.
-- A link inside a table cell is underlined in the text colour and turns Ember under a pointer.
+- A link inside a table cell is underlined in the text colour and turns Ember under a pointer. Persona name links are the scoped exception: their table row is the pointer target, so the name has no underline at rest or on hover. The row still turns the name Ember under a pointer, and the link keeps the standard keyboard focus indicator. (Developer decision, 2026-09-15.)
 - **A segmented control's chosen segment carries a two-pixel Ember line on its top edge**, over a plain fill, plus weight 500 so the state is not colour alone. It is the narrow active edge this file already asks Ember for, moved to the edge a person reads first. A wash fill is not used here: the wash is the primary action's own surface, and a segment wearing it reads as a button to press rather than a choice already made. (Developer decision, 2026-08-24.)
 - A rail tab at the top of a page or panel carries its two-pixel Ember line on the bottom edge, where the tab meets its content. This does not change the segmented control above. (Developer decision, 2026-08-26, from the run-detail review.) On the run detail's simulation rail the unchosen tab carries a one-pixel neutral line on the same edge and the rail draws no hairline of its own, so the pair reads as one rail rather than one underlined word. (Developer decision, 2026-09-07 evening.)
 
@@ -272,7 +273,7 @@ The measurements, all of them theme values:
 - Use one clear page title and a short purpose statement.
 - Group related fields on Pure Paper surfaces.
 - Keep labels visible. Placeholder text is not a label.
-- **One label grammar, everywhere.** A mandatory field's label ends in `*`. An optional field's label ends in `[optional]`, in square brackets. A field carries at most one faint help line, and that line says what to write or where the value comes from — never how Egma stores it. (Developer decision, 2026-08-24. The lines that explained storage — “One paste, ever…”, “From your Retell…”, “Off by default…” — were deleted with it.)
+- **One label grammar, everywhere.** A mandatory field's label ends in `*`. An optional field's label ends in `[optional]`, in square brackets. A field carries at most one faint help line, and that line says what to write or where the value comes from — never how Egma stores it. Persona create and clone are the scoped exception: optional `Description` has no suffix, persona fields have no explanatory help line, and their writing guidance lives in 14px faint placeholder text. Description has no placeholder. (Developer decisions, 2026-08-24 and persona exception 2026-09-15.)
 - **The star is never only a picture.** A field whose label ends in `*` also carries `aria-required="true"`, so the promise the label makes to a reader is the same one it makes to a screen reader. A starred label with no required semantics is a bug, not a style choice. (Developer decision, 2026-08-24.)
 - **An annotation is a quiet fact beside a label, never a second name for the field.** A field may carry one short annotation after its label — `scores · 1` — in the same faint ink as a help line, on the interpunct grammar this file already sets for `Result · Passed`. It says what the value means rather than what to write, so it sits outside the `<label>` element and never joins the name a screen reader announces; the control points at it with `aria-describedby` instead. Square brackets stay reserved for `[optional]`, so an annotation never wears them. A field carries an annotation or a help line, not both. (Developer decision, 2026-08-29.)
 - Save state is truthful: unchanged, saving, saved, or failed.
@@ -308,7 +309,7 @@ The measurements, all of them theme values:
 ### Side sheets
 
 - One record is created, read, and edited in a side sheet anchored to the right edge: agents, connections, personas, and tests. The list stays on screen behind it. (Developer decision, 2026-08-23.)
-- **Personas are the scoped exception.** A persona's architecture is chosen on a setup page, then create, read, and clone each use a full page with the production shell and breadcrumb. Saved custom and predefined personas are read-only; changes start an editable clone draft whose architecture cannot change. The list stays a separate page. Agents, connections, and tests continue to use the side-sheet rule above. (Developer decision, 2026-09-14, from Paper page `12 — Personas · Complete flow + Dropdowns`.)
+- **Personas are the scoped exception.** A persona's architecture is chosen on a setup page, then create, read, and clone each use a full page with the production shell and breadcrumb. Saved custom and predefined personas are read-only; changes start an editable clone draft whose architecture cannot change. The list stays a separate page. Persona settings sections start collapsed in create, read, and clone. Their right chevron sits before the label and points down when expanded. Hairlines separate only the major Name and Description, Who they are, and Settings groups; Language, speech, reasoning, and Advanced sections have no lines between them. Persona pages carry no tips block. The read page has no Clone action in its title bar; cloning remains in the persona table menu. Agents, connections, and tests continue to use the side-sheet rule above. (Developer decisions, 2026-09-14 from Paper page `12 — Personas · Complete flow + Dropdowns`, and persona polish 2026-09-15.)
 - **There are two side-sheet behaviours and one wider production reading variant.** The **modal** sheet is the create, read, and edit surface for agents, connections, and tests: it is 440px, sits over a scrim, and makes the page behind it inert. The **wide reading** sheet is the evidence surface — a transcript beside its grader results, a persona's version history — it is 640px, has no scrim, and deliberately leaves the page beside it usable. The production trace uses that same reading behaviour but progressively widens from 640px to 760px when the viewport has room, so more of the transcript stays visible. A production transcript closes after a primary pointer press on the page beside it. Simulation transcript-and-audio evidence stays open while its grader results are used for comparison. Every width is a theme value. (Developer decision, 2026-08-23; persona exception 2026-09-14; production-transcript outside dismissal and wider production reading variant added by developer decision, 2026-08-28.)
 - A side sheet is full height, on Pure Paper behind a hairline on its left edge.
 - Its head is the record's name at the lead step with a close beside it, over a hairline. Its body is the fields and scrolls. Its footer is pinned to the bottom.
@@ -318,7 +319,7 @@ The measurements, all of them theme values:
 
 ### Menus, popovers, and dialogs
 
-- Menus and popovers scale from the trigger origin.
+- Menus and popovers scale from the trigger origin. Persona field dropdowns are the scoped placement exception: they always open below the trigger, scroll the trigger into view when needed, and keep a bounded scrolling option list instead of flipping above it. Other product dropdowns retain adaptive placement. (Developer decision, 2026-09-15.)
 - Dialogs stay centered.
 - Dialogs trap focus, make the background inert, close with Escape, and restore the exact opener.
 - Destructive dialogs name the affected agent, test, persona, grader, key, invitation, run, or project.
