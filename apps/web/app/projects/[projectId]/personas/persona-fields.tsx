@@ -219,6 +219,16 @@ function capabilityMessage(
   return <Note bad={state.status === "unsupported"}>{label}: {state.reason ?? state.status}</Note>;
 }
 
+function capabilityInvalidReason(
+  state: { readonly status: string; readonly reason?: string },
+  available: boolean,
+  chooseAvailable: string,
+): string | undefined {
+  if (available) return undefined;
+  if (state.status === "supported" || state.status === "fixed") return chooseAvailable;
+  return state.reason ?? "Support could not be verified";
+}
+
 export function ModelFields({
   prefix,
   draft,
@@ -353,6 +363,20 @@ export function ModelFields({
   const voiceDisplay = capabilities === null || voiceAvailable
     ? selectedVoice?.name ?? activeVoiceId
     : `${activeVoiceId} · Unavailable`;
+  const languageInvalidReason = capabilities === null
+    ? undefined
+    : capabilityInvalidReason(
+        capabilities.language,
+        languageAvailable,
+        "Choose an available language",
+      );
+  const voiceInvalidReason = capabilities === null
+    ? undefined
+    : capabilityInvalidReason(
+        capabilities.voices,
+        voiceAvailable,
+        "Choose an available voice",
+      );
 
   return (
     <>
@@ -367,9 +391,7 @@ export function ModelFields({
       )}
       <PersonaSection
         label="Language"
-        invalidReason={capabilities !== null && !languageAvailable
-          ? "Choose an available language"
-          : undefined}
+        invalidReason={languageInvalidReason}
       >
         <Field label="Language*" htmlFor={`${prefix}-language`}>
           <SearchableSelect
@@ -398,9 +420,7 @@ export function ModelFields({
         <>
           <PersonaSection
             label="Text to speech"
-            invalidReason={capabilities !== null && !voiceAvailable
-              ? "Choose an available voice"
-              : undefined}
+            invalidReason={voiceInvalidReason}
           >
             <div className="flex flex-col gap-4">
               <ProviderModelFields
@@ -461,9 +481,7 @@ export function ModelFields({
       ) : (
         <PersonaSection
           label="Realtime voice"
-          invalidReason={capabilities !== null && !voiceAvailable
-            ? "Choose an available voice"
-            : undefined}
+          invalidReason={voiceInvalidReason}
         >
           <div className="flex flex-col gap-4">
             <VoiceField

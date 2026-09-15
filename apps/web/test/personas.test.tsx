@@ -318,7 +318,12 @@ describe("persona full-page flows", () => {
     provider.focus();
     fireEvent.keyDown(provider, { key: "Enter" });
     fireEvent.click(await screen.findByRole("option", { name: "Anthropic" }));
-    expect(screen.getByLabelText("Reasoning model*").textContent).toContain("Claude Sonnet");
+    const model = screen.getByLabelText("Reasoning model*");
+    model.focus();
+    fireEvent.keyDown(model, { key: "Enter" });
+    const selectedModel = await screen.findByRole("option", { name: "Claude Sonnet" });
+    expect(selectedModel.getAttribute("data-state")).toBe("checked");
+    fireEvent.keyDown(selectedModel, { key: "Escape" });
     fireEvent.change(screen.getByLabelText("Name*"), { target: { value: "Linked model" } });
     fireEvent.change(screen.getByLabelText("Identity name*"), { target: { value: "Lin" } });
     fireEvent.change(screen.getByLabelText("Personality*"), { target: { value: "Checks every choice." } });
