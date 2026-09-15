@@ -257,7 +257,7 @@ function PersonaRead({
         </PersonaSubsection>
       )}
 
-      <PersonaSubsection label="Advanced" surface="read">
+      <PersonaSubsection label="Advanced Settings" surface="read">
         <PersonaReadRows rows={advanced} />
       </PersonaSubsection>
     </div>
@@ -325,12 +325,7 @@ export function PersonaReadScreen({
         ]}
         topbarAction={
           persona === null || !mayClone ? undefined : (
-            <Button
-              asChild
-              variant="default"
-              size="default"
-              className="gap-2 border-transparent"
-            >
+            <Button asChild variant="default" size="default" className="gap-2">
               <Link href={personaClonePath(projectId, persona.id)}>
                 <CopyIcon className="size-4" strokeWidth={1.7} aria-hidden="true" />
                 Clone

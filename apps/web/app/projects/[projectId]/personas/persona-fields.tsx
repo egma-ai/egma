@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   getPersonaCapabilities,
@@ -21,6 +22,7 @@ import {
   type PersonaModelCatalogEntry,
 } from "@/lib/personas.ts";
 import { platformAnswer, platformClient } from "@/lib/platform-client.ts";
+import { projectPath } from "@/lib/project-context.ts";
 import { FieldHintContext } from "@/ui/field-hint.ts";
 import { FormRow } from "@/ui/form.tsx";
 import { SearchableSelect } from "@/ui/searchable-select.tsx";
@@ -41,6 +43,9 @@ const TEXT_BOX = "text-sm placeholder:text-sm placeholder:text-faint";
 
 /** A dropdown trigger on the boards: soft grey fill, 44px, 14px ink. */
 const DROPDOWN = "bg-surface-soft text-sm";
+
+/** The API's sentence when neither the organization nor the platform holds a key for the chosen provider. */
+const MISSING_PROVIDER_KEY = /credential bundle has no \w+ key/u;
 
 function Note({ children, bad = false }: { readonly children: ReactNode; readonly bad?: boolean }) {
   return (
@@ -322,6 +327,21 @@ export function ModelFields({
     capabilityAttempt,
   ]);
 
+  /* A missing provider key is fixed on the Provider API Keys page, so the notice says where. */
+  const capabilityNotice: ReactNode = capabilityError === null
+    ? null
+    : MISSING_PROVIDER_KEY.test(capabilityError)
+      ? (
+        <>
+          Please set the Provider API key in{" "}
+          <Link className="text-foreground underline pointer-hover:text-brand" href={projectPath(projectId, "settings", "provider-api-keys")}>
+            Settings
+          </Link>
+          .
+        </>
+      )
+      : capabilityError;
+
   const activeVoiceId = draft.mode === "live" ? draft.liveVoiceId : draft.separateVoiceId;
   const allVoices = capabilities?.voices.choices ?? [];
   const voiceAvailable =
@@ -412,7 +432,7 @@ export function ModelFields({
       <PersonaGroupLabel divider>Settings</PersonaGroupLabel>
       {capabilityError === null ? null : (
         <div className="flex flex-wrap items-center gap-3">
-          <Note bad>{capabilityError}</Note>
+          <Note bad>{capabilityNotice}</Note>
           <Button type="button" size="sm" variant="secondary" disabled={disabled} onClick={retryCapabilities}>
             Retry options
           </Button>
@@ -437,7 +457,7 @@ export function ModelFields({
           required
           invalid={capabilities !== null && !languageAvailable}
           loading={capabilities === null && capabilityError === null}
-          error={capabilityError}
+          error={capabilityNotice}
           empty="No languages found"
           emptyDetail="Try another search."
           onSearchChange={setLanguageSearch}
@@ -466,7 +486,7 @@ export function ModelFields({
               valid={voiceAvailable}
               describedBy={voiceInvalidReason === undefined ? undefined : voiceReasonId}
               loading={capabilities === null && capabilityError === null}
-              error={capabilityError}
+              error={capabilityNotice}
               options={voices}
               search={voiceSearch}
               type={voiceType}
@@ -518,7 +538,7 @@ export function ModelFields({
             valid={voiceAvailable}
             describedBy={voiceInvalidReason === undefined ? undefined : voiceReasonId}
             loading={capabilities === null && capabilityError === null}
-            error={capabilityError}
+            error={capabilityNotice}
             options={voices}
             search={voiceSearch}
             type={voiceType}
@@ -542,7 +562,7 @@ export function ModelFields({
         </PersonaSubsection>
       )}
 
-      <PersonaSubsection label="Advanced">
+      <PersonaSubsection label="Advanced Settings">
         {/* Two lanes even when the API leaves the second empty, so one dropdown stays the width of every other. */}
         <div className="grid grid-cols-2 gap-4 max-[900px]:grid-cols-1">
           <PersonaField label="Background sound*" htmlFor={`${prefix}-background-sound`}>
@@ -611,7 +631,7 @@ function VoiceField({
   /** The id of the reason an unavailable voice blocks the form, for the picker to point at. */
   readonly describedBy?: string;
   readonly loading: boolean;
-  readonly error: string | null;
+  readonly error: ReactNode;
   readonly options: readonly { readonly value: string; readonly label: string; readonly detail: string }[];
   readonly search: string;
   readonly type: "all" | "male" | "female" | "unknown";

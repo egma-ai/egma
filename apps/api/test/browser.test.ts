@@ -383,7 +383,7 @@ describe("adding a colleague, with no mail configured", () => {
     "does nothing until an admin confirms a destructive member action",
     async () => {
       await openPeopleSettings(page);
-      // The wide layout's row. The list beside it is the same three controls
+      // The wide layout's row. The list beside it is the same two controls
       // over the same person, drawn for a narrow screen from one column
       // definition, so driving either would prove the same thing.
       const bob = page.locator("tr", { hasText: "bob@acme.example" });
@@ -393,7 +393,15 @@ describe("adding a colleague, with no mail configured", () => {
           .locator('[data-slot="dialog-overlay"]')
           .click({ position: { x: 4, y: 4 } });
       };
-      // Three controls, and all one height. The height itself is the shared
+      // Both member actions live in the ⋮ every other table in the product
+      // ends its rows with, so each one is reached the same way.
+      const chooseForBob = async (item: string) => {
+        await bob
+          .getByRole("button", { name: "Open the menu for bob@acme.example" })
+          .click();
+        await page.getByRole("menuitem", { name: item }).click();
+      };
+      // Two controls, and both one height. The height itself is the shared
       // system's token rather than this page's own now that Settings is built
       // from the same controls as every other product page, so what is held
       // here is that they agree — the density itself is a token to tune.
@@ -402,7 +410,7 @@ describe("adding a colleague, with no mail configured", () => {
         .evaluateAll((controls) =>
           controls.map((control) => control.getBoundingClientRect().height),
         );
-      expect(heights).toHaveLength(3);
+      expect(heights).toHaveLength(2);
       expect(new Set(heights).size).toBe(1);
 
       const memberActions: string[] = [];
@@ -416,52 +424,52 @@ describe("adding a colleague, with no mail configured", () => {
 
       try {
         // The dialog itself is not an action. Every ordinary way out is safe.
-        await bob.getByRole("button", { name: "Deactivate" }).click();
+        await chooseForBob("Deactivate");
         expect(memberActions).toEqual([]);
         await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
 
-        await bob.getByRole("button", { name: "Deactivate" }).click();
+        await chooseForBob("Deactivate");
         await page.keyboard.press("Escape");
         expect(memberActions).toEqual([]);
 
-        await bob.getByRole("button", { name: "Deactivate" }).click();
+        await chooseForBob("Deactivate");
         await dismissDialogThroughOverlay();
         await expect.poll(() => page.getByRole("dialog").count()).toBe(0);
         expect(memberActions).toEqual([]);
 
         // Only the destructive button sends the request, and it sends the
         // endpoint named by the choice once.
-        await bob.getByRole("button", { name: "Deactivate" }).click();
+        await chooseForBob("Deactivate");
         const deactivated = page.waitForResponse((response) =>
           response.request().method() === "POST" &&
           new URL(response.url()).pathname.endsWith("/deactivate"),
         );
         await page.getByRole("dialog").getByRole("button", { name: "Deactivate" }).click();
         expect((await deactivated).status()).toBe(200);
-        // Case-insensitive: the standing is a badge now, and the shared
-        // system draws a badge in small capitals.
+        // The standing is the compact chip the product's other tables wear,
+        // and it says the word in sentence case.
         await expect.poll(() => bob.innerText()).toMatch(/deactivated/i);
         expect(memberActions).toHaveLength(1);
         expect(memberActions[0]).toMatch(/\/deactivate$/u);
 
         // Removal has its own confirmation and endpoint. Closing it is safe;
         // confirming it removes the row and sends one more request.
-        await bob.getByRole("button", { name: "Remove" }).click();
+        await chooseForBob("Remove");
         expect(memberActions).toHaveLength(1);
         await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
         await expect.poll(() => page.getByRole("dialog").count()).toBe(0);
 
-        await bob.getByRole("button", { name: "Remove" }).click();
+        await chooseForBob("Remove");
         await page.keyboard.press("Escape");
         await expect.poll(() => page.getByRole("dialog").count()).toBe(0);
         expect(memberActions).toHaveLength(1);
 
-        await bob.getByRole("button", { name: "Remove" }).click();
+        await chooseForBob("Remove");
         await dismissDialogThroughOverlay();
         await expect.poll(() => page.getByRole("dialog").count()).toBe(0);
         expect(memberActions).toHaveLength(1);
 
-        await bob.getByRole("button", { name: "Remove" }).click();
+        await chooseForBob("Remove");
         const removed = page.waitForResponse((response) =>
           response.request().method() === "POST" &&
           new URL(response.url()).pathname.endsWith("/remove"),
@@ -3065,7 +3073,7 @@ describe("the complete product, walked in order in a second project", () => {
       for (const group of ["Metadata", "Who they are", "Settings"]) {
         expect(await walk.getByRole("heading", { name: new RegExp(`^${group}$`, "iu"), level: 2 }).count()).toBe(1);
       }
-      for (const section of ["Language*", "Text-to-speech", "Speech-to-text", "LLM", "Advanced"]) {
+      for (const section of ["Language*", "Text-to-speech", "Speech-to-text", "LLM", "Advanced Settings"]) {
         expect(await walk.getByRole("region", { name: section, exact: true }).count()).toBe(1);
       }
       expect(await walk.getByText("Tips for a useful persona", { exact: true }).count()).toBe(0);
@@ -5407,7 +5415,7 @@ it(
       await walk.locator("[data-slot='persona-read']").waitFor();
       expect(await walk.locator("[data-slot='persona-read'] input, [data-slot='persona-read'] select, [data-slot='persona-read'] textarea").count()).toBe(0);
       // Every subsection is open on the read page, under a plain header.
-      for (const section of ["Language", "Text-to-speech", "Speech-to-text", "LLM", "Advanced"]) {
+      for (const section of ["Language", "Text-to-speech", "Speech-to-text", "LLM", "Advanced Settings"]) {
         expect(await walk.getByRole("region", { name: section, exact: true }).count()).toBe(1);
       }
       // A persona is changed by cloning it, so Clone is the title bar's one action.
@@ -5427,7 +5435,7 @@ it(
       await walk.waitForURL(/\/personas\/prs_[^/]+\/clone$/);
       await reactHasTakenOver(walk, "form");
       expect(await walk.locator("#clone-persona-name").inputValue()).toContain("Everyday Caller [Male]");
-      for (const section of ["Language*", "Text-to-speech", "Speech-to-text", "LLM", "Advanced"]) {
+      for (const section of ["Language*", "Text-to-speech", "Speech-to-text", "LLM", "Advanced Settings"]) {
         expect(await walk.getByRole("region", { name: section, exact: true }).count()).toBe(1);
       }
       expect(await walk.locator("#clone-persona-tts-provider").count()).toBe(1);
@@ -5439,11 +5447,25 @@ it(
       expect(await walk.getByText("Tips for a useful persona", { exact: true }).count()).toBe(0);
       await walk.fill("#clone-persona-name", "Patient Nora");
       await walk.fill("#clone-persona-personality", "Asks one question and waits for the answer.");
-      await walk.locator("#clone-persona-interruptions").click();
-      expect(await walk.locator("[data-slot='downward-select-content']").getAttribute("data-side")).toBe("bottom");
+      // A dropdown opens beside its trigger without moving the page: the
+      // trigger stays where it was, and the list stays inside the window.
+      async function opensInPlace(trigger: string): Promise<void> {
+        const before = await walk.locator(trigger).boundingBox();
+        await walk.locator(trigger).click();
+        const list = walk.locator("[data-slot='downward-select-content']");
+        await list.waitFor();
+        const drawn = await list.boundingBox();
+        const after = await walk.locator(trigger).boundingBox();
+        expect(after).toEqual(before);
+        if (drawn === null) throw new Error(`${trigger} drew no list`);
+        const window = walk.viewportSize();
+        if (window === null) throw new Error("the page has no viewport size");
+        expect(drawn.y).toBeGreaterThanOrEqual(0);
+        expect(drawn.y + drawn.height).toBeLessThanOrEqual(window.height);
+      }
+      await opensInPlace("#clone-persona-interruptions");
       await walk.getByRole("option", { name: "Frequent", exact: true }).click();
-      await walk.locator("#clone-persona-background-sound").click();
-      expect(await walk.locator("[data-slot='downward-select-content']").getAttribute("data-side")).toBe("bottom");
+      await opensInPlace("#clone-persona-background-sound");
       await walk.getByRole("option", { name: "Office", exact: true }).click();
 
       // A full-page draft still protects a person's work before navigation.

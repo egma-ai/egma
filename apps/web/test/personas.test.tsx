@@ -215,7 +215,7 @@ describe("persona full-page flows", () => {
     render(<PersonaCreateScreen projectId="prj_1" />);
     expect(await screen.findByText("Choose Persona's Agent Architecture")).toBeTruthy();
     expect(screen.getByText("How should this persona listen and respond?")).toBeTruthy();
-    expect(screen.getByRole("radio", { name: "Cascaded pipeline" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Cascaded Architecture" })).toBeTruthy();
     expect(screen.getByRole("radio", { name: "Realtime voice" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/personas");
@@ -238,7 +238,7 @@ describe("persona full-page flows", () => {
     }
     expect(screen.queryByText("Tips for a useful persona")).toBeNull();
     /* Nothing collapses: every subsection is a region with its fields drawn. */
-    for (const named of ["Language*", "Text-to-speech", "Speech-to-text", "LLM", "Advanced"]) {
+    for (const named of ["Language*", "Text-to-speech", "Speech-to-text", "LLM", "Advanced Settings"]) {
       expect(section(named)).toBeTruthy();
       expect(screen.queryByRole("button", { name: named })).toBeNull();
     }
@@ -254,7 +254,7 @@ describe("persona full-page flows", () => {
     expect(within(reasoning).getByLabelText("Provider*")).toBeTruthy();
     expect(within(reasoning).getByLabelText("Model*")).toBeTruthy();
     expect(screen.queryByLabelText(/Speech mode/i)).toBeNull();
-    const advanced = section("Advanced");
+    const advanced = section("Advanced Settings");
     expect(within(advanced).getByLabelText("Background sound*")).toBeTruthy();
     expect(within(advanced).getByLabelText("Interruptions*")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Create persona" })).toBeTruthy();
@@ -270,7 +270,7 @@ describe("persona full-page flows", () => {
     expect(screen.queryByLabelText(/Speech mode/i)).toBeNull();
     expect(screen.queryByLabelText(/Interruptions/i)).toBeNull();
     expect(screen.queryByLabelText(/Live speech model/i)).toBeNull();
-    for (const named of ["Language*", "Realtime LLM", "Advanced"]) {
+    for (const named of ["Language*", "Realtime LLM", "Advanced Settings"]) {
       expect(section(named)).toBeTruthy();
     }
     expect(screen.queryByRole("region", { name: "Text-to-speech" })).toBeNull();
@@ -305,7 +305,7 @@ describe("persona full-page flows", () => {
     expect(await screen.findByDisplayValue("Live Lee copy")).toBeTruthy();
     expect(asked.filter((one) => one.method === "POST")).toHaveLength(0);
     expect(screen.queryByLabelText(/Interruptions/i)).toBeNull();
-    for (const named of ["Language*", "Realtime LLM", "Advanced"]) {
+    for (const named of ["Language*", "Realtime LLM", "Advanced Settings"]) {
       expect(section(named)).toBeTruthy();
     }
     expect(screen.getByRole("heading", { level: 1, name: "Clone persona" })).toBeTruthy();
@@ -434,7 +434,7 @@ describe("persona full-page flows", () => {
     for (const heading of ["Metadata", "Who they are", "Settings"]) {
       expect(screen.getByRole("heading", { level: 2, name: heading })).toBeTruthy();
     }
-    for (const named of ["Language", "Realtime LLM", "Advanced"]) {
+    for (const named of ["Language", "Realtime LLM", "Advanced Settings"]) {
       expect(section(named)).toBeTruthy();
       expect(screen.queryByRole("button", { name: named })).toBeNull();
     }
@@ -458,7 +458,7 @@ describe("persona full-page flows", () => {
     expect(within(speech).getByText("Cartesia")).toBeTruthy();
     expect(within(speech).getByText("Model")).toBeTruthy();
     expect(within(speech).getByText("Sonic 3.5")).toBeTruthy();
-    const advanced = section("Advanced");
+    const advanced = section("Advanced Settings");
     expect(within(advanced).getByText("Interruptions")).toBeTruthy();
     expect(within(advanced).getByText("Occasional")).toBeTruthy();
     expect(screen.getByText("Custom")).toBeTruthy();

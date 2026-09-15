@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   changeMemberRole,
   createInvitation,
@@ -16,6 +16,7 @@ import { roleOf } from "../../../../../lib/me.ts";
 import { platformAnswer, platformClient } from "../../../../../lib/platform-client.ts";
 import {
   ASSIGNABLE_ROLES,
+  roleSaid,
   rowsIn,
   standingOf,
   type Invitation,
@@ -41,10 +42,12 @@ import {
   Help,
   Refused,
 } from "../../../../../ui/form.tsx";
+import { MenuDivider, MenuItem } from "../../../../../ui/menu.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import {
   ListInstant,
 } from "../../../../../ui/relative-time.tsx";
+import { MenuReason, RowMenu } from "../../../../../ui/row-menu.tsx";
 import { Section } from "../../../../../ui/section.tsx";
 import { SettingsTabs } from "../../../../../ui/settings-nav.tsx";
 import {
@@ -63,21 +66,23 @@ import { useShellSession } from "../../../../../ui/shell.tsx";
 type Tab = "people" | "invitations";
 
 /**
- * Use max-content grid tracks to keep named actions side by side, with any
- * disabled-action reason spanning a second row. w-0 min-w-full lets the reason
- * wrap without widening the button tracks. Remove cell padding in stacked
- * layout because the row already supplies it.
+ * Where a person or an invitation stands, on the compact chip the product's
+ * other tables wear — the persona Type chip's own shape, in sentence case. The
+ * tone supports the word; the word is what says the state.
  */
-const ROW_ACTIONS = [
-  "grid grid-cols-[max-content_max-content] items-center gap-2",
-  "px-(--row-padding-x) stacked:px-0",
-  "[&>span]:col-span-2 [&>span]:row-start-2 [&>span]:text-left",
-  "[&>span]:w-0 [&>span]:min-w-full [&>span]:whitespace-normal",
-].join(" ");
-
-/** The same lane, for a row that offers one control and no reason. */
-const ROW_ACTION =
-  "flex items-center justify-end gap-2 px-(--row-padding-x) stacked:px-0";
+function StandingChip({
+  tone,
+  children,
+}: {
+  readonly tone: "neutral" | "success" | "warning";
+  readonly children: ReactNode;
+}) {
+  return (
+    <Badge className="bg-transparent" shape="count" variant={tone}>
+      {children}
+    </Badge>
+  );
+}
 
 export default function PeopleSettingsPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -295,12 +300,12 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
           >
             {ASSIGNABLE_ROLES.map((one) => (
               <option key={one} value={one}>
-                {one}
+                {roleSaid(one)}
               </option>
             ))}
           </Select>
         ) : (
-          member.role
+          roleSaid(member.role)
         ),
     },
     {
@@ -308,37 +313,49 @@ function PeopleSettings({ projectId }: { readonly projectId: string }) {
       header: "Standing",
       cell: (member) =>
         member.deactivatedAt === null ? (
-          <Badge variant="success">Active</Badge>
+          <StandingChip tone="success">Active</StandingChip>
         ) : (
-          <Badge variant="warning">Deactivated</Badge>
+          <StandingChip tone="warning">Deactivated</StandingChip>
         ),
     },
     {
       key: "actions",
-      header: "Actions",
+      header: "Row actions",
       /* Mark the cell as an action so table overflow rules do not clip its focus ring. */
       action: true,
       cell: (member) => (
-        <div className={ROW_ACTIONS}>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!mayManage}
-            busy={busy}
-            {...(whyNot === undefined ? {} : { why: whyNot })}
-            onClick={() => setConfirming({ action: "deactivate", member })}
-          >
-            Deactivate
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!mayManage || busy}
-            onClick={() => setConfirming({ action: "remove", member })}
-          >
-            Remove
-          </Button>
-        </div>
+        <RowMenu label={`Open the menu for ${member.email}`}>
+          {(close) => (
+            <>
+              <MenuItem
+                disabled={!mayManage || busy}
+                onClick={() => {
+                  close();
+                  setConfirming({ action: "deactivate", member });
+                }}
+              >
+                Deactivate
+              </MenuItem>
+              <MenuDivider />
+              <MenuItem
+                disabled={!mayManage || busy}
+                onClick={() => {
+                  close();
+                  setConfirming({ action: "remove", member });
+                }}
+              >
+                <span className="text-failure">Remove</span>
+              </MenuItem>
+              {/*
+               * The reason stays in the row it is about. A disabled item
+               * cannot take focus, so the sentence is drawn in the panel,
+               * where a keyboard lands on it and a reader hears it with the
+               * items above.
+               */}
+              {whyNot === undefined ? null : <MenuReason>{whyNot}</MenuReason>}
+            </>
+          )}
+        </RowMenu>
       ),
     },
   ];
@@ -527,16 +544,16 @@ function Invitations({
     {
       key: "role",
       header: "Role",
-      cell: (invitation) => invitation.role,
+      cell: (invitation) => roleSaid(invitation.role),
     },
     {
       key: "standing",
       header: "Standing",
       cell: (invitation) =>
         standingOf(invitation) === "expired" ? (
-          <Badge variant="warning">Expired</Badge>
+          <StandingChip tone="warning">Expired</StandingChip>
         ) : (
-          <Badge>Pending</Badge>
+          <StandingChip tone="neutral">Pending</StandingChip>
         ),
     },
     {
@@ -546,23 +563,27 @@ function Invitations({
     },
     {
       key: "actions",
-      header: "Actions",
+      header: "Row actions",
       /* A row control, for the reason written on the column above. */
       action: true,
-      // Nothing on a pending row: waiting is what it is for. An expired one
-      // cannot be waited on, so the one thing left to do about it is here.
+      // No menu on a pending row: waiting is what it is for, and the slot stays
+      // open so the lane runs straight. An expired one cannot be waited on, so
+      // the one thing left to do about it is in its menu.
       cell: (invitation) =>
         standingOf(invitation) === "expired" ? (
-          <div className={ROW_ACTION}>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={busy}
-              onClick={() => void send(invitation.email, invitation.role)}
-            >
-              Send again
-            </Button>
-          </div>
+          <RowMenu label={`Open the menu for ${invitation.email}`}>
+            {(close) => (
+              <MenuItem
+                disabled={busy}
+                onClick={() => {
+                  close();
+                  void send(invitation.email, invitation.role);
+                }}
+              >
+                Send again
+              </MenuItem>
+            )}
+          </RowMenu>
         ) : null,
     },
   ];
@@ -618,7 +639,7 @@ function Invitations({
               >
                 {ASSIGNABLE_ROLES.map((one) => (
                   <option key={one} value={one}>
-                    {one}
+                    {roleSaid(one)}
                   </option>
                 ))}
               </Select>

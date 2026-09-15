@@ -1215,9 +1215,23 @@ describe("people and invitations", () => {
     expect(table.textContent).toContain("ada@acme.example");
     expect(table.textContent).toContain("bob@acme.example");
 
-    fireEvent.change(screen.getAllByLabelText("bob@acme.example role")[0]!, {
-      target: { value: "member" },
-    });
+    // The words are the product's; the values are the contract's. A control
+    // that sent `Member` would be refused by the route it posts to.
+    const control = screen.getAllByLabelText(
+      "bob@acme.example role",
+    )[0]! as HTMLSelectElement;
+    expect([...control.options].map((one) => one.text)).toEqual([
+      "Admin",
+      "Member",
+      "Viewer",
+    ]);
+    expect([...control.options].map((one) => one.value)).toEqual([
+      "admin",
+      "member",
+      "viewer",
+    ]);
+
+    fireEvent.change(control, { target: { value: "member" } });
 
     await waitFor(() => {
       expect(
@@ -1240,27 +1254,37 @@ describe("people and invitations", () => {
   });
 
   /**
-   * The reason sits in the row it is about, and every row names its own copy.
+   * The reason sits in the row it is about, in the menu whose items it explains.
    *
    * A table is where one sentence hoisted above it would be cheapest and
    * wrongest: the control a person is looking at would describe something
-   * somewhere else on the page. So there is one per row, and the ids are per
-   * row too — the same shape as the field and the retry that had to be cleared
-   * when a different row opened.
+   * somewhere else on the page. So there is one per row. A disabled item cannot
+   * take focus either, so the sentence is drawn inside the panel, where a
+   * keyboard lands on it and a reader hears it with the items above.
    */
-  it("gives each row's disabled control its own reason", async () => {
+  it("gives each row's disabled menu its own reason", async () => {
     open("member", false);
 
-    const said = await screen.findAllByText(/cannot manage members/);
-    const controls = screen.getAllByRole("button", { name: "Deactivate" });
-    expect(controls).toHaveLength(said.length);
-    expect(controls.length).toBeGreaterThan(1);
-    for (const [at, control] of controls.entries()) {
-      expect(control.hasAttribute("disabled")).toBe(true);
-      expect(control.getAttribute("aria-describedby")).toBe(said[at]!.id);
+    await screen.findByRole("table", { name: "Members" });
+    for (const email of ["ada@acme.example", "bob@acme.example"]) {
+      fireEvent.click(
+        screen.getByRole("button", { name: `Open the menu for ${email}` }),
+      );
+      const menu = await screen.findByRole("menu", {
+        name: `Open the menu for ${email}`,
+      });
+      for (const item of ["Deactivate", "Remove"]) {
+        expect(
+          within(menu)
+            .getByRole("menuitem", { name: item })
+            .hasAttribute("disabled"),
+        ).toBe(true);
+      }
+      expect(
+        within(menu).getByText(/Your member role cannot manage members/),
+      ).toBeTruthy();
+      fireEvent.keyDown(menu, { key: "Escape" });
     }
-    // Distinct, because two elements of one id is one element to a browser.
-    expect(new Set(said.map((one) => one.id)).size).toBe(said.length);
   });
 
   /**
@@ -1271,8 +1295,11 @@ describe("people and invitations", () => {
     open();
 
     fireEvent.click(
-      (await screen.findAllByRole("button", { name: "Remove" }))[1]!,
+      await screen.findByRole("button", {
+        name: "Open the menu for bob@acme.example",
+      }),
     );
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
 
     const dialog = await screen.findByRole("dialog");
     expect(dialog.textContent).toContain("bob@acme.example");
@@ -1299,11 +1326,25 @@ describe("people and invitations", () => {
       const table = await screen.findByRole("table", { name: "Members" });
       expect(table.textContent).toContain("bob@acme.example");
       expect(screen.queryByLabelText("bob@acme.example role")).toBeNull();
+      // The role they cannot change is still said as a word, not as a key.
+      expect(table.textContent).toContain("Viewer");
+      expect(table.textContent).toContain("Admin");
+
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Open the menu for bob@acme.example",
+        }),
+      );
+      const menu = await screen.findByRole("menu", {
+        name: "Open the menu for bob@acme.example",
+      });
       expect(
-        screen
-          .getAllByRole("button", { name: "Deactivate" })[0]
-          ?.hasAttribute("disabled"),
+        within(menu)
+          .getByRole("menuitem", { name: "Deactivate" })
+          .hasAttribute("disabled"),
       ).toBe(true);
+      fireEvent.keyDown(menu, { key: "Escape" });
+
       expect(
         screen.queryByRole("tab", { name: "Invitations" }),
       ).toBeNull();
@@ -1518,14 +1559,25 @@ describe("people and invitations", () => {
     expect(waiting.textContent).toContain("Pending");
     expect(waiting.textContent).not.toContain("Expired");
     expect(dead.textContent).toContain("Expired");
+    // And the role beside it is a word rather than the contract's key.
+    expect(waiting.textContent).toContain("Member");
 
     // And what each one offers matches what it is. A live invitation is waited
-    // on and carries no control; a dead one cannot be waited on, so the one
-    // move left is on it and only on it.
-    expect(within(dead).getByRole("button", { name: "Send again" })).toBeTruthy();
+    // on and carries no menu; a dead one cannot be waited on, so the one move
+    // left is in its menu and only in its menu.
     expect(
-      within(waiting).queryByRole("button", { name: "Send again" }),
+      within(waiting).queryByRole("button", {
+        name: `Open the menu for ${WAITING_INVITATION.email}`,
+      }),
     ).toBeNull();
+    fireEvent.click(
+      within(dead).getByRole("button", {
+        name: `Open the menu for ${DEAD_INVITATION.email}`,
+      }),
+    );
+    expect(
+      await screen.findByRole("menuitem", { name: "Send again" }),
+    ).toBeTruthy();
   });
 
   /**
@@ -1561,7 +1613,12 @@ describe("people and invitations", () => {
     fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
 
     const table = await screen.findByRole("table", { name: "Invitations" });
-    fireEvent.click(within(table).getByRole("button", { name: "Send again" }));
+    fireEvent.click(
+      within(table).getByRole("button", {
+        name: `Open the menu for ${DEAD_INVITATION.email}`,
+      }),
+    );
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Send again" }));
 
     expect(await screen.findByText(/Here is the link/)).toBeTruthy();
     expect(document.body.textContent).toContain(

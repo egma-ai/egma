@@ -443,15 +443,17 @@ function AccountMenu({
           "grid-cols-[var(--control-md)_minmax(0,1fr)] min-h-(--control-lg) py-1",
           "px-[calc(var(--space-2)-1px)]",
           "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
+          /* In the sidebar the control is boxed at rest, like the organization control above it. */
+          !compact && "border-border",
           "transition-transform duration-(--duration-press) ease-out",
           "pointer-coarse:min-h-(--tap-target)",
-          "pointer-hover:border-border pointer-hover:bg-surface",
+          "pointer-hover:border-border pointer-hover:bg-surface-soft",
           "[&:active:not(:focus-visible)]:scale-97",
           "motion-reduce:transition-none",
           "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
           compact && "w-(--tap-target) min-h-(--tap-target) grid-cols-[var(--tap-target)] p-0",
         )}
-        openClassName="border-border bg-surface"
+        openClassName="border-border bg-surface-soft"
         placement={placement}
         trigger={
           <>
@@ -665,12 +667,7 @@ function ShellFrame({
        */}
       <aside
         className={cn(
-          /*
-           * 8px under the account plate, and 8px over it inside the footer,
-           * so the band under the hairline is the 64px the boards draw around
-           * a 48px plate. (Read off Paper page 12, 2026-09-15.)
-           */
-          "sticky top-0 z-20 flex h-svh flex-col gap-5 overflow-visible pb-2",
+          "sticky top-0 z-20 flex h-svh flex-col gap-5 overflow-visible",
           "border-r border-border bg-surface",
           "max-[900px]:hidden",
         )}
@@ -682,12 +679,12 @@ function ShellFrame({
         <SidebarHeader className="px-4">{selector(false)}</SidebarHeader>
         {shown === null ? null : <Navigation projectId={shown} pathname={pathname} />}
         {/*
-         * 8px, the navigation column's inset, so the account plate is the same
-         * 208px block as a nav row and stands 8px off both edges of the bar.
-         * The avatar rides the 16px lane from inside it. The hairline on top
-         * spans the whole bar: the boards draw the account block under one.
+         * The account band is the organization bar's own 56px, under a
+         * hairline that spans the whole bar, with the boxed account control
+         * centered in it. 8px is the navigation column's inset, so the control
+         * is the same 208px block as a nav row. (Developer decision, 2026-09-15.)
          */}
-        <SidebarFooter className="border-t border-border px-2 pt-2">
+        <SidebarFooter className="min-h-(--sidebar-header-height) justify-center border-t border-border px-2 py-1">
           {role !== null && !canAuthor(role) ? (
             /*
              * The chip has no plate to sit inside, so it takes the 8px back as

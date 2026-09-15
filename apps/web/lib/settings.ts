@@ -69,6 +69,16 @@ export const NEW_PROJECT_PATH = "/new-project";
 export const ASSIGNABLE_ROLES = ["admin", "member", "viewer"] as const;
 
 /**
+ * A role as a page says it: `Admin`, never the contract's `admin`.
+ *
+ * The lowercase strings are what the API takes and returns, so they stay on
+ * every value a control sends. Only the words a person reads change.
+ */
+export function roleSaid(role: string): string {
+  return `${role.charAt(0).toUpperCase()}${role.slice(1)}`;
+}
+
+/**
  * Fall back to an empty array for an absent or malformed list value. This
  * prevents a render error but does not distinguish invalid data from no rows.
  */

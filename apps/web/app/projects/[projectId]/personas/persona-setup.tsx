@@ -10,13 +10,13 @@ import { PersonaActions } from "./persona-parts.tsx";
 
 /** One model in the pipeline a card names. */
 function PipelineStep({ children }: { readonly children: string }) {
-  return <span className="bg-surface-soft px-3 py-2 text-base text-foreground">{children}</span>;
+  return <span className="bg-surface-soft px-3 py-2 text-sm text-foreground">{children}</span>;
 }
 
 /** The direction glyph between two steps. It carries no meaning a reader needs. */
 function Glyph({ children }: { readonly children: string }) {
   return (
-    <span className="text-base text-faint" aria-hidden="true">
+    <span className="text-sm text-faint" aria-hidden="true">
       {children}
     </span>
   );
@@ -25,7 +25,7 @@ function Glyph({ children }: { readonly children: string }) {
 const CHOICES = [
   {
     mode: "separate" as const,
-    title: "Cascaded pipeline",
+    title: "Cascaded Architecture",
     detail: "Choose separate models for listening, reasoning, and speaking.",
   },
   {
@@ -91,7 +91,7 @@ export function ArchitectureSetup({
                 </span>
                 <RadioGroupItem value={choice.mode} aria-labelledby={titleId} />
               </span>
-              <span className="min-h-10 text-base text-faint">{choice.detail}</span>
+              <span className="min-h-10 text-sm text-faint">{choice.detail}</span>
               <span className="flex items-center gap-3 pt-2">
                 {choice.mode === "separate" ? (
                   <>
@@ -103,7 +103,7 @@ export function ArchitectureSetup({
                   </>
                 ) : (
                   <>
-                    <span className="text-base text-faint">Audio</span>
+                    <span className="text-sm text-faint">Audio</span>
                     <Glyph>↔</Glyph>
                     <PipelineStep>Live model</PipelineStep>
                   </>
