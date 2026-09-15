@@ -1968,19 +1968,22 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
         .toBe(5);
 
       /*
-       * Make storage refuse once to exercise signed-link recovery without waiting
-       * for expiry. The player must request a new link and restore playback position.
+       * Fire the player's own error to exercise signed-link recovery without
+       * waiting for expiry. The page must ask egma for a new link and restore
+       * the playback position; the store itself is left alone, because the
+       * player is now the only thing that fetches the recording and a refused
+       * second link is a failure, not a recovery.
        */
-      let refusals = 0;
-      await page.route(`${running.store.publicUrl}/**`, async (route) => {
-        refusals += 1;
-        if (refusals > 1) return route.continue();
-        return route.fulfill({
-          status: 403,
-          contentType: "application/xml",
-          body: "<Error><Code>AccessDenied</Code><Message>Request has expired</Message></Error>",
-        });
-      });
+      let linksAsked = 0;
+      await page.route(
+        (url) =>
+          url.origin === origin &&
+          /^\/v1\/simulations\/[^/]+\/recording$/u.test(url.pathname),
+        async (route) => {
+          linksAsked += 1;
+          return route.continue();
+        },
+      );
       try {
         await player.evaluate((element) => {
           const audio = element as unknown as {
@@ -1997,8 +2000,8 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
 
         // A second link was asked for, off the same page, with no reload.
         await expect
-          .poll(() => refusals, { timeout: 30_000 })
-          .toBeGreaterThan(1);
+          .poll(() => linksAsked, { timeout: 30_000 })
+          .toBeGreaterThan(0);
 
         // And it plays, from where the listener had got to rather than from the
         // beginning — being thrown back to the start of a recording you were
@@ -2019,11 +2022,10 @@ describe.skipIf(!storage.available)("hearing a recording from a run", () => {
           )
           .toBe(75);
       } finally {
-        // Removed with `behavior: "wait"`, not the default: the player keeps
-        // fetching the store while it plays, so a handler can be mid-continue
-        // at exactly this moment, and a default removal races it over one
-        // request. This is the page's only route here, so removing all of
-        // them is the same removal with the safe semantics.
+        // Removed with `behavior: "wait"`, not the default: a handler can be
+        // mid-continue at exactly this moment, and a default removal races it
+        // over one request. This is the page's only route here, so removing
+        // all of them is the same removal with the safe semantics.
         await page.unrouteAll({ behavior: "wait" });
       }
 
