@@ -1,11 +1,13 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { ownerSaid, type Persona } from "@/lib/personas.ts";
+import { FieldHintContext } from "@/ui/field-hint.ts";
 
 /**
  * Persona page primitives, read off Paper page 12 — "Personas · Complete flow
@@ -14,18 +16,18 @@ import { ownerSaid, type Persona } from "@/lib/personas.ts";
  * no toggle, and label-beside-value rows on the read page.
  */
 
-/** Which page a primitive is drawn on; the read page is quieter than the form. */
-export type PersonaPage = "form" | "read";
+/** Which surface a primitive is drawn on; the read page is quieter than the form. */
+export type PersonaSurface = "form" | "read";
 
 /** METADATA, WHO THEY ARE or SETTINGS: the 16px caps label that heads a group. */
 export function PersonaGroupLabel({
   divider = false,
-  page = "form",
+  surface = "form",
   children,
 }: {
   /** The hairline between groups; the first group draws none. */
   readonly divider?: boolean;
-  readonly page?: PersonaPage;
+  readonly surface?: PersonaSurface;
   readonly children: ReactNode;
 }) {
   return (
@@ -34,7 +36,7 @@ export function PersonaGroupLabel({
         "m-0 text-base font-medium tracking-normal text-foreground uppercase",
         /* The room under the hairline: 16px on the form, 20px on the read page. */
         divider && "border-t border-border",
-        divider && (page === "form" ? "pt-4" : "pt-5"),
+        divider && (surface === "form" ? "pt-4" : "pt-5"),
       )}
     >
       {children}
@@ -45,39 +47,54 @@ export function PersonaGroupLabel({
 /**
  * One subsection under Settings: a plain header over its fields, with no line
  * above it and no toggle. `htmlFor` makes the header the control's own label
- * when the subsection holds one control, as Language does.
+ * when the subsection holds one control, as Language does; a reason the
+ * choice is invalid then stays outside that label and describes the control
+ * instead, so it never joins the control's name.
  */
 export function PersonaSubsection({
   label,
   htmlFor,
   invalidReason,
-  page = "form",
+  surface = "form",
   children,
 }: {
   readonly label: string;
   readonly htmlFor?: string;
   readonly invalidReason?: string;
-  readonly page?: PersonaPage;
+  readonly surface?: PersonaSurface;
   readonly children: ReactNode;
 }) {
-  const said = (
-    <>
+  const reasonId = useId();
+  const describes = htmlFor !== undefined && invalidReason !== undefined;
+  const reason = invalidReason === undefined ? null : (
+    <span className="font-normal text-failure" id={describes ? reasonId : undefined}>
+      {" · "}
+      {invalidReason}
+    </span>
+  );
+  const heading = htmlFor === undefined ? (
+    <span>
       {label}
-      {invalidReason === undefined ? null : (
-        <span className="font-normal text-failure"> · {invalidReason}</span>
-      )}
+      {reason}
+    </span>
+  ) : (
+    <>
+      <label htmlFor={htmlFor}>{label}</label>
+      {reason}
     </>
   );
   return (
     <section className="flex min-w-0 flex-col gap-3 pt-2" aria-label={label}>
-      {page === "form" ? (
+      {surface === "form" ? (
         <h3 className="m-0 flex min-h-(--control-lg) items-center text-base font-medium text-foreground">
-          {htmlFor === undefined ? <span>{said}</span> : <label htmlFor={htmlFor}>{said}</label>}
+          {heading}
         </h3>
       ) : (
-        <h3 className="m-0 text-sm font-medium text-foreground">{said}</h3>
+        <h3 className="m-0 text-sm font-medium text-foreground">{heading}</h3>
       )}
-      {children}
+      <FieldHintContext.Provider value={describes ? reasonId : undefined}>
+        {children}
+      </FieldHintContext.Provider>
     </section>
   );
 }
@@ -96,6 +113,36 @@ export function PersonaField({
     <div className="flex flex-col gap-2" data-slot="field">
       <Label htmlFor={htmlFor}>{label}</Label>
       {children}
+    </div>
+  );
+}
+
+/** Cancel as text beside the page's one solid action, right-aligned under a persona form or its setup step. */
+export function PersonaActions({
+  label,
+  busy = false,
+  disabled = false,
+  cancelDisabled = false,
+  onPrimary,
+  onCancel,
+}: {
+  readonly label: string;
+  readonly busy?: boolean;
+  readonly disabled?: boolean;
+  readonly cancelDisabled?: boolean;
+  readonly onPrimary: () => void;
+  readonly onCancel: () => void;
+}) {
+  return (
+    <div className="flex w-full max-w-(--persona-form-width) justify-end">
+      <div className="flex items-center gap-2">
+        <Button type="button" variant="ghost" size="lg" className="px-3" disabled={cancelDisabled} onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="button" variant="solid" size="lg" className="px-4" busy={busy} disabled={disabled} onClick={onPrimary}>
+          {label}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -132,12 +179,12 @@ export function PersonaReadRows({ rows }: { readonly rows: readonly PersonaReadR
   );
 }
 
-/** The Type value on the read page: one word on a soft plate inside a hairline. */
+/** The Type value on the read page: the count chip on its soft plate, in ink. */
 export function PersonaTypePlate({ owner }: { readonly owner: Persona["owner"] }) {
   return (
-    <span className="inline-flex items-center border border-border bg-surface-soft px-2.5 py-0.5 text-sm text-foreground">
+    <Badge className="text-foreground" shape="count" variant="neutral">
       {ownerSaid(owner)}
-    </span>
+    </Badge>
   );
 }
 

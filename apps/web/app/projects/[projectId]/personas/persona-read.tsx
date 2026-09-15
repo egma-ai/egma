@@ -17,9 +17,11 @@ import {
   controlsOfPersona,
   interruptionSaid,
   languageLabel,
+  modelSaid,
   modelsOfPersona,
   personaClonePath,
   personasPath,
+  providerSaid,
   type Persona,
   type PersonaForm,
   type PersonaModels,
@@ -41,7 +43,7 @@ import {
   PersonaSubsection,
   PersonaTypePlate,
   type PersonaReadRow,
-} from "./sheet-parts.tsx";
+} from "./persona-parts.tsx";
 
 /**
  * The persona read page, off Paper page 12 — boards 05 and 07 for a cascaded
@@ -52,41 +54,6 @@ import {
  * and one fact per row, its label in a fixed lane at the left and its value
  * beside it. Nothing here is editable: a persona is changed by cloning it.
  */
-
-type CatalogJob = PersonaForm["modelCatalog"][number]["job"];
-
-/** The catalog row for one job, provider and model, once the form has arrived. */
-function catalogEntry(
-  form: PersonaForm | undefined,
-  job: CatalogJob,
-  provider: string,
-  model: string,
-): PersonaForm["modelCatalog"][number] | undefined {
-  return form?.modelCatalog.find(
-    (entry) =>
-      entry.job === job && entry.provider === provider && entry.model === model,
-  );
-}
-
-/** The provider as the catalog names it, or its raw id until the catalog says. */
-function providerSaid(
-  form: PersonaForm | undefined,
-  job: CatalogJob,
-  provider: string,
-  model: string,
-): string {
-  return catalogEntry(form, job, provider, model)?.label ?? provider;
-}
-
-/** The model as the catalog names it, or its raw id until the catalog says. */
-function modelSaid(
-  form: PersonaForm | undefined,
-  job: CatalogJob,
-  provider: string,
-  model: string,
-): string {
-  return catalogEntry(form, job, provider, model)?.modelLabel ?? model;
-}
 
 /**
  * The voice's name, the way the boards print it.
@@ -187,7 +154,7 @@ function PersonaRead({
       className="flex w-full max-w-(--persona-read-width) flex-col gap-4"
       data-slot="persona-read"
     >
-      <PersonaGroupLabel page="read">Metadata</PersonaGroupLabel>
+      <PersonaGroupLabel surface="read">Metadata</PersonaGroupLabel>
       <PersonaReadRows
         rows={[
           { label: "Name", value: persona.name },
@@ -202,7 +169,7 @@ function PersonaRead({
         ]}
       />
 
-      <PersonaGroupLabel page="read" divider>
+      <PersonaGroupLabel surface="read" divider>
         Who they are
       </PersonaGroupLabel>
       <PersonaReadRows
@@ -212,11 +179,11 @@ function PersonaRead({
         ]}
       />
 
-      <PersonaGroupLabel page="read" divider>
+      <PersonaGroupLabel surface="read" divider>
         Settings
       </PersonaGroupLabel>
 
-      <PersonaSubsection label="Language" page="read">
+      <PersonaSubsection label="Language" surface="read">
         <PersonaReadRows
           rows={[{ label: "Language", value: languageLabel(controls.language) }]}
         />
@@ -224,73 +191,73 @@ function PersonaRead({
 
       {models.mode === "separate" ? (
         <>
-          <PersonaSubsection label="Text-to-speech" page="read">
+          <PersonaSubsection label="Text-to-speech" surface="read">
             <PersonaReadRows
               rows={[
                 {
                   label: "Provider",
-                  value: providerSaid(form, "tts", models.tts.provider, models.tts.model),
+                  value: providerSaid(form?.modelCatalog, "tts", models.tts.provider, models.tts.model),
                 },
                 {
                   label: "Model",
-                  value: modelSaid(form, "tts", models.tts.provider, models.tts.model),
+                  value: modelSaid(form?.modelCatalog, "tts", models.tts.provider, models.tts.model),
                 },
                 { label: "Voice", value: voiceName },
               ]}
             />
           </PersonaSubsection>
-          <PersonaSubsection label="Speech-to-text" page="read">
+          <PersonaSubsection label="Speech-to-text" surface="read">
             <PersonaReadRows
               rows={[
                 {
                   label: "Provider",
-                  value: providerSaid(form, "stt", models.stt.provider, models.stt.model),
+                  value: providerSaid(form?.modelCatalog, "stt", models.stt.provider, models.stt.model),
                 },
                 {
                   label: "Model",
-                  value: modelSaid(form, "stt", models.stt.provider, models.stt.model),
+                  value: modelSaid(form?.modelCatalog, "stt", models.stt.provider, models.stt.model),
                 },
               ]}
             />
           </PersonaSubsection>
-          <PersonaSubsection label="LLM" page="read">
+          <PersonaSubsection label="LLM" surface="read">
             <PersonaReadRows
               rows={[
                 {
                   label: "Provider",
-                  value: providerSaid(form, "llm", models.llm.provider, models.llm.model),
+                  value: providerSaid(form?.modelCatalog, "llm", models.llm.provider, models.llm.model),
                 },
                 {
                   label: "Model",
-                  value: modelSaid(form, "llm", models.llm.provider, models.llm.model),
+                  value: modelSaid(form?.modelCatalog, "llm", models.llm.provider, models.llm.model),
                 },
               ]}
             />
           </PersonaSubsection>
         </>
       ) : (
-        <PersonaSubsection label="Realtime LLM" page="read">
+        <PersonaSubsection label="Realtime LLM" surface="read">
           <PersonaReadRows
             rows={[
               {
                 label: "Provider",
-                value: providerSaid(form, "live", models.live.provider, models.live.model),
+                value: providerSaid(form?.modelCatalog, "live", models.live.provider, models.live.model),
               },
               {
                 label: "Model",
-                value: modelSaid(form, "live", models.live.provider, models.live.model),
+                value: modelSaid(form?.modelCatalog, "live", models.live.provider, models.live.model),
               },
               { label: "Voice", value: voiceName },
               {
                 label: "Reasoning LLM",
-                value: modelSaid(form, "llm", models.llm.provider, models.llm.model),
+                value: modelSaid(form?.modelCatalog, "llm", models.llm.provider, models.llm.model),
               },
             ]}
           />
         </PersonaSubsection>
       )}
 
-      <PersonaSubsection label="Advanced" page="read">
+      <PersonaSubsection label="Advanced" surface="read">
         <PersonaReadRows rows={advanced} />
       </PersonaSubsection>
     </div>
@@ -362,7 +329,7 @@ export function PersonaReadScreen({
               asChild
               variant="default"
               size="default"
-              className="gap-2 border-transparent px-3.5"
+              className="gap-2 border-transparent"
             >
               <Link href={personaClonePath(projectId, persona.id)}>
                 <CopyIcon className="size-4" strokeWidth={1.7} aria-hidden="true" />

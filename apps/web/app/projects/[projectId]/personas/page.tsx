@@ -28,7 +28,7 @@ import { SearchField } from "@/ui/section.tsx";
 import { AppShell, PageBody, PageHeader, ProductPage, useShellSession } from "@/ui/shell.tsx";
 
 import { DeletePersonaDialog } from "./persona-sheets.tsx";
-import { PersonaTypeChip } from "./sheet-parts.tsx";
+import { PersonaTypeChip } from "./persona-parts.tsx";
 
 const SEARCH_SETTLE_MS = 300;
 

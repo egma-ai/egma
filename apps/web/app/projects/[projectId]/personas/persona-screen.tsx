@@ -4,10 +4,10 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { createPersona, forkPersona, getPersona, getPersonaForm } from "@egma/platform-api/client";
 
-import { Button } from "@/components/ui/button";
 import type { Refusal } from "@/lib/api.ts";
 import {
   BLANK_BEHAVIOR,
+  LIVE_MODEL,
   controlsFrom,
   controlsOfPersona,
   modelsDraftOf,
@@ -38,9 +38,8 @@ import {
 } from "@/ui/shell.tsx";
 
 import { BehaviorFields, ModelFields, NameFields, type FieldPrefix } from "./persona-fields.tsx";
+import { PersonaActions } from "./persona-parts.tsx";
 import { ArchitectureSetup } from "./persona-setup.tsx";
-
-export { PersonaReadScreen } from "./persona-read.tsx";
 
 type FlowKind = "create" | "clone";
 
@@ -52,12 +51,7 @@ function fallbackModels(mode: PersonaModels["mode"], form: PersonaForm): Persona
     return {
       mode: "live",
       llm,
-      live: {
-        provider: "openai",
-        model: "gpt-live-1",
-        adapter: "openai_live",
-        voiceId: live?.recommendedVoiceId ?? "alloy",
-      },
+      live: { ...LIVE_MODEL, voiceId: live?.recommendedVoiceId ?? "alloy" },
     };
   }
   const stt = form.modelCatalog.find((entry) => entry.job === "stt");
@@ -166,12 +160,14 @@ function PersonaDraft({
       </PageBody>
       <PageFooter>
         {/* Both flows end in the same act, so both boards print "Create persona". */}
-        <div className="flex w-full max-w-(--persona-form-width) justify-end gap-2">
-          <Button type="button" variant="ghost" size="lg" className="px-3" disabled={saving} onClick={() => navigation.push(personasPath(projectId))}>Cancel</Button>
-          <Button type="button" variant="solid" size="lg" className="px-4" busy={saving} disabled={!valid} onClick={() => void submit()}>
-            {saving ? "Creating…" : "Create persona"}
-          </Button>
-        </div>
+        <PersonaActions
+          label={saving ? "Creating…" : "Create persona"}
+          busy={saving}
+          disabled={!valid}
+          cancelDisabled={saving}
+          onPrimary={() => void submit()}
+          onCancel={() => navigation.push(personasPath(projectId))}
+        />
       </PageFooter>
     </>
   );

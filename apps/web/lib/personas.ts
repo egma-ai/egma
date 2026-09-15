@@ -18,6 +18,13 @@ type CascadedModels = Extract<PersonaModels, { readonly mode: "separate" }>;
 type LiveModels = Extract<PersonaModels, { readonly mode: "live" }>;
 type CascadedControls = Extract<PersonaControls, { readonly interruptionLevel: unknown }>;
 
+/** The one realtime speech model the API accepts; the contract names it, not the user. */
+export const LIVE_MODEL = {
+  provider: "openai",
+  model: "gpt-live-1",
+  adapter: "openai_live",
+} as const satisfies Omit<LiveModels["live"], "voiceId">;
+
 export type BehaviorDraft = {
   readonly identityName: string;
   readonly personality: string;
@@ -87,12 +94,7 @@ export function modelsFrom(draft: ModelsDraft): PersonaModels {
     return {
       mode: "live",
       llm: { provider: draft.llmProvider, model: draft.llmModel },
-      live: {
-        provider: "openai",
-        model: "gpt-live-1",
-        adapter: "openai_live",
-        voiceId: draft.liveVoiceId,
-      },
+      live: { ...LIVE_MODEL, voiceId: draft.liveVoiceId },
     } satisfies LiveModels;
   }
   return {
@@ -117,18 +119,39 @@ export function controlsFrom(draft: ModelsDraft): PersonaControls {
     : { ...shared, interruptionLevel: draft.interruptionLevel };
 }
 
+/** Which part of the persona a catalog entry serves. */
+export type CatalogJob = PersonaModelCatalogEntry["job"];
+
+/** The catalog row for one job, provider and model, once the form has arrived. */
+export function catalogEntry(
+  catalog: readonly PersonaModelCatalogEntry[] | undefined,
+  job: CatalogJob,
+  provider: string,
+  model: string,
+): PersonaModelCatalogEntry | undefined {
+  return catalog?.find(
+    (one) => one.job === job && one.provider === provider && one.model === model,
+  );
+}
+
+/** The provider as the catalog names it, or its raw id until the catalog says. */
+export function providerSaid(
+  catalog: readonly PersonaModelCatalogEntry[] | undefined,
+  job: CatalogJob,
+  provider: string,
+  model: string,
+): string {
+  return catalogEntry(catalog, job, provider, model)?.label ?? provider;
+}
+
+/** The model as the catalog names it, or its raw id until the catalog says. */
 export function modelSaid(
   catalog: readonly PersonaModelCatalogEntry[] | undefined,
-  job: PersonaModelCatalogEntry["job"],
-  selection: { readonly provider: string; readonly model: string },
+  job: CatalogJob,
+  provider: string,
+  model: string,
 ): string {
-  const entry = catalog?.find(
-    (one) =>
-      one.job === job &&
-      one.provider === selection.provider &&
-      one.model === selection.model,
-  );
-  return `${entry?.label ?? selection.provider} · ${entry?.modelLabel ?? selection.model}`;
+  return catalogEntry(catalog, job, provider, model)?.modelLabel ?? model;
 }
 
 export function ownerSaid(owner: Persona["owner"]): string {
@@ -178,12 +201,7 @@ export function modelsOfPersona(persona: Persona): PersonaModels {
     return {
       mode: "live",
       llm: { provider: String(values.llm_provider), model: String(values.llm_model) },
-      live: {
-        provider: "openai",
-        model: "gpt-live-1",
-        adapter: "openai_live",
-        voiceId: String(values.live_voice_id ?? "alloy"),
-      },
+      live: { ...LIVE_MODEL, voiceId: String(values.live_voice_id ?? "alloy") },
     };
   }
   return {

@@ -2,16 +2,18 @@
 
 import { useId } from "react";
 
-import { Button } from "@/components/ui/button";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
 import type { PersonaModels } from "@/lib/personas.ts";
 
-/** The chip a card's architecture row is built from. */
-function Chip({ children }: { readonly children: string }) {
+import { PersonaActions } from "./persona-parts.tsx";
+
+/** One model in the pipeline a card names. */
+function PipelineStep({ children }: { readonly children: string }) {
   return <span className="bg-surface-soft px-3 py-2 text-base text-foreground">{children}</span>;
 }
 
-/** The direction glyph between two chips. It carries no meaning a reader needs. */
+/** The direction glyph between two steps. It carries no meaning a reader needs. */
 function Glyph({ children }: { readonly children: string }) {
   return (
     <span className="text-base text-faint" aria-hidden="true">
@@ -56,15 +58,23 @@ export function ArchitectureSetup({
         <p className="m-0 text-sm text-faint">How should this persona listen and respond?</p>
       </div>
       {/*
-       * The card is the whole target: the label wraps the input, so a pointer
-       * anywhere inside it chooses. The radio itself stays a real radio and is
-       * named by the card title alone, not by the description and chips under it.
+       * The card is the whole target: the label wraps the radio, so a press
+       * anywhere inside it chooses. The radio is the shared one, named by the
+       * card title alone rather than by the description and chips under it.
        */}
-      <fieldset className="m-0 grid grid-cols-2 gap-4 border-0 p-0 max-[900px]:grid-cols-1">
-        <legend className="sr-only">Agent architecture</legend>
+      <RadioGroup
+        className="grid grid-cols-2 gap-4 max-[900px]:grid-cols-1"
+        aria-label="Agent architecture"
+        value={mode}
+        /*
+         * Radix reports the chosen value as a `string`; every item below was
+         * given one of `CHOICES`, so the narrowing is a fact about this group.
+         */
+        onValueChange={(chosen) => onMode(chosen as PersonaModels["mode"])}
+      >
         {CHOICES.map((choice) => {
           const selected = choice.mode === mode;
-          const title = `${named}-${choice.mode}`;
+          const titleId = `${named}-${choice.mode}`;
           return (
             <label
               key={choice.mode}
@@ -76,65 +86,34 @@ export function ArchitectureSetup({
               )}
             >
               <span className="flex items-center justify-between">
-                <span className="text-base font-medium text-foreground" id={title}>
+                <span className="text-base font-medium text-foreground" id={titleId}>
                   {choice.title}
                 </span>
-                <span className="flex flex-none items-center">
-                  <input
-                    className="sr-only"
-                    type="radio"
-                    name="persona-mode"
-                    value={choice.mode}
-                    checked={selected}
-                    aria-labelledby={title}
-                    onChange={() => onMode(choice.mode)}
-                  />
-                  {/* The one round shape in the product, drawn beside its own input. */}
-                  <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
-                    <circle
-                      className={selected ? "stroke-primary" : "stroke-faint"}
-                      cx="10"
-                      cy="10"
-                      r="8"
-                      fill="none"
-                      strokeWidth={1.5}
-                    />
-                    {selected ? <circle className="fill-primary" cx="10" cy="10" r="4" /> : null}
-                  </svg>
-                </span>
+                <RadioGroupItem value={choice.mode} aria-labelledby={titleId} />
               </span>
               <span className="min-h-10 text-base text-faint">{choice.detail}</span>
               <span className="flex items-center gap-3 pt-2">
                 {choice.mode === "separate" ? (
                   <>
-                    <Chip>STT</Chip>
+                    <PipelineStep>STT</PipelineStep>
                     <Glyph>→</Glyph>
-                    <Chip>LLM</Chip>
+                    <PipelineStep>LLM</PipelineStep>
                     <Glyph>→</Glyph>
-                    <Chip>TTS</Chip>
+                    <PipelineStep>TTS</PipelineStep>
                   </>
                 ) : (
                   <>
                     <span className="text-base text-faint">Audio</span>
                     <Glyph>↔</Glyph>
-                    <Chip>Live model</Chip>
+                    <PipelineStep>Live model</PipelineStep>
                   </>
                 )}
               </span>
             </label>
           );
         })}
-      </fieldset>
-      <div className="flex justify-end">
-        <div className="flex items-center gap-2">
-          <Button type="button" variant="ghost" size="lg" className="px-3" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button type="button" variant="solid" size="lg" className="px-4" onClick={onNext}>
-            Next
-          </Button>
-        </div>
-      </div>
+      </RadioGroup>
+      <PersonaActions label="Next" onPrimary={onNext} onCancel={onCancel} />
     </div>
   );
 }

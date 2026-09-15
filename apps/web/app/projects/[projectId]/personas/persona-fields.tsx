@@ -12,16 +12,19 @@ import { DownwardSelect, type DownwardSelectOption } from "@/components/ui/selec
 import { Textarea } from "@/components/ui/textarea";
 import {
   BACKGROUND_SOUNDS,
+  LIVE_MODEL,
   languageLabel,
   type BehaviorDraft,
+  type CatalogJob,
   type ModelsDraft,
   type PersonaForm,
+  type PersonaModelCatalogEntry,
 } from "@/lib/personas.ts";
 import { platformAnswer, platformClient } from "@/lib/platform-client.ts";
 import { FormRow } from "@/ui/form.tsx";
 import { SearchableSelect } from "@/ui/searchable-select.tsx";
 
-import { PersonaField, PersonaGroupLabel, PersonaSubsection } from "./sheet-parts.tsx";
+import { PersonaField, PersonaGroupLabel, PersonaSubsection } from "./persona-parts.tsx";
 
 /**
  * The persona create and clone form, read off Paper page 12 — boards 02
@@ -37,9 +40,6 @@ const TEXT_BOX = "text-sm placeholder:text-sm placeholder:text-faint";
 
 /** A dropdown trigger on the boards: soft grey fill, 44px, 14px ink. */
 const DROPDOWN = "bg-surface-soft text-sm";
-
-/** Which catalog entries a pair of dropdowns offers. */
-type CatalogJob = "llm" | "stt" | "tts" | "live";
 
 function Note({ children, bad = false }: { readonly children: ReactNode; readonly bad?: boolean }) {
   return (
@@ -150,7 +150,7 @@ function ProviderModelFields({
   job,
   provider,
   model,
-  form,
+  catalog,
   disabled,
   onChange,
 }: {
@@ -158,11 +158,13 @@ function ProviderModelFields({
   readonly job: CatalogJob;
   readonly provider: string;
   readonly model: string;
-  readonly form: PersonaForm;
+  /** The rows the pair may offer; a pair the API fixes is handed exactly one. */
+  readonly catalog: readonly PersonaModelCatalogEntry[];
   readonly disabled: boolean;
-  readonly onChange: (provider: string, model: string) => void;
+  /** Absent when the API fixes the pair: the one row offered is the one shown. */
+  readonly onChange?: (provider: string, model: string) => void;
 }) {
-  const offered = form.modelCatalog.filter((entry) => entry.job === job);
+  const offered = catalog.filter((entry) => entry.job === job);
   const providers = [...new Map(offered.map((entry) => [entry.provider, entry.label])).entries()];
   const models = offered.filter((entry) => entry.provider === provider);
   const chosenModel = models.some((entry) => entry.model === model);
@@ -186,7 +188,7 @@ function ProviderModelFields({
           options={providerOptions}
           onValueChange={(value) => {
             const next = offered.find((entry) => entry.provider === value);
-            if (next !== undefined) onChange(next.provider, next.model);
+            if (next !== undefined) onChange?.(next.provider, next.model);
           }}
         />
       </PersonaField>
@@ -199,7 +201,7 @@ function ProviderModelFields({
           disabled={disabled}
           required
           options={modelOptions}
-          onValueChange={(value) => onChange(provider, value)}
+          onValueChange={(value) => onChange?.(provider, value)}
         />
       </PersonaField>
     </FormRow>
@@ -259,15 +261,12 @@ export function ModelFields({
   const [voiceSearch, setVoiceSearch] = useState("");
   const [voiceType, setVoiceType] = useState<"all" | "male" | "female" | "unknown">("all");
   /*
-   * The realtime pair the Realtime LLM dropdowns show. It stays out of the
-   * draft because `modelsFrom` writes `openai` and `gpt-live-1` for every
-   * realtime persona: the API fixes the pair, so a choice here reaches the
-   * screen and never the request body.
+   * The realtime pair the API fixes, so the Realtime LLM dropdowns offer that
+   * one catalog row and nothing a choice could change.
    */
-  const [live, setLive] = useState(() => {
-    const entry = form.modelCatalog.find((one) => one.job === "live");
-    return { provider: entry?.provider ?? "openai", model: entry?.model ?? "gpt-live-1" };
-  });
+  const liveCatalog = form.modelCatalog.filter(
+    (entry) => entry.job === "live" && entry.provider === LIVE_MODEL.provider && entry.model === LIVE_MODEL.model,
+  );
   const request = useRef(0);
   const reportValidity = useRef(onValidityChange);
   reportValidity.current = onValidityChange;
@@ -284,8 +283,8 @@ export function ModelFields({
           ? {
               projectId,
               mode: "live",
-              liveProvider: "openai",
-              liveModel: "gpt-live-1",
+              liveProvider: LIVE_MODEL.provider,
+              liveModel: LIVE_MODEL.model,
               language: draft.language,
               voiceId: draft.liveVoiceId,
             }
@@ -452,7 +451,7 @@ export function ModelFields({
               job="tts"
               provider={draft.ttsProvider}
               model={draft.ttsModel}
-              form={form}
+              catalog={form.modelCatalog}
               disabled={disabled}
               onChange={(provider, model) => change(changeSelection(draft, "tts", provider, model))}
             />
@@ -480,7 +479,7 @@ export function ModelFields({
               job="stt"
               provider={draft.sttProvider}
               model={draft.sttModel}
-              form={form}
+              catalog={form.modelCatalog}
               disabled={disabled}
               onChange={(provider, model) => change(changeSelection(draft, "stt", provider, model))}
             />
@@ -491,7 +490,7 @@ export function ModelFields({
               job="llm"
               provider={draft.llmProvider}
               model={draft.llmModel}
-              form={form}
+              catalog={form.modelCatalog}
               disabled={disabled}
               onChange={(provider, model) => change(changeSelection(draft, "llm", provider, model))}
             />
@@ -502,11 +501,10 @@ export function ModelFields({
           <ProviderModelFields
             prefix={prefix}
             job="live"
-            provider={live.provider}
-            model={live.model}
-            form={form}
+            provider={LIVE_MODEL.provider}
+            model={LIVE_MODEL.model}
+            catalog={liveCatalog}
             disabled={disabled}
-            onChange={(provider, model) => setLive({ provider, model })}
           />
           <VoiceField
             prefix={prefix}
@@ -540,7 +538,8 @@ export function ModelFields({
       )}
 
       <PersonaSubsection label="Advanced">
-        <FormRow>
+        {/* Two lanes even when the API leaves the second empty, so one dropdown stays the width of every other. */}
+        <div className="grid grid-cols-2 gap-4 max-[900px]:grid-cols-1">
           <PersonaField label="Background sound*" htmlFor={`${prefix}-background-sound`}>
             <DownwardSelect
               id={`${prefix}-background-sound`}
@@ -576,7 +575,7 @@ export function ModelFields({
               />
             </PersonaField>
           ) : null}
-        </FormRow>
+        </div>
       </PersonaSubsection>
     </>
   );
