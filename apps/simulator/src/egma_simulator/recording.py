@@ -17,8 +17,6 @@ import wave
 from array import array
 from dataclasses import dataclass
 
-import numpy as np
-
 from .speech import SAMPLE_WIDTH_BYTES
 
 logger = logging.getLogger(__name__)
@@ -120,18 +118,17 @@ def _peaks(pcm: bytes, frames: int, bins: int) -> list[float]:
     """One channel's peak per slice, padded with quiet to ``frames``."""
     if frames == 0:
         return [0.0] * bins
+    samples = _samples(pcm, frames)
     size = -(-frames // bins)
-    samples = np.frombuffer(pcm[: frames * SAMPLE_WIDTH_BYTES], dtype="<i2")
-    padded = np.zeros(bins * size, dtype=np.int16)
-    padded[: len(samples)] = samples
-    slices = padded.reshape(bins, size)
-    # Signed 16-bit holds no positive 32768, so the negative extreme is read
-    # as its own magnitude instead of through abs().
-    loudest = np.maximum(
-        slices.max(axis=1).astype(np.int32),
-        -slices.min(axis=1).astype(np.int32),
-    )
-    return [round(float(peak) / FULL_SCALE, 3) for peak in loudest]
+    peaks: list[float] = []
+    for start in range(0, bins * size, size):
+        window = samples[start : start + size]
+        # Signed 16-bit holds no positive 32768, so the negative extreme is
+        # read as its own magnitude instead of through abs(). A slice past
+        # the last frame is quiet.
+        loudest = 0 if len(window) == 0 else max(max(window), -min(window))
+        peaks.append(round(loudest / FULL_SCALE, 3))
+    return peaks
 
 
 def channels_of(wav_bytes: bytes) -> tuple[bytes, bytes, int]:

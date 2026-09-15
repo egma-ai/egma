@@ -389,6 +389,11 @@ function drawableWaveform(waveform: RecordingWaveform): RecordingWaveform {
       }
     }
   }
+  if (waveform.human.length !== waveform.agent.length) {
+    throw new Error(
+      "a recording waveform cuts both channels on the same slices, so its two peak lists are the same length",
+    );
+  }
   return waveform;
 }
 

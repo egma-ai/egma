@@ -843,7 +843,7 @@ describe("the lifecycle lands", () => {
     expect(read.body.recordingWaveform).toEqual(waveform);
   });
 
-  it("refuses a waveform peak louder than full scale, and leaves a recording measured by nobody null", async () => {
+  it("refuses a waveform peak louder than full scale or channels of different lengths, and leaves a recording measured by nobody null", async () => {
     const { ada, key, agentId, versionId } = await aCustomerReadyToRun(
       "reports_voice_waveform",
       { carrierRoute: PHONE_IS_SET_UP },
@@ -875,6 +875,22 @@ describe("the lifecycle lands", () => {
     expect(refused.body.error).toBe("invalid_request");
     expect(String(refused.body.message)).toContain(
       "/events/0/facts/audio/waveform/human/0",
+    );
+
+    // Two channels cut on different slices cannot share one time axis, so
+    // the document is refused before anything lands.
+    const uneven = await report(simulationId, [
+      terminalEvent("completed", "agent_ended", {
+        audio: {
+          recording: `${simulationId}/dual-channel.wav`,
+          waveform: { human: [0.5, 0.5], agent: [0.5] },
+        },
+      }),
+    ]);
+    expect(uneven.statusCode).toBe(400);
+    expect(uneven.body.error).toBe("invalid_request");
+    expect(String(uneven.body.message)).toContain(
+      "/events/0/facts/audio/waveform: the human channel holds 2 peaks",
     );
 
     // The same recording, reported by a simulator that measured no peaks.

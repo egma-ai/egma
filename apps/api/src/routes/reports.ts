@@ -273,6 +273,28 @@ export async function reportRoutes(
     // schema, which requires simulation_id and permits only status events.
     const report = document as AcceptedReport;
 
+    // One recording is cut on one set of slices, which the schema cannot say
+    // for itself: a waveform whose channels differ in length is refused as a
+    // document, the same way a schema complaint is.
+    const unevenWaveforms = report.events.flatMap((event, at) => {
+      const waveform = event.facts?.audio?.waveform;
+      if (waveform === undefined) return [];
+      if (waveform.human.length === waveform.agent.length) return [];
+      return [
+        `/events/${String(at)}/facts/audio/waveform: the human channel holds ` +
+          `${String(waveform.human.length)} peaks and the agent channel ` +
+          `${String(waveform.agent.length)}, and one recording is cut on one set of slices`,
+      ];
+    });
+    if (unevenWaveforms.length > 0) {
+      return invalid(
+        reply,
+        `this is not a simulation report the contract accepts: ` +
+          `${unevenWaveforms.join("; ")}. Fix the document against the report ` +
+          `schema, contract version 1; resending the same bytes cannot help.`,
+      );
+    }
+
     // A document about another simulation is refused, not rerouted: the URL
     // and the document each name the simulation, and when they disagree
     // there is no honest way to pick one.

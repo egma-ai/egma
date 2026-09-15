@@ -3452,23 +3452,23 @@ describe("the complete product, walked in order in a second project", () => {
       const evidence = walk.getByRole("tabpanel", {
         name: "Transcript & audio",
       });
-      await evidence
-        .getByRole("heading", { name: "Conversation", exact: true })
-        .waitFor();
+      // Nothing has happened yet, so the tab waits with the Egma mark rather
+      // than stacking an empty recording over an empty transcript.
+      await evidence.locator('[data-slot="waiting-mark"]').waitFor();
 
       const shown = await walk.innerText("main");
-      // It is the conversation it says it is: the test it will execute, and
-      // who will call about it.
+      // It is the simulation it says it is: the test it will execute, and
+      // the persona who will call about it.
       expect(shown).toContain("Reschedules a booked appointment");
       expect(shown).toContain("Impatient Rita");
-      // And nothing has happened yet, said as the compact empty state used by
-      // this evidence surface rather than as a failure.
-      const emptyConversation = evidence.locator(
-        'section[aria-labelledby="run-evidence-conversation"]',
+      expect(await evidence.innerText()).toMatch(
+        /Queued\s+Waiting for a simulator to start\./u,
       );
-      expect(await emptyConversation.innerText()).toMatch(
-        /Conversation\s+No conversation recorded/u,
-      );
+      expect(
+        await evidence
+          .getByRole("heading", { name: "Conversation", exact: true })
+          .count(),
+      ).toBe(0);
       expect(await walk.locator("audio").count()).toBe(0);
     },
     SETTLE,

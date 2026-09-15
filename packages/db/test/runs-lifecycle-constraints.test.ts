@@ -561,6 +561,18 @@ describe("a simulation's shape", () => {
     );
   });
 
+  it("refuses peaks whose two channels are cut on different slices", async () => {
+    await expect(
+      insertSimulation("completed", {
+        modality: "voice",
+        recording_reference: "recordings/one.flac",
+        recording_waveform: JSON.stringify({ human: [0.2, 0.4], agent: [0.1] }),
+      }),
+    ).rejects.toSatisfy(
+      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
+    );
+  });
+
   it("keeps a voice recording's peaks beside its reference", async () => {
     await expect(
       insertSimulation("completed", {

@@ -540,6 +540,14 @@ export const simulation = pgTable(
       sql`${table.recordingWaveform} is null
         or ${table.recordingReference} is not null`,
     ),
+    // One recording is cut on one set of slices, so its two channels hold
+    // the same number of peaks.
+    check(
+      "simulation_waveform_channels_match",
+      sql`${table.recordingWaveform} is null
+        or jsonb_array_length(${table.recordingWaveform}->'human')
+          = jsonb_array_length(${table.recordingWaveform}->'agent')`,
+    ),
     // The tenancy triangle, edge by edge, exactly as the run's: project of
     // the organization, agent of the project, connection of the agent — and
     // the run of the same project, so a simulation cannot sit in a run that
