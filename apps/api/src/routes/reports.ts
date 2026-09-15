@@ -8,6 +8,7 @@ import {
   startSimulation,
   type CompletedEndingReason,
   type FailedEndingReason,
+  type RecordingWaveform,
   type Simulation,
   type SimulationStanding,
   type SimulationSummaryFacts,
@@ -88,10 +89,7 @@ type StatusEvent = {
     readonly turn_count: number;
     readonly audio: {
       readonly recording: string;
-      readonly waveform?: {
-        readonly human: readonly number[];
-        readonly agent: readonly number[];
-      };
+      readonly waveform?: RecordingWaveform;
     } | null;
     readonly provider_reference: string | null;
     readonly evidence_error?: "evidence_collection_error" | null;
@@ -153,9 +151,9 @@ function summaryFactsOf(event: StatusEvent): SimulationSummaryFacts {
       ? {}
       : {
           recordingReference: facts.audio.recording,
-          ...(facts.audio.waveform === undefined
-            ? {}
-            : { recordingWaveform: facts.audio.waveform }),
+          // Null when the simulator measured no peaks, so a row never keeps a
+          // waveform its report did not carry.
+          recordingWaveform: facts.audio.waveform ?? null,
         }),
     // Incoherent times leave measured execution unknown.
     ...(reportedMoments(facts) ?? {}),

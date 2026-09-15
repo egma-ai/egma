@@ -18,6 +18,7 @@ import { mintApiKeySecret } from "../auth/api-key.ts";
 import type { Identity } from "../auth/better-auth.ts";
 import { DEVICE_CLIENT_ID, normalizeUserCode } from "../auth/device.ts";
 import { resolveSession, type Session } from "../auth/session.ts";
+import { sendRenewedCookies } from "../http/credentialed.ts";
 import { toIdentityRequest } from "../http/web-handler.ts";
 
 /**
@@ -436,6 +437,7 @@ export async function deviceRoutes(
       });
       return null;
     }
+    sendRenewedCookies(reply, session.renewedCookies);
     return session;
   }
 }

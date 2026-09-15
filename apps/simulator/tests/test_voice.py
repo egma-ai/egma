@@ -54,6 +54,7 @@ from egma_simulator.recording import (
     AudioFacts,
     channels_of,
     dual_channel_wav,
+    measured_waveform,
     waveform_of,
 )
 from egma_simulator.spec import AuthoredPersona, PersonaParameters, SimulationSpec
@@ -458,6 +459,11 @@ def test_a_recording_is_measured_for_drawing_as_it_is_written():
     assert reported == {"recording": "sim-1/dual-channel.wav", "waveform": drawn}
     unmeasured = AudioFacts(recording="sim-1/dual-channel.wav", started_unix_nano=1)
     assert unmeasured.as_report() == {"recording": "sim-1/dual-channel.wav"}
+
+    # A fault in measuring costs the graph, never the recording it describes:
+    # bytes that do not hold whole samples cannot be measured, and that is None.
+    assert measured_waveform(persona, agent) == drawn
+    assert measured_waveform(b"\x00\x00\x00", b"\x00" * 4) is None
 
 
 # -- A whole exchange --------------------------------------------------------

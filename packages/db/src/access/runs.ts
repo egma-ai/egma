@@ -219,7 +219,7 @@ export type SimulationSummaryFacts = {
   readonly turnCount?: number | undefined;
   readonly providerReference?: string | undefined;
   readonly recordingReference?: string | undefined;
-  readonly recordingWaveform?: RecordingWaveform | undefined;
+  readonly recordingWaveform?: RecordingWaveform | null | undefined;
   readonly startedAt?: Date | undefined;
   readonly endedAt?: Date | undefined;
   readonly evidenceError?: "evidence_collection_error" | undefined;
@@ -351,7 +351,10 @@ function summaryFactsWrite(facts: SimulationSummaryFacts): Record<string, unknow
     write.recordingReference = facts.recordingReference.trim() || null;
   }
   if (facts.recordingWaveform !== undefined) {
-    write.recordingWaveform = drawableWaveform(facts.recordingWaveform);
+    write.recordingWaveform =
+      facts.recordingWaveform === null
+        ? null
+        : drawableWaveform(facts.recordingWaveform);
   }
   if (facts.startedAt !== undefined) write.startedAt = facts.startedAt;
   if (facts.endedAt !== undefined) write.endedAt = facts.endedAt;

@@ -1475,7 +1475,7 @@ export function simulationToolCalls(
  * The transcript panel and the run detail's Transcript tab both ask this, so
  * one answer decides whether evidence is drawn or the wait is shown.
  */
-export function simulationHasConversation(
+export function simulationHasTranscriptEvents(
   evidence: SimulationEvidence,
 ): boolean {
   const transcript = evidence.transcript;
@@ -2244,7 +2244,7 @@ export function SimulationTranscript({
   const requiredPov = attribution.pov;
   const transcript = evidence.transcript;
   const toolCalls = useMemo(() => simulationToolCalls(evidence), [evidence]);
-  const hasConversation = simulationHasConversation(evidence);
+  const hasConversation = simulationHasTranscriptEvents(evidence);
   if (
     source !== null &&
     !hasConversation &&

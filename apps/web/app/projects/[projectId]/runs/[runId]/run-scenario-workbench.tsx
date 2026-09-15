@@ -67,7 +67,7 @@ import {
   evidenceGradeTally,
   recordingSpeakerTimeline,
   RecordingEvidence,
-  simulationHasConversation,
+  simulationHasTranscriptEvents,
   SimulationEvidenceSummary,
   useSimulationEvidenceRecording,
   waitingForSimulationTranscript,
@@ -580,7 +580,7 @@ type WaitingSurface = "results" | "transcript";
 
 /** What a running simulation will send to each tab. Both share the queued wait. */
 const RUNNING_WAIT: Readonly<Record<WaitingSurface, string>> = {
-  results: "The conversation is happening now. Results appear here when it ends.",
+  results: "The simulation is happening now. Results appear here when it ends.",
   transcript:
     "The simulation is happening now. The transcript appears here as Egma receives it.",
 };
@@ -722,7 +722,7 @@ function TranscriptAndAudio({
 
   // No turn and no tool call has arrived, so the tab waits here rather than
   // stack an empty recording over an empty transcript.
-  if (active && !simulationHasConversation(evidence)) {
+  if (active && !simulationHasTranscriptEvents(evidence)) {
     return <WaitingForSimulation status={evidence.status} surface="transcript" />;
   }
 

@@ -80,7 +80,7 @@ from .persona import SILENCE_FOLLOW_UP_LIMIT, SILENCE_WAIT_SECONDS, Persona, Tur
 from .platform_logging import log_event
 from .plugs import PlugError, VoiceConnection
 from .provider_keys import ProviderKeyUnavailable, authentication_rejected
-from .recording import AudioFacts, dual_channel_wav, waveform_of
+from .recording import AudioFacts, dual_channel_wav, measured_waveform
 from .speech import (
     SCRIPTED_PAIR,
     PersonaVoice,
@@ -2129,7 +2129,7 @@ class VoiceConductor:
         self.audio = AudioFacts(
             recording=reference,
             started_unix_nano=self._recording_began_unix_nano,
-            waveform=waveform_of(persona_track, agent_track),
+            waveform=measured_waveform(persona_track, agent_track),
         )
 
     async def _run(self) -> None:

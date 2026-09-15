@@ -158,6 +158,60 @@ describe("a browser session", () => {
   });
 
   /**
+   * The traces door spells the credentialed hook out by hand, so it is proved
+   * on its own: a browser reaching it is renewed the same way, whatever the
+   * door then makes of the body.
+   */
+  it("is renewed on the traces door too", async () => {
+    api = await createApi("session_renewal_traces_door");
+    const cookie = await signedIn();
+    await dueForRenewal();
+
+    const posted = await api.app.inject({
+      method: "POST",
+      url: "/v1/traces",
+      headers: { cookie, "content-type": "application/json" },
+      payload: { resourceSpans: [] },
+    });
+    expect(posted.statusCode, posted.body).not.toBe(401);
+
+    const renewed = sessionCookieIn(posted.headers["set-cookie"]);
+    expect(renewed).toBeTypeOf("string");
+    expect(renewed).toContain(`Max-Age=${THIRTY_DAYS_SECONDS}`);
+  });
+
+  /** An API key has no cookie to renew, so a request under one sets none. */
+  it("sets no cookie on a request made with an API key", async () => {
+    api = await createApi("session_renewal_api_key");
+    const cookie = await signedIn();
+
+    const me = await api.app.inject({
+      method: "GET",
+      url: "/api/me",
+      headers: { cookie },
+    });
+    const projectId = (me.json() as { projects: { id: string }[] }).projects[0]?.id;
+    expect(projectId).toBeTypeOf("string");
+    const minted = await api.app.inject({
+      method: "POST",
+      url: "/v1/keys",
+      headers: { cookie },
+      payload: { name: "the terminal", projectId },
+    });
+    expect(minted.statusCode, minted.body).toBe(201);
+    const secret = (minted.json() as { secret: string }).secret;
+    await dueForRenewal();
+
+    const listed = await api.app.inject({
+      method: "GET",
+      url: "/v1/agents",
+      headers: { authorization: `Bearer ${secret}` },
+    });
+    expect(listed.statusCode, listed.body).toBe(200);
+    expect(setCookies(listed.headers["set-cookie"])).toEqual([]);
+  });
+
+  /**
    * Renewal keeps a session alive; it does not make one hard to end. Signing
    * out still deletes the row, so the renewed cookie and the one it came from
    * are both worth nothing on the very next request.

@@ -392,7 +392,7 @@ export const simulation = pgTable(
     /** The dual-channel recording's reference in the blob store, voice only. */
     recordingReference: text("recording_reference"),
     /**
-     * The recording measured for drawing: the simulator's 360 peaks a channel,
+     * The recording measured for drawing: the simulator's peaks per channel,
      * 0 to 1, human first and agent second. Null on a chat row, and null on a
      * voice row whose recording was written before the simulator measured one.
      */

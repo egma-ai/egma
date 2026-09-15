@@ -1097,7 +1097,7 @@ describe("one run after suites", () => {
     expect(within(panel).getByText("Running")).toBeTruthy();
     expect(
       within(panel).getByText(
-        "The conversation is happening now. Results appear here when it ends.",
+        "The simulation is happening now. Results appear here when it ends.",
       ),
     ).toBeTruthy();
     /* Nothing pretends to be evidence while there is none. */

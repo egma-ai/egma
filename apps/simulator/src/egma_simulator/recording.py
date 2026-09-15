@@ -11,6 +11,7 @@ under test second, so the file needs no legend to be read.
 from __future__ import annotations
 
 import io
+import logging
 import sys
 import wave
 from array import array
@@ -19,6 +20,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from .speech import SAMPLE_WIDTH_BYTES
+
+logger = logging.getLogger(__name__)
 
 RECORDING_NAME = "dual-channel.wav"
 """What one simulation's recording is called inside its own blob key."""
@@ -96,6 +99,21 @@ def waveform_of(
         "human": _peaks(persona_audio, frames, bins),
         "agent": _peaks(agent_audio, frames, bins),
     }
+
+
+def measured_waveform(
+    persona_audio: bytes, agent_audio: bytes
+) -> dict[str, list[float]] | None:
+    """``waveform_of``, or None when measuring fails.
+
+    The recording is the evidence and its graph is a convenience, so a fault
+    in measuring costs the graph and never the recording it describes.
+    """
+    try:
+        return waveform_of(persona_audio, agent_audio)
+    except Exception:
+        logger.warning("the recording could not be measured for drawing", exc_info=True)
+        return None
 
 
 def _peaks(pcm: bytes, frames: int, bins: int) -> list[float]:

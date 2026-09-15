@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import { hashInvitationToken } from "../auth/invitation.ts";
 import type { SessionIdentityProvider } from "../auth/seam.ts";
 import { resolveSession } from "../auth/session.ts";
+import { sendRenewedCookies } from "../http/credentialed.ts";
 import { toIdentityRequest } from "../http/web-handler.ts";
 
 /**
@@ -68,6 +69,7 @@ export async function invitationRoutes(
         message: "sign in, or sign up with this link, to accept an invitation",
       });
     }
+    sendRenewedCookies(reply, session.renewedCookies);
 
     const accepted = await acceptInvitation(
       hashInvitationToken(token),

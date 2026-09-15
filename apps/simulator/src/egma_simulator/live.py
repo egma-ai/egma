@@ -44,7 +44,7 @@ from .media import VoiceMedia
 from .model import ModelClient
 from .persona import OPENING_NUDGE, Persona
 from .plugs import PlugError, VoiceConnection
-from .recording import AudioFacts, dual_channel_wav, waveform_of
+from .recording import AudioFacts, dual_channel_wav, measured_waveform
 from .spec import LiveSelection
 from .speech import SpeechGain
 from .usage import ProviderUsage, live_duration_usage
@@ -658,7 +658,7 @@ class LiveConductor:
                     self.audio = AudioFacts(
                         reference,
                         started,
-                        waveform=waveform_of(persona_audio, agent_audio),
+                        waveform=measured_waveform(persona_audio, agent_audio),
                     )
                 except Exception:
                     self.evidence_error = "evidence_collection_error"
