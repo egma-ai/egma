@@ -665,7 +665,12 @@ function ShellFrame({
        */}
       <aside
         className={cn(
-          "sticky top-0 z-20 flex h-svh flex-col gap-5 overflow-visible pb-4",
+          /*
+           * 8px under the account plate, and 8px over it inside the footer,
+           * so the band under the hairline is the 64px the boards draw around
+           * a 48px plate. (Read off Paper page 12, 2026-09-15.)
+           */
+          "sticky top-0 z-20 flex h-svh flex-col gap-5 overflow-visible pb-2",
           "border-r border-border bg-surface",
           "max-[900px]:hidden",
         )}
@@ -679,10 +684,10 @@ function ShellFrame({
         {/*
          * 8px, the navigation column's inset, so the account plate is the same
          * 208px block as a nav row and stands 8px off both edges of the bar.
-         * The avatar rides the 16px lane from inside it — see `AccountMenu`,
-         * which pays for its own hairline.
+         * The avatar rides the 16px lane from inside it. The hairline on top
+         * spans the whole bar: the boards draw the account block under one.
          */}
-        <SidebarFooter className="px-2">
+        <SidebarFooter className="border-t border-border px-2 pt-2">
           {role !== null && !canAuthor(role) ? (
             /*
              * The chip has no plate to sit inside, so it takes the 8px back as

@@ -1,105 +1,143 @@
 "use client";
 
-import { ChevronRightIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Badge } from "@/components/ui/badge";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { ownerSaid, type Persona } from "../../../../lib/personas.ts";
+import { ownerSaid, type Persona } from "@/lib/personas.ts";
 
 /**
- * Persona-specific content built from shared page primitives and theme
- * values. Use the design system's type and spacing scale.
+ * Persona page primitives, read off Paper page 12 — "Personas · Complete flow
+ * + Dropdowns" (developer decisions, 2026-09-15): three caps groups with a
+ * hairline only between groups, plain subsection headers under Settings with
+ * no toggle, and label-beside-value rows on the read page.
  */
 
-/** A labelled settings group that keeps its fields reachable by keyboard. */
-export function PersonaSection({
-  label,
-  invalidReason,
-  open = false,
+/** Which page a primitive is drawn on; the read page is quieter than the form. */
+export type PersonaPage = "form" | "read";
+
+/** METADATA, WHO THEY ARE or SETTINGS: the 16px caps label that heads a group. */
+export function PersonaGroupLabel({
+  divider = false,
+  page = "form",
   children,
 }: {
-  readonly label: string;
-  readonly invalidReason?: string;
-  readonly open?: boolean;
+  /** The hairline between groups; the first group draws none. */
+  readonly divider?: boolean;
+  readonly page?: PersonaPage;
   readonly children: ReactNode;
 }) {
   return (
-    <Collapsible
-      defaultOpen={open}
-      asChild
+    <h2
+      className={cn(
+        "m-0 text-base font-medium tracking-normal text-foreground uppercase",
+        /* The room under the hairline: 16px on the form, 20px on the read page. */
+        divider && "border-t border-border",
+        divider && (page === "form" ? "pt-4" : "pt-5"),
+      )}
     >
-      <section aria-label={label}>
-        <h3 className="m-0">
-          <CollapsibleTrigger
-            className="group/collapsible flex min-h-(--control-lg) w-full items-center justify-start gap-2 border-0 bg-transparent p-0 text-left text-base font-medium text-foreground"
-            aria-invalid={invalidReason === undefined ? undefined : "true"}
-          >
-            <ChevronRightIcon
-              className="size-4 text-faint transition-transform duration-(--duration-hover) ease-out group-data-[state=open]/collapsible:rotate-90 motion-reduce:transition-none"
-              aria-hidden="true"
-            />
-            <span className="min-w-0 flex-1">
-              {label}
-              {invalidReason === undefined ? null : (
-                <span className="font-normal text-failure"> · {invalidReason}</span>
-              )}
-            </span>
-          </CollapsibleTrigger>
-        </h3>
-        <CollapsibleContent className="pb-4 pt-3">
-          {children}
-        </CollapsibleContent>
-      </section>
-    </Collapsible>
-  );
-}
-
-/** The divider heading above identity fields or persona settings. */
-export function PersonaGroupLabel({ children }: { readonly children: ReactNode }) {
-  return (
-    <h2 className="m-0 border-t border-border pt-4 text-sm font-medium text-foreground uppercase">
       {children}
     </h2>
   );
 }
 
-/** One fact about a persona, as a read view shows it. */
-export type Read = {
+/**
+ * One subsection under Settings: a plain header over its fields, with no line
+ * above it and no toggle. `htmlFor` makes the header the control's own label
+ * when the subsection holds one control, as Language does.
+ */
+export function PersonaSubsection({
+  label,
+  htmlFor,
+  invalidReason,
+  page = "form",
+  children,
+}: {
+  readonly label: string;
+  readonly htmlFor?: string;
+  readonly invalidReason?: string;
+  readonly page?: PersonaPage;
+  readonly children: ReactNode;
+}) {
+  const said = (
+    <>
+      {label}
+      {invalidReason === undefined ? null : (
+        <span className="font-normal text-failure"> · {invalidReason}</span>
+      )}
+    </>
+  );
+  return (
+    <section className="flex min-w-0 flex-col gap-3 pt-2" aria-label={label}>
+      {page === "form" ? (
+        <h3 className="m-0 flex min-h-(--control-lg) items-center text-base font-medium text-foreground">
+          {htmlFor === undefined ? <span>{said}</span> : <label htmlFor={htmlFor}>{said}</label>}
+        </h3>
+      ) : (
+        <h3 className="m-0 text-sm font-medium text-foreground">{said}</h3>
+      )}
+      {children}
+    </section>
+  );
+}
+
+/** A persona field: the label printed as the boards print it, star and all, in one ink. */
+export function PersonaField({
+  label,
+  htmlFor,
+  children,
+}: {
+  readonly label: string;
+  readonly htmlFor: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-2" data-slot="field">
+      <Label htmlFor={htmlFor}>{label}</Label>
+      {children}
+    </div>
+  );
+}
+
+/** One fact on the read page. */
+export type PersonaReadRow = {
   readonly label: string;
   readonly value: ReactNode;
-  /** An identifier or a rate, which reads straight in the mono face. */
-  readonly mono?: boolean;
 };
 
 /**
- * Use a definition list with one fact per line so long model and voice names
- * remain readable in the narrow sheet.
+ * The label in faint ink at the left, the value beside it, rows 12px apart.
+ *
+ * Under the shell's one layout breakpoint the label lane would leave a phone's
+ * value column a few words wide, so there each label stands over its value.
  */
-export function Reads({ reads }: { readonly reads: readonly Read[] }) {
+export function PersonaReadRows({ rows }: { readonly rows: readonly PersonaReadRow[] }) {
   return (
     <dl className="m-0 flex min-w-0 flex-col gap-3">
-      {reads.map((read) => (
-        <div className="flex min-w-0 flex-col gap-1" key={read.label}>
-          <dt className="m-0 text-sm text-faint">{read.label}</dt>
-          <dd
-            className={cn(
-              "m-0 min-w-0 text-sm text-foreground [overflow-wrap:anywhere]",
-              /* A description somebody wrote in paragraphs stays in them. */
-              "whitespace-pre-wrap",
-              read.mono === true && "font-mono",
-            )}
-          >
-            {read.value}
+      {rows.map((row) => (
+        <div
+          className="flex min-w-0 items-start gap-6 max-[900px]:flex-col max-[900px]:gap-1"
+          key={row.label}
+        >
+          <dt className="m-0 w-(--persona-read-label-width) flex-none text-sm text-faint max-[900px]:w-auto">
+            {row.label}
+          </dt>
+          <dd className="m-0 min-w-0 flex-1 text-sm whitespace-pre-wrap text-foreground [overflow-wrap:anywhere]">
+            {row.value}
           </dd>
         </div>
       ))}
     </dl>
+  );
+}
+
+/** The Type value on the read page: one word on a soft plate inside a hairline. */
+export function PersonaTypePlate({ owner }: { readonly owner: Persona["owner"] }) {
+  return (
+    <span className="inline-flex items-center border border-border bg-surface-soft px-2.5 py-0.5 text-sm text-foreground">
+      {ownerSaid(owner)}
+    </span>
   );
 }
 

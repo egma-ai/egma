@@ -42,6 +42,7 @@ export function SearchableSelect({
   empty,
   emptyDetail,
   emptyAction,
+  className,
   onSearchChange,
   onValueChange,
 }: {
@@ -58,6 +59,8 @@ export function SearchableSelect({
   readonly loading?: boolean;
   readonly error?: string | null;
   readonly toolbar?: ReactNode;
+  /** Classes for the trigger, merged after the shared field styles. */
+  readonly className?: string;
   readonly empty: string;
   readonly emptyDetail?: string;
   readonly emptyAction?: ReactNode;
@@ -91,6 +94,7 @@ export function SearchableSelect({
               "rounded-input border border-input bg-surface px-3 text-left text-base text-foreground",
               "disabled:cursor-not-allowed disabled:opacity-60",
               "pointer-coarse:min-h-(--tap-target)",
+              className,
             )}
             type="button"
             role="combobox"

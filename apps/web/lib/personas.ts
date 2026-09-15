@@ -135,6 +135,35 @@ export function ownerSaid(owner: Persona["owner"]): string {
   return owner === "egma" ? "Built-in" : "Custom";
 }
 
+/** A language tag as a person reads it: `en-US` is `English (United States)`. */
+export function languageLabel(value: string): string {
+  try {
+    const locale = new Intl.Locale(value);
+    const languages = new Intl.DisplayNames(["en"], { type: "language" });
+    const regions = new Intl.DisplayNames(["en"], { type: "region" });
+    const language = languages.of(locale.language) ?? locale.language;
+    return locale.region === undefined
+      ? language
+      : `${language} (${regions.of(locale.region) ?? locale.region})`;
+  } catch {
+    return value;
+  }
+}
+
+/** The interruption level as the boards print it. */
+export function interruptionSaid(
+  level: CascadedControls["interruptionLevel"],
+): string {
+  if (level === "none") return "None";
+  if (level === "occasional") return "Occasional";
+  return "Frequent";
+}
+
+/** The background sound as the boards print it. */
+export function backgroundSaid(id: PersonaControls["backgroundSoundId"]): string {
+  return BACKGROUND_SOUNDS.find((sound) => sound.id === id)?.label ?? id;
+}
+
 function valuesOf(persona: Persona): Record<string, number | string> {
   return Object.fromEntries(
     persona.parameterContract.map((field) => [field.key, field.defaultValue]),

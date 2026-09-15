@@ -77,6 +77,17 @@ const buttonVariants = cva(
           "pointer-hover:not-disabled:border-destructive-hover",
           "active:bg-destructive-pressed active:border-destructive-pressed",
         ],
+        /*
+         * Solid: a Deep Ember block with paper text. The persona pages' primary
+         * action, by developer decision on Paper page 12 (2026-09-15); every
+         * other page keeps the wash primary above.
+         */
+        solid: [
+          "border border-primary bg-primary text-primary-foreground",
+          "pointer-hover:not-disabled:bg-primary-hover",
+          "pointer-hover:not-disabled:border-primary-hover",
+          "active:bg-primary-pressed active:border-primary-pressed",
+        ],
       },
       size: {
         /* 36px and 16px of side padding: the toolbar control the boards draw. */

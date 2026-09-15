@@ -94,6 +94,7 @@ function DownwardSelect({
   options,
   disabled = false,
   required = false,
+  className,
   onValueChange,
 }: {
   readonly id: string;
@@ -101,6 +102,8 @@ function DownwardSelect({
   readonly options: readonly DownwardSelectOption[];
   readonly disabled?: boolean;
   readonly required?: boolean;
+  /** Classes for the trigger, merged after the shared select styles. */
+  readonly className?: string;
   readonly onValueChange: (value: string) => void;
 }) {
   const hint = useFieldHint();
@@ -128,7 +131,7 @@ function DownwardSelect({
           ref={trigger}
           id={id}
           data-slot="select"
-          className={cn(selectVariants({ size: "lg" }), "flex items-center justify-between gap-3 pr-3")}
+          className={cn(selectVariants({ size: "lg" }), "flex items-center justify-between gap-3 pr-3", className)}
           aria-required={required ? "true" : undefined}
           aria-describedby={hint}
         >
