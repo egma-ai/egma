@@ -184,6 +184,9 @@
   --page-max-wide: 1440px;
 
   --persona-form-width: 720px;
+
+  --persona-read-width: 960px;
+  --persona-read-label-width: 240px;
   --searchable-select-min-width: 20rem;
   --dropdown-max-height: 288px;
   --dropdown-viewport-height: min(
