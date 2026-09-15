@@ -247,6 +247,7 @@ export function ModelFields({
 }) {
   const [capabilities, setCapabilities] = useState<GetPersonaCapabilitiesResponse | null>(null);
   const [capabilityError, setCapabilityError] = useState<string | null>(null);
+  const [capabilityAttempt, setCapabilityAttempt] = useState(0);
   const [languageSearch, setLanguageSearch] = useState("");
   const [voiceSearch, setVoiceSearch] = useState("");
   const [voiceType, setVoiceType] = useState<"all" | "male" | "female" | "unknown">("all");
@@ -299,6 +300,7 @@ export function ModelFields({
     draft.language,
     draft.separateVoiceId,
     draft.liveVoiceId,
+    capabilityAttempt,
   ]);
 
   const activeVoiceId = draft.mode === "live" ? draft.liveVoiceId : draft.separateVoiceId;
@@ -346,6 +348,13 @@ export function ModelFields({
     onChange(next);
   }
 
+  function retryCapabilities(): void {
+    setCapabilities(null);
+    setCapabilityError(null);
+    reportValidity.current?.(false);
+    setCapabilityAttempt((current) => current + 1);
+  }
+
   const languageDisplay = capabilities === null || languageAvailable
     ? languageLabel(draft.language)
     : `${languageLabel(draft.language)} · Unavailable`;
@@ -357,7 +366,14 @@ export function ModelFields({
   return (
     <>
       <PersonaGroupLabel>Settings</PersonaGroupLabel>
-      {capabilityError === null ? null : <Note bad>{capabilityError}</Note>}
+      {capabilityError === null ? null : (
+        <div className="flex flex-wrap items-center gap-3">
+          <Note bad>{capabilityError}</Note>
+          <Button type="button" size="sm" variant="secondary" disabled={disabled} onClick={retryCapabilities}>
+            Retry options
+          </Button>
+        </div>
+      )}
       <PersonaSection label="Language">
         <Field
           label="Language*"

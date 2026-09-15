@@ -418,14 +418,26 @@ describe("persona full-page flows", () => {
     });
   });
 
-  it("keeps the draft visible when capabilities or creation is refused", async () => {
-    stubApi({
-      "GET /v1/persona-capabilities": { status: 503, body: { error: "unavailable", message: "Voice choices are unavailable." } },
+  it("retries a transient capability failure without losing the Live draft", async () => {
+    let attempts = 0;
+    const asked = stubApi({
+      "GET /v1/persona-capabilities": async () => {
+        attempts += 1;
+        return attempts === 1
+          ? json(503, { error: "unavailable", message: "Voice choices are unavailable." })
+          : json(200, CAPABILITIES);
+      },
     });
     render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
     expect(await screen.findByText("Voice choices are unavailable.")).toBeTruthy();
-    expect(screen.getByDisplayValue("Live Lee copy")).toBeTruthy();
+    const name = screen.getByDisplayValue("Live Lee copy");
+    fireEvent.change(name, { target: { value: "Retry Lee" } });
     expect((screen.getByRole("button", { name: "Clone persona" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Retry options" }));
+    await waitFor(() => expect(attempts).toBe(2));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Clone persona" }) as HTMLButtonElement).disabled).toBe(false));
+    expect((name as HTMLInputElement).value).toBe("Retry Lee");
+    expect(asked.filter((one) => one.path === "/v1/persona-capabilities")).toHaveLength(2);
   });
 
   it("offers Clone for built-ins and Clone plus Delete for custom personas", async () => {
@@ -479,5 +491,23 @@ describe("persona full-page flows", () => {
     expect(await screen.findByText("Personas are unavailable.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(asked.filter((one) => one.path === "/v1/personas")).toHaveLength(2));
+  });
+
+  it("stops pagination after the final accumulated page", async () => {
+    let pages = 0;
+    const asked = stubApi({
+      "GET /v1/personas": async () => {
+        pages += 1;
+        return pages === 1
+          ? json(200, { personas: [BUILTIN], nextPageToken: "next-page" })
+          : json(200, { personas: [CUSTOM], nextPageToken: null });
+      },
+    });
+    render(<PersonasPage />);
+    expect(await screen.findByRole("link", { name: "Built-in Priya" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Show more" }));
+    expect(await screen.findByRole("link", { name: "Custom Priya" })).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Show more" })).toBeNull());
+    expect(asked.filter((one) => one.path === "/v1/personas")).toHaveLength(2);
   });
 });

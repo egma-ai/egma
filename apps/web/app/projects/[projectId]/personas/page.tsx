@@ -132,7 +132,9 @@ function ProjectPersonas({ projectId }: { readonly projectId: string }) {
     }
     if (answer.status === "failed") return <Failure message={answer.refusal.message} onRetry={reload} />;
     const items = [...answer.value.personas, ...(after?.personas ?? [])];
-    const cursor = after?.nextPageToken ?? answer.value.nextPageToken;
+    const cursor = after === null
+      ? answer.value.nextPageToken
+      : after.nextPageToken;
     if (items.length === 0) {
       return search === ""
         ? <Empty title="No personas in this project yet" lead="Create a stable synthetic caller for your voice agent tests." action={action} />
