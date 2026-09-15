@@ -1027,7 +1027,9 @@ describe("what a project recorded in production", () => {
     "dresses the window control as this product's own",
     async () => {
       await page.goto(monitoringAt(acme));
-      await page.waitForSelector("#window");
+      // While the loading state hands over to the screen, two window
+      // controls can stand in the DOM for an instant; read the settled one.
+      await expect.poll(() => page.locator("#window").count()).toBe(1);
 
       expect(
         await page.locator("#window").evaluate((element) => {
