@@ -569,6 +569,11 @@ it.skipIf(!ENABLED || storage?.available !== true)(
         role: "member" as const,
         via: "session" as const,
       };
+      const authoredControls = {
+        language: "en-US",
+        backgroundSoundId: "none",
+        ...(LIVE_PERSONA_MODE ? {} : { interruptionLevel: "none" as const }),
+      };
       const authoredPersona = await request(instance, "POST", "/v1/personas", {
         key: projectKey,
         body: {
@@ -576,16 +581,7 @@ it.skipIf(!ENABLED || storage?.available !== true)(
           name: "Appointment Rita",
           identityName: NEUTRAL_PERSON.identityName,
           personality: NEUTRAL_PERSON.personality,
-          controls: {
-            language: "en-US",
-            emotion: "neutral",
-            accent: "voice_default",
-            speechSpeed: "slow",
-            speechVolume: 1,
-            backgroundSoundId: "none",
-            backgroundVolume: 0.0631,
-            interruptionLevel: "none",
-          },
+          controls: authoredControls,
           models: LIVE_PERSONA_MODE ? {
             mode: "live",
             llm: { provider: "openai", model: "gpt-4o-mini" },
@@ -612,10 +608,19 @@ it.skipIf(!ENABLED || storage?.available !== true)(
       } else {
         expect(authoredPersona.body).toMatchObject({
           settings: {
-            controls: { speechSpeed: "slow" },
-            models: { tts: { speed: 0.8 } },
+            controls: authoredControls,
+            models: {
+              tts: {
+                provider: "openai",
+                model: "tts-1",
+                voiceId: "alloy",
+              },
+            },
           },
         });
+        expect(
+          (authoredPersona.body.settings as { models: { tts: object } }).models.tts,
+        ).not.toHaveProperty("speed");
       }
       const suite = await request(instance, "POST", "/v1/test-suites", {
         key: projectKey, body: { name: "Retell live appointment" },
