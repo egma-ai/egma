@@ -219,6 +219,17 @@ export function createIdentity(options: IdentityOptions): Identity {
       bearer(),
     ],
 
+    // A browser session runs thirty days from its last use. Once a day of use
+    // has passed, the provider moves the row's deadline out and reissues the
+    // cookie with the same length. `resolveIdentity` below takes that cookie
+    // off the provider's answer and hands it to whoever writes the reply —
+    // without that, the row renews and the browser's copy still dies on the
+    // day it was signed in.
+    session: {
+      expiresIn: 60 * 60 * 24 * 30,
+      updateAge: 60 * 60 * 24,
+    },
+
     advanced: {
       // The cookie a person can see in their own browser says egma, not the
       // name of the library that happens to set it. A provider swap must not
@@ -357,13 +368,23 @@ export function createIdentity(options: IdentityOptions): Identity {
 
     provider: {
       async resolveIdentity(request): Promise<ExternalIdentity | null> {
-        const session = await auth.api.getSession({
+        // `returnHeaders` is the only way a call made from inside the server
+        // sees what the provider set on the way out. A renewal happens here,
+        // so dropping those headers is what leaves a browser holding the
+        // cookie it was signed in with.
+        const { headers, response } = await auth.api.getSession({
           headers: request.headers,
+          returnHeaders: true,
         });
-        if (session === null) return null;
+        if (response === null) return null;
+
+        const renewedCookies = headers.getSetCookie();
         return {
-          externalIdentityId: session.user.id,
-          email: session.user.email,
+          externalIdentityId: response.user.id,
+          email: response.user.email,
+          // Only when there is one, so an ordinary answer stays the two fields
+          // it has always been.
+          ...(renewedCookies.length === 0 ? {} : { renewedCookies }),
         };
       },
 

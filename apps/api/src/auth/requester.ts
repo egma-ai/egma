@@ -14,6 +14,11 @@ export type Requester = {
   readonly via: Via;
   /** Which key, when it was a key. Absent for a browser. */
   readonly apiKeyId?: string;
+  /**
+   * The provider's renewed session cookie, for the reply to send. Only a
+   * browser session ever carries one: an API key has no cookie to renew.
+   */
+  readonly renewedCookies?: readonly string[];
 };
 
 export async function resolveRequester(
@@ -27,5 +32,11 @@ export async function resolveRequester(
 
   const session = await resolveSession(provider, request);
   if (session?.auth === undefined) return null;
-  return { auth: session.auth, via: "session" };
+  return {
+    auth: session.auth,
+    via: "session",
+    ...(session.renewedCookies === undefined
+      ? {}
+      : { renewedCookies: session.renewedCookies }),
+  };
 }

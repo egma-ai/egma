@@ -14,6 +14,12 @@ import type { Role } from "@egma/db";
 export type ExternalIdentity = {
   readonly externalIdentityId: string;
   readonly email: string;
+  /**
+   * Set-Cookie lines the provider produced while answering, present only when
+   * it renewed the session; whoever writes the reply must send them, or the
+   * browser keeps a cookie that dies on the sign-in day.
+   */
+  readonly renewedCookies?: readonly string[];
 };
 
 /** What a terminal is handed at the start of an RFC 8628 device flow. */
