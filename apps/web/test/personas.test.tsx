@@ -217,8 +217,24 @@ describe("persona full-page flows", () => {
     stubApi();
     render(<PersonaCreateScreen projectId="prj_1" />);
     fireEvent.click(await screen.findByRole("button", { name: "Next" }));
-    expect(await screen.findByLabelText("Voice provider*")).toBeTruthy();
+    const name = await screen.findByLabelText("Name*");
+    expect(name.getAttribute("placeholder")).toBe("Ex Angry Spanish caller");
+    expect(screen.getByLabelText("Identity name*").getAttribute("placeholder")).toBe("John Doe");
+    const description = screen.getByLabelText("Description");
+    expect(description.getAttribute("placeholder")).toBeNull();
+    expect(description.getAttribute("aria-required")).toBeNull();
+    expect(screen.queryByText("The human name they give the agent in every simulation.")).toBeNull();
+    expect(screen.queryByText("Describe who they are and how they speak. Put their situation and goal in the test scenario.")).toBeNull();
+    expect(screen.queryByText("Tips for a useful persona")).toBeNull();
+    for (const section of ["Language", "Text to speech", "Speech to text", "Reasoning", "Advanced"]) {
+      const trigger = screen.getByRole("button", { name: section });
+      expect(trigger.getAttribute("aria-expanded")).toBe("false");
+      expect(trigger.firstElementChild?.tagName.toLocaleLowerCase()).toBe("svg");
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Text to speech" }));
+    expect(screen.getByLabelText("Voice provider*")).toBeTruthy();
     expect(screen.getByLabelText("Voice model*")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Speech to text" }));
     expect(screen.getByLabelText("Transcription provider*")).toBeTruthy();
     expect(screen.getByLabelText("Transcription model*")).toBeTruthy();
     expect(screen.queryByLabelText(/Speech mode/i)).toBeNull();
@@ -236,8 +252,16 @@ describe("persona full-page flows", () => {
     expect(screen.queryByLabelText(/Speech mode/i)).toBeNull();
     expect(screen.queryByLabelText(/Interruptions/i)).toBeNull();
     expect(screen.queryByLabelText(/Live speech model/i)).toBeNull();
+    for (const section of ["Language", "Realtime voice", "Advanced"]) {
+      expect(screen.getByRole("button", { name: section }).getAttribute("aria-expanded")).toBe("false");
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Realtime voice" }));
     const reasoning = screen.getByLabelText("Reasoning model*");
-    expect(within(reasoning).getByRole("option", { name: "GPT 5.6 Terra" })).toBeTruthy();
+    reasoning.focus();
+    fireEvent.keyDown(reasoning, { key: "Enter" });
+    const placeholder = await screen.findByRole("option", { name: "GPT 5.6 Terra" });
+    expect(placeholder.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.keyDown(placeholder, { key: "Escape" });
 
     fireEvent.change(screen.getByLabelText("Name*"), { target: { value: "Calm Lee" } });
     fireEvent.change(screen.getByLabelText("Identity name*"), { target: { value: "Lee" } });
@@ -258,7 +282,10 @@ describe("persona full-page flows", () => {
     expect(await screen.findByDisplayValue("Live Lee copy")).toBeTruthy();
     expect(asked.filter((one) => one.method === "POST")).toHaveLength(0);
     expect(screen.queryByLabelText(/Interruptions/i)).toBeNull();
-    fireEvent.change(screen.getByLabelText("Description [optional]"), { target: { value: "" } });
+    for (const section of ["Language", "Realtime voice", "Advanced"]) {
+      expect(screen.getByRole("button", { name: section }).getAttribute("aria-expanded")).toBe("false");
+    }
+    fireEvent.change(screen.getByLabelText("Description"), { target: { value: "" } });
     await waitFor(() => expect((screen.getByRole("button", { name: "Clone persona" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: "Clone persona" }));
 
@@ -286,8 +313,17 @@ describe("persona full-page flows", () => {
     const asked = stubApi();
     render(<PersonaCreateScreen projectId="prj_1" />);
     fireEvent.click(await screen.findByRole("button", { name: "Next" }));
-    fireEvent.change(await screen.findByLabelText("Reasoning provider*"), { target: { value: "anthropic" } });
-    expect((screen.getByLabelText("Reasoning model*") as HTMLSelectElement).value).toBe("claude-sonnet");
+    fireEvent.click(await screen.findByRole("button", { name: "Reasoning" }));
+    const provider = await screen.findByLabelText("Reasoning provider*");
+    provider.focus();
+    fireEvent.keyDown(provider, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Anthropic" }));
+    const model = screen.getByLabelText("Reasoning model*");
+    model.focus();
+    fireEvent.keyDown(model, { key: "Enter" });
+    const selectedModel = await screen.findByRole("option", { name: "Claude Sonnet" });
+    expect(selectedModel.getAttribute("data-state")).toBe("checked");
+    fireEvent.keyDown(selectedModel, { key: "Escape" });
     fireEvent.change(screen.getByLabelText("Name*"), { target: { value: "Linked model" } });
     fireEvent.change(screen.getByLabelText("Identity name*"), { target: { value: "Lin" } });
     fireEvent.change(screen.getByLabelText("Personality*"), { target: { value: "Checks every choice." } });
@@ -302,8 +338,10 @@ describe("persona full-page flows", () => {
   it("searches and chooses a supported language", async () => {
     stubApi();
     render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Language" }));
     const language = await screen.findByRole("combobox", { name: "Language*" });
     fireEvent.click(language);
+    expect(document.querySelector("[data-slot='popover-content']")?.getAttribute("data-side")).toBe("bottom");
     fireEvent.change(await screen.findByPlaceholderText("Search languages"), { target: { value: "kingdom" } });
     const choice = await screen.findByRole("option", { name: /English \(United Kingdom\)/u });
     fireEvent.click(choice);
@@ -315,6 +353,8 @@ describe("persona full-page flows", () => {
       "GET /v1/persona-capabilities": () => new Promise<Response>(() => undefined),
     });
     render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Language" }));
+    fireEvent.click(screen.getByRole("button", { name: "Realtime voice" }));
     expect((await screen.findByRole("combobox", { name: "Language*" })).textContent).toBe("English (United States)");
     expect(screen.getByRole("combobox", { name: "Voice*" }).textContent).toBe("alloy");
     expect(screen.queryByText(/Unavailable/u)).toBeNull();
@@ -370,6 +410,10 @@ describe("persona full-page flows", () => {
     const view = render(<PersonaReadScreen projectId="prj_1" personaId="prs_live" />);
     expect(await screen.findByText("Patient and concise.")).toBeTruthy();
     expect(view.container.querySelector("[data-slot='persona-read'] input, [data-slot='persona-read'] select, [data-slot='persona-read'] textarea")).toBeNull();
+    for (const section of ["Language", "Realtime voice", "Advanced"]) {
+      expect(screen.getByRole("button", { name: section }).getAttribute("aria-expanded")).toBe("false");
+    }
+    expect(screen.queryByRole("link", { name: "Clone" })).toBeNull();
     expect(screen.queryByText("Interruptions")).toBeNull();
     expect(screen.queryByText("gpt-live-1")).toBeNull();
   });
@@ -377,6 +421,7 @@ describe("persona full-page flows", () => {
   it("keeps provider and model as separate read facts for Cascaded personas", async () => {
     stubApi({ "GET /v1/personas/prs_live": { status: 200, body: CUSTOM } });
     render(<PersonaReadScreen projectId="prj_1" personaId="prs_live" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Text to speech" }));
     const speech = await screen.findByRole("region", { name: "Text to speech" });
     expect(within(speech).getByText("Provider")).toBeTruthy();
     expect(within(speech).getByText("Cartesia")).toBeTruthy();
@@ -387,6 +432,7 @@ describe("persona full-page flows", () => {
   it("makes searchable required voice choices keyboard-readable and keeps Unknown filtering", async () => {
     stubApi();
     render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Realtime voice" }));
     const voice = await screen.findByRole("combobox", { name: "Voice*" });
     await waitFor(() => expect(voice.getAttribute("aria-required")).toBe("true"));
     fireEvent.click(voice);
@@ -408,14 +454,12 @@ describe("persona full-page flows", () => {
       },
     });
     render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Realtime voice" }));
     const voice = await screen.findByRole("combobox", { name: "Voice*" });
     await waitFor(() => expect(voice).toHaveProperty("textContent", "alloy · Unavailable"));
     expect((screen.getByRole("button", { name: "Clone persona" }) as HTMLButtonElement).disabled).toBe(true);
-    await waitFor(() => {
-      const hint = voice.getAttribute("aria-describedby");
-      expect(hint).not.toBeNull();
-      expect(document.getElementById(hint!)?.textContent).toContain("Choose an available voice");
-    });
+    expect(voice.getAttribute("aria-describedby")).toBeNull();
+    expect(screen.queryByText("Choose an available voice before creating this persona.")).toBeNull();
   });
 
   it("retries a transient capability failure without losing the Live draft", async () => {
@@ -443,6 +487,8 @@ describe("persona full-page flows", () => {
   it("offers Clone for built-ins and Clone plus Delete for custom personas", async () => {
     stubApi();
     render(<PersonasPage />);
+    const builtIn = await screen.findByRole("link", { name: "Built-in Priya" });
+    expect(builtIn.getAttribute("data-slot")).toBe("persona-name-link");
     fireEvent.click(await screen.findByRole("button", { name: "Open the menu for Built-in Priya" }));
     let menu = await screen.findByRole("menu", { name: "Open the menu for Built-in Priya" });
     expect(within(menu).getByRole("menuitem", { name: "Clone" }).getAttribute("href")).toBe("/projects/prj_1/personas/prs_builtin/clone");

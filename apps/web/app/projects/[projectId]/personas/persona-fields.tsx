@@ -8,7 +8,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
+import { DownwardSelect, type DownwardSelectOption } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   BACKGROUND_SOUNDS,
@@ -66,20 +66,21 @@ export function NameFields({
       <Field label="Name*" htmlFor={`${prefix}-name`}>
         <Input
           id={`${prefix}-name`}
+          className="placeholder:text-sm placeholder:text-faint"
           value={name}
           disabled={disabled}
-          placeholder="What your team will call them"
+          placeholder="Ex Angry Spanish caller"
           aria-required="true"
           autoComplete="off"
           onChange={(event) => onName(event.target.value)}
         />
       </Field>
-      <Field label="Description [optional]" htmlFor={`${prefix}-description`}>
+      <Field label="Description" htmlFor={`${prefix}-description`}>
         <Input
           id={`${prefix}-description`}
+          className="placeholder:text-sm placeholder:text-faint"
           value={description}
           disabled={disabled}
-          placeholder="One line for people who select them"
           autoComplete="off"
           onChange={(event) => onDescription(event.target.value)}
         />
@@ -103,16 +104,13 @@ export function BehaviorFields({
     <>
       <PersonaGroupLabel>Who they are</PersonaGroupLabel>
       <div className="flex flex-col gap-4">
-        <Field
-          label="Identity name*"
-          htmlFor={`${prefix}-identity-name`}
-          hint="The human name they give the agent in every simulation."
-        >
+        <Field label="Identity name*" htmlFor={`${prefix}-identity-name`}>
           <Input
             id={`${prefix}-identity-name`}
+            className="placeholder:text-sm placeholder:text-faint"
             value={draft.identityName}
             disabled={disabled}
-            placeholder="For example, Priya"
+            placeholder="John Doe"
             aria-required="true"
             autoComplete="off"
             onChange={(event) =>
@@ -120,17 +118,14 @@ export function BehaviorFields({
             }
           />
         </Field>
-        <Field
-          label="Personality*"
-          htmlFor={`${prefix}-personality`}
-          hint="Describe who they are and how they speak. Put their situation and goal in the test scenario."
-        >
+        <Field label="Personality*" htmlFor={`${prefix}-personality`}>
           <Textarea
             id={`${prefix}-personality`}
+            className="placeholder:text-sm placeholder:text-faint"
             value={draft.personality}
             disabled={disabled}
             rows={5}
-            placeholder="Age, temperament, speech style, and what they know"
+            placeholder="Ex Impatient, speaks quickly, and asks direct questions"
             aria-required="true"
             onChange={(event) =>
               onChange({ ...draft, personality: event.target.value })
@@ -167,43 +162,40 @@ function ProviderModelFields({
   const providers = [...new Map(offered.map((entry) => [entry.provider, entry.label])).entries()];
   const models = offered.filter((entry) => entry.provider === provider);
   const chosenModel = models.some((entry) => entry.model === model);
+  const providerOptions: DownwardSelectOption[] = [
+    ...(providers.some(([id]) => id === provider) ? [] : [{ value: provider, label: `${provider} · Unavailable` }]),
+    ...providers.map(([value, label]) => ({ value, label })),
+  ];
+  const modelOptions: DownwardSelectOption[] = [
+    ...(modelPlaceholder === undefined ? [] : [{ value: "model-placeholder", label: modelPlaceholder, disabled: true }]),
+    ...(chosenModel ? [] : [{ value: model, label: `${model} · Unavailable` }]),
+    ...models.map((entry) => ({ value: entry.model, label: entry.modelLabel ?? entry.model })),
+  ];
   return (
     <FormRow>
       <Field label={`${title} provider*`} htmlFor={`${prefix}-${job}-provider`}>
-        <Select
+        <DownwardSelect
           id={`${prefix}-${job}-provider`}
           value={provider}
           disabled={disabled}
-          aria-required="true"
-          onChange={(event) => {
-            const next = offered.find((entry) => entry.provider === event.target.value);
+          required
+          options={providerOptions}
+          onValueChange={(value) => {
+            const next = offered.find((entry) => entry.provider === value);
             if (next !== undefined) onChange(next.provider, next.model);
           }}
-        >
-          {providers.some(([id]) => id === provider) ? null : (
-            <option value={provider}>{provider} · Unavailable</option>
-          )}
-          {providers.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-        </Select>
+        />
       </Field>
       <Field label={`${title} model*`} htmlFor={`${prefix}-${job}-model`}>
-        <Select
+        <DownwardSelect
+          key={provider}
           id={`${prefix}-${job}-model`}
           value={model}
           disabled={disabled}
-          aria-required="true"
-          onChange={(event) => onChange(provider, event.target.value)}
-        >
-          {modelPlaceholder === undefined ? null : (
-            <option value="" disabled>{modelPlaceholder}</option>
-          )}
-          {chosenModel ? null : <option value={model}>{model} · Unavailable</option>}
-          {models.map((entry) => (
-            <option key={entry.model} value={entry.model}>
-              {entry.modelLabel ?? entry.model}
-            </option>
-          ))}
-        </Select>
+          required
+          options={modelOptions}
+          onValueChange={(value) => onChange(provider, value)}
+        />
       </Field>
     </FormRow>
   );
@@ -226,6 +218,16 @@ function capabilityMessage(
 ): ReactNode {
   if (state.status === "supported") return null;
   return <Note bad={state.status === "unsupported"}>{label}: {state.reason ?? state.status}</Note>;
+}
+
+function capabilityInvalidReason(
+  state: { readonly status: string; readonly reason?: string },
+  available: boolean,
+  chooseAvailable: string,
+): string | undefined {
+  if (available) return undefined;
+  if (state.status === "supported" || state.status === "fixed") return chooseAvailable;
+  return state.reason ?? "Support could not be verified";
 }
 
 export function ModelFields({
@@ -362,6 +364,20 @@ export function ModelFields({
   const voiceDisplay = capabilities === null || voiceAvailable
     ? selectedVoice?.name ?? activeVoiceId
     : `${activeVoiceId} · Unavailable`;
+  const languageInvalidReason = capabilities === null
+    ? undefined
+    : capabilityInvalidReason(
+        capabilities.language,
+        languageAvailable,
+        "Choose an available language",
+      );
+  const voiceInvalidReason = capabilities === null
+    ? undefined
+    : capabilityInvalidReason(
+        capabilities.voices,
+        voiceAvailable,
+        "Choose an available voice",
+      );
 
   return (
     <>
@@ -374,12 +390,11 @@ export function ModelFields({
           </Button>
         </div>
       )}
-      <PersonaSection label="Language">
-        <Field
-          label="Language*"
-          htmlFor={`${prefix}-language`}
-          hint={!languageAvailable && capabilities !== null ? "Choose an available language before creating this persona." : undefined}
-        >
+      <PersonaSection
+        label="Language"
+        invalidReason={languageInvalidReason}
+      >
+        <Field label="Language*" htmlFor={`${prefix}-language`}>
           <SearchableSelect
             id={`${prefix}-language`}
             value={draft.language}
@@ -404,7 +419,10 @@ export function ModelFields({
 
       {draft.mode === "separate" ? (
         <>
-          <PersonaSection label="Text to speech">
+          <PersonaSection
+            label="Text to speech"
+            invalidReason={voiceInvalidReason}
+          >
             <div className="flex flex-col gap-4">
               <ProviderModelFields
                 prefix={prefix}
@@ -462,7 +480,10 @@ export function ModelFields({
           </PersonaSection>
         </>
       ) : (
-        <PersonaSection label="Realtime voice">
+        <PersonaSection
+          label="Realtime voice"
+          invalidReason={voiceInvalidReason}
+        >
           <div className="flex flex-col gap-4">
             <VoiceField
               prefix={prefix}
@@ -495,38 +516,38 @@ export function ModelFields({
         </PersonaSection>
       )}
 
-      <PersonaSection label="Advanced" open={false}>
+      <PersonaSection label="Advanced">
         <div className="flex flex-col gap-4">
           <Field label="Background sound*" htmlFor={`${prefix}-background-sound`}>
-            <Select
+            <DownwardSelect
               id={`${prefix}-background-sound`}
               value={draft.backgroundSoundId}
               disabled={disabled}
-              aria-required="true"
-              onChange={(event) => change({
+              required
+              options={BACKGROUND_SOUNDS.map((sound) => ({ value: sound.id, label: sound.label }))}
+              onValueChange={(value) => change({
                 ...draft,
-                backgroundSoundId: event.target.value as ModelsDraft["backgroundSoundId"],
+                backgroundSoundId: value as ModelsDraft["backgroundSoundId"],
               })}
-            >
-              {BACKGROUND_SOUNDS.map((sound) => <option key={sound.id} value={sound.id}>{sound.label}</option>)}
-            </Select>
+            />
           </Field>
           {draft.mode === "separate" ? (
             <Field label="Interruptions*" htmlFor={`${prefix}-interruptions`}>
-              <Select
+              <DownwardSelect
                 id={`${prefix}-interruptions`}
                 value={draft.interruptionLevel}
                 disabled={disabled}
-                aria-required="true"
-                onChange={(event) => change({
+                required
+                options={[
+                  { value: "none", label: "None" },
+                  { value: "occasional", label: "Occasional" },
+                  { value: "frequent", label: "Frequent" },
+                ]}
+                onValueChange={(value) => change({
                   ...draft,
-                  interruptionLevel: event.target.value as ModelsDraft["interruptionLevel"],
+                  interruptionLevel: value as ModelsDraft["interruptionLevel"],
                 })}
-              >
-                <option value="none">None</option>
-                <option value="occasional">Occasional</option>
-                <option value="frequent">Frequent</option>
-              </Select>
+              />
             </Field>
           ) : null}
         </div>
@@ -567,11 +588,7 @@ function VoiceField({
   readonly onChange: (value: string) => void;
 }) {
   return (
-    <Field
-      label="Voice*"
-      htmlFor={`${prefix}-voice`}
-      hint={!valid && !loading ? "Choose an available voice before creating this persona." : undefined}
-    >
+    <Field label="Voice*" htmlFor={`${prefix}-voice`}>
       <SearchableSelect
         id={`${prefix}-voice`}
         value={value}

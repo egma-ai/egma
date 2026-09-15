@@ -184,8 +184,12 @@
   --page-max-wide: 1440px;
 
   --persona-form-width: 720px;
-  --persona-tips-width: 440px;
   --searchable-select-min-width: 20rem;
+  --dropdown-max-height: 288px;
+  --dropdown-viewport-height: min(
+    var(--dropdown-max-height),
+    calc(50dvh - var(--space-8))
+  );
   --grade-fact-min: 150px;
 
 

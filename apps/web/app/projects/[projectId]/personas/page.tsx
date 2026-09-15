@@ -108,7 +108,7 @@ function ProjectPersonas({ projectId }: { readonly projectId: string }) {
   const columns: readonly Column<Persona>[] = [
     {
       key: "name", header: "Name", primary: true, width: "260px",
-      cell: (persona) => <Link className="text-sm text-foreground" href={personaPath(projectId, persona.id)}>{persona.name}</Link>,
+      cell: (persona) => <Link data-slot="persona-name-link" className="text-sm text-foreground" href={personaPath(projectId, persona.id)}>{persona.name}</Link>,
     },
     { key: "type", header: "Type", width: "130px", cell: (persona) => <PersonaTypeChip owner={persona.owner} /> },
     {

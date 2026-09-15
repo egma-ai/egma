@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createPersona, forkPersona, getPersona, getPersonaForm } from "@egma/platform-api/client";
 import { RadioIcon, WaypointsIcon } from "lucide-react";
@@ -16,7 +15,6 @@ import {
   modelsFrom,
   modelsOfPersona,
   ownerSaid,
-  personaClonePath,
   personaPath,
   personasPath,
   type BehaviorDraft,
@@ -74,19 +72,6 @@ function fallbackModels(mode: PersonaModels["mode"], form: PersonaForm): Persona
       voiceId: tts?.recommendedVoiceId ?? "alloy",
     },
   };
-}
-
-function Tips() {
-  return (
-    <aside className="w-full max-w-(--persona-tips-width) border border-border bg-surface-soft p-6" aria-labelledby="persona-tips-title">
-      <h2 className="m-0 text-base font-medium" id="persona-tips-title">Tips for a useful persona</h2>
-      <ul className="mt-4 mb-0 flex list-disc flex-col gap-3 pl-5 text-sm text-muted-foreground">
-        <li>Describe temperament, speech style, age, and what this person knows.</li>
-        <li>Use details that should stay stable across many tests.</li>
-        <li>Put the caller&apos;s situation and goal in the test scenario.</li>
-      </ul>
-    </aside>
-  );
 }
 
 function ArchitectureSetup({
@@ -224,27 +209,24 @@ function PersonaDraft({
     <>
       <PageBody>
         <div className="min-h-0 flex-1 overflow-y-auto pb-8">
-          <div className="flex w-full flex-wrap items-start gap-10">
-            <form
-              className="flex w-full max-w-(--persona-form-width) flex-none flex-col gap-4"
-              onSubmit={(event) => { event.preventDefault(); void submit(); }}
-            >
-              {refusal === null ? null : <Refused message={refusal.message} />}
-              <NameFields prefix={prefix} name={name} description={description} disabled={saving} onName={setName} onDescription={setDescription} />
-              <BehaviorFields prefix={prefix} draft={behavior} disabled={saving} onChange={setBehavior} />
-              <ModelFields
-                prefix={prefix}
-                draft={models}
-                form={form}
-                disabled={saving}
-                projectId={projectId}
-                onChange={setModels}
-                onValidityChange={setCapabilitiesValid}
-              />
-              <button className="sr-only" type="submit" disabled={!valid || saving}>Submit persona</button>
-            </form>
-            <Tips />
-          </div>
+          <form
+            className="flex w-full max-w-(--persona-form-width) flex-col gap-4"
+            onSubmit={(event) => { event.preventDefault(); void submit(); }}
+          >
+            {refusal === null ? null : <Refused message={refusal.message} />}
+            <NameFields prefix={prefix} name={name} description={description} disabled={saving} onName={setName} onDescription={setDescription} />
+            <BehaviorFields prefix={prefix} draft={behavior} disabled={saving} onChange={setBehavior} />
+            <ModelFields
+              prefix={prefix}
+              draft={models}
+              form={form}
+              disabled={saving}
+              projectId={projectId}
+              onChange={setModels}
+              onValidityChange={setCapabilitiesValid}
+            />
+            <button className="sr-only" type="submit" disabled={!valid || saving}>Submit persona</button>
+          </form>
         </div>
       </PageBody>
       <PageFooter>
@@ -409,7 +391,7 @@ function PersonaRead({ persona, form }: { readonly persona: Persona; readonly fo
           ]} />
         </PersonaSection>
       )}
-      <PersonaSection label="Advanced" open={false}>
+      <PersonaSection label="Advanced">
         <Reads reads={[
           { label: "Background sound", value: backgroundSaid(controls.backgroundSoundId) },
           ...(models.mode === "separate" ? [{ label: "Interruptions", value: "interruptionLevel" in controls ? controls.interruptionLevel : "none" }] : []),
@@ -420,8 +402,6 @@ function PersonaRead({ persona, form }: { readonly persona: Persona; readonly fo
 }
 
 export function PersonaReadScreen({ projectId, personaId }: { readonly projectId: string; readonly personaId: string }) {
-  const { me } = useShellSession();
-  const role = me === null ? null : roleOf(me);
   const { answer, reload } = useProjectRead<Persona>(
     (project) => platformAnswer(getPersona({ projectId: project, personaId }, { client: platformClient })),
     projectId,
@@ -437,9 +417,6 @@ export function PersonaReadScreen({ projectId, personaId }: { readonly projectId
     }
   }, [answer, form]);
   const persona = answer?.status === "ready" ? answer.value : null;
-  const clone = role !== null && canAuthor(role) && persona !== null
-    ? <Button asChild><Link href={personaClonePath(projectId, persona.id)}>Clone</Link></Button>
-    : undefined;
   let body: ReactNode;
   if (answer === null || answer.status === "signed-out") body = <Loading what="persona" />;
   else if (answer.status === "missing") body = <NotFound message={answer.refusal.message} />;
@@ -447,7 +424,7 @@ export function PersonaReadScreen({ projectId, personaId }: { readonly projectId
   else body = <PersonaRead persona={answer.value} form={form?.status === "ready" ? form.value : undefined} />;
   return (
     <ProductPage>
-      <PageHeader title={persona?.name ?? "Persona"} breadcrumbs={[{ label: "Personas", href: personasPath(projectId) }, { label: persona?.name ?? "Persona" }]} topbarAction={clone} />
+      <PageHeader title={persona?.name ?? "Persona"} breadcrumbs={[{ label: "Personas", href: personasPath(projectId) }, { label: persona?.name ?? "Persona" }]} />
       <PageBody>{body}</PageBody>
     </ProductPage>
   );

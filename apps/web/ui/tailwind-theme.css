@@ -278,10 +278,14 @@
   --page-gutter: var(--space-6);
   --page-max: 1200px;
   --page-max-wide: 1440px;
-  /* The approved full-page persona flow: form, tips, and their shared frame. */
+  /* The approved full-page persona form and its anchored choice menus. */
   --persona-form-width: 720px;
-  --persona-tips-width: 440px;
   --searchable-select-min-width: 20rem;
+  --dropdown-max-height: 288px;
+  --dropdown-viewport-height: min(
+    var(--dropdown-max-height),
+    calc(50dvh - var(--space-8))
+  );
   --grade-fact-min: 150px;
 
   /*
@@ -829,18 +833,24 @@
     transform-origin: var(--radix-popover-content-transform-origin);
   }
 
+  [data-slot="downward-select-content"] {
+    transform-origin: var(--radix-select-content-transform-origin);
+  }
+
   [data-slot="dropdown-menu-content"],
   [data-slot="dropdown-menu-sub-content"] {
     transform-origin: var(--radix-dropdown-menu-content-transform-origin);
   }
 
   [data-slot="popover-content"][data-state="open"],
+  [data-slot="downward-select-content"][data-state="open"],
   [data-slot="dropdown-menu-content"][data-state="open"],
   [data-slot="dropdown-menu-sub-content"][data-state="open"] {
     animation: egma-anchored-in var(--duration-popover-in) var(--ease-out);
   }
 
   [data-slot="popover-content"][data-state="closed"],
+  [data-slot="downward-select-content"][data-state="closed"],
   [data-slot="dropdown-menu-content"][data-state="closed"],
   [data-slot="dropdown-menu-sub-content"][data-state="closed"] {
     animation: egma-anchored-out var(--duration-popover-out) var(--ease-out);
@@ -965,6 +975,11 @@
     text-decoration-thickness: 1px;
     text-underline-offset: 3px;
     transition: color var(--duration-hover) var(--ease-out);
+  }
+
+  /* Persona names use the whole-row hover and focus treatment without a line. */
+  [data-slot="table-cell"] a[data-slot="persona-name-link"] {
+    text-decoration-line: none;
   }
 
   @media (hover: hover) and (pointer: fine) {
@@ -1103,6 +1118,7 @@
     }
 
     [data-slot="popover-content"][data-state="open"],
+    [data-slot="downward-select-content"][data-state="open"],
     [data-slot="dropdown-menu-content"][data-state="open"],
     [data-slot="dropdown-menu-sub-content"][data-state="open"],
     [data-slot="dialog-content"][data-state="open"],
@@ -1115,6 +1131,7 @@
     }
 
     [data-slot="popover-content"][data-state="closed"],
+    [data-slot="downward-select-content"][data-state="closed"],
     [data-slot="dropdown-menu-content"][data-state="closed"],
     [data-slot="dropdown-menu-sub-content"][data-state="closed"],
     [data-slot="dialog-content"][data-state="closed"],

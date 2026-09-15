@@ -3054,6 +3054,14 @@ describe("the complete product, walked in order in a second project", () => {
       await walk.getByRole("button", { name: "Next", exact: true }).click();
       await reactHasTakenOver(walk, "form");
 
+      expect(await walk.locator("#new-persona-name").getAttribute("placeholder")).toBe("Ex Angry Spanish caller");
+      expect(await walk.locator("#new-persona-identity-name").getAttribute("placeholder")).toBe("John Doe");
+      expect(await walk.locator("#new-persona-description").getAttribute("placeholder")).toBeNull();
+      for (const section of ["Language", "Text to speech", "Speech to text", "Reasoning", "Advanced"]) {
+        expect(await walk.getByRole("button", { name: section, exact: true }).getAttribute("aria-expanded")).toBe("false");
+      }
+      expect(await walk.getByText("Tips for a useful persona", { exact: true }).count()).toBe(0);
+
       await walk.fill("#new-persona-name", "Impatient Rita");
       await walk.fill(
         "#new-persona-description",
@@ -5375,12 +5383,18 @@ it(
       const address = `${origin}/projects/${projectId}/personas`;
       await walk.goto(address);
       await reactHasTakenOver(walk, "table");
-      await walk
-        .getByRole("link", { name: "Everyday Caller [Male]", exact: true })
-        .click();
+      const builtIn = walk.getByRole("link", { name: "Everyday Caller [Male]", exact: true });
+      expect(await builtIn.evaluate((link) =>
+        link.ownerDocument.defaultView?.getComputedStyle(link).textDecorationLine
+      )).toBe("none");
+      await builtIn.click();
       await walk.waitForURL(/\/personas\/prs_[^/]+$/);
       await walk.locator("[data-slot='persona-read']").waitFor();
       expect(await walk.locator("[data-slot='persona-read'] input, [data-slot='persona-read'] select, [data-slot='persona-read'] textarea").count()).toBe(0);
+      for (const section of ["Language", "Text to speech", "Speech to text", "Reasoning", "Advanced"]) {
+        expect(await walk.getByRole("button", { name: section, exact: true }).getAttribute("aria-expanded")).toBe("false");
+      }
+      expect(await walk.getByRole("link", { name: "Clone", exact: true }).count()).toBe(0);
       await walk.getByRole("button", { name: "Advanced" }).click();
       expect(await walk.getByText("Interruptions", { exact: true }).count()).toBe(1);
       await walk.evaluate("window.scrollTo(0, 0)");
@@ -5389,21 +5403,35 @@ it(
         path: "/tmp/egma-persona-read-light-desktop.png",
       });
 
-      await walk.getByRole("link", { name: "Clone", exact: true }).click();
+      await walk.getByRole("link", { name: "Personas", exact: true }).last().click();
+      await walk.waitForURL(address);
+      await reactHasTakenOver(walk, "table");
+      await walk.getByRole("button", { name: "Open the menu for Everyday Caller [Male]" }).click();
+      await walk.getByRole("menuitem", { name: "Clone", exact: true }).click();
       await walk.waitForURL(/\/personas\/prs_[^/]+\/clone$/);
       await reactHasTakenOver(walk, "form");
       expect(await walk.locator("#clone-persona-name").inputValue()).toContain("Everyday Caller [Male]");
+      for (const section of ["Language", "Text to speech", "Speech to text", "Reasoning", "Advanced"]) {
+        expect(await walk.getByRole("button", { name: section, exact: true }).getAttribute("aria-expanded")).toBe("false");
+      }
+      await walk.getByRole("button", { name: "Text to speech", exact: true }).click();
       expect(await walk.locator("#clone-persona-tts-provider").count()).toBe(1);
       expect(await walk.locator("#clone-persona-tts-model").count()).toBe(1);
+      await walk.getByRole("button", { name: "Speech to text", exact: true }).click();
       expect(await walk.locator("#clone-persona-stt-provider").count()).toBe(1);
       expect(await walk.locator("#clone-persona-stt-model").count()).toBe(1);
       expect(await walk.locator("#clone-persona-speech-mode").count()).toBe(0);
       expect(await walk.locator("#clone-persona-emotion, #clone-persona-speech-volume, #clone-persona-background-volume, #clone-persona-tts-speed").count()).toBe(0);
+      expect(await walk.getByText("Tips for a useful persona", { exact: true }).count()).toBe(0);
       await walk.fill("#clone-persona-name", "Patient Nora");
       await walk.fill("#clone-persona-personality", "Asks one question and waits for the answer.");
       await walk.getByRole("button", { name: "Advanced" }).click();
-      await walk.selectOption("#clone-persona-interruptions", "frequent");
-      await walk.selectOption("#clone-persona-background-sound", "office-v1");
+      await walk.locator("#clone-persona-interruptions").click();
+      expect(await walk.locator("[data-slot='downward-select-content']").getAttribute("data-side")).toBe("bottom");
+      await walk.getByRole("option", { name: "Frequent", exact: true }).click();
+      await walk.locator("#clone-persona-background-sound").click();
+      expect(await walk.locator("[data-slot='downward-select-content']").getAttribute("data-side")).toBe("bottom");
+      await walk.getByRole("option", { name: "Office", exact: true }).click();
 
       // A full-page draft still protects a person's work before navigation.
       await walk.getByRole("button", { name: "Cancel", exact: true }).click();
