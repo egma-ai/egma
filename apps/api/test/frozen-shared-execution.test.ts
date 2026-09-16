@@ -90,7 +90,7 @@ it("freezes shared grader and persona selections together while later work recei
         credentials: { apiKey: "livekit-key-A1B2C3D4WXYZ", apiSecret: "livekit-secret-E5F6G7H8QRST" },
       },
     });
-    prepared.push({ ...project, voice: used.settings.models.tts.voiceId as string, projectGraderId, personaSettingsId: used.settings.id as string, suiteId: suite.id as string,
+    prepared.push({ ...project, personaModel: used.settings.models.llm.model as string, voice: used.settings.models.tts.voiceId as string, projectGraderId, personaSettingsId: used.settings.id as string, suiteId: suite.id as string,
       testId: test.id as string, testVersionId: test.versionId as string, agentId: registered.agent.id as string, connectionId: registered.connection.id as string });
   }
   const first = prepared[0]!;
@@ -136,7 +136,7 @@ it("freezes shared grader and persona selections together while later work recei
 
   for (const project of prepared) {
     const current = await request(project.projectId, "GET", `/v1/personas/${persona.id}`);
-    expect(current).toMatchObject({ version: releasedPersona.version, settings: { id: project.personaSettingsId, models: { mode: "separate", llm: { model: project.model }, tts: { voiceId: project.voice } } } });
+    expect(current).toMatchObject({ version: releasedPersona.version, settings: { id: project.personaSettingsId, models: { mode: "separate", llm: { model: project.personaModel }, tts: { voiceId: project.voice } } } });
     expect(current.settings.models.tts).not.toHaveProperty("speed");
     const policy = await request(project.projectId, "GET", "/v1/graders");
     expect(policy.graders).toEqual(expect.arrayContaining([expect.objectContaining({ id: project.projectGraderId, settings: { llm_provider: "openai", llm_model: project.model } })]));
@@ -161,7 +161,7 @@ it("freezes shared grader and persona selections together while later work recei
     const project = prepared[index]!;
     const spec = specs.find((one) => one.simulation_id === oldRun.simulationId)!;
     expect(spec.persona).toMatchObject({ personality: originalPersona.personality });
-    expect(spec.models).toMatchObject({ mode: "separate", llm: { model: project.model }, tts: { voice_id: project.voice } });
+    expect(spec.models).toMatchObject({ mode: "separate", llm: { model: project.personaModel }, tts: { voice_id: project.voice } });
     expect((spec.models as { tts: object }).tts).not.toHaveProperty("speed");
     const auth = { ...firstAuth, projectId: project.projectId };
     await completeWithEvidence(auth, oldRun.runId, oldRun.simulationId, project, "after-shared-release");
@@ -193,7 +193,7 @@ it("freezes shared grader and persona selections together while later work recei
   expect(await getSimulation(firstAuth, later.simulationId)).toMatchObject({ personaVersionId: releasedPersona.id });
   const laterClaim = await api.app.inject({ method: "POST", url: CLAIMS_PATH, headers: { authorization: `Bearer ${api.config.simulatorServiceToken}` }, payload: { contract_versions: [5, 6, 7], claimant: "later-release", capacity: 1, wait_seconds: 0 } });
   expect(laterClaim.statusCode, laterClaim.body).toBe(200);
-  expect(laterClaim.json().specs).toMatchObject([{ simulation_id: later.simulationId, persona: { personality: releasedPersona.personality, parameters: { background_sound_id: "none" } }, models: { mode: "separate", llm: { model: first.model }, tts: { voice_id: first.voice } } }]);
+  expect(laterClaim.json().specs).toMatchObject([{ simulation_id: later.simulationId, persona: { personality: releasedPersona.personality, parameters: { background_sound_id: "none" } }, models: { mode: "separate", llm: { model: first.personaModel }, tts: { voice_id: first.voice } } }]);
   expect(laterClaim.json().specs[0].models.tts).not.toHaveProperty("speed");
   const detail = await request(first.projectId, "GET", `/v1/simulations/${oldRuns[0]!.simulationId}`);
   expect(detail.gradingPlan).not.toHaveProperty("state");
