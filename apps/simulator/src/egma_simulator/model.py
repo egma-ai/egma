@@ -14,7 +14,10 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 import aiohttp
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter, is_given
+from pipecat.adapters.services.open_ai_adapter import (
+    OpenAILLMAdapter,
+    openai_is_given,
+)
 from pipecat.processors.aggregators.llm_context import LLMContext
 
 from .client import UNREACHABLE
@@ -227,7 +230,9 @@ class OpenAICompatibleModel:
         )
         asked: dict[str, Any] = {"model": self._model_name}
         asked.update(
-            (name, value) for name, value in invocation.items() if is_given(value)
+            (name, value)
+            for name, value in invocation.items()
+            if openai_is_given(value)
         )
         if self._reasoning_effort is not None:
             asked["reasoning_effort"] = self._reasoning_effort

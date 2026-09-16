@@ -22,6 +22,7 @@ from conftest import (
 from pipecat.audio.vad.vad_analyzer import VADState
 from pipecat.frames.frames import (
     InterruptionFrame,
+    LLMFullResponseEndFrame,
     TextFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -1463,11 +1464,17 @@ async def test_agent_stop_before_delayed_interruption_playout_yields_to_normal_r
     assert deliberate_requests == 2
 
 
+@pytest.mark.parametrize("failure_after_cancel", [False, True])
+@pytest.mark.parametrize("normal_reply_fails", [False, True])
 async def test_failed_deliberate_model_request_does_not_steal_normal_reply(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_after_cancel: bool,
+    normal_reply_fails: bool,
 ):
     original_reply = Persona.reply_to
     attempts = 0
+    normal_failure = ModelFailure("the normal persona reply failed")
 
     async def fail_deliberate(self: Persona, context):
         nonlocal attempts
@@ -1476,7 +1483,11 @@ async def test_failed_deliberate_model_request_does_not_steal_normal_reply(
             for message in context.get_messages()
         ):
             attempts += 1
+            if failure_after_cancel:
+                conductor.agent_speech_stopped()
             raise RuntimeError("interruption request failed")
+        if normal_reply_fails:
+            raise normal_failure
         return await original_reply(self, context)
 
     monkeypatch.setattr(Persona, "reply_to", fail_deliberate)
@@ -1496,6 +1507,15 @@ async def test_failed_deliberate_model_request_does_not_steal_normal_reply(
     assert conductor is not None
     delays = iter((0.1, 1.0))
     conductor._random.uniform = lambda _low, _high: next(delays)
+
+    if normal_reply_fails:
+        with pytest.raises(ModelFailure, match="normal persona reply failed") as caught:
+            await observe(
+                conductor, assembled, spec, controls=ConversationControls()
+            )
+        assert caught.value is normal_failure
+        assert attempts == 1
+        return
 
     observed = await observe(
         conductor, assembled, spec, controls=ConversationControls()
@@ -1746,6 +1766,43 @@ async def test_a_brain_that_refuses_a_turn_fails_in_its_own_words(
 
     with pytest.raises(RuntimeError, match="unknown api key"):
         await voice_simulation(tmp_path, scenario="One point.", replies=["Noted."])
+
+
+async def test_model_failure_survives_an_error_before_the_reply_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    failure = ModelFailure(
+        "the model's answer had no words to speak",
+        diagnostic_attributes={"gen_ai.response.finish_reasons": "stop"},
+    )
+
+    async def refusing_persona(*_args: object, **_kwargs: object):
+        raise failure
+
+    push_frame = conductor_module._PersonaLLMService.push_frame
+    raised_fault = asyncio.Event()
+    raise_fault = VoiceConductor._raise_fault
+
+    def release_reply_end(self):
+        raised_fault.set()
+        raise_fault(self)
+
+    async def hold_reply_end(self, frame, direction=FrameDirection.DOWNSTREAM):
+        # Let the upstream error arrive before the queued response-end frame.
+        if isinstance(frame, LLMFullResponseEndFrame):
+            await raised_fault.wait()
+        await push_frame(self, frame, direction)
+
+    monkeypatch.setattr(Persona, "reply_to", refusing_persona)
+    monkeypatch.setattr(VoiceConductor, "_raise_fault", release_reply_end)
+    monkeypatch.setattr(
+        conductor_module._PersonaLLMService, "push_frame", hold_reply_end
+    )
+
+    with pytest.raises(ModelFailure, match="no words to speak") as caught:
+        await voice_simulation(tmp_path, scenario="One point.", replies=["Noted."])
+
+    assert caught.value is failure
 
 
 async def test_a_turn_no_transcriber_finds_words_in_is_a_turn_without_words(
