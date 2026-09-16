@@ -2230,10 +2230,19 @@ describe("the suite-first Tests route", () => {
     );
     expect(document.querySelector("[data-woken-cell]")).not.toBeNull();
 
-    // One persona has to stay, so the chip left behind carries no cross. The
-    // add line takes the caret instead, and it is still inside the cell.
+    // Taking the last chip in the list moves the caret to the one above it,
+    // which carries a cross like any other.
     fireEvent.click(
       within(written).getByRole("button", { name: "Remove Careful Chris" }),
+    );
+    expect(document.activeElement).toBe(
+      within(written).getByRole("button", { name: "Remove Impatient Rita" }),
+    );
+
+    // With no chip left to hold it, the add line takes the caret, and it is
+    // still inside the cell.
+    fireEvent.click(
+      within(written).getByRole("button", { name: "Remove Impatient Rita" }),
     );
     const add = within(written).getByRole("button", { name: "+ Add a persona" });
     expect(document.activeElement).toBe(add);
@@ -2259,19 +2268,15 @@ describe("the suite-first Tests route", () => {
     if (written === null) throw new Error("the test's row is not on screen");
     fireEvent.click(within(written).getByText("Impatient Rita"));
 
-    // The last persona standing carries no cross: a test says who calls.
-    expect(
-      within(written).queryByRole("button", { name: "Remove Impatient Rita" }),
-    ).toBeNull();
+    // The last persona standing carries a cross like any other, so swapping
+    // the one persona a test has is a press and a pick.
+    fireEvent.click(within(written).getByRole("button", { name: "Remove Impatient Rita" }));
+    expect(within(written).queryAllByRole("listitem")).toHaveLength(0);
+    expect(sent.some((request) => request.method === "PATCH")).toBe(false);
 
-    // Unticking that persona in the picker is the way somebody still tries, so
-    // that is where the refusal is answered, on the row and out loud.
-    fireEvent.click(within(written).getByRole("button", { name: "+ Add a persona" }));
-    const panel = await screen.findByRole("dialog", { name: "Choose personas" });
-    fireEvent.click(
-      await within(panel).findByRole("option", { name: "Impatient Rita" }),
-    );
-    fireEvent.click(within(panel).getByRole("button", { name: "Done" }));
+    // Leaving the cell empty is where the refusal is answered, on the row and
+    // out loud, and the stored persona stands.
+    fireEvent.pointerDown(document.body);
 
     expect((await within(written).findByRole("alert")).textContent).toBe(
       "A test needs at least one persona, because a test says who calls. The stored personas stand.",

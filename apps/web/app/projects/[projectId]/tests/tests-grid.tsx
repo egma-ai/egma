@@ -831,10 +831,9 @@ function PersonaChips({
       return;
     }
     /*
-     * Nothing left to hold the caret: the last persona on a stored test keeps
-     * no cross, and an emptied entry row has no chip at all. The add line is
-     * the cell's other way in, and the caret has to stay inside the cell —
-     * dropped to the body it blurs the cell, and a blur is a commit.
+     * Nothing left to hold the caret: an emptied cell has no chip at all. The
+     * add line is the cell's other way in, and the caret has to stay inside
+     * the cell — dropped to the body it blurs the cell, and a blur is a commit.
      */
     around.current?.querySelector<HTMLButtonElement>("[data-persona-add]")?.focus();
   }, [caretAt, ids]);
@@ -1068,10 +1067,11 @@ function CellBody({
         known={known}
         stored={stored}
         /*
-         * A test says who calls, so the one persona it has left keeps no
-         * cross. Unticking that persona in the picker is what says why.
+         * Every chip carries a cross, the last one too, so swapping the one
+         * persona a test has is a press and a pick. A cell left empty is
+         * refused on the way out, and the row says why.
          */
-        removable={woken && draft.personas.length > 1}
+        removable={woken}
         onRemove={(id) =>
           onChange({
             ...draft,
