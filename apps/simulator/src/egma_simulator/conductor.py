@@ -99,8 +99,6 @@ logger = logging.getLogger(__name__)
 
 MediaPosition = Fraction
 _INPUT_SOURCE_RANGE = "egma.input_source_range"
-_INTERRUPTION_AUDIO = "egma.interruption_audio"
-_INTERRUPTION_CAP_END = "egma.interruption_cap_end"
 _INTERRUPTION_STOPPED = "egma.interruption_stopped"
 _PERSONA_REPLY_KIND = "egma.persona_reply_kind"
 
@@ -156,6 +154,16 @@ class _AgentFinished(ControlFrame):
     heard_a_turn: bool = True
     silence_follow_up: int = 0
     silence_wait_seconds: float = SILENCE_WAIT_SECONDS
+
+
+@dataclass
+class _DeliberateAudioStarts(ControlFrame):
+    """Rides the playout queue just ahead of the first deliberate frame."""
+
+
+@dataclass
+class _DeliberateAudioCapped(ControlFrame):
+    """Rides the playout queue right behind the last frame under the cap."""
 
 
 @dataclass(frozen=True)
@@ -1220,7 +1228,7 @@ class _InterruptionAudioLimit(FrameProcessor):
                     return
                 self._frames = 0
                 self._conductor.interruption_audio_queued()
-            frame.metadata[_INTERRUPTION_AUDIO] = True
+                await self.push_frame(_DeliberateAudioStarts())
             limit = frame.sample_rate * 3
             remaining = min(
                 max(0, limit - self._frames),
@@ -1246,41 +1254,51 @@ class _InterruptionAudioLimit(FrameProcessor):
                 )
                 self._conductor.interruption_audio_capped()
             self._frames += frame.num_frames
+            await self.push_frame(frame, direction)
             if self._frames == limit:
                 self._conductor.interruption_audio_capped()
-                frame.metadata[_INTERRUPTION_CAP_END] = True
+                await self.push_frame(_DeliberateAudioCapped())
+            return
         await self.push_frame(frame, direction)
 
 
 class _InterruptionPlayout(FrameProcessor):
-    """Cancel unused synthesis only after the bounded final frame is accepted."""
+    """Follow deliberate audio through the transport by its two markers.
+
+    The transport rebuilds every audio frame it plays and keeps none of the
+    metadata stamped before it, so the markers ride its playout queue
+    instead: one just ahead of the first deliberate frame, one right behind
+    the last frame under the cap. Reaching this processor means every
+    transport output processor accepted what came before.
+    """
 
     def __init__(self, conductor: VoiceConductor) -> None:
         super().__init__()
         self._conductor = conductor
+        self._delivering = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
-        interruption_audio = (
-            direction == FrameDirection.DOWNSTREAM
-            and isinstance(frame, OutputAudioRawFrame)
-            and frame.metadata.get(_INTERRUPTION_AUDIO) is True
-        )
-        if interruption_audio:
-            # Reaching this processor means every transport output processor
-            # accepted the frame. Recording happens downstream on the same frame.
-            self._conductor.interruption_playout_started(frame)
-        await self.push_frame(frame, direction)
-        if direction != FrameDirection.DOWNSTREAM or not isinstance(
-            frame, OutputAudioRawFrame
-        ):
+        if direction != FrameDirection.DOWNSTREAM:
+            await self.push_frame(frame, direction)
             return
-        if interruption_audio:
-            if not self._conductor.interruption_playout_may_continue():
-                return
-        if frame.metadata.get(_INTERRUPTION_CAP_END) is True:
-            await self.push_frame(InterruptionFrame(), FrameDirection.UPSTREAM)
-            await self.push_frame(TTSStoppedFrame())
+        if isinstance(frame, _DeliberateAudioStarts):
+            self._delivering = True
+            return
+        if isinstance(frame, _DeliberateAudioCapped):
+            self._delivering = False
+            if self._conductor.interruption_playout_may_continue():
+                await self.push_frame(InterruptionFrame(), FrameDirection.UPSTREAM)
+                await self.push_frame(TTSStoppedFrame())
+            return
+        if isinstance(frame, (InterruptionFrame, PlayoutClearedFrame, TTSStoppedFrame)):
+            self._delivering = False
+        elif self._delivering and isinstance(frame, OutputAudioRawFrame):
+            self._conductor.interruption_playout_started(frame)
+            await self.push_frame(frame, direction)
+            self._conductor.interruption_playout_may_continue()
+            return
+        await self.push_frame(frame, direction)
 
 
 class _Timeline(FrameProcessor):

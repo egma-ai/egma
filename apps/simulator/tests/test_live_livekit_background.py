@@ -32,9 +32,9 @@ from egma_simulator.background import (
 )
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.conductor import (
-    _INTERRUPTION_AUDIO,
     ConductParameters,
     VoiceConductor,
+    _DeliberateAudioStarts,
     _EvidenceRecorder,
 )
 from egma_simulator.conversation import ConversationControls
@@ -191,6 +191,7 @@ class _QueuedLead(FrameProcessor):
         super().__init__()
         self._seconds = seconds
         self._added = False
+        self._deliberate_next = False
         self.deliberate_pcm: bytes | None = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
@@ -201,11 +202,14 @@ class _QueuedLead(FrameProcessor):
             await self.push_frame(
                 OutputAudioRawFrame(bytes(frames * 2), SAMPLE_RATE, 1), direction
             )
-        if (
+        if isinstance(frame, _DeliberateAudioStarts):
+            self._deliberate_next = True
+        elif (
             isinstance(frame, OutputAudioRawFrame)
-            and frame.metadata.get(_INTERRUPTION_AUDIO) is True
+            and self._deliberate_next
             and self.deliberate_pcm is None
         ):
+            self._deliberate_next = False
             self.deliberate_pcm = bytes(frame.audio)
         await self.push_frame(frame, direction)
 
