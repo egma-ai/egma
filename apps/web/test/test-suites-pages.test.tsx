@@ -222,12 +222,12 @@ function runBuilderAnswers(options: {
 }
 
 async function chooseRunTarget(): Promise<void> {
-  fireEvent.change(await screen.findByLabelText("Test suite *"), {
+  fireEvent.change(await screen.findByLabelText("Test suite*"), {
     target: { value: "ste_1" },
   });
-  fireEvent.change(screen.getByLabelText("Agent *"), { target: { value: "agt_1" } });
+  fireEvent.change(screen.getByLabelText("Agent*"), { target: { value: "agt_1" } });
   await screen.findByRole("option", { name: "Production · Voice" });
-  fireEvent.change(screen.getByLabelText("Connection *"), {
+  fireEvent.change(screen.getByLabelText("Connection*"), {
     target: { value: "con_1" },
   });
 }
@@ -459,8 +459,8 @@ describe("the suite-first Tests route", () => {
       document.activeElement,
     );
     expect(within(sheet).getByText("Run one test suite against one agent.")).toBeTruthy();
-    const suite = within(sheet).getByLabelText("Test suite *");
-    const agent = within(sheet).getByLabelText("Agent *");
+    const suite = within(sheet).getByLabelText("Test suite*");
+    const agent = within(sheet).getByLabelText("Agent*");
     expect(suite.getAttribute("aria-required")).toBe("true");
     expect(agent.getAttribute("aria-required")).toBe("true");
     expect(suite.getAttribute("data-slot")).toBe("select");
@@ -468,8 +468,8 @@ describe("the suite-first Tests route", () => {
     expect(suite.className).not.toContain("appearance-none");
     expect(agent.className).not.toContain("appearance-none");
     expect(sheet.querySelector('[data-slot="run-select-chevron"]')).toBeNull();
-    expect(within(sheet).queryByLabelText("Connection *")).toBeNull();
-    expect(screen.queryByLabelText("Run name [optional]")).toBeNull();
+    expect(within(sheet).queryByLabelText("Connection*")).toBeNull();
+    expect(screen.queryByLabelText("Run name")).toBeNull();
     expect(screen.queryByText("Choose an agent first.")).toBeNull();
     const body = sheet.querySelector('[data-slot="sheet-body"]');
     const footer = sheet.querySelector('[data-slot="sheet-footer"]');
@@ -488,20 +488,20 @@ describe("the suite-first Tests route", () => {
     expect((within(sheet).getByRole("button", { name: "Start run" }) as HTMLButtonElement).disabled)
       .toBe(true);
 
-    fireEvent.change(within(sheet).getByLabelText("Agent *"), {
+    fireEvent.change(within(sheet).getByLabelText("Agent*"), {
       target: { value: "agt_1" },
     });
-    const connection = await within(sheet).findByLabelText("Connection *");
+    const connection = await within(sheet).findByLabelText("Connection*");
     expect(connection.getAttribute("aria-required")).toBe("true");
     expect(
       within(sheet).getByRole("option", { name: "Production · Voice" }),
     ).toBeTruthy();
-    expect(screen.queryByLabelText("Run name [optional]")).toBeNull();
+    expect(screen.queryByLabelText("Run name")).toBeNull();
 
-    fireEvent.change(within(sheet).getByLabelText("Connection *"), {
+    fireEvent.change(within(sheet).getByLabelText("Connection*"), {
       target: { value: "con_1" },
     });
-    expect(screen.getByLabelText("Run name [optional]")).toBeTruthy();
+    expect(screen.getByLabelText("Run name")).toBeTruthy();
     expect(screen.queryByText("Leave blank to use the test suite name.")).toBeNull();
     expect((within(sheet).getByRole("button", { name: "Start run" }) as HTMLButtonElement).disabled)
       .toBe(true);
@@ -537,14 +537,14 @@ describe("the suite-first Tests route", () => {
 
     const { unmount } = render(<NewRunPage />);
     const sheet = await screen.findByRole("dialog", { name: "Create a run" });
-    fireEvent.change(within(sheet).getByLabelText("Test suite *"), {
+    fireEvent.change(within(sheet).getByLabelText("Test suite*"), {
       target: { value: "ste_1" },
     });
-    fireEvent.change(within(sheet).getByLabelText("Agent *"), {
+    fireEvent.change(within(sheet).getByLabelText("Agent*"), {
       target: { value: "agt_1" },
     });
-    await within(sheet).findByLabelText("Connection *");
-    fireEvent.change(within(sheet).getByLabelText("Connection *"), {
+    await within(sheet).findByLabelText("Connection*");
+    fireEvent.change(within(sheet).getByLabelText("Connection*"), {
       target: { value: "con_1" },
     });
 
@@ -587,21 +587,21 @@ describe("the suite-first Tests route", () => {
 
     render(<NewRunPage />);
     const room = await screen.findByRole("dialog", { name: "Create a run" });
-    fireEvent.change(within(room).getByLabelText("Test suite *"), {
+    fireEvent.change(within(room).getByLabelText("Test suite*"), {
       target: { value: "ste_1" },
     });
-    fireEvent.change(within(room).getByLabelText("Agent *"), {
+    fireEvent.change(within(room).getByLabelText("Agent*"), {
       target: { value: "agt_1" },
     });
-    await within(room).findByLabelText("Connection *");
-    fireEvent.change(within(room).getByLabelText("Connection *"), {
+    await within(room).findByLabelText("Connection*");
+    fireEvent.change(within(room).getByLabelText("Connection*"), {
       target: { value: "con_1" },
     });
     // A suite whose tests carry nothing still meets the one fact that is not
     // about the tests: a LiveKit simulation whose agent never reports to Egma
     // fails, so the requirement is said on every LiveKit run and stands alone
     // when no test mocks a tool.
-    expect(await screen.findByLabelText("Run name [optional]")).toBeTruthy();
+    expect(await screen.findByLabelText("Run name")).toBeTruthy();
     const bare = await waitFor(() => {
       const held = room.querySelector('[data-slot="run-note"]');
       if (held === null) throw new Error("no run note yet");
@@ -651,18 +651,18 @@ describe("the suite-first Tests route", () => {
       });
       const { unmount } = render(<NewRunPage />);
       const sheet = await screen.findByRole("dialog", { name: "Create a run" });
-      fireEvent.change(within(sheet).getByLabelText("Test suite *"), {
+      fireEvent.change(within(sheet).getByLabelText("Test suite*"), {
         target: { value: "ste_1" },
       });
-      fireEvent.change(within(sheet).getByLabelText("Agent *"), {
+      fireEvent.change(within(sheet).getByLabelText("Agent*"), {
         target: { value: "agt_1" },
       });
-      await within(sheet).findByLabelText("Connection *");
-      fireEvent.change(within(sheet).getByLabelText("Connection *"), {
+      await within(sheet).findByLabelText("Connection*");
+      fireEvent.change(within(sheet).getByLabelText("Connection*"), {
         target: { value: "con_1" },
       });
       if (expected.length === 0) {
-        expect(await screen.findByLabelText("Run name [optional]")).toBeTruthy();
+        expect(await screen.findByLabelText("Run name")).toBeTruthy();
         expect(sheet.querySelector('[data-slot="run-note"]')).toBeNull();
       } else {
         const note = await waitFor(() => {
@@ -806,7 +806,7 @@ describe("the suite-first Tests route", () => {
     });
 
     render(<NewRunPage />);
-    fireEvent.change(await screen.findByLabelText("Agent *"), {
+    fireEvent.change(await screen.findByLabelText("Agent*"), {
       target: { value: "agt_1" },
     });
 
@@ -841,7 +841,7 @@ describe("the suite-first Tests route", () => {
     render(<NewRunPage />);
 
     const sheet = await screen.findByRole("dialog", { name: "Create a run" });
-    fireEvent.change(within(sheet).getByLabelText("Test suite *"), {
+    fireEvent.change(within(sheet).getByLabelText("Test suite*"), {
       target: { value: "ste_1" },
     });
     fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
@@ -3097,7 +3097,7 @@ describe("the suite-first Tests route", () => {
 
     render(<NewRunPage />);
     await chooseRunTarget();
-    fireEvent.change(screen.getByLabelText("Run name [optional]"), {
+    fireEvent.change(screen.getByLabelText("Run name"), {
       target: { value: "Viewer can inspect this intent" },
     });
 
@@ -3135,7 +3135,7 @@ describe("the suite-first Tests route", () => {
     });
 
     render(<NewRunPage />);
-    fireEvent.change(await screen.findByLabelText("Test suite *"), {
+    fireEvent.change(await screen.findByLabelText("Test suite*"), {
       target: { value: "ste_1" },
     });
 
@@ -3161,7 +3161,7 @@ describe("the suite-first Tests route", () => {
     runBuilderAnswers({ started: { status: 422, body: { error, message } } });
     render(<NewRunPage />);
     await chooseRunTarget();
-    fireEvent.change(screen.getByLabelText("Run name [optional]"), {
+    fireEvent.change(screen.getByLabelText("Run name"), {
       target: { value: "Morning check" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));
@@ -3175,9 +3175,9 @@ describe("the suite-first Tests route", () => {
           : "/projects/prj_1/settings/billing",
       );
     }
-    expect((screen.getByLabelText("Test suite *") as HTMLSelectElement).value).toBe("ste_1");
-    expect((screen.getByLabelText("Connection *") as HTMLSelectElement).value).toBe("con_1");
-    expect((screen.getByLabelText("Run name [optional]") as HTMLInputElement).value).toBe("Morning check");
+    expect((screen.getByLabelText("Test suite*") as HTMLSelectElement).value).toBe("ste_1");
+    expect((screen.getByLabelText("Connection*") as HTMLSelectElement).value).toBe("con_1");
+    expect((screen.getByLabelText("Run name") as HTMLInputElement).value).toBe("Morning check");
     expect(routed.push).not.toHaveBeenCalled();
   });
 
@@ -3206,16 +3206,16 @@ describe("the suite-first Tests route", () => {
 
     render(<NewRunPage />);
     await chooseRunTarget();
-    fireEvent.change(screen.getByLabelText("Run name [optional]"), {
+    fireEvent.change(screen.getByLabelText("Run name"), {
       target: { value: "Morning check" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));
 
     expect(await screen.findByText("Egma could not answer.")).toBeTruthy();
-    expect((screen.getByLabelText("Test suite *") as HTMLSelectElement).value).toBe("ste_1");
-    expect((screen.getByLabelText("Agent *") as HTMLSelectElement).value).toBe("agt_1");
-    expect((screen.getByLabelText("Connection *") as HTMLSelectElement).value).toBe("con_1");
-    expect((screen.getByLabelText("Run name [optional]") as HTMLInputElement).value).toBe(
+    expect((screen.getByLabelText("Test suite*") as HTMLSelectElement).value).toBe("ste_1");
+    expect((screen.getByLabelText("Agent*") as HTMLSelectElement).value).toBe("agt_1");
+    expect((screen.getByLabelText("Connection*") as HTMLSelectElement).value).toBe("con_1");
+    expect((screen.getByLabelText("Run name") as HTMLInputElement).value).toBe(
       "Morning check",
     );
 
@@ -3225,7 +3225,7 @@ describe("the suite-first Tests route", () => {
         sent.filter((request) => request.path === "/v1/runs" && request.method === "POST"),
       ).toHaveLength(2);
     });
-    fireEvent.change(screen.getByLabelText("Run name [optional]"), {
+    fireEvent.change(screen.getByLabelText("Run name"), {
       target: { value: "Evening check" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Start run" }));
@@ -3355,10 +3355,10 @@ describe("the suite-first Tests route", () => {
 
     render(<NewRunPage />);
     await screen.findByRole("option", { name: "Northside Ford" });
-    fireEvent.change(screen.getByLabelText("Test suite *"), { target: { value: "ste_1" } });
-    fireEvent.change(screen.getByLabelText("Agent *"), { target: { value: "agt_1" } });
+    fireEvent.change(screen.getByLabelText("Test suite*"), { target: { value: "ste_1" } });
+    fireEvent.change(screen.getByLabelText("Agent*"), { target: { value: "agt_1" } });
     await screen.findByRole("option", { name: "Production · Voice" });
-    fireEvent.change(screen.getByLabelText("Connection *"), {
+    fireEvent.change(screen.getByLabelText("Connection*"), {
       target: { value: "con_1" },
     });
 

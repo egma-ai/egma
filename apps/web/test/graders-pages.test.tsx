@@ -896,7 +896,7 @@ describe("the project Graders surface", () => {
     }
 
     /* A description is one line, at the height of the name above it. */
-    const description = within(sheet).getByLabelText("Description [optional]");
+    const description = within(sheet).getByLabelText("Description");
     expect(description.tagName).toBe("INPUT");
 
     /* The judge answers met or not met. It never returns a fraction. */
@@ -928,8 +928,8 @@ describe("the project Graders surface", () => {
       ],
       ["Name*", within(sheet).getByLabelText("Name*")],
       [
-        "Description [optional]",
-        within(sheet).getByLabelText("Description [optional]"),
+        "Description",
+        within(sheet).getByLabelText("Description"),
       ],
       [
         "evidence sentence",

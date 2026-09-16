@@ -33,16 +33,10 @@ import { PersonaField, PersonaGroupLabel, PersonaSubsection } from "./persona-pa
  * The persona create and clone form, read off Paper page 12 — boards 02
  * "Create persona · Cascaded", 03 "Create persona · Realtime" and the two
  * clone boards: three caps groups, plain subsections under Settings, white
- * text boxes and soft grey dropdowns, all 14px.
+ * text boxes and soft grey dropdowns, all 14px — the shared controls' own look since 2026-09-15.
  */
 
 export type FieldPrefix = "new-persona" | "clone-persona";
-
-/** A text box on the boards: white fill, 44px, 14px ink and 14px placeholder. */
-const TEXT_BOX = "text-sm placeholder:text-sm placeholder:text-faint";
-
-/** A dropdown trigger on the boards: soft grey fill, 44px, 14px ink. */
-const DROPDOWN = "bg-surface-soft text-sm";
 
 /** The API's sentence when neither the organization nor the platform holds a key for the chosen provider. */
 const MISSING_PROVIDER_KEY = /credential bundle has no \w+ key/u;
@@ -77,7 +71,6 @@ export function NameFields({
         <PersonaField label="Name*" htmlFor={`${prefix}-name`}>
           <Input
             id={`${prefix}-name`}
-            className={TEXT_BOX}
             value={name}
             disabled={disabled}
             placeholder="Ex Angry Spanish caller"
@@ -90,7 +83,6 @@ export function NameFields({
         <PersonaField label="Description" htmlFor={`${prefix}-description`}>
           <Input
             id={`${prefix}-description`}
-            className={TEXT_BOX}
             value={description}
             disabled={disabled}
             autoComplete="off"
@@ -120,7 +112,6 @@ export function BehaviorFields({
         <PersonaField label="Identity name*" htmlFor={`${prefix}-identity-name`}>
           <Input
             id={`${prefix}-identity-name`}
-            className={TEXT_BOX}
             value={draft.identityName}
             disabled={disabled}
             placeholder="John Doe"
@@ -134,7 +125,6 @@ export function BehaviorFields({
         <PersonaField label="Personality prompt*" htmlFor={`${prefix}-personality`}>
           <Textarea
             id={`${prefix}-personality`}
-            className={TEXT_BOX}
             value={draft.personality}
             disabled={disabled}
             rows={3}
@@ -187,7 +177,6 @@ function ProviderModelFields({
       <PersonaField label="Provider*" htmlFor={`${prefix}-${job}-provider`}>
         <DownwardSelect
           id={`${prefix}-${job}-provider`}
-          className={DROPDOWN}
           value={provider}
           disabled={disabled}
           required
@@ -202,7 +191,6 @@ function ProviderModelFields({
         <DownwardSelect
           key={provider}
           id={`${prefix}-${job}-model`}
-          className={DROPDOWN}
           value={model}
           disabled={disabled}
           required
@@ -447,7 +435,6 @@ export function ModelFields({
       >
         <SearchableSelect
           id={`${prefix}-language`}
-          className={DROPDOWN}
           value={draft.language}
           displayValue={languageDisplay}
           options={languages}
@@ -552,7 +539,6 @@ export function ModelFields({
           <PersonaField label="Reasoning LLM*" htmlFor={`${prefix}-llm-model`}>
             <DownwardSelect
               id={`${prefix}-llm-model`}
-              className={DROPDOWN}
               value={draft.llmModel}
               disabled={disabled}
               required
@@ -569,7 +555,6 @@ export function ModelFields({
           <PersonaField label="Background sound*" htmlFor={`${prefix}-background-sound`}>
             <DownwardSelect
               id={`${prefix}-background-sound`}
-              className={DROPDOWN}
               value={draft.backgroundSoundId}
               disabled={disabled}
               required
@@ -585,7 +570,6 @@ export function ModelFields({
             <PersonaField label="Interruptions*" htmlFor={`${prefix}-interruptions`}>
               <DownwardSelect
                 id={`${prefix}-interruptions`}
-                className={DROPDOWN}
                 value={draft.interruptionLevel}
                 disabled={disabled}
                 required
@@ -646,7 +630,6 @@ function VoiceField({
       <FieldHintContext.Provider value={describedBy}>
       <SearchableSelect
         id={`${prefix}-voice`}
-        className={DROPDOWN}
         value={value}
         displayValue={displayValue}
         options={options}
