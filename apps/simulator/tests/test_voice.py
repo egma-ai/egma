@@ -36,6 +36,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from egma_simulator import conductor as conductor_module
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.conductor import (
+    PARTIAL_TURN_AGENT_HANG_UP,
     ConductParameters,
     InterruptionEvidence,
     VoiceConductor,
@@ -153,6 +154,7 @@ async def observe(
     *,
     controls: ConversationControls,
     spans: list[tuple[str, str, int, int]] | None = None,
+    partials: list[tuple[str, int, int, str]] | None = None,
 ) -> Observed:
     """Conduct, and keep everything the conductor said about it.
 
@@ -160,7 +162,9 @@ async def observe(
     conversation runs. The same handle :func:`room_walk` offers next door,
     and for the same reason: a simulation that ends in a raise never
     returns an :class:`Observed`, and what it said before it raised is
-    often the whole subject.
+    often the whole subject. ``partials``, when given, takes the turns
+    that have audio but no words the way the service does, with their
+    cause, instead of letting them fall back onto ``spans``.
     """
     spans = [] if spans is None else spans
     measures: list[tuple[str, float]] = []
@@ -168,6 +172,12 @@ async def observe(
 
     async def on_utterance(speaker: str, text: str, began: int, ended: int) -> None:
         spans.append((speaker, text, began, ended))
+
+    async def on_partial_utterance(
+        speaker: str, began: int, ended: int, cause: str
+    ) -> None:
+        assert partials is not None
+        partials.append((speaker, began, ended, cause))
 
     async def on_measured(measure: str, began: int, ended: int) -> None:
         measures.append((measure, (ended - began) / NANOSECONDS_PER_MILLISECOND))
@@ -184,6 +194,7 @@ async def observe(
         name="sim:voice-test",
         on_utterance=on_utterance,
         on_measured=on_measured,
+        on_partial_utterance=on_partial_utterance if partials is not None else None,
         on_interruption=interruptions.append,
     )
     return Observed(
@@ -925,16 +936,22 @@ async def test_the_agent_hanging_up_mid_reply_ends_the_call_at_once(
         VoiceConductor, "persona_audio", hang_up_on_the_first_persona_audio
     )
 
+    partials: list[tuple[str, int, int, str]] = []
     observed = await observe(
-        conductor, assembled, spec, controls=ConversationControls()
+        conductor,
+        assembled,
+        spec,
+        controls=ConversationControls(),
+        partials=partials,
     )
 
     assert observed.conducted.ending == "agent_ended"
     assert observed.conducted.reason == "the agent ended the exchange"
     assert tts.interrupted.is_set()
-    assert [speaker for speaker, _text in observed.turns] == ["agent", "human"]
-    _speaker, text, began, ended = observed.spans[-1]
-    assert text == ""
+    assert [speaker for speaker, _text in observed.turns] == ["agent"]
+    [(speaker, began, ended, cause)] = partials
+    assert speaker == "human"
+    assert cause == PARTIAL_TURN_AGENT_HANG_UP
     assert 900_000_000 <= ended - began <= 1_100_000_000
     audio = observed.assembled.audio
     assert audio is not None

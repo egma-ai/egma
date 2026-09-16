@@ -127,7 +127,17 @@ PERSONA_ENDED_SILENCE: Ending = (
 )
 
 OnUtterance = Callable[[str, str, int, int], Awaitable[None]]
-OnPartialUtterance = Callable[[str, int, int], Awaitable[None]]
+OnPartialUtterance = Callable[[str, int, int, str], Awaitable[None]]
+"""Speaker, span, and why the turn has audio but no words: a partial-turn cause."""
+
+PARTIAL_TURN_INTERRUPTION_CAP = "interruption_cap"
+"""The deliberate interruption's audio stopped at the three-second cap."""
+
+PARTIAL_TURN_AGENT_HANG_UP = "agent_hang_up"
+"""The agent hung up while the persona was still speaking."""
+
+_CLEAR_ACKNOWLEDGEMENT_SECONDS = 2.0
+"""How long a departure cut waits for the transport to acknowledge its flush."""
 OnMeasured = Callable[[str, int, int], Awaitable[None]]
 OnProviderUsage = Callable[[ProviderUsage], Awaitable[None]]
 OnAnswered = Callable[[], Awaitable[None]]
@@ -164,6 +174,17 @@ class _DeliberateAudioStarts(ControlFrame):
 @dataclass
 class _DeliberateAudioCapped(ControlFrame):
     """Rides the playout queue right behind the last frame under the cap."""
+
+
+@dataclass
+class _DepartureCut:
+    """A persona turn cut by the agent's departure, awaiting the transport's clear."""
+
+    began: MediaPosition | None
+    ended: MediaPosition | None
+    audible: bool
+    heard_through: MediaPosition | None = None
+    cleared: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 @dataclass(frozen=True)
@@ -1467,6 +1488,7 @@ class VoiceConductor:
         self._record = _Record()
         self._heard_so_far = 0
         self._ending: Ending | None = None
+        self._departure_cut: _DepartureCut | None = None
         self._agent_departed = False
         self._owes_a_turn = False
         self._opened_unix_nano = 0
@@ -2350,6 +2372,12 @@ class VoiceConductor:
         so the persona stopped where the recording stops holding it — not
         where the speech leg had already run to.
         """
+        cut = self._departure_cut
+        if cut is not None and not cut.cleared.is_set():
+            # The recorder has just trimmed to this position, so it is what
+            # the agent heard before the departure cut the persona off.
+            cut.heard_through = heard_through
+            cut.cleared.set()
         ended = self._persona_ended
         began = self._persona_began
         if ended is not None:
@@ -2391,7 +2419,9 @@ class VoiceConductor:
             )
         deliberate = self.deliberate_response_owned
         if deliberate and self._deliberate_capped:
-            await self._took_partial_persona_turn(began, ended)
+            await self._took_partial_persona_turn(
+                began, ended, PARTIAL_TURN_INTERRUPTION_CAP
+            )
         else:
             await self._took_a_turn(
                 "human", text, began, ended, apply_turn_limit=not concludes
@@ -2479,13 +2509,15 @@ class VoiceConductor:
             self.media_advanced()
 
     async def _took_partial_persona_turn(
-        self, began: MediaPosition, ended: MediaPosition
+        self, began: MediaPosition, ended: MediaPosition, cause: str
     ) -> None:
         """Record audible speech without guessing which generated words played."""
         self._record.history.append(Turn("human", ""))
         self._record.turns += 1
         if self._on_partial_utterance is not None:
-            await self._on_partial_utterance("human", self._at(began), self._at(ended))
+            await self._on_partial_utterance(
+                "human", self._at(began), self._at(ended), cause
+            )
         elif self._on_utterance is not None:
             await self._on_utterance("human", "", self._at(began), self._at(ended))
         if self._record.turns >= self._max_turns and self._ending is None:
@@ -2578,29 +2610,49 @@ class VoiceConductor:
     async def _cut_persona_playout(self) -> None:
         """Keep what the persona was heard saying and drop the rest.
 
-        What played out before the departure stays on the record as a
-        partial turn. What was still queued, being written, or being
-        synthesized was never heard: the flush drops it, so the pipeline
-        ends at once instead of after that playout.
+        The flush drops whatever was still queued, being written, or being
+        synthesized, so the pipeline ends at once instead of after that
+        playout. What did play out stays on the record as a partial turn,
+        measured only once the transport has acknowledged the clear:
+        accepted audio carries playout positions that run ahead of what
+        the agent actually heard, and the recorder trims them on the clear.
         """
-        began = self._persona_began
-        ended = self._persona_ended
-        if (
-            self._pending_persona_text is not None
-            and began is not None
-            and ended is not None
-        ):
-            if self._recorder is not None:
-                ended = min(ended, self._recorder.bot_position)
-            if ended > began:
-                await self._took_partial_persona_turn(began, ended)
+        cut = _DepartureCut(
+            began=self._persona_began,
+            ended=self._persona_ended,
+            audible=self._pending_persona_text is not None,
+        )
         self._pending_persona_text = None
         self._pending_persona_concludes = False
         self._pending_silence_follow_up = 0
         self._persona_began = None
         self._persona_ended = None
-        if self._worker is not None:
+        if self._worker is None:
+            return
+        self._departure_cut = cut
+        try:
             await self._worker.queue_frame(InterruptionFrame())
+            async with asyncio.timeout(_CLEAR_ACKNOWLEDGEMENT_SECONDS):
+                await cut.cleared.wait()
+        except TimeoutError:
+            pass
+        finally:
+            self._departure_cut = None
+        heard_through = cut.heard_through
+        if heard_through is None and self._recorder is not None:
+            heard_through = self._recorder.bot_position
+        if (
+            not cut.audible
+            or cut.began is None
+            or cut.ended is None
+            or heard_through is None
+        ):
+            return
+        ended = min(cut.ended, heard_through)
+        if ended > cut.began:
+            await self._took_partial_persona_turn(
+                cut.began, ended, PARTIAL_TURN_AGENT_HANG_UP
+            )
 
     async def _next_activity(self) -> None:
         if self._running is None or self._media is None:
