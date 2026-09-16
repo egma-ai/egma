@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 from aiohttp import web
+from conftest import loopback_spec
 from pipecat.processors.aggregators.llm_context import LLMContext
 
 from egma_simulator.model import (
@@ -29,6 +30,7 @@ from egma_simulator.model import (
     build_model_client,
     split_sentences,
 )
+from egma_simulator.persona import Persona, Turn
 from egma_simulator.redaction import REDACTED
 from egma_simulator.spec import SimulationSpec
 
@@ -375,6 +377,39 @@ async def test_the_selected_reasoning_effort_is_sent_to_openai(model_stub):
         await client.close()
 
     assert model_stub.requests[0]["reasoning_effort"] == "none"
+
+
+async def test_an_interjection_request_names_no_tools_and_still_reaches_the_provider(
+    model_stub,
+):
+    """The interruption context carries no tools, so Pipecat's adapter fills
+    ``tools`` and ``tool_choice`` with the OpenAI SDK's own placeholder. The
+    request body must leave both out rather than fail to serialize."""
+    model_stub.answer_with("Sorry, one second.")
+    client = OpenAICompatibleModel(
+        base_url=model_stub.base_url,
+        api_key="k",
+        model_name="model-under-test",
+    )
+    spec = SimulationSpec.from_document(loopback_spec("sim-interjection"))
+    persona = Persona(
+        authored=spec.persona,
+        scenario_instructions=spec.scenario_instructions,
+        model=client,
+    )
+    try:
+        reply = await persona.reply_to(
+            persona.interruption_context([Turn("agent", "Let me read the schedule.")])
+        )
+    finally:
+        await client.close()
+
+    assert reply == PersonaReply(text="Sorry, one second.", concluded=False)
+    sent = model_stub.requests[0]
+    assert "tools" not in sent
+    assert "tool_choice" not in sent
+    assert sent["messages"][-1]["role"] == "user"
+    assert "Interrupt now" in sent["messages"][-1]["content"]
 
 
 async def test_a_provider_cannot_echo_its_key_in_a_successful_reply(model_stub):
