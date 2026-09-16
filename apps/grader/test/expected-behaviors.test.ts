@@ -1,4 +1,4 @@
-import { GRADER_DEFINITION_CATALOG, PREDEFINED_GRADERS } from "@egma/db";
+import { currentGrades, GRADER_DEFINITION_CATALOG, PREDEFINED_GRADERS } from "@egma/db";
 import { describe, expect, it } from "vitest";
 import { execute } from "../src/graders/index.ts";
 import type { JudgeAnswer, JudgeQuestion } from "../src/judge/index.ts";
@@ -37,13 +37,49 @@ describe("the common LLM response", () => {
     expect(grade.details.assertions).toHaveLength(3);
     expect(grade.details.assertions?.[2]).toMatchObject({ key: "behavior_3", decision: "not_met", score: 0, citedTurns: [1], citedSpanIds: ["aaaaaaaaaaaaaaaa"] });
   });
-  it("retains all criterion details when one decision cannot be determined", async () => {
+  it("counts an undetermined criterion as zero and retains its evidence", async () => {
     const { execution } = input({ results: [result("behavior_1"), result("behavior_2"), result("behavior_3", "cannot_determine")] });
     const grade = await execute(execution);
-    expect(grade.score).toBeNull();
-    expect(grade.details.error).toContain("1 of 3");
+    expect(grade.score).toBe(2 / 3);
+    expect(grade.details.error).toBeUndefined();
     expect(grade.details.assertions).toHaveLength(3);
-    expect(grade.details.assertions?.[2]).toMatchObject({ decision: "cannot_determine", rationale: "Evidence for behavior_3", citedTurns: [1] });
+    expect(grade.details.assertions?.[2]).toEqual({ key: "behavior_3", decision: "cannot_determine", score: 0, rationale: "Evidence for behavior_3", citedTurns: [1], citedSpanIds: ["aaaaaaaaaaaaaaaa"] });
+  });
+  it.each([
+    { passThreshold: 1, expectedResult: "failed" },
+    { passThreshold: 0.5, expectedResult: "failed" },
+    { passThreshold: 0.25, expectedResult: "passed" },
+  ])("scores the unreached scheduling flow against threshold $passThreshold", async ({ passThreshold, expectedResult }) => {
+    const { execution } = input({ results: [
+      result("behavior_1", "not_met"),
+      result("behavior_2", "cannot_determine"),
+      result("behavior_3", "cannot_determine"),
+      result("behavior_4", "met"),
+    ] }, expected.id, [
+      "The agent asks which day the caller wants instead of claiming availability before a day is provided.",
+      "After the caller says Thursday, the agent calls check_availability with day set to Thursday before saying whether Thursday is available.",
+      "The agent says Thursday is available and offers the mocked 1:00 PM time.",
+      "The agent does not claim that an appointment was booked or confirmed.",
+    ]);
+    const grade = await execute(execution);
+    expect(grade.score).toBe(0.25);
+    expect(grade.details.rationale).toBe("1 of 4 criteria passed.");
+    expect(grade.details.error).toBeUndefined();
+    expect(grade.details.assertions?.map((assertion) => assertion.score)).toEqual([0, 0, 0, 1]);
+    expect(currentGrades([{
+      ...grade,
+      projectGraderId: "expected-behaviors",
+      graderPassThreshold: passThreshold,
+      gradingSequence: 1,
+      gradedAtMicroseconds: 1n,
+    }])[0]?.result).toBe(expectedResult);
+  });
+  it("returns zero when every behavior is undetermined", async () => {
+    const { execution } = input({ results: BEHAVIORS.map((_, at) => result(`behavior_${at + 1}`, "cannot_determine")) });
+    const grade = await execute(execution);
+    expect(grade.score).toBe(0);
+    expect(grade.details.error).toBeUndefined();
+    expect(grade.details.assertions?.map((assertion) => assertion.score)).toEqual([0, 0, 0]);
   });
   it("accepts the complete instruction family with test context, without claiming prompt obedience", async () => {
     const { execution, asked } = input({ results: [result("instruction_1")] });

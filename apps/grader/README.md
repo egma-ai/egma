@@ -122,12 +122,14 @@ extra properties, empty or partial results, mixed families, duplicate or
 unknown IDs, invalid decisions, and citations outside the supplied transcript.
 It cannot prove that a structurally complete family matches the prompt's intent.
 
-Each `met` contributes one and each `not_met` contributes zero. The top-level
-score is the fraction of criteria met, so two of three is `2/3`. Any
-`cannot_determine` makes the top-level score null while retaining all decisions,
-reasons, turn citations, and resolved span citations in `details.assertions`.
-Malformed responses and failed calls also yield an error grade with a null
-score. Sibling graders still execute independently.
+Each `met` contributes one. Both `not_met` and `cannot_determine` contribute
+zero. The top-level score is the fraction of all criteria met, so one met,
+one not met, and two undetermined criteria score `1/4`. The frozen pass threshold
+decides whether that grade passes. All decisions, reasons, turn citations, and
+resolved span citations remain in `details.assertions`; an undetermined decision
+is not a grading error. Malformed responses, failed calls, and evidence that
+cannot be submitted for grading still yield an error grade with a null score.
+Sibling graders still execute independently.
 
 ## Response latency
 

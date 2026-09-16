@@ -19,8 +19,15 @@ score is `0.75`. With a pass threshold of `1`, that grader fails. With a
 threshold of `0.75`, it passes. The failed statement remains visible in either
 case.
 
-A grading error means Egma could not decide or complete the check. It is
-different from a score of `0`, which means the check ran and failed.
+For LLM graders, a `cannot_determine` decision counts as `0`, just like
+`not_met`, and remains in the total number of criteria. The original decision
+and reason remain visible in the grade details. For example, one met criterion,
+one not met, and two undetermined criteria score `0.25` and fail a threshold
+of `1`.
+
+A grading error means Egma could not produce a valid result, such as when a
+model request fails or returns an incomplete response. It has no score. An
+undetermined decision in a valid response is a completed, scored result.
 
 ## Read the combined score
 

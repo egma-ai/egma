@@ -57,14 +57,17 @@ independent concerns into separate graders so the result tells you what failed.
 
 ## Read the score
 
-A check of one instruction returns `1` when met or `0` when not met. A prompt
-that checks each supplied expected behavior can return a fractional score:
-the number of met behaviors divided by the total. Egma computes this score
-from the decisions; the model does not choose an arbitrary numeric score.
+A check of one instruction returns `1` when met. It returns `0` when not met
+or when the model cannot determine whether it was met. A prompt that checks each
+supplied expected behavior can return a fractional score: the number of met
+behaviors divided by the total, including undetermined behaviors. Egma computes
+this score from the decisions; the model does not choose an arbitrary numeric score.
 
-If the model cannot determine a result, the grade has no score. An incomplete
-or invalid response also produces a grading error. Read the rationale and
-citations before changing your threshold. See [Scores and thresholds](/docs/platform/graders/scores-and-thresholds).
+An undetermined decision earns no credit toward the pass threshold. Its original
+decision, rationale, and citations remain in the grade details. A failed model
+request or an incomplete or invalid response produces a grading error with no
+score. Read the rationale and citations before changing your threshold. See
+[Scores and thresholds](/docs/platform/graders/scores-and-thresholds).
 
 ## Edit or clone a grader
 
