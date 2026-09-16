@@ -1088,10 +1088,10 @@ describe("what a project recorded in production", () => {
         );
       expect(headings).toEqual([
         "Agent",
-        "Time",
         "Duration",
         "P90 turn latency",
         "Trace ID",
+        "Time",
         "Actions",
       ]);
       expect(
