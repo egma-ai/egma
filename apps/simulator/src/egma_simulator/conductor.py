@@ -19,6 +19,7 @@ from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.frames.frames import (
     ControlFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     FunctionCallFromLLM,
     FunctionCallResultProperties,
@@ -101,6 +102,7 @@ _INPUT_SOURCE_RANGE = "egma.input_source_range"
 _INTERRUPTION_AUDIO = "egma.interruption_audio"
 _INTERRUPTION_CAP_END = "egma.interruption_cap_end"
 _INTERRUPTION_STOPPED = "egma.interruption_stopped"
+_PERSONA_REPLY_KIND = "egma.persona_reply_kind"
 
 
 @dataclass(frozen=True)
@@ -853,9 +855,13 @@ class _PersonaLLMService(LLMService):
                 await self._process_context(frame.context)
             except Exception as fault:
                 self._failure = fault
-                await self.push_error(
-                    "the persona model could not answer", exception=fault
+                error = ErrorFrame(
+                    error="the persona model could not answer", exception=fault
                 )
+                error.metadata[_PERSONA_REPLY_KIND] = frame.metadata.get(
+                    _PERSONA_REPLY_KIND, "ordinary"
+                )
+                await self.push_error_frame(error)
             finally:
                 await self.push_frame(LLMFullResponseEndFrame())
             return
@@ -919,7 +925,9 @@ class _PersonaReplyGate(FrameProcessor):
         self._silence_follow_up = silence_follow_up
         self._kind = kind
         try:
-            await push(LLMContextFrame(context=context))
+            frame = LLMContextFrame(context=context)
+            frame.metadata[_PERSONA_REPLY_KIND] = kind
+            await push(frame)
             await waiting
         except BaseException:
             if self._waiting is waiting:
@@ -1457,8 +1465,6 @@ class VoiceConductor:
         self._fault = ""
         self._brain_fault: BaseException | None = None
         self._closed = False
-        self._ignored_pipeline_faults = 0
-        self._interruption_model_fault_observed = False
         self._control_tasks: set[asyncio.Task[None]] = set()
         self._interruptions: _InterruptionScheduler | None = None
         self._discard_deliberate_audio = False
@@ -1800,10 +1806,6 @@ class VoiceConductor:
         self.media_advanced()
 
     def interruption_provider_failed(self, reason: str) -> None:
-        if self._interruption_model_fault_observed:
-            self._interruption_model_fault_observed = False
-        else:
-            self._ignored_pipeline_faults += 1
         self.interruption_canceled(reason, drain=False)
 
     async def conduct(
@@ -2004,12 +2006,17 @@ class VoiceConductor:
                 return
             exception = getattr(error, "exception", None)
             processor = getattr(error, "processor", None)
-            if self._ignored_pipeline_faults:
-                self._ignored_pipeline_faults -= 1
-                return
+            if processor is model:
+                # The reply gate owns deliberate failures even after cancellation.
+                if (
+                    getattr(error, "metadata", {}).get(_PERSONA_REPLY_KIND)
+                    == "deliberate"
+                ):
+                    return
+                if isinstance(exception, BaseException):
+                    self.the_brain_failed(exception)
+                    return
             if self.deliberate_response_owned:
-                if processor is model:
-                    self._interruption_model_fault_observed = True
                 self.interruption_canceled(
                     "speech_provider_failed",
                     force=self.deliberate_delivering,
