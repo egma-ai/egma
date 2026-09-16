@@ -376,10 +376,11 @@ export function ModelFields({
         return (voiceType === "all" || presentation === voiceType) &&
           `${voice.name} ${voice.id}`.toLocaleLowerCase().includes(query);
       })
+      /* A row says the voice's gender when it is known, and nothing when it is not. */
       .map((voice) => ({
         value: voice.id,
         label: voice.name,
-        detail: voice.presentation === "male" ? "Male" : voice.presentation === "female" ? "Female" : "Unknown",
+        ...(voice.presentation === "male" ? { detail: "Male" } : voice.presentation === "female" ? { detail: "Female" } : {}),
       }));
   }, [allVoices, voiceSearch, voiceType]);
 
@@ -632,7 +633,7 @@ function VoiceField({
   readonly describedBy?: string;
   readonly loading: boolean;
   readonly error: ReactNode;
-  readonly options: readonly { readonly value: string; readonly label: string; readonly detail: string }[];
+  readonly options: readonly { readonly value: string; readonly label: string; readonly detail?: string }[];
   readonly search: string;
   readonly type: "all" | "male" | "female" | "unknown";
   readonly onSearch: (value: string) => void;
