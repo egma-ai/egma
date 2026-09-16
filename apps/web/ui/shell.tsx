@@ -445,13 +445,14 @@ function AccountMenu({
           "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
           "transition-transform duration-(--duration-press) ease-out",
           "pointer-coarse:min-h-(--tap-target)",
-          "pointer-hover:border-border pointer-hover:bg-surface",
+          /* No box, at rest or under a pointer: a pointer only tints the fill. */
+          "pointer-hover:bg-surface-soft",
           "[&:active:not(:focus-visible)]:scale-97",
           "motion-reduce:transition-none",
           "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
           compact && "w-(--tap-target) min-h-(--tap-target) grid-cols-[var(--tap-target)] p-0",
         )}
-        openClassName="border-border bg-surface"
+        openClassName="bg-surface-soft"
         placement={placement}
         trigger={
           <>
@@ -665,7 +666,7 @@ function ShellFrame({
        */}
       <aside
         className={cn(
-          "sticky top-0 z-20 flex h-svh flex-col gap-5 overflow-visible pb-4",
+          "sticky top-0 z-20 flex h-svh flex-col gap-5 overflow-visible",
           "border-r border-border bg-surface",
           "max-[900px]:hidden",
         )}
@@ -677,12 +678,13 @@ function ShellFrame({
         <SidebarHeader className="px-4">{selector(false)}</SidebarHeader>
         {shown === null ? null : <Navigation projectId={shown} pathname={pathname} />}
         {/*
-         * 8px, the navigation column's inset, so the account plate is the same
-         * 208px block as a nav row and stands 8px off both edges of the bar.
-         * The avatar rides the 16px lane from inside it — see `AccountMenu`,
-         * which pays for its own hairline.
+         * The account band is the organization bar's own 56px, under a
+         * hairline that spans the whole bar, with the account control centered
+         * in it and no box of its own at rest. 8px is the navigation column's
+         * inset, so the control is the same 208px block as a nav row.
+         * (Developer decision, 2026-09-15.)
          */}
-        <SidebarFooter className="px-2">
+        <SidebarFooter className="min-h-(--sidebar-header-height) justify-center border-t border-border px-2 py-1">
           {role !== null && !canAuthor(role) ? (
             /*
              * The chip has no plate to sit inside, so it takes the 8px back as
@@ -788,6 +790,8 @@ export function ProductPage({
 }) {
   return (
     <main
+      /* The document lock in globals.css reads this: a viewport page pins the document. */
+      data-viewport={viewport ? "always" : desktopViewport ? "desktop" : undefined}
       className={cn(
         "flex w-full min-w-0 flex-col",
         "[--page-content-max:var(--page-max)]",

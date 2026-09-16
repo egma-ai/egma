@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   getPersonaCapabilities,
   type GetPersonaCapabilitiesResponse,
@@ -12,17 +13,39 @@ import { DownwardSelect, type DownwardSelectOption } from "@/components/ui/selec
 import { Textarea } from "@/components/ui/textarea";
 import {
   BACKGROUND_SOUNDS,
+  LIVE_MODEL,
+  languageLabel,
   type BehaviorDraft,
+  type CatalogJob,
   type ModelsDraft,
   type PersonaForm,
+  type PersonaModelCatalogEntry,
 } from "@/lib/personas.ts";
 import { platformAnswer, platformClient } from "@/lib/platform-client.ts";
-import { Field, FormRow } from "@/ui/form.tsx";
+import { projectPath } from "@/lib/project-context.ts";
+import { FieldHintContext } from "@/ui/field-hint.ts";
+import { FormRow } from "@/ui/form.tsx";
 import { SearchableSelect } from "@/ui/searchable-select.tsx";
 
-import { PersonaGroupLabel, PersonaSection } from "./sheet-parts.tsx";
+import { PersonaField, PersonaGroupLabel, PersonaSubsection } from "./persona-parts.tsx";
+
+/**
+ * The persona create and clone form, read off Paper page 12 — boards 02
+ * "Create persona · Cascaded", 03 "Create persona · Realtime" and the two
+ * clone boards: three caps groups, plain subsections under Settings, white
+ * text boxes and soft grey dropdowns, all 14px.
+ */
 
 export type FieldPrefix = "new-persona" | "clone-persona";
+
+/** A text box on the boards: white fill, 44px, 14px ink and 14px placeholder. */
+const TEXT_BOX = "text-sm placeholder:text-sm placeholder:text-faint";
+
+/** A dropdown trigger on the boards: soft grey fill, 44px, 14px ink. */
+const DROPDOWN = "bg-surface-soft text-sm";
+
+/** The API's sentence when neither the organization nor the platform holds a key for the chosen provider. */
+const MISSING_PROVIDER_KEY = /credential bundle has no \w+ key/u;
 
 function Note({ children, bad = false }: { readonly children: ReactNode; readonly bad?: boolean }) {
   return (
@@ -30,20 +53,6 @@ function Note({ children, bad = false }: { readonly children: ReactNode; readonl
       {children}
     </p>
   );
-}
-
-function languageLabel(value: string): string {
-  try {
-    const locale = new Intl.Locale(value);
-    const languages = new Intl.DisplayNames(["en"], { type: "language" });
-    const regions = new Intl.DisplayNames(["en"], { type: "region" });
-    const language = languages.of(locale.language) ?? locale.language;
-    return locale.region === undefined
-      ? language
-      : `${language} (${regions.of(locale.region) ?? locale.region})`;
-  } catch {
-    return value;
-  }
 }
 
 export function NameFields({
@@ -62,30 +71,34 @@ export function NameFields({
   readonly onDescription: (value: string) => void;
 }) {
   return (
-    <FormRow>
-      <Field label="Name*" htmlFor={`${prefix}-name`}>
-        <Input
-          id={`${prefix}-name`}
-          className="placeholder:text-sm placeholder:text-faint"
-          value={name}
-          disabled={disabled}
-          placeholder="Ex Angry Spanish caller"
-          aria-required="true"
-          autoComplete="off"
-          onChange={(event) => onName(event.target.value)}
-        />
-      </Field>
-      <Field label="Description" htmlFor={`${prefix}-description`}>
-        <Input
-          id={`${prefix}-description`}
-          className="placeholder:text-sm placeholder:text-faint"
-          value={description}
-          disabled={disabled}
-          autoComplete="off"
-          onChange={(event) => onDescription(event.target.value)}
-        />
-      </Field>
-    </FormRow>
+    <>
+      <PersonaGroupLabel>Metadata</PersonaGroupLabel>
+      <FormRow>
+        <PersonaField label="Name*" htmlFor={`${prefix}-name`}>
+          <Input
+            id={`${prefix}-name`}
+            className={TEXT_BOX}
+            value={name}
+            disabled={disabled}
+            placeholder="Ex Angry Spanish caller"
+            aria-required="true"
+            autoComplete="off"
+            onChange={(event) => onName(event.target.value)}
+          />
+        </PersonaField>
+        {/* Optional, and the boards print it with no suffix and no placeholder. */}
+        <PersonaField label="Description" htmlFor={`${prefix}-description`}>
+          <Input
+            id={`${prefix}-description`}
+            className={TEXT_BOX}
+            value={description}
+            disabled={disabled}
+            autoComplete="off"
+            onChange={(event) => onDescription(event.target.value)}
+          />
+        </PersonaField>
+      </FormRow>
+    </>
   );
 }
 
@@ -102,12 +115,12 @@ export function BehaviorFields({
 }) {
   return (
     <>
-      <PersonaGroupLabel>Who they are</PersonaGroupLabel>
+      <PersonaGroupLabel divider>Who they are</PersonaGroupLabel>
       <div className="flex flex-col gap-4">
-        <Field label="Identity name*" htmlFor={`${prefix}-identity-name`}>
+        <PersonaField label="Identity name*" htmlFor={`${prefix}-identity-name`}>
           <Input
             id={`${prefix}-identity-name`}
-            className="placeholder:text-sm placeholder:text-faint"
+            className={TEXT_BOX}
             value={draft.identityName}
             disabled={disabled}
             placeholder="John Doe"
@@ -117,48 +130,47 @@ export function BehaviorFields({
               onChange({ ...draft, identityName: event.target.value })
             }
           />
-        </Field>
-        <Field label="Personality*" htmlFor={`${prefix}-personality`}>
+        </PersonaField>
+        <PersonaField label="Personality prompt*" htmlFor={`${prefix}-personality`}>
           <Textarea
             id={`${prefix}-personality`}
-            className="placeholder:text-sm placeholder:text-faint"
+            className={TEXT_BOX}
             value={draft.personality}
             disabled={disabled}
-            rows={5}
+            rows={3}
             placeholder="Ex Impatient, speaks quickly, and asks direct questions"
             aria-required="true"
             onChange={(event) =>
               onChange({ ...draft, personality: event.target.value })
             }
           />
-        </Field>
+        </PersonaField>
       </div>
     </>
   );
 }
 
+/** The Provider and Model pair a subsection carries, side by side. */
 function ProviderModelFields({
   prefix,
   job,
-  title,
   provider,
   model,
-  form,
+  catalog,
   disabled,
-  modelPlaceholder,
   onChange,
 }: {
   readonly prefix: FieldPrefix;
-  readonly job: "llm" | "stt" | "tts";
-  readonly title: string;
+  readonly job: CatalogJob;
   readonly provider: string;
   readonly model: string;
-  readonly form: PersonaForm;
+  /** The rows the pair may offer; a pair the API fixes is handed exactly one. */
+  readonly catalog: readonly PersonaModelCatalogEntry[];
   readonly disabled: boolean;
-  readonly modelPlaceholder?: string;
-  readonly onChange: (provider: string, model: string) => void;
+  /** Absent when the API fixes the pair: the one row offered is the one shown. */
+  readonly onChange?: (provider: string, model: string) => void;
 }) {
-  const offered = form.modelCatalog.filter((entry) => entry.job === job);
+  const offered = catalog.filter((entry) => entry.job === job);
   const providers = [...new Map(offered.map((entry) => [entry.provider, entry.label])).entries()];
   const models = offered.filter((entry) => entry.provider === provider);
   const chosenModel = models.some((entry) => entry.model === model);
@@ -167,36 +179,37 @@ function ProviderModelFields({
     ...providers.map(([value, label]) => ({ value, label })),
   ];
   const modelOptions: DownwardSelectOption[] = [
-    ...(modelPlaceholder === undefined ? [] : [{ value: "model-placeholder", label: modelPlaceholder, disabled: true }]),
     ...(chosenModel ? [] : [{ value: model, label: `${model} · Unavailable` }]),
     ...models.map((entry) => ({ value: entry.model, label: entry.modelLabel ?? entry.model })),
   ];
   return (
     <FormRow>
-      <Field label={`${title} provider*`} htmlFor={`${prefix}-${job}-provider`}>
+      <PersonaField label="Provider*" htmlFor={`${prefix}-${job}-provider`}>
         <DownwardSelect
           id={`${prefix}-${job}-provider`}
+          className={DROPDOWN}
           value={provider}
           disabled={disabled}
           required
           options={providerOptions}
           onValueChange={(value) => {
             const next = offered.find((entry) => entry.provider === value);
-            if (next !== undefined) onChange(next.provider, next.model);
+            if (next !== undefined) onChange?.(next.provider, next.model);
           }}
         />
-      </Field>
-      <Field label={`${title} model*`} htmlFor={`${prefix}-${job}-model`}>
+      </PersonaField>
+      <PersonaField label="Model*" htmlFor={`${prefix}-${job}-model`}>
         <DownwardSelect
           key={provider}
           id={`${prefix}-${job}-model`}
+          className={DROPDOWN}
           value={model}
           disabled={disabled}
           required
           options={modelOptions}
-          onValueChange={(value) => onChange(provider, value)}
+          onValueChange={(value) => onChange?.(provider, value)}
         />
-      </Field>
+      </PersonaField>
     </FormRow>
   );
 }
@@ -253,6 +266,15 @@ export function ModelFields({
   const [languageSearch, setLanguageSearch] = useState("");
   const [voiceSearch, setVoiceSearch] = useState("");
   const [voiceType, setVoiceType] = useState<"all" | "male" | "female" | "unknown">("all");
+  /* The voice reason is drawn in the subsection header and read from the voice picker. */
+  const voiceReasonId = useId();
+  /*
+   * The realtime pair the API fixes, so the Realtime LLM dropdowns offer that
+   * one catalog row and nothing a choice could change.
+   */
+  const liveCatalog = form.modelCatalog.filter(
+    (entry) => entry.job === "live" && entry.provider === LIVE_MODEL.provider && entry.model === LIVE_MODEL.model,
+  );
   const request = useRef(0);
   const reportValidity = useRef(onValidityChange);
   reportValidity.current = onValidityChange;
@@ -269,8 +291,8 @@ export function ModelFields({
           ? {
               projectId,
               mode: "live",
-              liveProvider: "openai",
-              liveModel: "gpt-live-1",
+              liveProvider: LIVE_MODEL.provider,
+              liveModel: LIVE_MODEL.model,
               language: draft.language,
               voiceId: draft.liveVoiceId,
             }
@@ -304,6 +326,21 @@ export function ModelFields({
     draft.liveVoiceId,
     capabilityAttempt,
   ]);
+
+  /* A missing provider key is fixed on the Provider API Keys page, so the notice says where. */
+  const capabilityNotice: ReactNode = capabilityError === null
+    ? null
+    : MISSING_PROVIDER_KEY.test(capabilityError)
+      ? (
+        <>
+          Please set the Provider API key in{" "}
+          <Link className="text-foreground underline pointer-hover:text-brand" href={projectPath(projectId, "settings", "provider-api-keys")}>
+            Settings
+          </Link>
+          .
+        </>
+      )
+      : capabilityError;
 
   const activeVoiceId = draft.mode === "live" ? draft.liveVoiceId : draft.separateVoiceId;
   const allVoices = capabilities?.voices.choices ?? [];
@@ -339,10 +376,11 @@ export function ModelFields({
         return (voiceType === "all" || presentation === voiceType) &&
           `${voice.name} ${voice.id}`.toLocaleLowerCase().includes(query);
       })
+      /* A row says the voice's gender when it is known, and nothing when it is not. */
       .map((voice) => ({
         value: voice.id,
         label: voice.name,
-        detail: voice.presentation === "male" ? "Male" : voice.presentation === "female" ? "Female" : "Unknown",
+        ...(voice.presentation === "male" ? { detail: "Male" } : voice.presentation === "female" ? { detail: "Female" } : {}),
       }));
   }, [allVoices, voiceSearch, voiceType]);
 
@@ -379,148 +417,159 @@ export function ModelFields({
         "Choose an available voice",
       );
 
+  /* A realtime persona reasons on an OpenAI chat model, so the one dropdown offers those. */
+  const reasoning = form.modelCatalog.filter(
+    (entry) => entry.job === "llm" && entry.provider === "openai",
+  );
+  const reasoningOptions: DownwardSelectOption[] = [
+    ...(reasoning.some((entry) => entry.model === draft.llmModel)
+      ? []
+      : [{ value: draft.llmModel, label: `${draft.llmModel} · Unavailable` }]),
+    ...reasoning.map((entry) => ({ value: entry.model, label: entry.modelLabel ?? entry.model })),
+  ];
+
   return (
     <>
-      <PersonaGroupLabel>Settings</PersonaGroupLabel>
+      <PersonaGroupLabel divider>Settings</PersonaGroupLabel>
       {capabilityError === null ? null : (
         <div className="flex flex-wrap items-center gap-3">
-          <Note bad>{capabilityError}</Note>
+          <Note bad>{capabilityNotice}</Note>
           <Button type="button" size="sm" variant="secondary" disabled={disabled} onClick={retryCapabilities}>
             Retry options
           </Button>
         </div>
       )}
-      <PersonaSection
-        label="Language"
+      {/* The subsection header is the combobox's own label: Language holds one control. */}
+      <PersonaSubsection
+        label="Language*"
+        htmlFor={`${prefix}-language`}
         invalidReason={languageInvalidReason}
       >
-        <Field label="Language*" htmlFor={`${prefix}-language`}>
-          <SearchableSelect
-            id={`${prefix}-language`}
-            value={draft.language}
-            displayValue={languageDisplay}
-            options={languages}
-            search={languageSearch}
-            searchLabel="Choose a language"
-            searchPlaceholder="Search languages"
-            disabled={disabled || capabilities?.language.status === "fixed"}
-            required
-            invalid={capabilities !== null && !languageAvailable}
-            loading={capabilities === null && capabilityError === null}
-            error={capabilityError}
-            empty="No languages found"
-            emptyDetail="Try another search."
-            onSearchChange={setLanguageSearch}
-            onValueChange={(language) => change({ ...draft, language })}
-          />
-        </Field>
+        <SearchableSelect
+          id={`${prefix}-language`}
+          className={DROPDOWN}
+          value={draft.language}
+          displayValue={languageDisplay}
+          options={languages}
+          search={languageSearch}
+          searchLabel="Choose a language"
+          searchPlaceholder="Search languages"
+          disabled={disabled || capabilities?.language.status === "fixed"}
+          required
+          invalid={capabilities !== null && !languageAvailable}
+          loading={capabilities === null && capabilityError === null}
+          error={capabilityNotice}
+          empty="No languages found"
+          emptyDetail="Try another search."
+          onSearchChange={setLanguageSearch}
+          onValueChange={(language) => change({ ...draft, language })}
+        />
         {capabilities === null ? null : capabilityMessage("Language", capabilities.language)}
-      </PersonaSection>
+      </PersonaSubsection>
 
       {draft.mode === "separate" ? (
         <>
-          <PersonaSection
-            label="Text to speech"
-            invalidReason={voiceInvalidReason}
-          >
-            <div className="flex flex-col gap-4">
-              <ProviderModelFields
-                prefix={prefix}
-                job="tts"
-                title="Voice"
-                provider={draft.ttsProvider}
-                model={draft.ttsModel}
-                form={form}
-                disabled={disabled}
-                onChange={(provider, model) => change(changeSelection(draft, "tts", provider, model))}
-              />
-              <VoiceField
-                prefix={prefix}
-                disabled={disabled}
-                value={activeVoiceId}
-                displayValue={voiceDisplay}
-                valid={voiceAvailable}
-                loading={capabilities === null && capabilityError === null}
-                error={capabilityError}
-                options={voices}
-                search={voiceSearch}
-                type={voiceType}
-                onSearch={setVoiceSearch}
-                onType={setVoiceType}
-                onClear={() => { setVoiceSearch(""); setVoiceType("all"); }}
-                onChange={(separateVoiceId) => change({ ...draft, separateVoiceId })}
-              />
-              {capabilities === null ? null : capabilityMessage("Voice", capabilities.voices)}
-            </div>
-          </PersonaSection>
-          <PersonaSection label="Speech to text">
+          <PersonaSubsection label="Text-to-speech" invalidReason={voiceInvalidReason} invalidReasonId={voiceReasonId}>
             <ProviderModelFields
               prefix={prefix}
-              job="stt"
-              title="Transcription"
-              provider={draft.sttProvider}
-              model={draft.sttModel}
-              form={form}
+              job="tts"
+              provider={draft.ttsProvider}
+              model={draft.ttsModel}
+              catalog={form.modelCatalog}
               disabled={disabled}
-              onChange={(provider, model) => change(changeSelection(draft, "stt", provider, model))}
+              onChange={(provider, model) => change(changeSelection(draft, "tts", provider, model))}
             />
-          </PersonaSection>
-          <PersonaSection label="Reasoning">
-            <ProviderModelFields
-              prefix={prefix}
-              job="llm"
-              title="Reasoning"
-              provider={draft.llmProvider}
-              model={draft.llmModel}
-              form={form}
-              disabled={disabled}
-              modelPlaceholder="GPT 5.6 Terra"
-              onChange={(provider, model) => change(changeSelection(draft, "llm", provider, model))}
-            />
-          </PersonaSection>
-        </>
-      ) : (
-        <PersonaSection
-          label="Realtime voice"
-          invalidReason={voiceInvalidReason}
-        >
-          <div className="flex flex-col gap-4">
             <VoiceField
               prefix={prefix}
               disabled={disabled}
               value={activeVoiceId}
               displayValue={voiceDisplay}
               valid={voiceAvailable}
+              describedBy={voiceInvalidReason === undefined ? undefined : voiceReasonId}
               loading={capabilities === null && capabilityError === null}
-              error={capabilityError}
+              error={capabilityNotice}
               options={voices}
               search={voiceSearch}
               type={voiceType}
               onSearch={setVoiceSearch}
               onType={setVoiceType}
               onClear={() => { setVoiceSearch(""); setVoiceType("all"); }}
-              onChange={(liveVoiceId) => change({ ...draft, liveVoiceId })}
+              onChange={(separateVoiceId) => change({ ...draft, separateVoiceId })}
             />
+            {capabilities === null ? null : capabilityMessage("Voice", capabilities.voices)}
+          </PersonaSubsection>
+          <PersonaSubsection label="Speech-to-text">
+            <ProviderModelFields
+              prefix={prefix}
+              job="stt"
+              provider={draft.sttProvider}
+              model={draft.sttModel}
+              catalog={form.modelCatalog}
+              disabled={disabled}
+              onChange={(provider, model) => change(changeSelection(draft, "stt", provider, model))}
+            />
+          </PersonaSubsection>
+          <PersonaSubsection label="LLM">
             <ProviderModelFields
               prefix={prefix}
               job="llm"
-              title="Reasoning"
               provider={draft.llmProvider}
               model={draft.llmModel}
-              form={form}
+              catalog={form.modelCatalog}
               disabled={disabled}
-              modelPlaceholder="GPT 5.6 Terra"
               onChange={(provider, model) => change(changeSelection(draft, "llm", provider, model))}
             />
-          </div>
-        </PersonaSection>
+          </PersonaSubsection>
+        </>
+      ) : (
+        <PersonaSubsection label="Realtime LLM" invalidReason={voiceInvalidReason} invalidReasonId={voiceReasonId}>
+          <ProviderModelFields
+            prefix={prefix}
+            job="live"
+            provider={LIVE_MODEL.provider}
+            model={LIVE_MODEL.model}
+            catalog={liveCatalog}
+            disabled={disabled}
+          />
+          <VoiceField
+            prefix={prefix}
+            disabled={disabled}
+            value={activeVoiceId}
+            displayValue={voiceDisplay}
+            valid={voiceAvailable}
+            describedBy={voiceInvalidReason === undefined ? undefined : voiceReasonId}
+            loading={capabilities === null && capabilityError === null}
+            error={capabilityNotice}
+            options={voices}
+            search={voiceSearch}
+            type={voiceType}
+            onSearch={setVoiceSearch}
+            onType={setVoiceType}
+            onClear={() => { setVoiceSearch(""); setVoiceType("all"); }}
+            onChange={(liveVoiceId) => change({ ...draft, liveVoiceId })}
+          />
+          {capabilities === null ? null : capabilityMessage("Voice", capabilities.voices)}
+          <PersonaField label="Reasoning LLM*" htmlFor={`${prefix}-llm-model`}>
+            <DownwardSelect
+              id={`${prefix}-llm-model`}
+              className={DROPDOWN}
+              value={draft.llmModel}
+              disabled={disabled}
+              required
+              options={reasoningOptions}
+              onValueChange={(value) => change(changeSelection(draft, "llm", "openai", value))}
+            />
+          </PersonaField>
+        </PersonaSubsection>
       )}
 
-      <PersonaSection label="Advanced">
-        <div className="flex flex-col gap-4">
-          <Field label="Background sound*" htmlFor={`${prefix}-background-sound`}>
+      <PersonaSubsection label="Advanced Settings">
+        {/* Two lanes even when the API leaves the second empty, so one dropdown stays the width of every other. */}
+        <div className="grid grid-cols-2 gap-4 max-[900px]:grid-cols-1">
+          <PersonaField label="Background sound*" htmlFor={`${prefix}-background-sound`}>
             <DownwardSelect
               id={`${prefix}-background-sound`}
+              className={DROPDOWN}
               value={draft.backgroundSoundId}
               disabled={disabled}
               required
@@ -530,11 +579,13 @@ export function ModelFields({
                 backgroundSoundId: value as ModelsDraft["backgroundSoundId"],
               })}
             />
-          </Field>
+          </PersonaField>
+          {/* A realtime persona carries no interruption level, so the API has no control to draw. */}
           {draft.mode === "separate" ? (
-            <Field label="Interruptions*" htmlFor={`${prefix}-interruptions`}>
+            <PersonaField label="Interruptions*" htmlFor={`${prefix}-interruptions`}>
               <DownwardSelect
                 id={`${prefix}-interruptions`}
+                className={DROPDOWN}
                 value={draft.interruptionLevel}
                 disabled={disabled}
                 required
@@ -548,10 +599,10 @@ export function ModelFields({
                   interruptionLevel: value as ModelsDraft["interruptionLevel"],
                 })}
               />
-            </Field>
+            </PersonaField>
           ) : null}
         </div>
-      </PersonaSection>
+      </PersonaSubsection>
     </>
   );
 }
@@ -562,6 +613,7 @@ function VoiceField({
   value,
   displayValue,
   valid,
+  describedBy,
   loading,
   error,
   options,
@@ -577,9 +629,11 @@ function VoiceField({
   readonly value: string;
   readonly displayValue: string;
   readonly valid: boolean;
+  /** The id of the reason an unavailable voice blocks the form, for the picker to point at. */
+  readonly describedBy?: string;
   readonly loading: boolean;
-  readonly error: string | null;
-  readonly options: readonly { readonly value: string; readonly label: string; readonly detail: string }[];
+  readonly error: ReactNode;
+  readonly options: readonly { readonly value: string; readonly label: string; readonly detail?: string }[];
   readonly search: string;
   readonly type: "all" | "male" | "female" | "unknown";
   readonly onSearch: (value: string) => void;
@@ -588,9 +642,11 @@ function VoiceField({
   readonly onChange: (value: string) => void;
 }) {
   return (
-    <Field label="Voice*" htmlFor={`${prefix}-voice`}>
+    <PersonaField label="Voice*" htmlFor={`${prefix}-voice`}>
+      <FieldHintContext.Provider value={describedBy}>
       <SearchableSelect
         id={`${prefix}-voice`}
+        className={DROPDOWN}
         value={value}
         displayValue={displayValue}
         options={options}
@@ -624,6 +680,7 @@ function VoiceField({
         onSearchChange={onSearch}
         onValueChange={onChange}
       />
-    </Field>
+      </FieldHintContext.Provider>
+    </PersonaField>
   );
 }

@@ -3,7 +3,7 @@
 import { cva, type VariantProps } from "class-variance-authority";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import { Select as SelectPrimitive } from "radix-ui";
-import { useRef, useState, type ComponentProps } from "react";
+import type { ComponentProps } from "react";
 
 import { useFieldHint } from "@/ui/field-hint.ts";
 import { cn } from "@/lib/utils";
@@ -87,13 +87,19 @@ type DownwardSelectOption = {
   readonly disabled?: boolean;
 };
 
-/** An opt-in select whose scrollable picker always opens below its trigger. */
+/**
+ * A select whose picker opens below its trigger when the window has room
+ * there and above it when it does not, the way any dropdown places itself.
+ * The page never moves to make room: the list is capped to the space Radix
+ * measures on the side it chose, and scrolls inside that.
+ */
 function DownwardSelect({
   id,
   value,
   options,
   disabled = false,
   required = false,
+  className,
   onValueChange,
 }: {
   readonly id: string;
@@ -101,78 +107,63 @@ function DownwardSelect({
   readonly options: readonly DownwardSelectOption[];
   readonly disabled?: boolean;
   readonly required?: boolean;
+  /** Classes for the trigger, merged after the shared select styles. */
+  readonly className?: string;
   readonly onValueChange: (value: string) => void;
 }) {
   const hint = useFieldHint();
-  const trigger = useRef<HTMLButtonElement>(null);
-  const [open, setOpen] = useState(false);
 
   return (
-    <>
-      <SelectPrimitive.Root
-        open={open}
-        value={value}
-        disabled={disabled}
-        required={required}
-        onValueChange={onValueChange}
-        onOpenChange={(next) => {
-          setOpen(next);
-          if (next) {
-            requestAnimationFrame(() => {
-              trigger.current?.scrollIntoView({ block: "center", inline: "nearest" });
-            });
-          }
-        }}
+    <SelectPrimitive.Root
+      value={value}
+      disabled={disabled}
+      required={required}
+      onValueChange={onValueChange}
+    >
+      <SelectPrimitive.Trigger
+        id={id}
+        data-slot="select"
+        className={cn(selectVariants({ size: "lg" }), "flex items-center justify-between gap-3 pr-3", className)}
+        aria-required={required ? "true" : undefined}
+        aria-describedby={hint}
       >
-        <SelectPrimitive.Trigger
-          ref={trigger}
-          id={id}
-          data-slot="select"
-          className={cn(selectVariants({ size: "lg" }), "flex items-center justify-between gap-3 pr-3")}
-          aria-required={required ? "true" : undefined}
-          aria-describedby={hint}
+        <SelectPrimitive.Value />
+        <SelectPrimitive.Icon asChild>
+          <ChevronDownIcon className="size-4 flex-none text-faint" aria-hidden="true" />
+        </SelectPrimitive.Icon>
+      </SelectPrimitive.Trigger>
+      <SelectPrimitive.Portal>
+        <SelectPrimitive.Content
+          data-slot="downward-select-content"
+          position="popper"
+          side="bottom"
+          align="start"
+          sideOffset={8}
+          collisionPadding={8}
+          className={cn(
+            "z-30 flex w-(--radix-select-trigger-width) flex-col overflow-hidden",
+            "max-h-[calc(var(--radix-select-content-available-height)-var(--space-2))]",
+            "border border-border bg-popover text-popover-foreground shadow-popover outline-none",
+          )}
         >
-          <SelectPrimitive.Value />
-          <SelectPrimitive.Icon asChild>
-            <ChevronDownIcon className="size-4 flex-none text-faint" aria-hidden="true" />
-          </SelectPrimitive.Icon>
-        </SelectPrimitive.Trigger>
-        <SelectPrimitive.Portal>
-          <SelectPrimitive.Content
-            data-slot="downward-select-content"
-            position="popper"
-            side="bottom"
-            align="start"
-            sideOffset={8}
-            avoidCollisions={false}
-            className="z-30 w-(--radix-select-trigger-width) overflow-hidden border border-border bg-popover text-popover-foreground shadow-popover outline-none"
-          >
-            <SelectPrimitive.Viewport className="max-h-(--dropdown-viewport-height) overflow-y-auto p-1">
-              {options.map((option) => (
-                <SelectPrimitive.Item
-                  key={option.value}
-                  value={option.value}
-                  disabled={option.disabled}
-                  className="flex min-h-(--control-md) cursor-pointer items-center gap-3 px-3 py-2 text-sm text-foreground outline-none data-[disabled]:pointer-events-none data-[disabled]:text-faint data-[highlighted]:bg-surface-soft data-[state=checked]:bg-surface-active pointer-coarse:min-h-(--tap-target)"
-                >
-                  <SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText>
-                  <SelectPrimitive.ItemIndicator className="ml-auto flex-none text-brand">
-                    <CheckIcon className="size-4" aria-hidden="true" />
-                  </SelectPrimitive.ItemIndicator>
-                </SelectPrimitive.Item>
-              ))}
-            </SelectPrimitive.Viewport>
-          </SelectPrimitive.Content>
-        </SelectPrimitive.Portal>
-      </SelectPrimitive.Root>
-      {open ? (
-        <span
-          className="block h-(--dropdown-viewport-height)"
-          data-slot="downward-select-scroll-space"
-          aria-hidden="true"
-        />
-      ) : null}
-    </>
+          <SelectPrimitive.Viewport className="min-h-0 max-h-(--dropdown-max-height) overflow-y-auto p-1">
+            {options.map((option) => (
+              <SelectPrimitive.Item
+                key={option.value}
+                value={option.value}
+                disabled={option.disabled}
+                className="flex min-h-(--control-md) cursor-pointer items-center gap-3 px-3 py-2 text-sm text-foreground outline-none data-[disabled]:pointer-events-none data-[disabled]:text-faint data-[highlighted]:bg-surface-soft data-[state=checked]:bg-surface-active pointer-coarse:min-h-(--tap-target)"
+              >
+                <SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText>
+                <SelectPrimitive.ItemIndicator className="ml-auto flex-none text-brand">
+                  <CheckIcon className="size-4" aria-hidden="true" />
+                </SelectPrimitive.ItemIndicator>
+              </SelectPrimitive.Item>
+            ))}
+          </SelectPrimitive.Viewport>
+        </SelectPrimitive.Content>
+      </SelectPrimitive.Portal>
+    </SelectPrimitive.Root>
   );
 }
 

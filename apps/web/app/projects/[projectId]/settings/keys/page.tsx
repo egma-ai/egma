@@ -34,10 +34,12 @@ import {
   Help,
   Refused,
 } from "../../../../../ui/form.tsx";
+import { MenuItem } from "../../../../../ui/menu.tsx";
 import { Empty, Failure, Loading } from "../../../../../ui/page-state.tsx";
 import {
   ListInstant,
 } from "../../../../../ui/relative-time.tsx";
+import { RowMenu } from "../../../../../ui/row-menu.tsx";
 import { Section } from "../../../../../ui/section.tsx";
 import {
   useOrganizationRead,
@@ -59,11 +61,13 @@ export default function ApiKeysSettingsPage() {
 const WHOLE_ORGANIZATION = "";
 
 /**
- * Pad named row actions because the table's trailing slot is sized for a menu
- * trigger. Remove that padding in stacked layout, where the row already supplies it.
+ * Let the create form fill the page frame.
+ *
+ * `Form` holds itself to a reading width, which is right for a page that is
+ * one form and wrong for one whose form stands over a table: the two panels
+ * then share a left edge and no other. The table below decides the width here.
  */
-const ROW_ACTIONS =
-  "flex items-center justify-end gap-2 px-(--row-padding-x) stacked:px-0";
+const FULL_WIDTH_FORM = "w-full [&>[data-slot=form]]:max-w-none";
 
 /**
  * The only copy of a newly minted secret.
@@ -134,11 +138,12 @@ function ApiKeyReceipt({
             {keyValue.secret}
           </code>
         </div>
+        {/* 44px, the height every control inside a panel on this page carries. */}
         <CardFooter>
-          <Button type="button" onClick={() => void copy()}>
+          <Button type="button" size="lg" onClick={() => void copy()}>
             Copy key
           </Button>
-          <Button type="button" variant="secondary" onClick={onDismiss}>
+          <Button type="button" size="lg" variant="secondary" onClick={onDismiss}>
             Dismiss
           </Button>
         </CardFooter>
@@ -254,22 +259,25 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
       },
       {
         key: "actions",
-        header: "Actions",
+        header: "Row actions",
         /*
          * Mark the cell as an action so table overflow rules do not clip its focus ring.
          */
         action: true,
         cell: (key) => (
-          <div className={ROW_ACTIONS}>
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={busy}
-              onClick={() => setConfirmingRevoke(key)}
-            >
-              Revoke
-            </Button>
-          </div>
+          <RowMenu label={`Open the menu for ${key.name ?? "Unnamed key"}`}>
+            {(close) => (
+              <MenuItem
+                disabled={busy}
+                onClick={() => {
+                  close();
+                  setConfirmingRevoke(key);
+                }}
+              >
+                <span className="text-failure">Revoke</span>
+              </MenuItem>
+            )}
+          </RowMenu>
         ),
       },
     ];
@@ -317,47 +325,51 @@ function ApiKeys({ projectId }: { readonly projectId: string }) {
           ) : (
             <>
               <Section title="Create a key">
-                <Form onSubmit={() => void mint()}>
-                  <FormRow>
-                    <Field label="Name" htmlFor="key-name">
-                      <Input
-                        id="key-name"
-                        value={name}
-                        autoComplete="off"
-                        spellCheck={false}
-                        disabled={busy}
-                        onChange={(event) => setName(event.target.value)}
-                      />
-                    </Field>
-                    <Field label="Scope" htmlFor="key-scope">
-                      <Select
-                        id="key-scope"
-                        value={scope}
-                        disabled={busy}
-                        onChange={(event) => setScope(event.target.value)}
-                      >
-                        {projects.map((project) => (
-                          <option key={project.id} value={project.id}>
-                            {`Project · ${project.name}`}
+                <div className={FULL_WIDTH_FORM}>
+                  <Form onSubmit={() => void mint()}>
+                    <FormRow>
+                      <Field label="Name" htmlFor="key-name">
+                        <Input
+                          id="key-name"
+                          value={name}
+                          autoComplete="off"
+                          spellCheck={false}
+                          disabled={busy}
+                          onChange={(event) => setName(event.target.value)}
+                        />
+                      </Field>
+                      <Field label="Scope" htmlFor="key-scope">
+                        <Select
+                          id="key-scope"
+                          value={scope}
+                          disabled={busy}
+                          onChange={(event) => setScope(event.target.value)}
+                        >
+                          {projects.map((project) => (
+                            <option key={project.id} value={project.id}>
+                              {`Project · ${project.name}`}
+                            </option>
+                          ))}
+                          <option value={WHOLE_ORGANIZATION}>
+                            Whole organization
                           </option>
-                        ))}
-                        <option value={WHOLE_ORGANIZATION}>
-                          Whole organization
-                        </option>
-                      </Select>
-                    </Field>
-                  </FormRow>
-                  <FormActions>
-                    <Button
-                      type="submit"
-                      disabled={minted !== null}
-                      busy={busy}
-                      {...(whyNot === undefined ? {} : { why: whyNot })}
-                    >
-                      {busy ? "Creating…" : "Create key"}
-                    </Button>
-                  </FormActions>
-                </Form>
+                        </Select>
+                      </Field>
+                    </FormRow>
+                    <FormActions>
+                      {/* 44px, which is the height of the fields it finishes. */}
+                      <Button
+                        type="submit"
+                        size="lg"
+                        disabled={minted !== null}
+                        busy={busy}
+                        {...(whyNot === undefined ? {} : { why: whyNot })}
+                      >
+                        {busy ? "Creating…" : "Create key"}
+                      </Button>
+                    </FormActions>
+                  </Form>
+                </div>
               </Section>
 
               <Section title="Your keys">

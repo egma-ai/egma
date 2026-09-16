@@ -37,8 +37,14 @@ export function Section({
            * A heading carries no size of its own in this product: the browser's
            * own heading sizes are not on the accepted scale, so every one of
            * them takes its size from a class.
+           *
+           * The class is the 16px weight-500 step the page's own title bar and
+           * the empty-state card already use. A section inside a page does not
+           * out-size the page it sits in; the 32px above it is what sets it
+           * apart, which is the file's own "hierarchy comes from size, space,
+           * and restrained use of weight 500".
            */}
-          <h2 className="m-0 text-lg font-medium">{title}</h2>
+          <h2 className="m-0 text-base font-medium">{title}</h2>
           {lead === undefined ? null : (
             <p className="mt-1 mb-0 max-w-[72ch] text-sm leading-(--line-normal) text-muted-foreground">
               {lead}

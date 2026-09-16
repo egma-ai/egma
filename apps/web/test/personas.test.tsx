@@ -3,10 +3,10 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import PersonasPage from "../app/projects/[projectId]/personas/page.tsx";
+import { PersonaReadScreen } from "../app/projects/[projectId]/personas/persona-read.tsx";
 import {
   PersonaCloneScreen,
   PersonaCreateScreen,
-  PersonaReadScreen,
 } from "../app/projects/[projectId]/personas/persona-screen.tsx";
 import type { Me } from "../lib/me.ts";
 import type { Persona, PersonaForm, PersonaModels } from "../lib/personas.ts";
@@ -187,6 +187,11 @@ function stubApi(overrides: Record<string, StubAnswer> = {}) {
   return asked;
 }
 
+/** The settings subsection named on the page: a plain header over its fields. */
+function section(name: string): HTMLElement {
+  return screen.getByRole("region", { name });
+}
+
 beforeEach(() => {
   routed.push.mockReset();
   routed.replace.mockReset();
@@ -208,38 +213,51 @@ describe("persona full-page flows", () => {
   it("cancels setup without creating a record", async () => {
     const asked = stubApi();
     render(<PersonaCreateScreen projectId="prj_1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    expect(await screen.findByText("Choose Persona's Agent Architecture")).toBeTruthy();
+    expect(screen.getByText("How should this persona listen and respond?")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Cascaded Architecture" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Realtime voice" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/personas");
     expect(asked.filter((one) => one.method === "POST")).toHaveLength(0);
   });
 
-  it("keeps Cascaded architecture fixed and exposes its separate provider and model fields", async () => {
+  it("keeps Cascaded architecture fixed and lays the form out in three open groups", async () => {
     stubApi();
     render(<PersonaCreateScreen projectId="prj_1" />);
     fireEvent.click(await screen.findByRole("button", { name: "Next" }));
     const name = await screen.findByLabelText("Name*");
     expect(name.getAttribute("placeholder")).toBe("Ex Angry Spanish caller");
     expect(screen.getByLabelText("Identity name*").getAttribute("placeholder")).toBe("John Doe");
+    expect(screen.getByLabelText("Personality prompt*").getAttribute("placeholder")).toBe("Ex Impatient, speaks quickly, and asks direct questions");
     const description = screen.getByLabelText("Description");
     expect(description.getAttribute("placeholder")).toBeNull();
     expect(description.getAttribute("aria-required")).toBeNull();
-    expect(screen.queryByText("The human name they give the agent in every simulation.")).toBeNull();
-    expect(screen.queryByText("Describe who they are and how they speak. Put their situation and goal in the test scenario.")).toBeNull();
-    expect(screen.queryByText("Tips for a useful persona")).toBeNull();
-    for (const section of ["Language", "Text to speech", "Speech to text", "Reasoning", "Advanced"]) {
-      const trigger = screen.getByRole("button", { name: section });
-      expect(trigger.getAttribute("aria-expanded")).toBe("false");
-      expect(trigger.firstElementChild?.tagName.toLocaleLowerCase()).toBe("svg");
+    for (const heading of ["Metadata", "Who they are", "Settings"]) {
+      expect(screen.getByRole("heading", { level: 2, name: heading })).toBeTruthy();
     }
-    fireEvent.click(screen.getByRole("button", { name: "Text to speech" }));
-    expect(screen.getByLabelText("Voice provider*")).toBeTruthy();
-    expect(screen.getByLabelText("Voice model*")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Speech to text" }));
-    expect(screen.getByLabelText("Transcription provider*")).toBeTruthy();
-    expect(screen.getByLabelText("Transcription model*")).toBeTruthy();
+    expect(screen.queryByText("Tips for a useful persona")).toBeNull();
+    /* Nothing collapses: every subsection is a region with its fields drawn. */
+    for (const named of ["Language*", "Text-to-speech", "Speech-to-text", "LLM", "Advanced Settings"]) {
+      expect(section(named)).toBeTruthy();
+      expect(screen.queryByRole("button", { name: named })).toBeNull();
+    }
+    expect(screen.getByRole("combobox", { name: "Language*" })).toBeTruthy();
+    const speech = section("Text-to-speech");
+    expect(within(speech).getByLabelText("Provider*")).toBeTruthy();
+    expect(within(speech).getByLabelText("Model*")).toBeTruthy();
+    expect(within(speech).getByRole("combobox", { name: "Voice*" })).toBeTruthy();
+    const transcription = section("Speech-to-text");
+    expect(within(transcription).getByLabelText("Provider*")).toBeTruthy();
+    expect(within(transcription).getByLabelText("Model*")).toBeTruthy();
+    const reasoning = section("LLM");
+    expect(within(reasoning).getByLabelText("Provider*")).toBeTruthy();
+    expect(within(reasoning).getByLabelText("Model*")).toBeTruthy();
     expect(screen.queryByLabelText(/Speech mode/i)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
-    expect(screen.getByLabelText("Interruptions*")).toBeTruthy();
+    const advanced = section("Advanced Settings");
+    expect(within(advanced).getByLabelText("Background sound*")).toBeTruthy();
+    expect(within(advanced).getByLabelText("Interruptions*")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create persona" })).toBeTruthy();
   });
 
   it("locks Live mode in setup and creates one persona with no interruption control", async () => {
@@ -252,26 +270,31 @@ describe("persona full-page flows", () => {
     expect(screen.queryByLabelText(/Speech mode/i)).toBeNull();
     expect(screen.queryByLabelText(/Interruptions/i)).toBeNull();
     expect(screen.queryByLabelText(/Live speech model/i)).toBeNull();
-    for (const section of ["Language", "Realtime voice", "Advanced"]) {
-      expect(screen.getByRole("button", { name: section }).getAttribute("aria-expanded")).toBe("false");
+    for (const named of ["Language*", "Realtime LLM", "Advanced Settings"]) {
+      expect(section(named)).toBeTruthy();
     }
-    fireEvent.click(screen.getByRole("button", { name: "Realtime voice" }));
-    const reasoning = screen.getByLabelText("Reasoning model*");
+    expect(screen.queryByRole("region", { name: "Text-to-speech" })).toBeNull();
+    const realtime = section("Realtime LLM");
+    expect(within(realtime).getByLabelText("Provider*")).toBeTruthy();
+    expect(within(realtime).getByLabelText("Model*")).toBeTruthy();
+    expect(within(realtime).getByRole("combobox", { name: "Voice*" })).toBeTruthy();
+    const reasoning = within(realtime).getByLabelText("Reasoning LLM*");
     reasoning.focus();
     fireEvent.keyDown(reasoning, { key: "Enter" });
-    const placeholder = await screen.findByRole("option", { name: "GPT 5.6 Terra" });
-    expect(placeholder.getAttribute("aria-disabled")).toBe("true");
-    fireEvent.keyDown(placeholder, { key: "Escape" });
+    /* Only the supported reasoning provider's models are offered. */
+    expect(await screen.findByRole("option", { name: "GPT 4o mini" })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: "Claude Sonnet" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("option", { name: "GPT 4o mini" }), { key: "Escape" });
 
     fireEvent.change(screen.getByLabelText("Name*"), { target: { value: "Calm Lee" } });
     fireEvent.change(screen.getByLabelText("Identity name*"), { target: { value: "Lee" } });
-    fireEvent.change(screen.getByLabelText("Personality*"), { target: { value: "Calm and concise." } });
+    fireEvent.change(screen.getByLabelText("Personality prompt*"), { target: { value: "Calm and concise." } });
     await waitFor(() => expect((screen.getByRole("button", { name: "Create persona" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: "Create persona" }));
 
     await waitFor(() => expect(asked.filter((one) => one.method === "POST")).toHaveLength(1));
     const body = asked.find((one) => one.method === "POST")!.body as { models: PersonaModels; controls: Record<string, unknown> };
-    expect(body.models).toMatchObject({ mode: "live", live: { model: "gpt-live-1" } });
+    expect(body.models).toMatchObject({ mode: "live", live: { model: "gpt-live-1" }, llm: { provider: "openai", model: "gpt-4o-mini" } });
     expect(body.controls).toEqual({ language: "en-US", backgroundSoundId: "none" });
     expect(routed.replace).toHaveBeenCalledWith("/projects/prj_1/personas/prs_created");
   });
@@ -282,12 +305,13 @@ describe("persona full-page flows", () => {
     expect(await screen.findByDisplayValue("Live Lee copy")).toBeTruthy();
     expect(asked.filter((one) => one.method === "POST")).toHaveLength(0);
     expect(screen.queryByLabelText(/Interruptions/i)).toBeNull();
-    for (const section of ["Language", "Realtime voice", "Advanced"]) {
-      expect(screen.getByRole("button", { name: section }).getAttribute("aria-expanded")).toBe("false");
+    for (const named of ["Language*", "Realtime LLM", "Advanced Settings"]) {
+      expect(section(named)).toBeTruthy();
     }
+    expect(screen.getByRole("heading", { level: 1, name: "Clone persona" })).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Description"), { target: { value: "" } });
-    await waitFor(() => expect((screen.getByRole("button", { name: "Clone persona" }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(screen.getByRole("button", { name: "Clone persona" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Create persona" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Create persona" }));
 
     await waitFor(() => expect(asked.filter((one) => one.method === "POST")).toHaveLength(1));
     const write = asked.find((one) => one.method === "POST")!;
@@ -313,12 +337,12 @@ describe("persona full-page flows", () => {
     const asked = stubApi();
     render(<PersonaCreateScreen projectId="prj_1" />);
     fireEvent.click(await screen.findByRole("button", { name: "Next" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Reasoning" }));
-    const provider = await screen.findByLabelText("Reasoning provider*");
+    const reasoning = await screen.findByRole("region", { name: "LLM" });
+    const provider = within(reasoning).getByLabelText("Provider*");
     provider.focus();
     fireEvent.keyDown(provider, { key: "Enter" });
     fireEvent.click(await screen.findByRole("option", { name: "Anthropic" }));
-    const model = screen.getByLabelText("Reasoning model*");
+    const model = within(reasoning).getByLabelText("Model*");
     model.focus();
     fireEvent.keyDown(model, { key: "Enter" });
     const selectedModel = await screen.findByRole("option", { name: "Claude Sonnet" });
@@ -326,7 +350,7 @@ describe("persona full-page flows", () => {
     fireEvent.keyDown(selectedModel, { key: "Escape" });
     fireEvent.change(screen.getByLabelText("Name*"), { target: { value: "Linked model" } });
     fireEvent.change(screen.getByLabelText("Identity name*"), { target: { value: "Lin" } });
-    fireEvent.change(screen.getByLabelText("Personality*"), { target: { value: "Checks every choice." } });
+    fireEvent.change(screen.getByLabelText("Personality prompt*"), { target: { value: "Checks every choice." } });
     await waitFor(() => expect((screen.getByRole("button", { name: "Create persona" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: "Create persona" }));
     await waitFor(() => expect(asked.filter((one) => one.method === "POST")).toHaveLength(1));
@@ -338,7 +362,6 @@ describe("persona full-page flows", () => {
   it("searches and chooses a supported language", async () => {
     stubApi();
     render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Language" }));
     const language = await screen.findByRole("combobox", { name: "Language*" });
     fireEvent.click(language);
     expect(document.querySelector("[data-slot='popover-content']")?.getAttribute("data-side")).toBe("bottom");
@@ -353,8 +376,6 @@ describe("persona full-page flows", () => {
       "GET /v1/persona-capabilities": () => new Promise<Response>(() => undefined),
     });
     render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Language" }));
-    fireEvent.click(screen.getByRole("button", { name: "Realtime voice" }));
     expect((await screen.findByRole("combobox", { name: "Language*" })).textContent).toBe("English (United States)");
     expect(screen.getByRole("combobox", { name: "Voice*" }).textContent).toBe("alloy");
     expect(screen.queryByText(/Unavailable/u)).toBeNull();
@@ -373,7 +394,7 @@ describe("persona full-page flows", () => {
     render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
     await waitFor(() => expect(asked.some((one) => one.path === "/v1/personas/prs_live")).toBe(true));
     expect(document.querySelector("form")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Clone persona" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create persona" })).toBeNull();
   });
 
   it("keeps clone values after the server refuses the write", async () => {
@@ -386,8 +407,8 @@ describe("persona full-page flows", () => {
     render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
     const name = await screen.findByLabelText("Name*");
     fireEvent.change(name, { target: { value: "Still here" } });
-    await waitFor(() => expect((screen.getByRole("button", { name: "Clone persona" }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(screen.getByRole("button", { name: "Clone persona" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Create persona" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Create persona" }));
     expect(await screen.findByText("This mode cannot be changed.")).toBeTruthy();
     expect((name as HTMLInputElement).value).toBe("Still here");
     expect(asked.filter((one) => one.method === "POST")).toHaveLength(1);
@@ -398,22 +419,33 @@ describe("persona full-page flows", () => {
       "POST /v1/personas/prs_live/fork": () => new Promise<Response>(() => undefined),
     });
     render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
-    await waitFor(() => expect((screen.getByRole("button", { name: "Clone persona" }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(screen.getByRole("button", { name: "Clone persona" }));
-    expect(await screen.findByRole("button", { name: "Cloning…" })).toBeTruthy();
+    await waitFor(() => expect((screen.getByRole("button", { name: "Create persona" }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Create persona" }));
+    expect(await screen.findByRole("button", { name: "Creating…" })).toBeTruthy();
     expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
     expect(routed.push).not.toHaveBeenCalled();
   });
 
-  it("renders saved Live personas as read-only and omits fixed backend details", async () => {
+  it("renders saved Live personas as read-only facts with Clone in the title bar", async () => {
     stubApi();
     const view = render(<PersonaReadScreen projectId="prj_1" personaId="prs_live" />);
     expect(await screen.findByText("Patient and concise.")).toBeTruthy();
     expect(view.container.querySelector("[data-slot='persona-read'] input, [data-slot='persona-read'] select, [data-slot='persona-read'] textarea")).toBeNull();
-    for (const section of ["Language", "Realtime voice", "Advanced"]) {
-      expect(screen.getByRole("button", { name: section }).getAttribute("aria-expanded")).toBe("false");
+    for (const heading of ["Metadata", "Who they are", "Settings"]) {
+      expect(screen.getByRole("heading", { level: 2, name: heading })).toBeTruthy();
     }
-    expect(screen.queryByRole("link", { name: "Clone" })).toBeNull();
+    for (const named of ["Language", "Realtime LLM", "Advanced Settings"]) {
+      expect(section(named)).toBeTruthy();
+      expect(screen.queryByRole("button", { name: named })).toBeNull();
+    }
+    expect(screen.getByRole("link", { name: "Clone" }).getAttribute("href")).toBe("/projects/prj_1/personas/prs_live/clone");
+    expect(screen.getByText("Personality prompt")).toBeTruthy();
+    expect(screen.getByText("English (United States)")).toBeTruthy();
+    const realtime = section("Realtime LLM");
+    expect(within(realtime).getByText("GPT Live")).toBeTruthy();
+    expect(within(realtime).getByText("Reasoning LLM")).toBeTruthy();
+    expect(within(realtime).getByText("GPT 4o mini")).toBeTruthy();
+    await waitFor(() => expect(within(realtime).getByText("Alloy")).toBeTruthy());
     expect(screen.queryByText("Interruptions")).toBeNull();
     expect(screen.queryByText("gpt-live-1")).toBeNull();
   });
@@ -421,18 +453,28 @@ describe("persona full-page flows", () => {
   it("keeps provider and model as separate read facts for Cascaded personas", async () => {
     stubApi({ "GET /v1/personas/prs_live": { status: 200, body: CUSTOM } });
     render(<PersonaReadScreen projectId="prj_1" personaId="prs_live" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Text to speech" }));
-    const speech = await screen.findByRole("region", { name: "Text to speech" });
+    const speech = await screen.findByRole("region", { name: "Text-to-speech" });
     expect(within(speech).getByText("Provider")).toBeTruthy();
     expect(within(speech).getByText("Cartesia")).toBeTruthy();
     expect(within(speech).getByText("Model")).toBeTruthy();
     expect(within(speech).getByText("Sonic 3.5")).toBeTruthy();
+    const advanced = section("Advanced Settings");
+    expect(within(advanced).getByText("Interruptions")).toBeTruthy();
+    expect(within(advanced).getByText("Occasional")).toBeTruthy();
+    expect(screen.getByText("Custom")).toBeTruthy();
+  });
+
+  it("hides the Clone action from a viewer on the read page", async () => {
+    routed.sessionMe = { ...me(), organizations: [{ ...me().organizations[0]!, role: "viewer" }] };
+    stubApi();
+    render(<PersonaReadScreen projectId="prj_1" personaId="prs_live" />);
+    expect(await screen.findByText("Patient and concise.")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Clone" })).toBeNull();
   });
 
   it("makes searchable required voice choices keyboard-readable and keeps Unknown filtering", async () => {
     stubApi();
     render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Realtime voice" }));
     const voice = await screen.findByRole("combobox", { name: "Voice*" });
     await waitFor(() => expect(voice.getAttribute("aria-required")).toBe("true"));
     fireEvent.click(voice);
@@ -454,11 +496,13 @@ describe("persona full-page flows", () => {
       },
     });
     render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Realtime voice" }));
     const voice = await screen.findByRole("combobox", { name: "Voice*" });
     await waitFor(() => expect(voice).toHaveProperty("textContent", "alloy · Unavailable"));
-    expect((screen.getByRole("button", { name: "Clone persona" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(voice.getAttribute("aria-describedby")).toBeNull();
+    expect((screen.getByRole("button", { name: "Create persona" }) as HTMLButtonElement).disabled).toBe(true);
+    /* The reason sits in the subsection header, and the picker points at it. */
+    const reason = voice.getAttribute("aria-describedby");
+    expect(reason).not.toBeNull();
+    expect(document.getElementById(reason!)?.textContent).toContain("Choose an available voice");
     expect(screen.queryByText("Choose an available voice before creating this persona.")).toBeNull();
   });
 
@@ -476,10 +520,10 @@ describe("persona full-page flows", () => {
     expect(await screen.findByText("Voice choices are unavailable.")).toBeTruthy();
     const name = screen.getByDisplayValue("Live Lee copy");
     fireEvent.change(name, { target: { value: "Retry Lee" } });
-    expect((screen.getByRole("button", { name: "Clone persona" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Create persona" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Retry options" }));
     await waitFor(() => expect(attempts).toBe(2));
-    await waitFor(() => expect((screen.getByRole("button", { name: "Clone persona" }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Create persona" }) as HTMLButtonElement).disabled).toBe(false));
     expect((name as HTMLInputElement).value).toBe("Retry Lee");
     expect(asked.filter((one) => one.path === "/v1/persona-capabilities")).toHaveLength(2);
   });
