@@ -578,8 +578,10 @@ async def test_a_successful_provider_cannot_echo_its_key_to_voice_or_evidence():
     assert attribute(model_span, "output") == safe_reply
 
 
-@pytest.mark.parametrize("interrupt", [False, True])
-async def test_voice_plays_a_streamed_sentence_before_model_completion(interrupt):
+@pytest.mark.parametrize(
+    "outcome", ["complete", "interrupt", "disconnect", "invalid_tool"]
+)
+async def test_voice_plays_a_streamed_sentence_before_model_completion(outcome):
     from test_model_streaming import HeldStream, event, model_with_stream
 
     stream = HeldStream(
@@ -600,6 +602,28 @@ async def test_voice_plays_a_streamed_sentence_before_model_completion(interrupt
         )
         + b"data: [DONE]\n\n",
     )
+    if outcome == "disconnect":
+        stream.last = b""
+    elif outcome == "invalid_tool":
+        stream.last = (
+            event(
+                {
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "call_bad",
+                            "type": "function",
+                            "function": {
+                                "name": "end_call",
+                                "arguments": '{"unexpected":true}',
+                            },
+                        }
+                    ]
+                },
+                finish="tool_calls",
+            )
+            + b"data: [DONE]\n\n"
+        )
     model, _ = model_with_stream(stream)
     persona = Persona(
         authored=AUTHORED, scenario_instructions="Ask safely.", model=model
@@ -654,7 +678,7 @@ async def test_voice_plays_a_streamed_sentence_before_model_completion(interrupt
         assert not stream.closed
         assert gate.busy
         assert not conductor.concluded
-        if interrupt:
+        if outcome == "interrupt":
             await worker.queue_frame(InterruptionFrame())
             await asyncio.wait_for(gate.wait_idle(), 2)
             assert stream.closed
@@ -672,6 +696,14 @@ async def test_voice_plays_a_streamed_sentence_before_model_completion(interrupt
         stream.release.set()
         await asyncio.wait_for(conductor.ended.wait(), 2)
         await asyncio.wait_for(output.responded.wait(), 2)
+        if outcome in ("disconnect", "invalid_tool"):
+            assert len(conductor.failures) == 1
+            assert isinstance(conductor.failures[0], ModelFailure)
+            assert not conductor.concluded
+            assert not legs.tts._audio_contexts
+            await worker.queue_frame(EndFrame())
+            await asyncio.wait_for(running, 2)
+            return
         assert conductor.spoken == ["First sentence. Goodbye."]
         assert conductor.concluded == ["First sentence. Goodbye."]
         assert not conductor.failures

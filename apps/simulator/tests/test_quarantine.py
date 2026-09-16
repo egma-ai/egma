@@ -20,6 +20,8 @@ SOURCE_ROOT = APP_ROOT / "src" / "egma_simulator"
 # is what the test exists to prevent.
 ALLOWED_DEPENDENCIES = {
     "aiohttp",  # the outbound HTTP client, and the workbench's server
+    "openai",  # provider streaming, SSE decoding, and response cleanup
+    "httpx",  # OpenAI SDK transport with the claimed environment proxy policy
     "jsonschema",  # holds every document to the contract, both directions
     "referencing",  # resolves versioned cross-schema references for jsonschema
     "rfc3339-validator",  # Check schema date-time formats.
@@ -130,6 +132,8 @@ def test_no_module_imports_anything_from_outside_the_app():
     # and used directly only by its Daytona transport shim.
     allowed_modules = {
         "aiohttp",
+        "openai",
+        "httpx",
         "deepgram",
         "jsonschema",
         "referencing",

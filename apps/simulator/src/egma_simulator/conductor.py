@@ -1036,6 +1036,15 @@ class _PersonaReplyGate(FrameProcessor):
             self._conductor.persona_reply_updated("".join(self._text))
         await self.push_frame(TextFrame(text))
 
+    async def _close_streamed_reply(self, *, abort: bool = False) -> None:
+        if not self._released:
+            return
+        if abort:
+            self._conductor.persona_will_not_finish()
+            await self.push_frame(InterruptionFrame())
+        await self.push_frame(LLMFullResponseEndFrame())
+        self._released = False
+
     async def _finish_reply(self) -> None:
         waiting = self._waiting
         due = self._due
@@ -1044,6 +1053,7 @@ class _PersonaReplyGate(FrameProcessor):
         try:
             reply = self._service.take_reply()
             if waiting.cancelled():
+                await self._close_streamed_reply(abort=True)
                 return
             received = "".join(self._text).strip()
             if received != reply.text:
@@ -1054,7 +1064,7 @@ class _PersonaReplyGate(FrameProcessor):
                 self._conductor.persona_reply_updated(
                     reply.text, concludes=reply.concluded
                 )
-                await self.push_frame(LLMFullResponseEndFrame())
+                await self._close_streamed_reply()
             elif (
                 self._kind == "deliberate"
                 and not self._conductor.may_start_interruption
@@ -1077,9 +1087,11 @@ class _PersonaReplyGate(FrameProcessor):
                     await self.push_frame(TextFrame(reply.text))
                     await self.push_frame(LLMFullResponseEndFrame())
         except asyncio.CancelledError:
+            await self._close_streamed_reply(abort=True)
             waiting.cancel()
             raise
         except Exception as fault:
+            await self._close_streamed_reply(abort=True)
             if not waiting.done():
                 waiting.set_exception(fault)
         else:

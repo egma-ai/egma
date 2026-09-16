@@ -14,8 +14,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import aiohttp
-import httpx
-from openai import APIError, APIStatusError, AsyncOpenAI
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.open_ai_adapter import (
@@ -30,6 +28,8 @@ from .redaction import REDACTED
 from .usage import ProviderUsage, llm_usage
 
 if TYPE_CHECKING:
+    from openai import AsyncOpenAI
+
     from .spec import SimulationSpec
 
 END_CALL_TOOL_NAME = "end_call"
@@ -332,6 +332,9 @@ class OpenAICompatibleModel:
         self, context: LLMContext, on_text: Callable[[str], Awaitable[None]]
     ) -> PersonaReply:
         """Release safe text while accumulating tool arguments and usage."""
+        import httpx
+        from openai import APIError, APIStatusError, AsyncOpenAI
+
         if self._stream_client is None:
             self._stream_client = AsyncOpenAI(
                 api_key=self._api_key,

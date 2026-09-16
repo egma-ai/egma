@@ -826,10 +826,7 @@ def _cartesia_mouth(
         encoding="pcm_s16le",
         container="raw",
         settings=settings,
-        # One persona turn is one whole thing to say, so it goes over in
-        # one piece rather than a sentence at a time: the default waits for
-        # sentence-ending punctuation and adds that wait to
-        # every sentence of every turn.
+        # Cartesia accepts text increments on one shared audio context.
         text_aggregation_mode=TextAggregationMode.TOKEN,
     )
     return leg, spoken_with, ()
