@@ -6,12 +6,16 @@ Only its structured end_call tool ends the exchange; spoken text has no control 
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import aiohttp
+import httpx
+from openai import APIError, APIStatusError, AsyncOpenAI
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.open_ai_adapter import (
@@ -118,6 +122,14 @@ class ModelClient(Protocol):
     async def close(self) -> None: ...
 
 
+class StreamingModelClient(ModelClient, Protocol):
+    """Optional text delivery used by ordinary voice replies."""
+
+    async def reply_streamed(
+        self, context: LLMContext, on_text: Callable[[str], Awaitable[None]]
+    ) -> PersonaReply: ...
+
+
 _SENTENCES = re.compile(r"[^.!?]+[.!?]*")
 
 
@@ -181,6 +193,7 @@ class OpenAICompatibleModel:
         self._timeout = aiohttp.ClientTimeout(total=timeout_seconds)
         self._use_environment_proxy = use_environment_proxy
         self._session: aiohttp.ClientSession | None = None
+        self._stream_client: AsyncOpenAI | None = None
 
     @property
     def model_name(self) -> str:
@@ -222,7 +235,7 @@ class OpenAICompatibleModel:
             text,
         )
 
-    async def reply(self, context: LLMContext) -> PersonaReply:
+    def _request(self, context: LLMContext) -> dict[str, Any]:
         invocation = _OPENAI_ADAPTER.get_llm_invocation_params(
             context,
             system_instruction=None,
@@ -236,6 +249,10 @@ class OpenAICompatibleModel:
         )
         if self._reasoning_effort is not None:
             asked["reasoning_effort"] = self._reasoning_effort
+        return asked
+
+    async def reply(self, context: LLMContext) -> PersonaReply:
+        asked = self._request(context)
         try:
             async with self._live_session().post(
                 f"{self._base_url}/chat/completions",
@@ -256,6 +273,9 @@ class OpenAICompatibleModel:
                 f"the model was unreachable: {self._provider_detail(error)}"
             ) from None
 
+        return self._decode_reply(body)
+
+    def _decode_reply(self, body: object) -> PersonaReply:
         diagnostics = _completion_diagnostics(body)
         try:
             message = body["choices"][0]["message"]
@@ -308,6 +328,114 @@ class OpenAICompatibleModel:
             usage=llm_usage(body, selection_model=self._model_name),
         )
 
+    async def reply_streamed(
+        self, context: LLMContext, on_text: Callable[[str], Awaitable[None]]
+    ) -> PersonaReply:
+        """Release safe text while accumulating tool arguments and usage."""
+        if self._stream_client is None:
+            self._stream_client = AsyncOpenAI(
+                api_key=self._api_key,
+                base_url=self._base_url,
+                timeout=self._timeout.total,
+                max_retries=0,
+                http_client=httpx.AsyncClient(trust_env=self._use_environment_proxy),
+            )
+        delivered = ""
+        try:
+            async with asyncio.timeout(self._timeout.total):
+                text = ""
+                calls: dict[int, dict[str, Any]] = {}
+                body: dict[str, Any] = {}
+                finished = False
+                async with await self._stream_client.chat.completions.create(
+                    **self._request(context),
+                    stream=True,
+                    stream_options={"include_usage": True},
+                ) as stream:
+                    async for chunk in stream:
+                        body["id"] = chunk.id
+                        body["model"] = chunk.model
+                        if chunk.usage is not None:
+                            body["usage"] = chunk.usage.model_dump()
+                        if not chunk.choices:
+                            continue
+                        choice = chunk.choices[0]
+                        if choice.finish_reason is not None:
+                            if choice.finish_reason not in ("stop", "tool_calls"):
+                                raise ModelFailure(
+                                    "the model's streamed reply was incomplete"
+                                )
+                            finished = True
+                        delta = choice.delta
+                        if delta.content:
+                            text += delta.content
+                            safe = self._stream_prefix(text)
+                            if safe != delivered:
+                                await on_text(safe[len(delivered) :])
+                                delivered = safe
+                        for part in delta.tool_calls or ():
+                            if part.type is not None and part.type != "function":
+                                raise ModelFailure(
+                                    "the model returned an unsupported tool type"
+                                )
+                            call = calls.setdefault(
+                                part.index,
+                                {
+                                    "id": "",
+                                    "type": "function",
+                                    "function": {"name": "", "arguments": ""},
+                                },
+                            )
+                            call["id"] += part.id or ""
+                            if part.function:
+                                call["function"]["name"] += part.function.name or ""
+                                call["function"]["arguments"] += (
+                                    part.function.arguments or ""
+                                )
+                if not finished:
+                    raise ModelFailure(
+                        "the model's stream ended before its reply completed"
+                    )
+                body["choices"] = [
+                    {
+                        "message": {
+                            "content": text,
+                            "tool_calls": list(calls.values()),
+                        }
+                    }
+                ]
+            reply = self._decode_reply(body)
+        except APIStatusError as error:
+            if self._customer_funded and error.status_code in (401, 403):
+                raise ProviderKeyUnavailable("openai") from None
+            raise ModelFailure(
+                f"the model answered {error.status_code}: "
+                f"{self._provider_detail(error)}"
+            ) from None
+        except (APIError, TimeoutError) as error:
+            raise ModelFailure(
+                f"the model was unreachable: {self._provider_detail(error)}"
+            ) from None
+        if not reply.text.startswith(delivered.rstrip()):
+            raise ModelFailure("the model's streamed text changed after delivery")
+        if len(reply.text) > len(delivered):
+            await on_text(reply.text[len(delivered) :])
+        return reply
+
+    def _stream_prefix(self, text: str) -> str:
+        """Hold incomplete credential matches before text reaches telemetry."""
+        key = self._api_key
+        if key and len(key) < 8:
+            # A short development key needs the next token boundary to be safe.
+            text = re.sub(r"[A-Za-z0-9_-]+$", "", text)
+        elif key:
+            text = self._without_api_key(text)
+            for size in range(min(len(key) - 1, len(text)), 0, -1):
+                if text.endswith(key[:size]):
+                    text = text[:-size]
+                    break
+        return self._without_api_key(text).lstrip()
+
     def _tool_calls_from(self, written: object) -> tuple[PersonaToolCall, ...]:
         """Decode provider tool JSON; Pipecat executes the typed call later."""
         if written is None:
@@ -357,6 +485,9 @@ class OpenAICompatibleModel:
         )
 
     async def close(self) -> None:
+        if self._stream_client is not None:
+            await self._stream_client.close()
+            self._stream_client = None
         if self._session is not None:
             await self._session.close()
             self._session = None

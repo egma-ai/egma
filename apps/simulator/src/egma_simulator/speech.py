@@ -896,7 +896,8 @@ def _openai_mouth(
                             await self.remove_audio_context(context_id)
                             return
                         await self.start_tts_usage_metrics(text)
-                        async for chunk in response.iter_bytes(self.chunk_size):
+                        # Release 100 ms of PCM instead of the default 500 ms.
+                        async for chunk in response.iter_bytes(self.sample_rate // 5):
                             if chunk:
                                 await self.stop_ttfb_metrics()
                                 yield TTSAudioRawFrame(

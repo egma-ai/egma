@@ -36,7 +36,6 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
-    UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
@@ -272,16 +271,24 @@ class _AgentEar(VADProcessor):
             self._conductor.media_advanced()
 
 
-class _TurnBoundary(FrameProcessor):
-    """Put Pipecat's public user-turn verdict into the ordered frame stream."""
+class _AgentTurnProcessor(UserTurnProcessor):
+    """Queue the turn verdict behind its transcript at the same producer."""
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
-        await super().process_frame(frame, direction)
-        await self.push_frame(frame, direction)
-        if direction == FrameDirection.DOWNSTREAM and isinstance(
-            frame, UserStoppedSpeakingFrame
-        ):
-            await self.push_frame(_AgentFinished())
+    def __init__(
+        self,
+        *,
+        user_turn_strategies: UserTurnStrategies,
+        user_turn_stop_timeout: float = DEFAULT_CONDUCT.agent_turn_backstop_seconds,
+    ) -> None:
+        super().__init__(
+            user_turn_strategies=user_turn_strategies,
+            user_turn_stop_timeout=user_turn_stop_timeout,
+        )
+
+        @self.event_handler("on_user_turn_stopped")
+        async def finished(processor: UserTurnProcessor, _strategy: object) -> None:
+            # The system stop frame can overtake text in downstream processors.
+            await processor.push_frame(_AgentFinished())
 
 
 @dataclass(frozen=True)
@@ -755,10 +762,10 @@ class _PersonaLLMService(LLMService):
 
     Pipecat owns the service lifecycle, instrumentation scope, span, input and
     output attributes. The model client still owns the direct provider request,
-    including its non-streaming body and timeout.
+    including streamed text, tool arguments, and timeout.
     """
 
-    def __init__(self, *, persona: Persona) -> None:
+    def __init__(self, *, persona: Persona, stream_responses: bool = False) -> None:
         super().__init__(
             settings=LLMSettings(
                 model=persona.model_name,
@@ -775,6 +782,8 @@ class _PersonaLLMService(LLMService):
             )
         )
         self._persona = persona
+        self._stream_responses = stream_responses
+        self._streaming_reply = False
         self._reply: PersonaReply | None = None
         self._failure: Exception | None = None
         self._function_call_done: asyncio.Event | None = None
@@ -857,7 +866,15 @@ class _PersonaLLMService(LLMService):
     async def _process_context(self, context: LLMContext) -> None:
         self._reply = None
         self._failure = None
-        reply = await self._persona.reply_to(context)
+
+        async def emit(text: str) -> None:
+            await self.push_frame(LLMTextFrame(text))
+
+        reply = (
+            await self._persona.reply_streamed(context, emit)
+            if self._streaming_reply
+            else await self._persona.reply_to(context)
+        )
         if reply.usage is not None:
             # What the provider says this turn cost, onto the same bus the
             # speaking and listening legs report on. The model client already
@@ -875,7 +892,7 @@ class _PersonaLLMService(LLMService):
                     ]
                 )
             )
-        if reply.text:
+        if reply.text and not self._streaming_reply:
             await self.push_frame(LLMTextFrame(reply.text))
         reply = await self._execute_tool_calls(reply, context)
         self._reply = reply
@@ -883,7 +900,14 @@ class _PersonaLLMService(LLMService):
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         if isinstance(frame, LLMContextFrame):
-            await self.push_frame(LLMFullResponseStartFrame())
+            self._streaming_reply = (
+                self._stream_responses
+                and self._persona.supports_streaming
+                and frame.metadata.get(_PERSONA_REPLY_KIND, "ordinary") == "ordinary"
+            )
+            start = LLMFullResponseStartFrame()
+            start.metadata["persona_streaming"] = self._streaming_reply
+            await self.push_frame(start)
             try:
                 await self._process_context(frame.context)
             except Exception as fault:
@@ -912,7 +936,7 @@ class _PersonaLLMService(LLMService):
 
 
 class _PersonaReplyGate(FrameProcessor):
-    """Hold model chunks until Egma applies conclusion and speaking timing."""
+    """Apply speaking timing before releasing ordinary reply chunks to TTS."""
 
     def __init__(
         self, *, service: _PersonaLLMService, conductor: VoiceConductor
@@ -923,6 +947,8 @@ class _PersonaReplyGate(FrameProcessor):
         self._waiting: asyncio.Future[None] | None = None
         self._due: MediaPosition | None = None
         self._collecting = False
+        self._streaming = False
+        self._released = False
         self._text: list[str] = []
         self._silence_follow_up = 0
         self._kind = "ordinary"
@@ -973,20 +999,42 @@ class _PersonaReplyGate(FrameProcessor):
             frame, InterruptionFrame
         ):
             self._conductor.persona_will_not_finish()
+            if self._streaming:
+                self.cancel_pending()
         if direction != FrameDirection.DOWNSTREAM or self._waiting is None:
             await self.push_frame(frame, direction)
             return
         if isinstance(frame, LLMFullResponseStartFrame):
             self._collecting = True
+            self._streaming = frame.metadata.get("persona_streaming", False)
             self._text = []
             return
         if self._collecting and isinstance(frame, LLMTextFrame):
             self._text.append(frame.text)
+            if self._streaming and not self._waiting.cancelled():
+                await self._release_chunk(frame.text)
             return
         if self._collecting and isinstance(frame, LLMFullResponseEndFrame):
             await self._finish_reply()
             return
         await self.push_frame(frame, direction)
+
+    async def _release_chunk(self, text: str) -> None:
+        if not text or self._conductor.is_ending:
+            return
+        if not self._released:
+            assert self._due is not None
+            await self._conductor.wait_until(self._due)
+            if self._conductor.is_ending or self._waiting.cancelled():
+                return
+            self._conductor.persona_will_speak(
+                text, silence_follow_up=self._silence_follow_up
+            )
+            self._released = True
+            await self.push_frame(LLMFullResponseStartFrame())
+        else:
+            self._conductor.persona_reply_updated("".join(self._text))
+        await self.push_frame(TextFrame(text))
 
     async def _finish_reply(self) -> None:
         waiting = self._waiting
@@ -997,12 +1045,17 @@ class _PersonaReplyGate(FrameProcessor):
             reply = self._service.take_reply()
             if waiting.cancelled():
                 return
-            received = "".join(self._text)
+            received = "".join(self._text).strip()
             if received != reply.text:
                 raise RuntimeError(
                     "Pipecat's persona response did not match its model reply"
                 )
-            if (
+            if self._released:
+                self._conductor.persona_reply_updated(
+                    reply.text, concludes=reply.concluded
+                )
+                await self.push_frame(LLMFullResponseEndFrame())
+            elif (
                 self._kind == "deliberate"
                 and not self._conductor.may_start_interruption
             ):
@@ -1044,6 +1097,8 @@ class _PersonaReplyGate(FrameProcessor):
         self._waiting = None
         self._due = None
         self._collecting = False
+        self._streaming = False
+        self._released = False
         self._text = []
         self._silence_follow_up = 0
         self._kind = "ordinary"
@@ -1970,7 +2025,7 @@ class VoiceConductor:
         self._opened_unix_nano = _now()
 
         ear = _AgentEar(vad_analyzer=self._vad, conductor=self)
-        turns = UserTurnProcessor(
+        turns = _AgentTurnProcessor(
             user_turn_strategies=UserTurnStrategies(
                 start=[
                     VADUserTurnStartStrategy(
@@ -1980,9 +2035,8 @@ class VoiceConductor:
             ),
             user_turn_stop_timeout=self._parameters.agent_turn_backstop_seconds,
         )
-        turn_boundary = _TurnBoundary()
         assert self._persona is not None
-        model = _PersonaLLMService(persona=self._persona)
+        model = _PersonaLLMService(persona=self._persona, stream_responses=True)
         replies = _PersonaReplyGate(service=model, conductor=self)
         brain = _PersonaBrain(persona=self._persona, conductor=self, replies=replies)
         interruptions = _InterruptionScheduler(
@@ -2018,7 +2072,6 @@ class VoiceConductor:
                 ear,
                 self._legs.stt,
                 turns,
-                turn_boundary,
                 interruptions,
                 brain,
                 model,
@@ -2350,6 +2403,12 @@ class VoiceConductor:
         self._discard_deliberate_audio = False
         if deliberate:
             self._interruption_state = "ready"
+
+    def persona_reply_updated(self, text: str, *, concludes: bool = False) -> None:
+        """Update streamed words without resetting their recorded audio bounds."""
+        if self._pending_persona_text is not None:
+            self._pending_persona_text = text
+            self._pending_persona_concludes = concludes
 
     def persona_audio(
         self,

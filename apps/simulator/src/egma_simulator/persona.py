@@ -9,12 +9,13 @@ From the persona POV, the persona is assistant and the agent under test is user.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from typing import cast
 
 from pipecat.processors.aggregators.llm_context import LLMContext
 
-from .model import PERSONA_TOOLS, ModelClient, PersonaReply
+from .model import PERSONA_TOOLS, ModelClient, PersonaReply, StreamingModelClient
 from .spec import AuthoredPersona
 
 SILENCE_WAIT_SECONDS = 10.0
@@ -213,6 +214,17 @@ class Persona:
     async def reply_to(self, context: LLMContext) -> PersonaReply:
         """Ask the configured model without changing its provider contract."""
         return await self._model.reply(context)
+
+    @property
+    def supports_streaming(self) -> bool:
+        return callable(getattr(self._model, "reply_streamed", None))
+
+    async def reply_streamed(
+        self, context: LLMContext, on_text: Callable[[str], Awaitable[None]]
+    ) -> PersonaReply:
+        return await cast(StreamingModelClient, self._model).reply_streamed(
+            context, on_text
+        )
 
     async def next_turn(self, history: Sequence[Turn]) -> PersonaReply:
         """What the persona says next, given everything said so far —

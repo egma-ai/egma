@@ -42,6 +42,7 @@ import {
 } from "../lib/transcripts.ts";
 import { MEASURES } from "../lib/transcript-copy.ts";
 import { Dialog } from "./dialog.tsx";
+import { Tooltip } from "./feedback.tsx";
 import { PlanItems } from "./evidence.tsx";
 import {
   GradeDetails,
@@ -287,6 +288,18 @@ function p90TurnLatency(metrics: readonly Measured[]): string {
   return `${String(rounded)} ms${latency.partial ? " · partial" : ""}`;
 }
 
+function turnLatencyExplanation(metrics: readonly Measured[]): string {
+  const latency = metrics.find(
+    (metric) =>
+      metric.measure === "turn_response_latency" && metric.unit === "milliseconds",
+  );
+  const definition =
+    "Time from the end of the caller's speech to the agent's reply. P90 describes the slower turns, not the average.";
+  if (latency === undefined || !Number.isFinite(latency.mean)) return definition;
+  const count = latency.samples.length;
+  return `${definition} Average: ${String(Math.round(latency.mean))} ms across ${String(count)} measured ${count === 1 ? "turn" : "turns"}${latency.partial ? " (partial)" : ""}. Provider dashboards can use a different summary and measurement boundary.`;
+}
+
 /** Keep the compact visual dash while announcing what it means. */
 function summaryValue(value: string) {
   if (value !== "-") return value;
@@ -347,7 +360,17 @@ export function SimulationEvidenceSummary({
         </strong>
       </div>
       <div className={SUMMARY_STRIP_CELL}>
-        <span className={SUMMARY_STRIP_LABEL}>P90 turn latency</span>
+        <Tooltip label={turnLatencyExplanation(evidence.metrics)}>
+          <button
+            type="button"
+            className={cn(
+              SUMMARY_STRIP_LABEL,
+              "text-left underline decoration-dotted underline-offset-4",
+            )}
+          >
+            P90 turn latency
+          </button>
+        </Tooltip>
         <strong className={SUMMARY_VALUE}>
           {summaryValue(p90TurnLatency(evidence.metrics))}
         </strong>
@@ -904,11 +927,15 @@ function waveformPath(
   if (peaks.length === 0) return "";
   const width = 1000;
   const step = width / Math.max(1, peaks.length - 1);
-  const top = peaks.map(
+  // Share one display scale across speakers; leave silence at zero.
+  const visible = peaks.map((peak) =>
+    Number.isFinite(peak) ? Math.sqrt(Math.max(0, Math.min(1, peak))) : 0,
+  );
+  const top = visible.map(
     (peak, at) =>
       `${(at * step).toFixed(2)},${(middle - peak * scale).toFixed(2)}`,
   );
-  const bottom = [...peaks].reverse().map((peak, reverseAt) => {
+  const bottom = [...visible].reverse().map((peak, reverseAt) => {
     const at = peaks.length - reverseAt - 1;
     return `${(at * step).toFixed(2)},${(middle + peak * scale).toFixed(2)}`;
   });
@@ -1349,6 +1376,7 @@ export function RecordingEvidence({
                 />
                 {agent}
               </span>
+              <span>Quiet speech expanded for visibility.</span>
             </div>
           ) : null}
         </div>
@@ -1901,7 +1929,7 @@ const TranscriptTurn = memo(function TranscriptTurn({
       <div className="flex min-h-(--transcript-turn-min-height) min-w-0 items-center px-2 py-1 pointer-coarse:min-h-(--tap-target)">
         <p className="m-0 text-sm wrap-anywhere whitespace-pre-wrap text-foreground">
           {turn.text === "" ? (
-            <span className="text-faint italic">Nothing was said.</span>
+            <span className="text-faint italic">No transcript captured.</span>
           ) : (
             turn.text
           )}
