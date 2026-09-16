@@ -99,6 +99,7 @@ class _AcceptedOutput(BaseOutputTransport):
             )
         )
         self.accepted = 0
+        self.first_audio = asyncio.Event()
 
     async def start(self, frame) -> None:
         await super().start(frame)
@@ -106,6 +107,7 @@ class _AcceptedOutput(BaseOutputTransport):
 
     async def write_audio_frame(self, _frame) -> bool:
         self.accepted += 1
+        self.first_audio.set()
         return True
 
 
@@ -457,3 +459,53 @@ async def test_openai_http_tts_failure_reaps_context_through_pipeline(
         if not running.done():
             await worker.cancel()
         await asyncio.wait_for(running, 1)
+
+
+class _BufferedResponse(_HeldResponse):
+    async def iter_bytes(self, chunk_size: int):
+        owner = self
+
+        class Stream(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                yield b"\x01\x00" * 2_400
+                await owner.middle.wait()
+                yield b"\x02\x00" * 12_000
+
+        response = httpx.Response(200, stream=Stream())
+        async for chunk in response.aiter_bytes(chunk_size):
+            yield chunk
+        self.ended.set()
+
+
+@pytest.mark.asyncio
+async def test_openai_tts_plays_first_100ms_without_waiting_for_more_audio() -> None:
+    response = _BufferedResponse()
+    tts, _create = _openai_tts(response)
+    output = _AcceptedOutput()
+    worker = PipelineWorker(
+        Pipeline([tts, output]),
+        enable_tracing=False,
+        enable_turn_tracking=False,
+        enable_rtvi=False,
+        idle_timeout_secs=None,
+    )
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker)
+    running = asyncio.create_task(runner.run())
+    try:
+        await worker.queue_frames([
+            LLMFullResponseStartFrame(),
+            TextFrame("First sentence."),
+            LLMFullResponseEndFrame(),
+        ])
+        await asyncio.wait_for(response.entered.wait(), 5)
+        await asyncio.wait_for(output.first_audio.wait(), 1)
+        assert not response.ended.is_set()
+        response.middle.set()
+        await asyncio.wait_for(response.ended.wait(), 5)
+        await worker.queue_frame(EndFrame())
+        await asyncio.wait_for(running, 5)
+    finally:
+        if not running.done():
+            await worker.cancel()
+            await asyncio.wait_for(running, 5)

@@ -65,7 +65,7 @@ export function Transcript({
   if (transcript.turns.length === 0) {
     return (
       <Empty
-        title="Nothing was said"
+        title="No recorded transcript"
         lead="Egma filed steps for this simulation but no turns. Whatever happened, nobody spoke."
       />
     );
@@ -135,7 +135,7 @@ export function Transcript({
             <div>
               <p className="m-0 text-sm whitespace-pre-wrap text-foreground">
                 {turn.text === "" ? (
-                  <span className="text-faint italic">Nothing was said.</span>
+                  <span className="text-faint italic">No transcript captured.</span>
                 ) : (
                   turn.text
                 )}

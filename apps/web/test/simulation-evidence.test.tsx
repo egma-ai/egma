@@ -498,6 +498,16 @@ describe("one simulation's grades", () => {
    * the same p90 the transcript page leads with, worded by the one shared
    * formatter, so the two surfaces cannot describe one conversation two ways.
    */
+  it("explains the latency percentile, average, and sample count", async () => {
+    page();
+    render(<SimulationEvidencePage />);
+    const label = await screen.findByRole("button", { name: "P90 turn latency" });
+    fireEvent.focus(label);
+    const help = await screen.findByRole("tooltip");
+    expect(help.textContent).toContain("P90 describes the slower turns, not the average");
+    expect(help.textContent).toContain("Average: 760 ms across 2 measured turns");
+  });
+
   it("shows what was measured, p90-led, apart from the grades", async () => {
     page();
     render(<SimulationEvidencePage />);

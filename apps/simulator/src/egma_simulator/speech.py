@@ -826,10 +826,7 @@ def _cartesia_mouth(
         encoding="pcm_s16le",
         container="raw",
         settings=settings,
-        # One persona turn is one whole thing to say, so it goes over in
-        # one piece rather than a sentence at a time: the default waits for
-        # sentence-ending punctuation and adds that wait to
-        # every sentence of every turn.
+        # Cartesia accepts text increments on one shared audio context.
         text_aggregation_mode=TextAggregationMode.TOKEN,
     )
     return leg, spoken_with, ()
@@ -896,7 +893,8 @@ def _openai_mouth(
                             await self.remove_audio_context(context_id)
                             return
                         await self.start_tts_usage_metrics(text)
-                        async for chunk in response.iter_bytes(self.chunk_size):
+                        # Release 100 ms of PCM instead of the default 500 ms.
+                        async for chunk in response.iter_bytes(self.sample_rate // 5):
                             if chunk:
                                 await self.stop_ttfb_metrics()
                                 yield TTSAudioRawFrame(

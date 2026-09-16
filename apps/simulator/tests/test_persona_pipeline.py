@@ -8,10 +8,12 @@ from collections.abc import AsyncGenerator
 from fractions import Fraction
 
 import aiohttp
+import pytest
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     StartFrame,
     TextFrame,
@@ -53,9 +55,7 @@ from egma_simulator.speech import (
     encode_speech,
 )
 
-AUTHORED = AuthoredPersona(
-    name="Alex", personality="Patient.", language="en-US"
-)
+AUTHORED = AuthoredPersona(name="Alex", personality="Patient.", language="en-US")
 
 SECRET = "egma-secret-must-not-enter-telemetry"
 
@@ -576,3 +576,141 @@ async def test_a_successful_provider_cannot_echo_its_key_to_voice_or_evidence():
         if scope == "pipecat" and span["name"] == "llm"
     )
     assert attribute(model_span, "output") == safe_reply
+
+
+@pytest.mark.parametrize(
+    "outcome", ["complete", "interrupt", "disconnect", "invalid_tool"]
+)
+async def test_voice_plays_a_streamed_sentence_before_model_completion(outcome):
+    from test_model_streaming import HeldStream, event, model_with_stream
+
+    stream = HeldStream(
+        event({"content": "First sentence. G"}),
+        event(
+            {
+                "content": "oodbye.",
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "call_end",
+                        "type": "function",
+                        "function": {"name": "end_call", "arguments": "{}"},
+                    }
+                ],
+            },
+            finish="tool_calls",
+        )
+        + b"data: [DONE]\n\n",
+    )
+    if outcome == "disconnect":
+        stream.last = b""
+    elif outcome == "invalid_tool":
+        stream.last = (
+            event(
+                {
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "call_bad",
+                            "type": "function",
+                            "function": {
+                                "name": "end_call",
+                                "arguments": '{"unexpected":true}',
+                            },
+                        }
+                    ]
+                },
+                finish="tool_calls",
+            )
+            + b"data: [DONE]\n\n"
+        )
+    model, _ = model_with_stream(stream)
+    persona = Persona(
+        authored=AUTHORED, scenario_instructions="Ask safely.", model=model
+    )
+
+    class StreamingConductor(ConductorProbe):
+        def persona_will_not_finish(self):
+            pass
+
+        def persona_reply_updated(self, text, *, concludes=False):
+            self.spoken[-1] = text
+            self.history[-1] = Turn("human", text)
+            if concludes:
+                self.concluded.append(text)
+                self.ended.set()
+
+    conductor = StreamingConductor()
+    service = _PersonaLLMService(persona=persona, stream_responses=True)
+    gate = _PersonaReplyGate(service=service, conductor=conductor)
+    brain = _PersonaBrain(persona=persona, conductor=conductor, replies=gate)
+    legs = build_legs(
+        SpeechProviders(
+            stt="scripted", tts="openai", tts_key=SECRET, tts_model="gpt-4o-mini-tts"
+        ),
+        voice=PersonaVoice(voice_id="alloy", provider="openai", speed=1.0),
+    )
+    await legs.tts._client.close()
+    legs.tts._client = StockTTSClient()
+
+    first_audio = asyncio.Event()
+
+    class AudioProbe(OutputProbe):
+        async def process_frame(self, frame, direction):
+            await super().process_frame(frame, direction)
+            if isinstance(frame, TTSAudioRawFrame):
+                first_audio.set()
+
+    output = AudioProbe()
+    worker = PipelineWorker(
+        Pipeline([brain, service, gate, legs.tts, output]),
+        idle_timeout_secs=None,
+        enable_tracing=False,
+        enable_turn_tracking=False,
+        enable_rtvi=False,
+    )
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker)
+    running = asyncio.create_task(runner.run())
+    try:
+        await worker.queue_frame(_AgentFinished(heard_a_turn=False))
+        await asyncio.wait_for(first_audio.wait(), 2)
+        assert not stream.closed
+        assert gate.busy
+        assert not conductor.concluded
+        if outcome == "interrupt":
+            await worker.queue_frame(InterruptionFrame())
+            await asyncio.wait_for(gate.wait_idle(), 2)
+            assert stream.closed
+            assert not conductor.concluded
+            assert not conductor.failures
+            stream.release.set()
+            await worker.queue_frame(_AgentFinished(heard_a_turn=False))
+            await asyncio.wait_for(conductor.ended.wait(), 2)
+            assert conductor.concluded == ["First sentence. Goodbye."]
+            assert conductor.spoken == ["First sentence. G", "First sentence. Goodbye."]
+            assert not conductor.failures
+            await worker.queue_frame(EndFrame())
+            await asyncio.wait_for(running, 2)
+            return
+        stream.release.set()
+        await asyncio.wait_for(conductor.ended.wait(), 2)
+        await asyncio.wait_for(output.responded.wait(), 2)
+        if outcome in ("disconnect", "invalid_tool"):
+            assert len(conductor.failures) == 1
+            assert isinstance(conductor.failures[0], ModelFailure)
+            assert not conductor.concluded
+            assert not legs.tts._audio_contexts
+            await worker.queue_frame(EndFrame())
+            await asyncio.wait_for(running, 2)
+            return
+        assert conductor.spoken == ["First sentence. Goodbye."]
+        assert conductor.concluded == ["First sentence. Goodbye."]
+        assert not conductor.failures
+        await worker.queue_frame(EndFrame())
+        await asyncio.wait_for(running, 2)
+    finally:
+        if not running.done():
+            await worker.cancel()
+            await asyncio.wait_for(running, 2)
+        await model.close()

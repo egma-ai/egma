@@ -95,7 +95,7 @@ export const TRACE_SHEET = {
   },
   transcript: {
     title: "Transcript",
-    nothingTitle: "Nothing was said",
+    nothingTitle: "No recorded transcript",
     nothingLead: "Egma recorded no spoken turns for this trace.",
   },
   actions: {
