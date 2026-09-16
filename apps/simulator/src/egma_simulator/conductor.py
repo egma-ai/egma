@@ -237,6 +237,10 @@ class _AgentEar(VADProcessor):
             self._conductor.agent_is_departing()
             await self._conductor.agent_input_is_closing(self.position)
             await self.finalize_active_utterance()
+            # Input audio travels as system frames, so every frame before the
+            # marker has already passed the whole pipeline: the departure is
+            # complete here, not after the persona's queued playout.
+            frame.completed.set()
         if isinstance(frame, InputAudioRawFrame):
             source_start = self.position
             source_end = source_start + Fraction(frame.num_frames, frame.sample_rate)
@@ -1336,7 +1340,6 @@ class _Timeline(FrameProcessor):
                 heard_through=self._recorder.bot_position
             )
         elif isinstance(frame, RemoteParticipantLeftFrame):
-            frame.completed.set()
             self._conductor.media_advanced()
         await self.push_frame(frame, direction)
 
@@ -2183,7 +2186,7 @@ class VoiceConductor:
                 return
             if ear.hearing_speech or self._heard_so_far < len(ear.utterances):
                 return
-            self._ending = AGENT_ENDED
+            await self._agent_ended_the_exchange()
             return
         if self._owes_a_turn or ear.hearing_speech:
             return
@@ -2276,9 +2279,7 @@ class VoiceConductor:
             return None
         if self._media is not None and self._media.ended.is_set():
             self._agent_departed = True
-            self._ending = AGENT_ENDED
-            self._owes_a_turn = False
-            self.media_advanced()
+            await self._agent_ended_the_exchange()
             return None
         if (
             heard_a_turn
@@ -2567,6 +2568,40 @@ class VoiceConductor:
             await self._ear.finalize_active_utterance()
         self.media_advanced()
 
+    async def _agent_ended_the_exchange(self) -> None:
+        """Name the ending, then stop the persona where the agent stopped hearing."""
+        self._ending = AGENT_ENDED
+        self._owes_a_turn = False
+        await self._cut_persona_playout()
+        self.media_advanced()
+
+    async def _cut_persona_playout(self) -> None:
+        """Keep what the persona was heard saying and drop the rest.
+
+        What played out before the departure stays on the record as a
+        partial turn. What was still queued, being written, or being
+        synthesized was never heard: the flush drops it, so the pipeline
+        ends at once instead of after that playout.
+        """
+        began = self._persona_began
+        ended = self._persona_ended
+        if (
+            self._pending_persona_text is not None
+            and began is not None
+            and ended is not None
+        ):
+            if self._recorder is not None:
+                ended = min(ended, self._recorder.bot_position)
+            if ended > began:
+                await self._took_partial_persona_turn(began, ended)
+        self._pending_persona_text = None
+        self._pending_persona_concludes = False
+        self._pending_silence_follow_up = 0
+        self._persona_began = None
+        self._persona_ended = None
+        if self._worker is not None:
+            await self._worker.queue_frame(InterruptionFrame())
+
     async def _next_activity(self) -> None:
         if self._running is None or self._media is None:
             raise PipelineGone("the voice pipeline was not running")
@@ -2576,7 +2611,7 @@ class VoiceConductor:
         failed = asyncio.ensure_future(self._media.failed.wait())
         ended = (
             None
-            if self._agent_departed
+            if self._media.ended.is_set()
             else asyncio.ensure_future(self._media.ended.wait())
         )
         waiting = {changed, faulted, stopped, failed, self._running}

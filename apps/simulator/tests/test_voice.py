@@ -21,9 +21,12 @@ from conftest import (
 )
 from pipecat.audio.vad.vad_analyzer import VADState
 from pipecat.frames.frames import (
+    Frame,
     InterruptionFrame,
     LLMFullResponseEndFrame,
+    StartFrame,
     TextFrame,
+    TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -847,6 +850,101 @@ async def test_production_stop_window_needs_the_full_declared_quiet_period():
     assert state is not VADState.QUIET
     state = await detector.analyze_audio(bytes(detector.num_frames_required() * 2))
     assert state is VADState.QUIET
+
+
+class _StallingTTS(FrameProcessor):
+    """Speak one second, then stay busy synthesizing until interrupted."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.rate = 0
+        self.interrupted = asyncio.Event()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if isinstance(frame, StartFrame):
+            self.rate = frame.audio_out_sample_rate
+        if (
+            direction == FrameDirection.DOWNSTREAM
+            and isinstance(frame, TextFrame)
+            and not isinstance(frame, TranscriptionFrame)
+        ):
+            await self.push_frame(TTSStartedFrame())
+            await self.push_frame(
+                TTSAudioRawFrame(
+                    audio=bytes((1, 0)) * self.rate,
+                    sample_rate=self.rate,
+                    num_channels=1,
+                )
+            )
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.interrupted.set()
+                raise
+        await self.push_frame(frame, direction)
+
+
+async def test_the_agent_hanging_up_mid_reply_ends_the_call_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A hang-up cuts the persona where the agent stopped hearing it.
+
+    The reply still being synthesized is never heard and never waited for.
+    What did play out stays on the record as a partial turn, and the ending
+    is the agent's, not a lost transport or a limit.
+    """
+    spec = spec_for(
+        scenario="Let me explain the whole situation from the top.",
+        greeting="Front desk, how can I help you today?",
+    )
+    tts = _StallingTTS()
+    legs = SpeechLegs(
+        stt=ScriptedSTT(), tts=tts, voice=voice_from_models(spec.models)
+    )
+    monkeypatch.setattr(conductor_module, "build_legs", lambda *_args, **_kwargs: legs)
+    assembled = assemble(
+        spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
+    )
+    conductor = assembled.conductor
+    assert conductor is not None
+    transport = conductor._connection.transport
+    persona_audio = VoiceConductor.persona_audio
+    hung_up = False
+
+    def hang_up_on_the_first_persona_audio(active, frame, *, recorded_until):
+        nonlocal hung_up
+        persona_audio(active, frame, recorded_until=recorded_until)
+        if not hung_up:
+            hung_up = True
+            transport._queue_audio(
+                silence(0.1, transport._input_rate), hang_up_after=True
+            )
+
+    monkeypatch.setattr(
+        VoiceConductor, "persona_audio", hang_up_on_the_first_persona_audio
+    )
+
+    observed = await observe(
+        conductor, assembled, spec, controls=ConversationControls()
+    )
+
+    assert observed.conducted.ending == "agent_ended"
+    assert observed.conducted.reason == "the agent ended the exchange"
+    assert tts.interrupted.is_set()
+    assert [speaker for speaker, _text in observed.turns] == ["agent", "human"]
+    _speaker, text, began, ended = observed.spans[-1]
+    assert text == ""
+    assert 900_000_000 <= ended - began <= 1_100_000_000
+    audio = observed.assembled.audio
+    assert audio is not None
+    persona, _agent, rate = channels_of((tmp_path / audio["recording"]).read_bytes())
+    audible = sum(
+        1
+        for offset in range(0, len(persona), 2)
+        if persona[offset : offset + 2] != b"\x00\x00"
+    )
+    assert 0.9 * rate <= audible <= 1.1 * rate
 
 
 class _AbruptDeparture:
