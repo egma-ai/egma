@@ -1283,6 +1283,10 @@ class _InterruptionAudioLimit(FrameProcessor):
             if self._frames == limit:
                 self._conductor.interruption_audio_capped()
                 await self.push_frame(_DeliberateAudioCapped())
+                # Cancel the unused synthesis from ahead of the transport. An
+                # interruption pushed from behind it would pass back through
+                # and clear the capped audio still queued for playout.
+                await self.push_frame(InterruptionFrame(), FrameDirection.UPSTREAM)
             return
         await self.push_frame(frame, direction)
 
@@ -1295,6 +1299,11 @@ class _InterruptionPlayout(FrameProcessor):
     instead: one just ahead of the first deliberate frame, one right behind
     the last frame under the cap. Reaching this processor means every
     transport output processor accepted what came before.
+
+    The cap marker only closes the turn here. The cancel of the unused
+    synthesis comes from the limit ahead of the transport, because an
+    interruption pushed upstream from behind it passes back through and
+    clears the capped audio still queued for playout.
     """
 
     def __init__(self, conductor: VoiceConductor) -> None:
@@ -1313,7 +1322,6 @@ class _InterruptionPlayout(FrameProcessor):
         if isinstance(frame, _DeliberateAudioCapped):
             self._delivering = False
             if self._conductor.interruption_playout_may_continue():
-                await self.push_frame(InterruptionFrame(), FrameDirection.UPSTREAM)
                 await self.push_frame(TTSStoppedFrame())
             return
         if isinstance(frame, (InterruptionFrame, PlayoutClearedFrame, TTSStoppedFrame)):
