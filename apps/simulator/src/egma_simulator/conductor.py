@@ -1297,7 +1297,7 @@ class _InterruptionPlayout(FrameProcessor):
             return
         if isinstance(frame, (InterruptionFrame, PlayoutClearedFrame, TTSStoppedFrame)):
             self._delivering = False
-        elif self._delivering and isinstance(frame, OutputAudioRawFrame):
+        elif self._delivering and isinstance(frame, TTSAudioRawFrame):
             self._conductor.interruption_playout_started(frame)
             await self.push_frame(frame, direction)
             self._conductor.interruption_playout_may_continue()
