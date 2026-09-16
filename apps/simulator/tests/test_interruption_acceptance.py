@@ -117,6 +117,27 @@ class _ExactSecondTTS(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
+class _UpstreamInterruptionsBehindTheTransport(FrameProcessor):
+    """Count interruptions that would pass back through the transport.
+
+    The real transport clears its playout queue on an interruption in either
+    direction, so one pushed upstream from behind it cuts off audio it had
+    already accepted.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.count = 0
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if direction == FrameDirection.UPSTREAM and isinstance(
+            frame, InterruptionFrame
+        ):
+            self.count += 1
+        await self.push_frame(frame, direction)
+
+
 class _ActAfterAcceptedAudio(FrameProcessor):
     def __init__(self, action) -> None:
         super().__init__()
@@ -234,6 +255,7 @@ async def test_exact_three_second_boundary_cancels_unused_audio_without_text_lie
     model = _HeldModel([full, "Normal answer."])
     model.release.set()
     tts = _ExactSecondTTS()
+    behind_the_transport = _UpstreamInterruptionsBehindTheTransport()
 
     _conducted, spans, audio, _transport, interruptions = await _conduct_with(
         tmp_path,
@@ -242,12 +264,16 @@ async def test_exact_three_second_boundary_cancels_unused_audio_without_text_lie
         tts=tts,
         greeting="Please keep speaking continuously while the caller interrupts. " * 10,
         replies=["Thanks."],
+        output_after_transport=(behind_the_transport,),
     )
 
     deliberate = next(turn for turn in spans if turn[0] == "human")
     assert deliberate[3] - deliberate[2] <= 3_000_000_000
     assert deliberate[1] == ""
+    # The cancel comes from ahead of the transport; nothing passes back
+    # through it that would clear the three seconds it already accepted.
     assert tts.canceled.is_set()
+    assert behind_the_transport.count == 0
     delivered = next(event for event in interruptions if event.event == "delivered")
     assert delivered.generated_text == full
     assert delivered.delivered_text is None

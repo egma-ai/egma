@@ -303,6 +303,15 @@ class _ScriptedOutput(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         if isinstance(frame, OutputAudioRawFrame):
+            # Pipecat's output transport hands downstream fresh frames cut from
+            # its own buffer: same class and audio, no metadata and no context
+            # id. Match it so nothing after the transport can lean on what was
+            # stamped before it.
+            frame = type(frame)(
+                bytes(frame.audio),
+                sample_rate=frame.sample_rate,
+                num_channels=frame.num_channels,
+            )
             await self._transport.accepted_output(frame)
             played_out_at(
                 frame,

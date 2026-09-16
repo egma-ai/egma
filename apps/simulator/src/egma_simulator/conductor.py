@@ -99,8 +99,6 @@ logger = logging.getLogger(__name__)
 
 MediaPosition = Fraction
 _INPUT_SOURCE_RANGE = "egma.input_source_range"
-_INTERRUPTION_AUDIO = "egma.interruption_audio"
-_INTERRUPTION_CAP_END = "egma.interruption_cap_end"
 _INTERRUPTION_STOPPED = "egma.interruption_stopped"
 _PERSONA_REPLY_KIND = "egma.persona_reply_kind"
 
@@ -129,7 +127,17 @@ PERSONA_ENDED_SILENCE: Ending = (
 )
 
 OnUtterance = Callable[[str, str, int, int], Awaitable[None]]
-OnPartialUtterance = Callable[[str, int, int], Awaitable[None]]
+OnPartialUtterance = Callable[[str, int, int, str], Awaitable[None]]
+"""Speaker, span, and why the turn has audio but no words: a partial-turn cause."""
+
+PARTIAL_TURN_INTERRUPTION_CAP = "interruption_cap"
+"""The deliberate interruption's audio stopped at the three-second cap."""
+
+PARTIAL_TURN_AGENT_HANG_UP = "agent_hang_up"
+"""The agent hung up while the persona was still speaking."""
+
+_CLEAR_ACKNOWLEDGEMENT_SECONDS = 2.0
+"""How long a departure cut waits for the transport to acknowledge its flush."""
 OnMeasured = Callable[[str, int, int], Awaitable[None]]
 OnProviderUsage = Callable[[ProviderUsage], Awaitable[None]]
 OnAnswered = Callable[[], Awaitable[None]]
@@ -156,6 +164,27 @@ class _AgentFinished(ControlFrame):
     heard_a_turn: bool = True
     silence_follow_up: int = 0
     silence_wait_seconds: float = SILENCE_WAIT_SECONDS
+
+
+@dataclass
+class _DeliberateAudioStarts(ControlFrame):
+    """Rides the playout queue just ahead of the first deliberate frame."""
+
+
+@dataclass
+class _DeliberateAudioCapped(ControlFrame):
+    """Rides the playout queue right behind the last frame under the cap."""
+
+
+@dataclass
+class _DepartureCut:
+    """A persona turn cut by the agent's departure, awaiting the transport's clear."""
+
+    began: MediaPosition | None
+    ended: MediaPosition | None
+    audible: bool
+    heard_through: MediaPosition | None = None
+    cleared: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 @dataclass(frozen=True)
@@ -229,6 +258,10 @@ class _AgentEar(VADProcessor):
             self._conductor.agent_is_departing()
             await self._conductor.agent_input_is_closing(self.position)
             await self.finalize_active_utterance()
+            # Input audio travels as system frames, so every frame before the
+            # marker has already passed the whole pipeline: the departure is
+            # complete here, not after the persona's queued playout.
+            frame.completed.set()
         if isinstance(frame, InputAudioRawFrame):
             source_start = self.position
             source_end = source_start + Fraction(frame.num_frames, frame.sample_rate)
@@ -1220,7 +1253,7 @@ class _InterruptionAudioLimit(FrameProcessor):
                     return
                 self._frames = 0
                 self._conductor.interruption_audio_queued()
-            frame.metadata[_INTERRUPTION_AUDIO] = True
+                await self.push_frame(_DeliberateAudioStarts())
             limit = frame.sample_rate * 3
             remaining = min(
                 max(0, limit - self._frames),
@@ -1246,41 +1279,59 @@ class _InterruptionAudioLimit(FrameProcessor):
                 )
                 self._conductor.interruption_audio_capped()
             self._frames += frame.num_frames
+            await self.push_frame(frame, direction)
             if self._frames == limit:
                 self._conductor.interruption_audio_capped()
-                frame.metadata[_INTERRUPTION_CAP_END] = True
+                await self.push_frame(_DeliberateAudioCapped())
+                # Cancel the unused synthesis from ahead of the transport. An
+                # interruption pushed from behind it would pass back through
+                # and clear the capped audio still queued for playout.
+                await self.push_frame(InterruptionFrame(), FrameDirection.UPSTREAM)
+            return
         await self.push_frame(frame, direction)
 
 
 class _InterruptionPlayout(FrameProcessor):
-    """Cancel unused synthesis only after the bounded final frame is accepted."""
+    """Follow deliberate audio through the transport by its two markers.
+
+    The transport rebuilds every audio frame it plays and keeps none of the
+    metadata stamped before it, so the markers ride its playout queue
+    instead: one just ahead of the first deliberate frame, one right behind
+    the last frame under the cap. Reaching this processor means every
+    transport output processor accepted what came before.
+
+    The cap marker only closes the turn here. The cancel of the unused
+    synthesis comes from the limit ahead of the transport, because an
+    interruption pushed upstream from behind it passes back through and
+    clears the capped audio still queued for playout.
+    """
 
     def __init__(self, conductor: VoiceConductor) -> None:
         super().__init__()
         self._conductor = conductor
+        self._delivering = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
-        interruption_audio = (
-            direction == FrameDirection.DOWNSTREAM
-            and isinstance(frame, OutputAudioRawFrame)
-            and frame.metadata.get(_INTERRUPTION_AUDIO) is True
-        )
-        if interruption_audio:
-            # Reaching this processor means every transport output processor
-            # accepted the frame. Recording happens downstream on the same frame.
-            self._conductor.interruption_playout_started(frame)
-        await self.push_frame(frame, direction)
-        if direction != FrameDirection.DOWNSTREAM or not isinstance(
-            frame, OutputAudioRawFrame
-        ):
+        if direction != FrameDirection.DOWNSTREAM:
+            await self.push_frame(frame, direction)
             return
-        if interruption_audio:
-            if not self._conductor.interruption_playout_may_continue():
-                return
-        if frame.metadata.get(_INTERRUPTION_CAP_END) is True:
-            await self.push_frame(InterruptionFrame(), FrameDirection.UPSTREAM)
-            await self.push_frame(TTSStoppedFrame())
+        if isinstance(frame, _DeliberateAudioStarts):
+            self._delivering = True
+            return
+        if isinstance(frame, _DeliberateAudioCapped):
+            self._delivering = False
+            if self._conductor.interruption_playout_may_continue():
+                await self.push_frame(TTSStoppedFrame())
+            return
+        if isinstance(frame, (InterruptionFrame, PlayoutClearedFrame, TTSStoppedFrame)):
+            self._delivering = False
+        elif self._delivering and isinstance(frame, TTSAudioRawFrame):
+            self._conductor.interruption_playout_started(frame)
+            await self.push_frame(frame, direction)
+            self._conductor.interruption_playout_may_continue()
+            return
+        await self.push_frame(frame, direction)
 
 
 class _Timeline(FrameProcessor):
@@ -1318,7 +1369,6 @@ class _Timeline(FrameProcessor):
                 heard_through=self._recorder.bot_position
             )
         elif isinstance(frame, RemoteParticipantLeftFrame):
-            frame.completed.set()
             self._conductor.media_advanced()
         await self.push_frame(frame, direction)
 
@@ -1446,6 +1496,7 @@ class VoiceConductor:
         self._record = _Record()
         self._heard_so_far = 0
         self._ending: Ending | None = None
+        self._departure_cut: _DepartureCut | None = None
         self._agent_departed = False
         self._owes_a_turn = False
         self._opened_unix_nano = 0
@@ -2165,7 +2216,7 @@ class VoiceConductor:
                 return
             if ear.hearing_speech or self._heard_so_far < len(ear.utterances):
                 return
-            self._ending = AGENT_ENDED
+            await self._agent_ended_the_exchange()
             return
         if self._owes_a_turn or ear.hearing_speech:
             return
@@ -2258,9 +2309,7 @@ class VoiceConductor:
             return None
         if self._media is not None and self._media.ended.is_set():
             self._agent_departed = True
-            self._ending = AGENT_ENDED
-            self._owes_a_turn = False
-            self.media_advanced()
+            await self._agent_ended_the_exchange()
             return None
         if (
             heard_a_turn
@@ -2331,6 +2380,12 @@ class VoiceConductor:
         so the persona stopped where the recording stops holding it — not
         where the speech leg had already run to.
         """
+        cut = self._departure_cut
+        if cut is not None and not cut.cleared.is_set():
+            # The recorder has just trimmed to this position, so it is what
+            # the agent heard before the departure cut the persona off.
+            cut.heard_through = heard_through
+            cut.cleared.set()
         ended = self._persona_ended
         began = self._persona_began
         if ended is not None:
@@ -2372,7 +2427,9 @@ class VoiceConductor:
             )
         deliberate = self.deliberate_response_owned
         if deliberate and self._deliberate_capped:
-            await self._took_partial_persona_turn(began, ended)
+            await self._took_partial_persona_turn(
+                began, ended, PARTIAL_TURN_INTERRUPTION_CAP
+            )
         else:
             await self._took_a_turn(
                 "human", text, began, ended, apply_turn_limit=not concludes
@@ -2460,13 +2517,15 @@ class VoiceConductor:
             self.media_advanced()
 
     async def _took_partial_persona_turn(
-        self, began: MediaPosition, ended: MediaPosition
+        self, began: MediaPosition, ended: MediaPosition, cause: str
     ) -> None:
         """Record audible speech without guessing which generated words played."""
         self._record.history.append(Turn("human", ""))
         self._record.turns += 1
         if self._on_partial_utterance is not None:
-            await self._on_partial_utterance("human", self._at(began), self._at(ended))
+            await self._on_partial_utterance(
+                "human", self._at(began), self._at(ended), cause
+            )
         elif self._on_utterance is not None:
             await self._on_utterance("human", "", self._at(began), self._at(ended))
         if self._record.turns >= self._max_turns and self._ending is None:
@@ -2549,6 +2608,60 @@ class VoiceConductor:
             await self._ear.finalize_active_utterance()
         self.media_advanced()
 
+    async def _agent_ended_the_exchange(self) -> None:
+        """Name the ending, then stop the persona where the agent stopped hearing."""
+        self._ending = AGENT_ENDED
+        self._owes_a_turn = False
+        await self._cut_persona_playout()
+        self.media_advanced()
+
+    async def _cut_persona_playout(self) -> None:
+        """Keep what the persona was heard saying and drop the rest.
+
+        The flush drops whatever was still queued, being written, or being
+        synthesized, so the pipeline ends at once instead of after that
+        playout. What did play out stays on the record as a partial turn,
+        measured only once the transport has acknowledged the clear:
+        accepted audio carries playout positions that run ahead of what
+        the agent actually heard, and the recorder trims them on the clear.
+        """
+        cut = _DepartureCut(
+            began=self._persona_began,
+            ended=self._persona_ended,
+            audible=self._pending_persona_text is not None,
+        )
+        self._pending_persona_text = None
+        self._pending_persona_concludes = False
+        self._pending_silence_follow_up = 0
+        self._persona_began = None
+        self._persona_ended = None
+        if self._worker is None:
+            return
+        self._departure_cut = cut
+        try:
+            await self._worker.queue_frame(InterruptionFrame())
+            async with asyncio.timeout(_CLEAR_ACKNOWLEDGEMENT_SECONDS):
+                await cut.cleared.wait()
+        except TimeoutError:
+            pass
+        finally:
+            self._departure_cut = None
+        heard_through = cut.heard_through
+        if heard_through is None and self._recorder is not None:
+            heard_through = self._recorder.bot_position
+        if (
+            not cut.audible
+            or cut.began is None
+            or cut.ended is None
+            or heard_through is None
+        ):
+            return
+        ended = min(cut.ended, heard_through)
+        if ended > cut.began:
+            await self._took_partial_persona_turn(
+                cut.began, ended, PARTIAL_TURN_AGENT_HANG_UP
+            )
+
     async def _next_activity(self) -> None:
         if self._running is None or self._media is None:
             raise PipelineGone("the voice pipeline was not running")
@@ -2558,7 +2671,7 @@ class VoiceConductor:
         failed = asyncio.ensure_future(self._media.failed.wait())
         ended = (
             None
-            if self._agent_departed
+            if self._media.ended.is_set()
             else asyncio.ensure_future(self._media.ended.wait())
         )
         waiting = {changed, faulted, stopped, failed, self._running}

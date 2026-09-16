@@ -141,6 +141,7 @@ class _PendingVoiceTurn(_Conductor):
         self._pending_silence_follow_up = 0
         self._persona_began = None
         self._persona_ended = None
+        self._departure_cut = None
         self._cancel_after_accepted_audio = None
         self._owes_a_turn = True
         self._record = SimpleNamespace(

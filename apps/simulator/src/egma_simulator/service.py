@@ -20,7 +20,11 @@ from typing import Protocol
 
 from .blob import BlobStore, FilesystemBlobStore, S3BlobStore
 from .client import ClaimedSpec, ClaimFailure, ControlPlaneClient, HeartbeatFailure
-from .conductor import InterruptionEvidence
+from .conductor import (
+    PARTIAL_TURN_AGENT_HANG_UP,
+    PARTIAL_TURN_INTERRUPTION_CAP,
+    InterruptionEvidence,
+)
 from .config import MediaSettings, SimulatorConfig
 from .contract import ContractViolation
 from .conversation import Conducted, ConversationControls, conduct
@@ -97,6 +101,27 @@ def resources_for_claim(
         session_token=runtime.storage.session_token,
     )
     return claimed_config, claimed_blobs
+
+
+PARTIAL_TURN_NOTES = {
+    PARTIAL_TURN_INTERRUPTION_CAP: (
+        "Speech was delivered, but exact words are unavailable because audio "
+        "was truncated at the three-second interruption cap."
+    ),
+    PARTIAL_TURN_AGENT_HANG_UP: (
+        "Speech was delivered, but exact words are unavailable because the "
+        "agent hung up while the persona was still speaking."
+    ),
+}
+"""What the transcript says about a persona turn with audio but no words."""
+
+
+def partial_turn_note(cause: str) -> str:
+    return PARTIAL_TURN_NOTES.get(
+        cause,
+        "Speech was delivered, but exact words are unavailable because the "
+        "audio was cut short.",
+    )
 
 
 class Executor(Protocol):
@@ -521,17 +546,14 @@ class RunningSimulation:
         )
 
     async def _on_partial_utterance(
-        self, speaker: str, began_unix_nano: int, ended_unix_nano: int
+        self, speaker: str, began_unix_nano: int, ended_unix_nano: int, cause: str
     ) -> None:
         self._spans.spoken_turn(
             speaker,
             "",
             began_unix_nano=began_unix_nano,
             ended_unix_nano=ended_unix_nano,
-            platform_notes=(
-                "Speech was delivered, but exact words are unavailable because "
-                "audio was truncated at the three-second interruption cap.",
-            ),
+            platform_notes=(partial_turn_note(cause),),
         )
         self._reporter.turn_count += 1
 

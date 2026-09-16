@@ -14,9 +14,17 @@ from conftest import loopback_spec, scripted_spec
 
 from egma_simulator import service as service_module
 from egma_simulator.client import ClaimedSpec, ClaimFailure
+from egma_simulator.conductor import (
+    PARTIAL_TURN_AGENT_HANG_UP,
+    PARTIAL_TURN_INTERRUPTION_CAP,
+)
 from egma_simulator.config import SimulatorConfig
 from egma_simulator.redaction import SecretRegistry
-from egma_simulator.service import SimulatorService, resources_for_claim
+from egma_simulator.service import (
+    SimulatorService,
+    partial_turn_note,
+    resources_for_claim,
+)
 from egma_simulator.spec import AuthoredPersona, SimulationSpec
 
 
@@ -323,3 +331,13 @@ def test_a_daytona_claim_replaces_only_media_and_recording_resources(
         "secret_access_key": "temporary-secret",
         "session_token": "temporary-session",
     }
+
+
+def test_a_partial_turn_note_names_its_cause():
+    """A turn with audio but no words says why, and a hang-up is not a cap."""
+    capped = partial_turn_note(PARTIAL_TURN_INTERRUPTION_CAP)
+    hung_up = partial_turn_note(PARTIAL_TURN_AGENT_HANG_UP)
+    assert "three-second interruption cap" in capped
+    assert "hung up" in hung_up
+    assert "cap" not in hung_up
+    assert "cut short" in partial_turn_note("a_cause_nobody_named")
