@@ -445,13 +445,14 @@ function AccountMenu({
           "cursor-pointer rounded-input border border-transparent bg-transparent text-left",
           "transition-transform duration-(--duration-press) ease-out",
           "pointer-coarse:min-h-(--tap-target)",
-          "pointer-hover:border-border pointer-hover:bg-surface",
+          /* No box, at rest or under a pointer: a pointer only tints the fill. */
+          "pointer-hover:bg-surface-soft",
           "[&:active:not(:focus-visible)]:scale-97",
           "motion-reduce:transition-none",
           "motion-reduce:[&:active:not(:focus-visible)]:scale-100",
           compact && "w-(--tap-target) min-h-(--tap-target) grid-cols-[var(--tap-target)] p-0",
         )}
-        openClassName="border-border bg-surface"
+        openClassName="bg-surface-soft"
         placement={placement}
         trigger={
           <>
