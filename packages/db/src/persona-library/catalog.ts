@@ -70,6 +70,12 @@ const OPENAI_PERSONA_MODELS = {
   tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "cedar", speed: 1 },
 } as const;
 
+const CASCADED_PERSONA_MODELS = {
+  ...OPENAI_PERSONA_MODELS,
+  llm: { provider: "openai", model: "gpt-5.6-terra" },
+  stt: { provider: "openai", model: "gpt-live-transcribe" },
+} as const;
+
 const everydayPersonality =
   "Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.";
 
@@ -147,6 +153,15 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
         parameterContract: personaParameterContract(OPENAI_PERSONA_MODELS),
         createdAt: new Date("2026-09-14T00:00:00.000Z"),
       },
+      {
+        id: "prsv_01M2NRBH9AEF9RVXBQCAP6RXBX",
+        version: 7,
+        identityName: "Alex Morgan",
+        personality: everydayPersonality,
+        language: null,
+        parameterContract: personaParameterContract(CASCADED_PERSONA_MODELS),
+        createdAt: new Date("2026-09-16T00:00:00.000Z"),
+      },
     ],
   },
   {
@@ -173,6 +188,11 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
       identityName: "Alex Morgan", personality: everydayPersonality, language: null,
       parameterContract: personaParameterContract({ ...OPENAI_PERSONA_MODELS, tts: { ...OPENAI_PERSONA_MODELS.tts, voiceId: "coral" } }),
       createdAt: new Date("2026-09-14T00:00:00.000Z"),
+    }, {
+      id: "prsv_01M2NRBH9AEF9RVXBQCAP6RXBY", version: 5,
+      identityName: "Emma Carter", personality: everydayPersonality, language: null,
+      parameterContract: personaParameterContract({ ...CASCADED_PERSONA_MODELS, tts: { ...CASCADED_PERSONA_MODELS.tts, voiceId: "coral" } }),
+      createdAt: new Date("2026-09-16T00:00:00.000Z"),
     }],
   },
   {
@@ -201,6 +221,11 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
       identityName: "Jordan Lee", personality: "Explains the problem directly and expects the agent to acknowledge the concern and provide a clear resolution.", language: null,
       parameterContract: personaParameterContract(OPENAI_PERSONA_MODELS),
       createdAt: new Date("2026-09-14T00:00:00.000Z"),
+    }, {
+      id: "prsv_01M2NRBH9BE0DS5K84M4DJT0VQ", version: 5,
+      identityName: "Jordan Lee", personality: "Explains the problem directly and expects the agent to acknowledge the concern and provide a clear resolution.", language: null,
+      parameterContract: personaParameterContract(CASCADED_PERSONA_MODELS),
+      createdAt: new Date("2026-09-16T00:00:00.000Z"),
     }],
   },
   {
@@ -227,6 +252,11 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
       identityName: "Mateo García", personality: everydayPersonality, language: null,
       parameterContract: personaParameterContract(OPENAI_PERSONA_MODELS, { language: "es-ES", executionPolicyVersion: 2, backgroundSoundId: "none", interruptionLevel: "none" }),
       createdAt: new Date("2026-09-14T00:00:00.000Z"),
+    }, {
+      id: "prsv_01M2NRBH9BE0DS5K84M4DJT0VR", version: 5,
+      identityName: "Mateo García", personality: everydayPersonality, language: null,
+      parameterContract: personaParameterContract(CASCADED_PERSONA_MODELS, { language: "es-ES", executionPolicyVersion: 2, backgroundSoundId: "none", interruptionLevel: "none" }),
+      createdAt: new Date("2026-09-16T00:00:00.000Z"),
     }],
   },
   {
@@ -249,6 +279,14 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
       language: null,
       parameterContract: personaParameterContract(OPENAI_PERSONA_MODELS, { language: "en-US", executionPolicyVersion: 2, backgroundSoundId: "none", interruptionLevel: "frequent" }),
       createdAt: new Date("2026-09-14T00:00:00.000Z"),
+    }, {
+      id: "prsv_01M2NRBH9BE0DS5K84M4DJT0VS",
+      version: 3,
+      identityName: "Taylor Brooks",
+      personality: "Keeps responses brief, direct, and relevant to the current topic.",
+      language: null,
+      parameterContract: personaParameterContract(CASCADED_PERSONA_MODELS, { language: "en-US", executionPolicyVersion: 2, backgroundSoundId: "none", interruptionLevel: "frequent" }),
+      createdAt: new Date("2026-09-16T00:00:00.000Z"),
     }],
   },
 ];

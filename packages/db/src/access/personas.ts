@@ -39,6 +39,7 @@ import {
   personaParameterContract,
   personaControlsOfParameters,
   personaModelsOfParameters,
+  personaModelParameterValues,
   personaParametersOfSettings,
   validatePersonaParameterContract,
   validatePersonaParameterValues,
@@ -391,8 +392,17 @@ export async function seedPersonaLibraryInternal(
         .for("update", { of: projectPersona });
       const expandedSettings = savedSettings.map((row) => {
         const oldValues = validatePersonaParameterValues(row.parameterContract, row.parameterValues);
-        const models = personaModelsOfParameters(oldValues);
-        const controls = historicalPersonaControls(oldValues, installed?.language === null || installed?.language === undefined ? {} : { language: installed.language });
+        // Built-in models follow the catalog; saved project controls stay intact.
+        const defaults = defaultPersonaParameterValues(current.parameterContract);
+        const models = personaModelsOfParameters(defaults);
+        const previousControls = historicalPersonaControls(oldValues, installed?.language === null || installed?.language === undefined ? {} : { language: installed.language });
+        const controls = personaControlsOfParameters({
+          ...defaults,
+          language: previousControls.language,
+          background_sound_id: previousControls.backgroundSoundId,
+          interruption_level: previousControls.interruptionLevel ?? defaults.interruption_level,
+          ...personaModelParameterValues(models),
+        });
         const contract = personaParameterContract(models, controls);
         const values = personaParametersOfSettings({ models, ...controls });
         return { id: row.id, values, contract };
