@@ -608,8 +608,16 @@ describe("catalog integrity", () => {
     expect((await getPersona(tenant.auth, used.id))?.settings).toEqual(migrated?.settings);
   });
 
-  it("ships exactly five presets with complete starting controls", async () => {
+  it("ships exactly five presets with distinct caller names and complete starting controls", async () => {
     const tenant = await signUp("new-built-in-defaults");
+    const identityNames = new Map([
+      ["Everyday Caller [Male]", "Alex Morgan"],
+      ["Everyday Caller [Female]", "Emma Carter"],
+      ["Angry caller", "Jordan Lee"],
+      ["Spanish caller", "Mateo García"],
+      ["Interruptive caller", "Taylor Brooks"],
+    ]);
+    expect(new Set(PERSONA_LIBRARY_CATALOG.map((entry) => entry.versions.at(-1)?.identityName)).size).toBe(5);
     const defaults = new Map(PERSONA_LIBRARY_CATALOG.map((entry) => [
       entry.name,
       currentPersonaParameterDefaults(entry.versions.at(-1)?.parameterContract).values,
@@ -638,6 +646,7 @@ describe("catalog integrity", () => {
       });
       const definition = PERSONA_LIBRARY_CATALOG.find((entry) => entry.name === name)!;
       const used = await usePersona(tenant.auth, definition.id);
+      expect(used?.identityName).toBe(identityNames.get(name));
       expect(used?.settings?.parameterValues).toEqual(values);
     }
   });

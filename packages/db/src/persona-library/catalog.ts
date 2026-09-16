@@ -190,7 +190,7 @@ export const PERSONA_LIBRARY_CATALOG: readonly EgmaProvidedPersona[] = [
       createdAt: new Date("2026-09-14T00:00:00.000Z"),
     }, {
       id: "prsv_01M2NRBH9AEF9RVXBQCAP6RXBY", version: 5,
-      identityName: "Alex Morgan", personality: everydayPersonality, language: null,
+      identityName: "Emma Carter", personality: everydayPersonality, language: null,
       parameterContract: personaParameterContract({ ...CASCADED_PERSONA_MODELS, tts: { ...CASCADED_PERSONA_MODELS.tts, voiceId: "coral" } }),
       createdAt: new Date("2026-09-16T00:00:00.000Z"),
     }],
