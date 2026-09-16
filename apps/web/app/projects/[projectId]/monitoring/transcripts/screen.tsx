@@ -643,15 +643,6 @@ function columnsFor(
       },
     },
     {
-      key: "time",
-      header: TRACE_COLUMNS.time,
-      width: "260px",
-      mono: true,
-      cell: (row) => (
-        <ListInstant instant={row.startedAt} precision="second" />
-      ),
-    },
-    {
       key: "duration",
       header: TRACE_COLUMNS.duration,
       width: "95px",
@@ -690,6 +681,15 @@ function columnsFor(
         >
           {row.traceId}
         </button>
+      ),
+    },
+    {
+      key: "time",
+      header: TRACE_COLUMNS.time,
+      width: "260px",
+      mono: true,
+      cell: (row) => (
+        <ListInstant instant={row.startedAt} precision="second" />
       ),
     },
     {

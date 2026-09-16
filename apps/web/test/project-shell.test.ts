@@ -129,7 +129,7 @@ describe("the product navigation", () => {
     expect(NAVIGATION_GROUPS.map((group) => group.label)).toEqual([
       null,
       "Simulations",
-      "OBSERVABILITY",
+      "Monitoring",
     ]);
   });
 
@@ -183,7 +183,7 @@ describe("the product navigation", () => {
    * address — the transcript list, reached without a redirect and without a
    * reserved neighbour under the area being able to become the landing.
    */
-  it("puts one Traces item under OBSERVABILITY, opening the transcript list", () => {
+  it("puts one Traces item under Monitoring, opening the transcript list", () => {
     const monitoring = NAVIGATION_GROUPS[2];
     expect(monitoring?.id).toBe("monitoring");
     expect(monitoring?.items.map((item) => item.label)).toEqual(["Traces"]);

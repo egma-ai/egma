@@ -248,7 +248,8 @@ export function evidenceGradeTally(evidence: SimulationEvidence): GradeTally {
 }
 
 /**
- * The count of passed graders, and what else the graders returned.
+ * The count of passed graders, plus how many errored. A failed grader adds no
+ * word: the fraction already says it.
  *
  * Null while grading is in flight or while any selected grader has no
  * current grade, because a partial count would read as a settled one.
@@ -262,7 +263,6 @@ function gradersPassedText(evidence: SimulationEvidence): string | null {
   if (tally.passed + tally.failed + tally.errored < tally.selected) return null;
   return [
     `${String(tally.passed)}/${String(tally.selected)}`,
-    tally.failed === 0 ? null : `${String(tally.failed)} failed`,
     tally.errored === 0 ? null : `${String(tally.errored)} errored`,
   ]
     .filter((part): part is string => part !== null)

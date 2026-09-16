@@ -119,7 +119,6 @@ function ProjectPersonas({ projectId }: { readonly projectId: string }) {
       key: "description", header: "Description", hideOnMobile: true,
       cell: (persona) => persona.description || <span className="text-faint">No description</span>,
     },
-    { key: "version", header: "Version", hideOnMobile: true, mono: true, width: "90px", cell: (persona) => `v${persona.version}` },
     { key: "updated", header: "Updated", width: "130px", cell: (persona) => <ListInstant instant={persona.updatedAt} /> },
     { key: "actions", header: "Row actions", action: true, cell: rowMenu },
   ];
