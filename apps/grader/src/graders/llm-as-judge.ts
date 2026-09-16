@@ -36,12 +36,6 @@ export async function executeLlmAsJudge(execution: Execution): Promise<GraderRes
   try {
     const answer = validateJudgeAnswer(await judge.ask(question), question);
     const assertions = answer.results.map((one) => assertionResultOf(one.id, one, evidence.transcript));
-    const errors = assertions.filter((one) => one.error !== undefined);
-    if (errors.length > 0) {
-      return { score: null, details: {
-        error: `${errors.length} of ${assertions.length} criteria could not be graded`, assertions,
-      } };
-    }
     const met = answer.results.filter((one) => one.decision === "met").length;
     return { score: met / assertions.length, details: {
       rationale: assertions.length === 1 ? assertions[0]?.rationale : `${met} of ${assertions.length} criteria passed.`,

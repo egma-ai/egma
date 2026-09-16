@@ -95,17 +95,23 @@ describe("a customer LLM grader", () => {
     expect(scripted.judge.asked[0]?.criterion).toBe(INSTRUCTIONS);
   });
 
-  it("turns could-not-determine into a grading error", async () => {
+  it("scores could-not-determine as zero while retaining the decision", async () => {
     const { execution: input } = execution(
       cannotDetermine("The transcript does not settle this."),
     );
 
-    await expect(execute(input)).resolves.toMatchObject({
-      score: null,
+    await expect(execute(input)).resolves.toEqual({
+      score: 0,
       details: {
-        error:
-          "1 of 1 criteria could not be graded",
-        assertions: [{ key: "instruction_1" }],
+        rationale: "The transcript does not settle this.",
+        assertions: [{
+          key: "instruction_1",
+          decision: "cannot_determine",
+          score: 0,
+          rationale: "The transcript does not settle this.",
+          citedSpanIds: [],
+          citedTurns: [],
+        }],
       },
     });
   });

@@ -2,6 +2,7 @@ import { newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  appendGrades,
   appendSpans,
   createCustomLlmGrader,
   editGraderDefinition,
@@ -38,7 +39,7 @@ import {
 } from "../../../packages/db/test/support/clickhouse.ts";
 import { seedOrganization, seedUser } from "../../../packages/db/test/support/tenancy.ts";
 import { gradeClaim } from "../src/grade.ts";
-import { scriptedJudge, met } from "./support/scripted-judge.ts";
+import { scriptedJudge, met, cannotDetermine } from "./support/scripted-judge.ts";
 
 let database: MigratedDatabase;
 let store: MigratedTraceStore;
@@ -313,5 +314,89 @@ describe("a frozen LLM model and core", () => {
     expect((await readTraceGrades(auth, { source: "production", traceId: laterTrace })).current).toEqual(expect.arrayContaining([
       expect.objectContaining({ projectGraderId: custom.projectGrader.id, score: null, graderDefinitionVersion: 2, graderPassThreshold: 0.9, parameterValues: { llm_provider: "openai", llm_model: "gpt-5.6-terra" }, details: { error: expect.stringContaining("the selected provider failed") } }),
     ]));
+  });
+
+  it("regrades a saved undetermined error as a failed grade and keeps its history", async () => {
+    const custom = await createCustomLlmGrader(auth, {
+      name: "Appointment confirmed",
+      gradingInstructions: "The agent confirms the appointment.",
+      passesWhen: "Confirmed",
+      failsWhen: "Not confirmed",
+      parameterValues: { llm_provider: "openai", llm_model: "gpt-4o-mini" },
+      scope: { simulations: [], production: { sample_percent: 100 } },
+      passThreshold: 1,
+    });
+    const traceId = "8888888888888888888888888888eeee";
+    await appendSpans(auth, [
+      { ...span(), traceId },
+      { ...responseLatencySpan(), traceId, durationNanoseconds: 500_000_000n },
+      { ...span(), traceId, spanId: "3333333333333333", parentSpanId: rootSpanId, kind: "turn:agent", text: "The team will follow up.", endsTrace: false },
+    ]);
+    await requestGrading(auth, { source: "production", traceId, traceStartedAt: startedAt, endsTrace: true, evidenceReady: true, modality: "voice" });
+    const [claim] = await claimGradingJobs({ claimant: "undetermined-judgment", capacity: 1 });
+    if (!claim) throw new Error("missing production work");
+    const legacyError = {
+      error: "1 of 1 criteria could not be graded",
+      assertions: [{
+        key: "instruction_1",
+        decision: "cannot_determine" as const,
+        rationale: "The transcript does not establish a confirmed appointment.",
+        error: "the grader could not determine whether this behavior was met",
+      }],
+    };
+    await appendGrades(claim.auth, claim.entries.map((entry) => ({
+      source: claim.source,
+      traceId,
+      traceStartedAtMicroseconds: BigInt(startedAt.getTime()) * 1_000n,
+      runId: "",
+      projectGraderId: entry.projectGraderId,
+      graderDefinitionId: entry.graderDefinitionId,
+      graderDefinitionVersion: entry.graderDefinitionVersion,
+      parameterValues: entry.parameterValues,
+      graderPassThreshold: entry.graderPassThreshold,
+      gradingSequence: claim.sequenceBase + claim.attempts,
+      gradedAtMicroseconds: BigInt(Date.now()) * 1_000n,
+      score: entry.projectGraderId === custom.projectGrader.id ? null : 1,
+      details: entry.projectGraderId === custom.projectGrader.id ? legacyError : { rationale: "Response latency passed." },
+    })));
+    await finishGradingJob(claim.auth, claim.id, claim.claimedBy);
+    await expect(readTraceGrading(auth, { source: "production", traceId }))
+      .resolves.toMatchObject({ state: "error", combinedScore: null });
+
+    await expect(regradeTrace(auth, { source: "production", traceId }))
+      .resolves.toMatchObject({ kind: "queued", reopened: true });
+    const [regrade] = await claimGradingJobs({ claimant: "undetermined-regrade", capacity: 1 });
+    if (!regrade) throw new Error("missing regrade work");
+    expect(regrade.entries).toEqual(claim.entries);
+    const scripted = scriptedJudge({ answers: {}, otherwise: cannotDetermine("The transcript does not establish a confirmed appointment.") });
+    await gradeClaim(regrade, {
+      providerCredentials: { load: async () => ({ openai: "fixture-key" }) },
+      makers: scripted.makers,
+    });
+    await finishGradingJob(regrade.auth, regrade.id, regrade.claimedBy);
+
+    const grading = await readTraceGrading(auth, { source: "production", traceId });
+    if (grading === undefined) throw new Error("missing grading result");
+    expect(grading).toMatchObject({ state: "complete", combinedScore: 0.5 });
+    const grade = grading.current.find((one) => one.projectGraderId === custom.projectGrader.id);
+    expect(grade).toMatchObject({
+      score: 0,
+      result: "failed",
+      details: {
+        assertions: [{
+          key: "instruction_1",
+          decision: "cannot_determine",
+          score: 0,
+          rationale: "The transcript does not establish a confirmed appointment.",
+        }],
+      },
+    });
+    expect(grade?.details.error).toBeUndefined();
+    expect(grade?.details.assertions?.[0]?.error).toBeUndefined();
+    expect(scripted.asked).toHaveLength(1);
+    expect(grading.history.filter((one) => one.projectGraderId === custom.projectGrader.id)).toMatchObject([
+      { score: null, details: legacyError },
+      { score: 0 },
+    ]);
   });
 });
