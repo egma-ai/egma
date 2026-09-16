@@ -660,6 +660,12 @@ async def test_voice_plays_a_streamed_sentence_before_model_completion(interrupt
             assert stream.closed
             assert not conductor.concluded
             assert not conductor.failures
+            stream.release.set()
+            await worker.queue_frame(_AgentFinished(heard_a_turn=False))
+            await asyncio.wait_for(conductor.ended.wait(), 2)
+            assert conductor.concluded == ["First sentence. Goodbye."]
+            assert conductor.spoken == ["First sentence. G", "First sentence. Goodbye."]
+            assert not conductor.failures
             await worker.queue_frame(EndFrame())
             await asyncio.wait_for(running, 2)
             return
