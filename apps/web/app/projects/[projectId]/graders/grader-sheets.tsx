@@ -771,7 +771,7 @@ function GraderCoreForm({ entry, projectId, open, cloning, onDone, onCancel }: {
       {refused === null ? null : <Refused message={refused.message} />}
       <SheetLead>{cloning ? "Copy the current instructions and this project's settings into an independent grader." : "Save changed instructions as the next core version. Earlier versions stay read-only."}</SheetLead>
       <Field label="Name*" htmlFor="grader-core-name"><Input id="grader-core-name" value={name} aria-required="true" disabled={saving} onChange={(event) => setName(event.target.value)} /></Field>
-      <Field label="Description [optional]" htmlFor="grader-core-description"><Input id="grader-core-description" value={description} disabled={saving} onChange={(event) => setDescription(event.target.value)} /></Field>
+      <Field label="Description" htmlFor="grader-core-description"><Input id="grader-core-description" value={description} disabled={saving} onChange={(event) => setDescription(event.target.value)} /></Field>
       {cloning ? null : <Field label="Grading instructions*" htmlFor="grader-core-instructions">
         <Textarea id="grader-core-instructions" value={instructions} rows={10} aria-required="true" disabled={saving} onChange={(event) => setInstructions(event.target.value)} />
       </Field>}
@@ -1269,7 +1269,7 @@ export function CreateCustomGraderSheet({
              * seven-line box invited a paragraph that no list can show.
              */}
             <Field
-              label="Description [optional]"
+              label="Description"
               htmlFor="custom-grader-description"
               hint="Explain what quality this grader checks."
             >

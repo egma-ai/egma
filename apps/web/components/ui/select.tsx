@@ -15,8 +15,9 @@ import { cn } from "@/lib/utils";
  */
 const selectVariants = cva(
   [
-    "w-full min-w-0 rounded-input border border-input bg-surface pl-3 pr-10",
-    "text-base text-foreground",
+    /* A dropdown sits on the soft grey surface, so a field that opens a list looks different from one that takes typing. */
+    "w-full min-w-0 rounded-input border border-input bg-surface-soft pl-3 pr-10",
+    "text-sm text-foreground",
     "disabled:cursor-not-allowed disabled:opacity-60",
     /* "Pointer targets are at least 44px on coarse pointers." */
     "pointer-coarse:min-h-(--tap-target)",

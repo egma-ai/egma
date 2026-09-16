@@ -39,13 +39,8 @@ function ConfigControl({
 
   return (
     <Field
-      /*
-       * One label grammar everywhere (`DESIGN.md`, 2026-08-24): `*` on a
-       * mandatory field, `[optional]` in square brackets on the rest. The
-       * round-bracket spelling this used to draw was the only place in the
-       * product still saying it the old way.
-       */
-      label={field.required ? `${field.label}*` : `${field.label} [optional]`}
+      /* One label grammar everywhere (`DESIGN.md`): `*` on a mandatory field, nothing on the rest. */
+      label={field.required ? `${field.label}*` : field.label}
       htmlFor={id}
     >
       {field.kind === "json" ? (
@@ -96,7 +91,7 @@ function CredentialControl({
 
   return (
     <Field
-      label={field.required ? `${field.label}*` : `${field.label} [optional]`}
+      label={field.required ? `${field.label}*` : field.label}
       htmlFor={id}
     >
       {field.kind === "json" ? (

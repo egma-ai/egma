@@ -78,7 +78,7 @@ export function SearchableSelect({
           id={id}
           className={cn(
             "flex min-h-(--control-lg) w-full min-w-0 items-center justify-between gap-3",
-            "rounded-input border border-input bg-surface px-3 text-left text-base text-foreground",
+            "rounded-input border border-input bg-surface-soft px-3 text-left text-sm text-foreground",
             "disabled:cursor-not-allowed disabled:opacity-60",
             "pointer-coarse:min-h-(--tap-target)",
             className,

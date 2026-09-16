@@ -17,7 +17,7 @@ function Input({ className, type, ...props }: ComponentProps<"input">) {
       data-slot="input"
       className={cn(
         "w-full min-h-(--control-lg) rounded-input border border-input bg-surface px-3",
-        "text-base text-foreground placeholder:text-faint",
+        "text-sm text-foreground placeholder:text-faint",
         "read-only:bg-surface-soft read-only:text-muted-foreground",
         "disabled:cursor-not-allowed disabled:opacity-60",
         "file:border-0 file:bg-transparent file:text-sm file:font-medium",

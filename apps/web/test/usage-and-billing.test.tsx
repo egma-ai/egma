@@ -386,7 +386,7 @@ it("validates a custom amount before opening checkout", async () => {
     body: { url: "https://checkout.stripe.com/test" },
   };
   fireEvent.click(await screen.findByRole("button", { name: "Buy credit" }));
-  const input = screen.getByLabelText("Another amount [optional]");
+  const input = screen.getByLabelText("Another amount");
   fireEvent.change(input, { target: { value: "4.99" } });
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   expect(screen.getByText("The smallest amount is $5.00.")).toBeTruthy();

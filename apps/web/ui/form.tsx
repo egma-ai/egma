@@ -13,18 +13,14 @@ import { FieldHintContext } from "./field-hint.ts";
  */
 
 /**
- * Render trailing required stars in the form accent color and preserve them
- * inside the label. Controls still need aria-required. Grid column headings
- * use their own muted marker and accessible name.
+ * A required field's label ends in `*`, printed in the label's own ink right
+ * after the last word, the way the persona pages print it. Controls still
+ * need aria-required. Grid column headings use their own muted marker and
+ * accessible name.
  */
 export function LabelText({ label }: { readonly label: string }) {
   if (!label.endsWith("*")) return <>{label}</>;
-  return (
-    <span>
-      {label.slice(0, -1)}
-      <span className="pl-1 text-brand">*</span>
-    </span>
-  );
+  return <>{`${label.slice(0, -1).trimEnd()}*`}</>;
 }
 
 /** Provide the hint ID to nested controls and render the shared label primitive. */

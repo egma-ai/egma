@@ -407,7 +407,7 @@ function BuyCreditDialog({
             className="text-sm font-medium"
             htmlFor="billing-custom-credit"
           >
-            Another amount [optional]
+            Another amount
           </label>
           <div className="flex items-center gap-2">
             <Input

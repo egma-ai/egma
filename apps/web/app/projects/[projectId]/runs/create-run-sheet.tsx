@@ -424,7 +424,7 @@ export function CreateRunSheet({
           />
         ) : (
           <div className="flex flex-col gap-3">
-            <Field label="Test suite *" htmlFor="run-suite">
+            <Field label="Test suite*" htmlFor="run-suite">
               <Select
                 id="run-suite"
                 className={suiteId === "" ? "text-faint" : undefined}
@@ -476,7 +476,7 @@ export function CreateRunSheet({
             <Empty title="This project has no active agent" />
           ) : (
             <>
-              <Field label="Agent *" htmlFor="run-agent">
+              <Field label="Agent*" htmlFor="run-agent">
                 <Select
                   id="run-agent"
                   className={agentId === "" ? "text-faint" : undefined}
@@ -516,7 +516,7 @@ export function CreateRunSheet({
             {agentDetail === null ? (
               <Loading what="this agent's connections" />
             ) : agentDetail.status === "ready" && connections.length > 0 ? (
-              <Field label="Connection *" htmlFor="run-connection">
+              <Field label="Connection*" htmlFor="run-connection">
                 <Select
                   id="run-connection"
                   className={connectionId === "" ? "text-faint" : undefined}
@@ -560,7 +560,7 @@ export function CreateRunSheet({
 
         {connectionId === "" ? null : (
           <div>
-            <Field label="Run name [optional]" htmlFor="run-name">
+            <Field label="Run name" htmlFor="run-name">
               <Input
                 id="run-name"
                 value={name}
@@ -586,7 +586,7 @@ export function CreateRunSheet({
             </CollapsibleTrigger>
             <CollapsibleContent className="pt-3">
               <Field
-                label="Concurrency [optional]"
+                label="Concurrency"
                 htmlFor="run-concurrency"
                 hint={`Leave blank to use ${chosenConnection.modality === "chat" ? 10 : 4} simultaneous simulations.`}
               >
