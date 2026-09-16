@@ -16,6 +16,8 @@ function Textarea({ className, ...props }: ComponentProps<"textarea">) {
       className={cn(
         "w-full resize-y rounded-input border border-input bg-surface p-3",
         "text-sm text-foreground placeholder:text-faint",
+        /* Touch screens keep 16px text: iOS zooms the page into any focused control set smaller. */
+        "pointer-coarse:text-base",
         "read-only:bg-surface-soft read-only:text-muted-foreground",
         "disabled:cursor-not-allowed disabled:opacity-60",
         className,

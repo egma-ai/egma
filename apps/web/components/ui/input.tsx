@@ -18,6 +18,8 @@ function Input({ className, type, ...props }: ComponentProps<"input">) {
       className={cn(
         "w-full min-h-(--control-lg) rounded-input border border-input bg-surface px-3",
         "text-sm text-foreground placeholder:text-faint",
+        /* Touch screens keep 16px text: iOS zooms the page into any focused control set smaller. */
+        "pointer-coarse:text-base",
         "read-only:bg-surface-soft read-only:text-muted-foreground",
         "disabled:cursor-not-allowed disabled:opacity-60",
         "file:border-0 file:bg-transparent file:text-sm file:font-medium",

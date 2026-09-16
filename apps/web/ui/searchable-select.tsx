@@ -79,6 +79,8 @@ export function SearchableSelect({
           className={cn(
             "flex min-h-(--control-lg) w-full min-w-0 items-center justify-between gap-3",
             "rounded-input border border-input bg-surface-soft px-3 text-left text-sm text-foreground",
+            /* Touch screens keep 16px text: iOS zooms the page into any focused control set smaller. */
+            "pointer-coarse:text-base",
             "disabled:cursor-not-allowed disabled:opacity-60",
             "pointer-coarse:min-h-(--tap-target)",
             className,
