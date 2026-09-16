@@ -1028,18 +1028,21 @@ describe("what a project recorded in production", () => {
     async () => {
       await page.goto(monitoringAt(acme));
       // While the loading state hands over to the screen, two window
-      // controls can stand in the DOM for an instant; read the settled one.
+      // controls can stand in the DOM: wait for the handover to finish, then
+      // read the one the screen drew.
+      await expect.poll(() => page.getByText(/^Loading /u).count()).toBe(0);
       await expect.poll(() => page.locator("#window").count()).toBe(1);
+      const window = page.locator("#window").first();
 
       expect(
-        await page.locator("#window").evaluate((element) => {
+        await window.evaluate((element) => {
           const styleOf = Reflect.get(globalThis, "getComputedStyle") as
             (target: unknown) => { readonly appearance: string };
           return styleOf(element).appearance;
         }),
       ).toBe("base-select");
       expect(
-        await page.locator("#window").evaluate((element) => {
+        await window.evaluate((element) => {
           const styleOf = Reflect.get(globalThis, "getComputedStyle") as
             (target: unknown) => { readonly alignItems: string };
           return styleOf(element).alignItems;
