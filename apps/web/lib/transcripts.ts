@@ -57,6 +57,19 @@ export function metricLine(one: Measured): string {
 }
 export type Detail = GetTraceResponse;
 
+/** Explain the reported latency without recomputing its reduction. */
+export function turnLatencyExplanation(metrics: readonly Measured[]): string {
+  const latency = metrics.find(
+    (metric) =>
+      metric.measure === "turn_response_latency" && metric.unit === "milliseconds",
+  );
+  const definition =
+    "Time from the end of the caller's speech to the agent's reply. P90 describes the slower turns, not the average.";
+  if (latency === undefined || !Number.isFinite(latency.mean)) return definition;
+  const count = latency.samples.length;
+  return `${definition} Average: ${String(Math.round(latency.mean))} ms across ${String(count)} measured ${count === 1 ? "turn" : "turns"}${latency.partial ? " (partial)" : ""}. Provider dashboards can use a different summary and measurement boundary.`;
+}
+
 /** Turn a machine-written assertion key into a label without hiding its meaning. */
 export function humanizeIdentifier(value: string): string {
   const words = value
