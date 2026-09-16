@@ -367,12 +367,12 @@ describe("one simulation's grades", () => {
       name: "Simulation summary",
     });
     expect(within(summary).getByText("Graders passed")).toBeTruthy();
-    expect(within(summary).getByText("0/1 · 1 failed")).toBeTruthy();
+    expect(within(summary).getByText("0/1")).toBeTruthy();
     /*
      * The bar's values read in the product's own sans face. Tabular figures
      * still hold the columns still; mono stays where it names a thing.
      */
-    for (const value of ["0/1 · 1 failed", "40s"]) {
+    for (const value of ["0/1", "40s"]) {
       expect(within(summary).getByText(value).className).not.toContain("font-mono");
       expect(within(summary).getByText(value).className).toContain("tabular-nums");
     }
@@ -486,7 +486,7 @@ describe("one simulation's grades", () => {
     const summary = await screen.findByRole("region", {
       name: "Simulation summary",
     });
-    expect(within(summary).getByText("0/1 · 1 failed")).toBeTruthy();
+    expect(within(summary).getByText("0/1")).toBeTruthy();
     expect(within(summary).getByText("0s")).toBeTruthy();
     expect(within(summary).getByText("0")).toBeTruthy();
     expect(within(summary).getByText("0 ms")).toBeTruthy();

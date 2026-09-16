@@ -2,7 +2,7 @@ import { projectPath, sectionIn } from "./project-context.ts";
 
 /**
  * The project navigation has one unlabelled group for Agents and Graders, one
- * Simulations group, and one OBSERVABILITY group. Every link carries the
+ * Simulations group, and one Monitoring group. Every link carries the
  * project. Groups control presentation only; the address decides the active
  * item.
  */
@@ -75,7 +75,7 @@ export const NAVIGATION_GROUPS: readonly NavigationGroup[] = [
    */
   {
     id: "monitoring",
-    label: "OBSERVABILITY",
+    label: "Monitoring",
     items: [{ id: "monitoring", label: "Traces", opens: ["transcripts"] }],
   },
 ];

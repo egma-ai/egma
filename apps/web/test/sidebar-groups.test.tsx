@@ -54,7 +54,7 @@ const GROUPS: readonly {
 }[] = [
   { label: null, items: ["Agents", "Graders"] },
   { label: "Simulations", items: ["Tests", "Personas", "Runs"] },
-  { label: "OBSERVABILITY", items: ["Traces"] },
+  { label: "Monitoring", items: ["Traces"] },
 ];
 
 /** The clusters as drawn, labelled or not — a named region is only two of them. */
@@ -202,7 +202,7 @@ describe("the grouped sidebar", () => {
       within(navigation).queryByRole("link", { name: "Simulation runs" }),
     ).toBeNull();
     expect(
-      within(navigation).queryByRole("link", { name: "OBSERVABILITY" }),
+      within(navigation).queryByRole("link", { name: "Monitoring" }),
     ).toBeNull();
   });
 

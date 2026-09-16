@@ -397,10 +397,10 @@ describe("what the Monitoring list asks egma for", () => {
   });
 
   /**
-   * **Traces, not Monitoring.** OBSERVABILITY is the sidebar group; this is
+   * **Traces, not Monitoring.** Monitoring is the sidebar group; this is
    * the one page under it, and since the separate monitoring screen retired it
    * is where the one monitoring verb lives too (board `JGS-0`). A title bar
-   * repeating the group's word said the section's name twice over.
+   * repeating the group's word would say the section's name twice over.
    */
   it("heads the page Traces", async () => {
     stub({ rows: [ONE_ROW] });
@@ -424,10 +424,10 @@ describe("what the Monitoring list shows", () => {
 
     expect(headings).toEqual([
       TRACE_COLUMNS.agent,
-      TRACE_COLUMNS.time,
       TRACE_COLUMNS.duration,
       TRACE_COLUMNS.p90TurnLatency,
       TRACE_COLUMNS.traceId,
+      TRACE_COLUMNS.time,
       TRACE_COLUMNS.actions,
     ]);
     expect(within(table).getByText("4.78s")).toBeDefined();

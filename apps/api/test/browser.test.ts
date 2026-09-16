@@ -831,7 +831,7 @@ describe("what a project recorded in production", () => {
       });
 
       // The six rows the three clusters hold — the unlabelled standing pair at
-      // the top, the three Simulations rows, and OBSERVABILITY's one. Settings
+      // the top, the three Simulations rows, and Monitoring's one. Settings
       // is not one of them and neither is a simulation.
       for (const area of [
         "Agents",
@@ -1088,10 +1088,10 @@ describe("what a project recorded in production", () => {
         );
       expect(headings).toEqual([
         "Agent",
-        "Time",
         "Duration",
         "P90 turn latency",
         "Trace ID",
+        "Time",
         "Actions",
       ]);
       expect(
