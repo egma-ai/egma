@@ -182,7 +182,7 @@ describe("the Predefined persona", () => {
     expect(persona).toMatchObject({
       owner: "egma",
       projectId: null,
-      version: 6,
+      version: 7,
       identityName: "Alex Morgan",
       personality:
         "Starts patient and cooperative, answers one question at a time, and becomes firmer if the agent is confusing or repetitive without becoming rude.",
@@ -193,15 +193,15 @@ describe("the Predefined persona", () => {
   it("migrates project settings without changing built-in core history", async () => {
     const before = await getPersona(globex.auth, EGMA_PROVIDED_PERSONAS.defaultPersona);
     expect(before).toMatchObject({
-      version: 6,
-      versionId: "prsv_01K4R000000000000000000021",
+      version: 7,
+      versionId: "prsv_01M2NRBH9AEF9RVXBQCAP6RXBX",
       settings: null,
     });
 
     const used = await usePersona(globex.auth, EGMA_PROVIDED_PERSONAS.defaultPersona);
     expect(used).toMatchObject({
-      version: 6,
-      versionId: "prsv_01K4R000000000000000000021",
+      version: 7,
+      versionId: "prsv_01M2NRBH9AEF9RVXBQCAP6RXBX",
       settings: { parameterValues: {
         speech_mode: "separate",
         interruption_level: "none",
@@ -225,16 +225,16 @@ describe("the Predefined persona", () => {
     expect(await seedPersonaLibrary()).toEqual([]);
     expect(await seedPersonaLibrary()).toEqual([]);
     expect(await getPersona(globex.auth, EGMA_PROVIDED_PERSONAS.defaultPersona)).toMatchObject({
-      version: 6,
-      versionId: "prsv_01K4R000000000000000000021",
+      version: 7,
+      versionId: "prsv_01M2NRBH9AEF9RVXBQCAP6RXBX",
       settings: { parameterValues: { language: "en-US", speech_mode: "separate", interruption_level: "none" } },
     });
     const { rows } = await database.sql<{ id: string; version: number }>(
       "select id, version from persona_definition_version where persona_id = $1 order by version",
       [EGMA_PROVIDED_PERSONAS.defaultPersona],
     );
-    expect(rows).toHaveLength(6);
-    expect(rows.at(-1)).toEqual({ id: "prsv_01K4R000000000000000000021", version: 6 });
+    expect(rows).toHaveLength(7);
+    expect(rows.at(-1)).toEqual({ id: "prsv_01M2NRBH9AEF9RVXBQCAP6RXBX", version: 7 });
     expect(rows.map((row) => row.id)).toContain("prsv_01K4R000000000000000000016");
   });
 
@@ -306,7 +306,7 @@ describe("forking a persona", () => {
     expect(edited?.settings?.models).toEqual(source.settings!.models);
     expect(
       (await getPersona(acme.auth, EGMA_PROVIDED_PERSONAS.defaultPersona))?.version,
-    ).toBe(6);
+    ).toBe(7);
   });
 
   it("copies the source version that wins the source-row lock", async () => {
@@ -568,7 +568,48 @@ describe("catalog integrity", () => {
     });
   });
 
-  it("ships exactly five presets with complete starting controls", () => {
+  it.each(["live", "cartesia"] as const)("replaces saved %s built-in models without changing controls, history, or forks", async (mode) => {
+    const tenant = await signUp(`catalog-models-${mode}`);
+    const models: PersonaModels = mode === "live" ? {
+      mode: "live",
+      llm: { provider: "openai", model: "gpt-4o-mini" },
+      live: { provider: "openai", model: "gpt-live-1", adapter: "openai_live", voiceId: "alloy" },
+    } : EVERYDAY_CALLER_V1_MODELS;
+    const contract = personaParameterContract(models, {
+      language: "es-ES",
+      backgroundSoundId: "rain-v1",
+      executionPolicyVersion: 2,
+      ...(mode === "live" ? {} : { interruptionLevel: "frequent" }),
+    });
+    const used = await usePersona(tenant.auth, EGMA_PROVIDED_PERSONAS.defaultPersona);
+    if (used?.settings === null || used?.settings === undefined) throw new Error("built-in settings missing");
+    const history = await getPersonaVersion(tenant.auth, used.versionId);
+    await database.sql(
+      "update project_persona set parameter_values = $1, parameter_contract = $2 where id = $3",
+      [JSON.stringify(defaultPersonaParameterValues(contract)), JSON.stringify(contract), used.settings.id],
+    );
+    const fork = await forkPersona(tenant.auth, used.id);
+    if (fork === undefined) throw new Error("custom fork missing");
+
+    await seedPersonaLibrary();
+    const migrated = await getPersona(tenant.auth, used.id);
+    expect(migrated?.settings?.parameterValues).toEqual({
+      speech_mode: "separate",
+      llm_provider: "openai", llm_model: "gpt-5.6-terra",
+      stt_provider: "openai", stt_model: "gpt-live-transcribe",
+      tts_provider: "openai", tts_model: "gpt-4o-mini-tts", tts_voice_id: "cedar",
+      language: "es-ES", background_sound_id: "rain-v1", execution_policy_version: 2,
+      interruption_level: mode === "live" ? "none" : "frequent",
+    });
+    expect(await getPersonaVersion(tenant.auth, used.versionId)).toEqual(history);
+    expect((await getPersona(tenant.auth, fork.id))?.settings).toEqual(fork.settings);
+
+    expect(await seedPersonaLibrary()).toEqual([]);
+    expect((await getPersona(tenant.auth, used.id))?.settings).toEqual(migrated?.settings);
+  });
+
+  it("ships exactly five presets with complete starting controls", async () => {
+    const tenant = await signUp("new-built-in-defaults");
     const defaults = new Map(PERSONA_LIBRARY_CATALOG.map((entry) => [
       entry.name,
       currentPersonaParameterDefaults(entry.versions.at(-1)?.parameterContract).values,
@@ -582,19 +623,29 @@ describe("catalog integrity", () => {
     ]);
     for (const [name, values] of defaults) {
       expect(values).toMatchObject({
+        speech_mode: "separate",
+        llm_provider: "openai",
+        llm_model: "gpt-5.6-terra",
+        stt_provider: "openai",
+        stt_model: "gpt-live-transcribe",
+        tts_provider: "openai",
+        tts_model: "gpt-4o-mini-tts",
         tts_voice_id: name === "Everyday Caller [Female]" ? "coral" : "cedar",
         language: name === "Spanish caller" ? "es-ES" : "en-US",
         background_sound_id: "none",
         interruption_level: name === "Interruptive caller" ? "frequent" : "none",
         execution_policy_version: 2,
       });
+      const definition = PERSONA_LIBRARY_CATALOG.find((entry) => entry.name === name)!;
+      const used = await usePersona(tenant.auth, definition.id);
+      expect(used?.settings?.parameterValues).toEqual(values);
     }
   });
 
   it("carries an identity name and one complete models value in every fixed version", () => {
     expect(PERSONA_LIBRARY_CATALOG).toHaveLength(5);
     const versions = PERSONA_LIBRARY_CATALOG[0]?.versions;
-    expect(versions).toHaveLength(6);
+    expect(versions).toHaveLength(7);
     expect(versions?.[0]).toMatchObject({
       id: "prsv_01M0E4J0BBE1FVDVTZ1BSS5C97",
       version: 1,

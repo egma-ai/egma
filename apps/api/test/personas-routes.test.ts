@@ -487,7 +487,7 @@ describe("creating and reading a persona", () => {
     expect(found).toMatchObject({
       name: "Everyday Caller [Male]",
       description: "Regular conversationalist persona",
-      version: 6,
+      version: 7,
       owner: "egma",
       // Catalog content, and the whole point of it: nobody ever hears
       // "Hi, I'm Everyday Caller [Male]."
@@ -761,8 +761,8 @@ describe("forking a persona", () => {
     expect(made.settings).toBeNull();
     expect(fork.settings?.models).toEqual({
       mode: "separate",
-      llm: { provider: "openai", model: "gpt-4o-mini" },
-      stt: { provider: "openai", model: "gpt-4o-mini-transcribe" },
+      llm: { provider: "openai", model: "gpt-5.6-terra" },
+      stt: { provider: "openai", model: "gpt-live-transcribe" },
       tts: { provider: "openai", model: "gpt-4o-mini-tts", voiceId: "cedar" },
     });
     expect(fork.owner).toBe("organization");
