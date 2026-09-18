@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .persona import Persona, Turn
-from .plugs import AgentReply, ConnectionPlug, PlugError
+from .plugs import AgentReply, ConnectionPlug
 from .usage import ProviderUsage
 
 logger = logging.getLogger(__name__)
@@ -395,7 +395,7 @@ async def conduct(
         if not startup_finished:
             explain = getattr(plug, "startup_duration_failure", None)
             if callable(explain):
-                raise PlugError(explain(max_duration_seconds)) from None
+                raise explain(max_duration_seconds) from None
         return ended(duration_limit_reached(max_duration_seconds))
     finally:
         if on_execution_ended is not None:

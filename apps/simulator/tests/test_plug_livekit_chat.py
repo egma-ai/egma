@@ -1632,11 +1632,27 @@ async def test_a_worker_that_never_comes_is_never_the_agent_failing(
             max_duration_seconds=1,
         )
 
-    assert failed_ending(never_came.value) == ERROR
+    assert failed_ending(never_came.value) == "agent_never_joined"
     told = str(never_came.value)
     assert "no agent named" in told
     assert "configured 1s duration expired" in told
     assert len(stub.dispatches) == 1
+    assert stub.deleted == [stub.rooms[0].name]
+
+
+@pytest.mark.parametrize("agent_joins", [False, True])
+async def test_chat_startup_deadline_keeps_the_missing_agent_reason(
+    tmp_path, monkeypatch, agent_joins
+):
+    from egma_simulator.media import livekit_room
+
+    monkeypatch.setattr(livekit_room, "LIVEKIT_STARTUP_SECONDS", 0.1)
+    stub = ChatStub(agent_joins=agent_joins, agent_reports=False)
+    with pytest.raises(PlugError, match="startup timed out after 0.1s") as failure:
+        await asyncio.wait_for(
+            chat_walk(tmp_path, stub, monkeypatch), 2
+        )
+    assert failure.value.ending == ("error" if agent_joins else "agent_never_joined")
     assert stub.deleted == [stub.rooms[0].name]
 
 

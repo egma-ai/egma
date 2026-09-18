@@ -56,6 +56,7 @@ async def test_transcript_arriving_after_stop_wait_reaches_the_persona(delay, st
         raise error
 
     conductor = SimpleNamespace(
+        startup_ready=True,
         deliberate_response_owned=False,
         the_agent_finished=finished,
         the_brain_failed=failed,

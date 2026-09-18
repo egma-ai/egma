@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import math
+import socket
 import struct
 import sys
 import urllib.parse
@@ -20,6 +21,8 @@ from array import array
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from functools import cache
 from typing import Any
 
@@ -48,6 +51,7 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt, traced_tts
 
 from .config import STT_PROVIDERS, TTS_PROVIDERS, VAD_PROVIDERS
+from .platform_logging import log_event
 from .provider_keys import ProviderKeyUnavailable, authentication_rejected
 from .spec import PersonaParameters, SelectedModels
 from .usage import ProviderUsage, realtime_transcription_usage
@@ -86,6 +90,9 @@ OPENAI_REALTIME_PROXY_OPEN_SECONDS = 30.0
 
 OPENAI_REALTIME_PROXY_READY_SECONDS = 45.0
 """How long proxied OpenAI Realtime may take to become ready."""
+
+OPENAI_STT_CONNECT_ATTEMPTS = 3
+OPENAI_STT_RETRY_DELAY_SECONDS = 0.5
 
 OPENAI_INSTRUCTIONLESS_TTS_MODELS = frozenset({"tts-1", "tts-1-hd"})
 """OpenAI speech models that do not accept delivery instructions."""
@@ -528,6 +535,12 @@ class SpeechLegs:
                 "heard"
             ) from never_ready
 
+    def cancel_startup(self) -> None:
+        """Release a connecting service so Pipecat can process cancellation."""
+        cancel = getattr(self.stt, "cancel_startup", None)
+        if cancel is not None:
+            cancel()
+
     async def aclose(self) -> None:
         """Release whatever the legs hold. Safe from every state, always
         called — a pipeline that was never opened still built its legs."""
@@ -957,6 +970,34 @@ def _openai_mouth(
     return leg, spoken_with, (leg._client.close,)
 
 
+def _rate_limit_retry_delay(response: Any) -> float | None:
+    """Honor Retry-After for a rate limit, excluding an explicit exhausted quota."""
+    try:
+        body = json.loads(response.body)
+    except (ValueError, TypeError):
+        body = None
+    error = body.get("error") if isinstance(body, dict) else None
+    if isinstance(error, dict) and "insufficient_quota" in (
+        error.get("code"), error.get("type")
+    ):
+        return None
+    values = response.headers.get_all("Retry-After")
+    if len(values) != 1:
+        return None
+    value = values[0].strip()
+    try:
+        if value.isascii() and value.isdigit():
+            delay = float(value)
+        else:
+            date = parsedate_to_datetime(value)
+            if date.tzinfo is None:
+                return None
+            delay = max(0.0, (date - datetime.now(UTC)).total_seconds())
+    except (ValueError, TypeError, OverflowError):
+        return None
+    return delay if math.isfinite(delay) else None
+
+
 def _openai_realtime_ears(
     providers: SpeechProviders, *, language: str | None = None
 ) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None]:
@@ -969,15 +1010,115 @@ def _openai_realtime_ears(
     from pipecat.services.openai.stt import (
         OpenAIRealtimeSTTService as PipecatOpenAIRealtimeSTTService,
     )
+    from websockets.exceptions import InvalidStatus
 
     class OpenAIRealtimeSTTService(PipecatOpenAIRealtimeSTTService):
         """Pipecat's realtime service with the live model's current wire shape."""
+
+        _initial_connection_complete = False
+        _startup_canceled = False
+        _initial_connection_task: asyncio.Task[Any] | None = None
+
+        def cancel_startup(self) -> None:
+            self._startup_canceled = True
+            if self._initial_connection_task is not None:
+                self._initial_connection_task.cancel()
+
+        async def _connect(self) -> None:
+            try:
+                await super()._connect()
+            except asyncio.CancelledError:
+                if not self._startup_canceled:
+                    raise
 
         async def _websocket_connect(self, uri: str, **kwargs: Any) -> Any:
             if providers.use_environment_proxy:
                 kwargs.setdefault("proxy", True)
                 kwargs.setdefault("open_timeout", OPENAI_REALTIME_PROXY_OPEN_SECONDS)
-            return await super()._websocket_connect(uri, **kwargs)
+            if self._initial_connection_complete:
+                return await super()._websocket_connect(uri, **kwargs)
+            if self._startup_canceled:
+                raise asyncio.CancelledError
+            self._initial_connection_task = asyncio.create_task(
+                self._connect_initial(uri, **kwargs)
+            )
+            try:
+                return await self._initial_connection_task
+            finally:
+                self._initial_connection_task = None
+
+        async def _connect_initial(self, uri: str, **kwargs: Any) -> Any:
+            budget = (
+                OPENAI_REALTIME_PROXY_READY_SECONDS
+                if providers.use_environment_proxy
+                else LISTENING_READY_SECONDS
+            )
+            deadline = asyncio.timeout(budget)
+            try:
+                async with deadline:
+                    return await self._connect_attempts(
+                        uri, deadline=deadline, **kwargs
+                    )
+            except TimeoutError as fault:
+                if deadline.expired():
+                    raise TimeoutError(
+                        "OpenAI transcription connection did not open within "
+                        f"{budget:g}s"
+                    ) from fault
+                raise
+
+        async def _connect_attempts(
+            self, uri: str, *, deadline: asyncio.Timeout, **kwargs: Any
+        ) -> Any:
+            rate_limit_retried = False
+            for attempt in range(1, OPENAI_STT_CONNECT_ATTEMPTS + 1):
+                try:
+                    connection = await super()._websocket_connect(uri, **kwargs)
+                except (
+                    InvalidStatus, TimeoutError, ConnectionError, socket.gaierror
+                ) as fault:
+                    status = (
+                        fault.response.status_code
+                        if isinstance(fault, InvalidStatus)
+                        else None
+                    )
+                    retryable = (
+                        fault.errno == socket.EAI_AGAIN
+                        if isinstance(fault, socket.gaierror)
+                        else status is None or status in {502, 503, 504}
+                    )
+                    delay = OPENAI_STT_RETRY_DELAY_SECONDS * 2 ** (attempt - 1)
+                    if status == 429:
+                        requested_delay = _rate_limit_retry_delay(fault.response)
+                        retryable = (
+                            requested_delay is not None and not rate_limit_retried
+                        )
+                        if requested_delay is not None:
+                            delay = requested_delay
+                        rate_limit_retried = True
+                    remaining = deadline.when() - asyncio.get_running_loop().time()
+                    retryable = retryable and delay < remaining
+                    retry = retryable and attempt < OPENAI_STT_CONNECT_ATTEMPTS
+                    log_event(
+                        logger,
+                        logging.WARNING,
+                        "egma.speech.connection_attempt_failed",
+                        "OpenAI transcription connection attempt failed",
+                        attributes={
+                            "egma.speech.provider": "openai",
+                            "egma.speech.operation": "stt_connect",
+                            "egma.speech.attempt": attempt,
+                            "egma.speech.will_retry": retry,
+                            "http.response.status_code": status,
+                            "error.type": type(fault).__name__,
+                        },
+                    )
+                    if not retry:
+                        raise
+                    await asyncio.sleep(delay)
+                else:
+                    self._initial_connection_complete = True
+                    return connection
 
         async def _handle_transcription_completed(self, evt: dict) -> None:
             """Keep what the provider says the transcription cost.

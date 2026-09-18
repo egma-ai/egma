@@ -134,9 +134,10 @@ class LiveKitChat:
         _typing_or_nothing(greeting)
         return greeting.text
 
-    def startup_duration_failure(self, seconds: float) -> str:
+    def startup_duration_failure(self, seconds: float) -> PlugError:
         """Explain why startup was still pending when the simulation ended."""
-        return self._backend.startup_duration_failure(seconds)
+        fault = self._backend.startup_duration_failure(seconds)
+        return PlugError(str(fault), ending=fault.ending)
 
     async def deliver(self, text: str) -> AgentReply:
         """Type the persona's turn in, and read the agent's answer back."""

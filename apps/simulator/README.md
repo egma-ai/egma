@@ -125,6 +125,34 @@ limit trips (both limits report `limit_reached`, with a reason naming
 which), or a cancel directive stops it. A limit ending is deliberate and
 never the agent failing.
 
+LiveKit startup waits up to a fixed 60 seconds for the agent to join, complete the
+Egma SDK exchange, publish an initialized session state, and provide its
+audio track (voice only). The simulation's duration limit or cancellation
+can stop this wait earlier. Persona replies wait for startup; an early
+agent greeting is retained. A startup failure names the missing step and
+does not produce a completed simulation for grading.
+
+The startup limit is defined in code. The simulation's own duration and the
+one-shot execution deadline still apply. No participant
+seen is reported as `agent_never_joined`; incomplete setup after a participant
+joins is reported as `error`, including a missing audio track.
+
+The first OpenAI Realtime STT connection retries HTTP 502, 503, and 504,
+connection failures, and timeouts up to three attempts, with short delays.
+The connection attempts share a 15-second limit (45 seconds when using the
+environment proxy). A 429 with a valid `Retry-After` header can retry once,
+within the same attempt and time limits. The full requested delay is honored;
+if it does not fit, the refusal is returned without retrying. Missing or invalid
+headers and explicit exhausted-quota errors are not retried. Authentication
+and configuration refusals are not retried. Cancellation stops an active
+connection attempt or retry.
+LiveKit quota errors point to the configured LiveKit project's limits;
+speech errors retain their speech-provider source.
+
+Startup logs record `egma.startup.pending_condition`. STT retry logs record
+the attempt number, HTTP status when available, and whether another attempt
+will follow. These fields contain no transcript or connection credentials.
+
 Reports are minted as events (ids and timestamps stamped once), written to
 a local write-ahead log, then delivered in order; a resend replays the
 same bytes, so the receiving side can dedup on event ids. A report carries

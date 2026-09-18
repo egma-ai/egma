@@ -31,6 +31,22 @@ RpcNotice = Callable[[Any], None]
 RpcRefusalNotice = Callable[[Any, MockToolRefusal], None]
 
 
+def livekit_capacity_hint(reason: str) -> str:
+    """Add next steps only to explicit LiveKit capacity refusals."""
+    reason = reason.lower()
+    if (
+        ("429" in reason and ("status" in reason or "http" in reason))
+        or "resource_exhausted" in reason
+        or "quota" in reason
+        or "limit exceeded" in reason
+    ):
+        return (
+            "; check this LiveKit project's usage limits and active rooms "
+            "before trying again"
+        )
+    return ""
+
+
 def disconnect_reason_name(reason: object) -> str:
     """Keep the documented RTC reason, never arbitrary provider payloads."""
     from livekit import rtc

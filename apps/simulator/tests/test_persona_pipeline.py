@@ -168,6 +168,11 @@ class StockTTSClient:
 
 
 class ConductorProbe:
+    startup_ready = True
+
+    async def wait_until_started(self) -> None:
+        return None
+
     def __init__(self) -> None:
         self.history: list[Turn] = []
         self.spoken: list[str] = []

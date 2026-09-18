@@ -129,9 +129,10 @@ class LiveKitRoom:
         except MediaBackendError as refused:
             raise PlugError(str(refused), ending=refused.ending) from refused
 
-    def startup_duration_failure(self, seconds: float) -> str:
+    def startup_duration_failure(self, seconds: float) -> PlugError:
         """Explain why startup was still pending when the simulation ended."""
-        return self._backend.startup_duration_failure(seconds, require_audio=True)
+        fault = self._backend.startup_duration_failure(seconds, require_audio=True)
+        return PlugError(str(fault), ending=fault.ending)
 
     async def close(self) -> None:
         """Leave, and delete the room. Safe from every state."""
