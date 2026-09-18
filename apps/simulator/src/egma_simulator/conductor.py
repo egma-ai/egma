@@ -1145,7 +1145,12 @@ class _PersonaBrain(FrameProcessor):
         if isinstance(frame, _AgentFinished):
             said = " ".join(piece for piece in self._heard if piece)
             self._heard.clear()
-            if self._conductor.deliberate_response_owned or self._replies.busy:
+            if (
+                not self._conductor.startup_ready
+                or self._deferred
+                or self._conductor.deliberate_response_owned
+                or self._replies.busy
+            ):
                 deferred = asyncio.create_task(self._answer_when_idle(frame, said))
                 self._deferred.add(deferred)
                 deferred.add_done_callback(self._deferred.discard)
@@ -1188,6 +1193,7 @@ class _PersonaBrain(FrameProcessor):
     async def _answer_when_idle(self, frame: _AgentFinished, said: str) -> None:
         try:
             async with self._answer_lock:
+                await self._conductor.wait_until_started()
                 while self._replies.busy or self._conductor.deliberate_response_owned:
                     await self._replies.wait_idle()
                     await self._conductor.wait_until_interruption_idle()
@@ -1579,6 +1585,7 @@ class VoiceConductor:
         self._recording_rate = 0
 
         self._activity = asyncio.Event()
+        self._startup_ready = asyncio.Event()
         self._faulted = asyncio.Event()
         self._fault = ""
         self._brain_fault: BaseException | None = None
@@ -1666,7 +1673,8 @@ class VoiceConductor:
     def may_start_interruption(self) -> bool:
         ear = self._ear
         return (
-            not self.is_ending
+            self.startup_ready
+            and not self.is_ending
             and ear is not None
             and ear.hearing_speech
             and self._interruption_state in {"preparing", "ready"}
@@ -1675,10 +1683,18 @@ class VoiceConductor:
     @property
     def interruption_due(self) -> bool:
         return (
-            self._interruption_due_at is not None
+            self.startup_ready
+            and self._interruption_due_at is not None
             and self._position >= self._interruption_due_at
             and self._interruption_state == "scheduled"
         )
+
+    @property
+    def startup_ready(self) -> bool:
+        return self._startup_ready.is_set()
+
+    async def wait_until_started(self) -> None:
+        await self._startup_ready.wait()
 
     def agent_speech_started(self) -> None:
         self._agent_speech_began = self._position
@@ -2157,6 +2173,16 @@ class VoiceConductor:
                     if processor is leg and customer_funded and provider is not None:
                         self._brain_fault = ProviderKeyUnavailable(provider)
             self._fault = str(getattr(error, "error", error))
+            if self._brain_fault is None and processor in (
+                self._legs.stt,
+                self._legs.tts,
+            ):
+                operation = (
+                    "speech recognition"
+                    if processor is self._legs.stt
+                    else "speech output"
+                )
+                self._brain_fault = SpeechFault(f"{operation} failed: {self._fault}")
             self._faulted.set()
             self.media_advanced()
 
@@ -2172,20 +2198,9 @@ class VoiceConductor:
             await self._reach_event(timeline.started)
             await self._reach_step(self._legs.ready())
             await self._reach_step(self._connection.open())
-        except (PipelineGone, SpeechFault) as refused:
-            # Transport processors start only once Pipecat receives its
-            # StartFrame. A join refusal therefore arrives as a pipeline
-            # fault while the connection's open step is pending. Keep it a
-            # platform refusal instead of calling it a speech-leg failure.
-            transport = (
-                self._media.transport_name
-                if self._media is not None
-                else "voice transport"
-            )
-            raise PlugError(
-                f"the voice connection could not open through the {transport}: "
-                f"{refused}"
-            ) from refused
+        except PipelineGone as refused:
+            raise self._startup_transport_fault(str(refused)) from refused
+        self._startup_ready.set()
         self.media_advanced()
 
     async def close(self) -> None:
@@ -2216,7 +2231,11 @@ class VoiceConductor:
             if self._control_tasks:
                 await asyncio.gather(*self._control_tasks, return_exceptions=True)
                 self._control_tasks.clear()
-            await self._worker.queue_frame(EndFrame())
+            if self.startup_ready:
+                await self._worker.queue_frame(EndFrame())
+            else:
+                self._legs.cancel_startup()
+                await self._worker.cancel()
             await asyncio.wait_for(asyncio.shield(self._running), timeout=10.0)
         except Exception as unfinished:
             logger.warning("the voice pipeline did not end cleanly: %r", unfinished)
@@ -2657,7 +2676,21 @@ class VoiceConductor:
     def _raise_fault(self) -> None:
         if self._brain_fault is not None:
             raise self._brain_fault
+        if not self.startup_ready:
+            raise self._startup_transport_fault(self._fault)
         raise SpeechFault(f"a voice pipeline component refused: {self._fault}")
+
+    def _startup_transport_fault(self, reason: str) -> PlugError:
+        from .media.room import livekit_capacity_hint
+
+        transport = (
+            self._media.transport_name if self._media is not None else "voice transport"
+        )
+        hint = livekit_capacity_hint(reason) if "livekit" in transport.lower() else ""
+        return PlugError(
+            f"the voice connection could not open through the {transport}: "
+            f"{reason}{hint}"
+        )
 
     def _stop_if_asked(self) -> None:
         if self._controls.cause is not None:

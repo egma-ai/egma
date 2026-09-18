@@ -2472,11 +2472,12 @@ async def test_the_room_is_deleted_however_the_simulation_ends(
     assert canceled.deleted == [canceled.rooms[0].name]
 
     faulted = RoomStub(refuses_dispatch="the project is over its agent quota")
-    with pytest.raises(PlugError):
+    with pytest.raises(PlugError) as quota_refusal:
         await room_walk(
             tmp_path, faulted, monkeypatch, agent_name="front-desk", scenario="One."
         )
     assert faulted.deleted == [faulted.rooms[0].name]
+    assert "this LiveKit project's usage limits" in str(quota_refusal.value)
 
 
 class CancelsOnceUnderWay(ConversationControls):
@@ -3746,3 +3747,88 @@ async def test_the_golden_token_endpoint_fixture_is_a_connection_the_plug_accept
         spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
     )
     assert assembled.conductor is not None
+
+
+@pytest.mark.parametrize("missing", ["hello", "native_state", "audio", "agent"])
+async def test_startup_has_its_own_deadline_and_reports_the_missing_step(
+    tmp_path,
+    monkeypatch,
+    missing,
+    caplog,
+):
+    monkeypatch.setattr(livekit_room_module, "LIVEKIT_STARTUP_SECONDS", 0.1)
+    stub = RoomStub(
+        greeting="Front desk.",
+        replies=["Noted."],
+        agent_reports=missing != "hello",
+        agent_state_at_start=None if missing == "native_state" else "listening",
+        agent_publishes_audio=missing != "audio",
+        agent_joins=missing != "agent",
+    )
+    spans = []
+    with pytest.raises(PlugError, match="LiveKit startup timed out after") as failure:
+        await asyncio.wait_for(
+            room_walk(
+                tmp_path,
+                stub,
+                monkeypatch,
+                spans=spans,
+                scenario="One point.",
+                max_duration_seconds=600,
+            ),
+            3,
+        )
+    expected = {
+        "hello": "did not report to Egma",
+        "native_state": "AgentSession.start",
+        "audio": "audio track",
+        "agent": "front-desk",
+    }
+    assert expected[missing] in str(failure.value)
+    assert not [span for span in spans if span[0] == "human"]
+    assert stub.deleted == [stub.rooms[0].name]
+    event = next(r for r in caplog.records if r.msg == "LiveKit startup failed")
+    assert (
+        event._egma_log_attributes["egma.startup.pending_condition"]
+        == {
+            "hello": "egma_hello",
+            "native_state": "native_session",
+            "audio": "audio_track",
+            "agent": "agent_join",
+        }[missing]
+    )
+
+
+async def test_persona_waits_for_startup_and_keeps_the_early_greeting(
+    tmp_path,
+    monkeypatch,
+):
+    release = asyncio.Event()
+    stub = RoomStub(
+        greeting="Front desk.", replies=["Noted."], release_initial_state=release
+    )
+    spans = []
+    walking = asyncio.create_task(
+        room_walk(
+            tmp_path,
+            stub,
+            monkeypatch,
+            spans=spans,
+            scenario="One point.",
+        )
+    )
+    try:
+        await asyncio.wait_for(stub.report_complete.wait(), 1)
+        # Scripted audio runs faster than real time; this lets its greeting
+        # reach the persona while the native session is still initializing.
+        await asyncio.sleep(0.4)
+        assert not spans
+        release.set()
+        conducted, turns, _, _ = await asyncio.wait_for(walking, 3)
+    finally:
+        if not walking.done():
+            walking.cancel()
+            await asyncio.gather(walking, return_exceptions=True)
+    assert conducted.status == "completed"
+    assert turns[:2] == [("agent", "Front desk."), ("human", "One point.")]
+    assert turns.count(("agent", "Front desk.")) == 1

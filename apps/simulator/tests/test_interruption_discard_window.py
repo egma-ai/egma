@@ -132,6 +132,7 @@ class _Rig:
         )
         self.conductor._recorder = self.recorder
         self.conductor._ear = _Ear()
+        self.conductor._startup_ready.set()
         self.output = _Output()
         self.probe = _Probe()
         self.spoken: list[tuple[str, str]] = []

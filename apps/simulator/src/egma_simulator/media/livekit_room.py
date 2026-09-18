@@ -63,6 +63,7 @@ from .room import (
     first_of,
     fresh_chat_room_name,
     fresh_room_name,
+    livekit_capacity_hint,
     persona_name_for,
     room_name_for,
     room_token,
@@ -198,6 +199,10 @@ class _UnsafeEndpointAddress(OSError):
     """The token endpoint resolved to an address Egma must not reach."""
 
 
+LIVEKIT_STARTUP_SECONDS = 60.0
+"""Maximum wait for the dispatched agent's SDK, session, and media readiness."""
+
+
 class LiveKitStartup:
     """Latched configuration and native session readiness for one worker.
 
@@ -325,11 +330,42 @@ class LiveKitStartup:
     def no_participant_seen(self) -> bool:
         return not self._seen and self._reporting_identity is None
 
+    def pending_condition(self, *, require_audio: bool) -> str:
+        if self.no_participant_seen:
+            return "agent_join"
+        if self._mock_tools is not None and self._accepted_identity is None:
+            return "egma_hello"
+        if not self.ready:
+            return "native_session"
+        if require_audio and not self._audio_track_identities:
+            return "audio_track"
+        if require_audio and self._mock_tools is not None:
+            if self._accepted_identity not in self._audio_track_identities:
+                return "audio_track"
+        return "ready"
+
+    def pending_detail(self, *, require_audio: bool) -> str:
+        pending = self.pending_condition(require_audio=require_audio)
+        if pending == "egma_hello" and self._mock_tools is not None:
+            return self._mock_tools.why_unreported
+        return {
+            "agent_join": "no agent joined; check that its LiveKit worker is running",
+            "native_session": (
+                "the agent did not publish an initialized LiveKit session state; "
+                "check that AgentSession.start completes in the agent worker"
+            ),
+            "audio_track": (
+                "the agent's audio track was not ready; check that the agent "
+                "publishes audio and that Egma can subscribe to it"
+            ),
+            "ready": "the agent's startup conditions were satisfied",
+        }[pending]
+
     async def wait(self, room: Any, *, require_audio: bool = False) -> None:
         """Wait for startup or an explicit room/configuration failure.
 
-        There is no local deadline. The simulation's outer control cancels this
-        await when its configured duration or cancel directive wins.
+        The room lifecycle bounds this wait. Simulation cancellation and its
+        configured duration can end it earlier.
         """
         while True:
             refusal = self._refusal
@@ -343,7 +379,7 @@ class LiveKitStartup:
             ):
                 raise MediaBackendError(
                     "the agent disconnected before its LiveKit session finished "
-                    "starting",
+                    f"starting: {self.pending_detail(require_audio=require_audio)}",
                     ending=ERROR,
                 )
             if room.failed.is_set():
@@ -355,7 +391,7 @@ class LiveKitStartup:
             if room.ended.is_set():
                 raise MediaBackendError(
                     "the agent disconnected before its LiveKit session finished "
-                    "starting",
+                    f"starting: {self.pending_detail(require_audio=require_audio)}",
                     ending=ERROR,
                 )
             has_audio = not require_audio or self._has_audio(room)
@@ -511,7 +547,9 @@ def platform_refusal(what_failed: str, code: str, told: str) -> MediaBackendErro
     about a reason is proved about the one a customer will read.
     """
     return MediaBackendError(
-        f"{what_failed}: livekit answered {code} — {told}", ending=ERROR
+        f"{what_failed}: livekit answered {code} — {told}"
+        f"{livekit_capacity_hint(f'HTTP {code}: {told}')}",
+        ending=ERROR,
     )
 
 
@@ -997,12 +1035,45 @@ class RoomLifecycle:
         room = self._room
         if room is None:
             raise MediaBackendError("an agent was waited for before a room")
-        await self._startup.wait(room, require_audio=require_audio)
+        try:
+            async with asyncio.timeout(LIVEKIT_STARTUP_SECONDS):
+                await self._startup.wait(room, require_audio=require_audio)
+        except TimeoutError as timed_out:
+            self._log_startup("failed", require_audio=require_audio)
+            detail = (
+                self._nobody_came(LIVEKIT_STARTUP_SECONDS)
+                if self._startup.no_participant_seen
+                else self._startup.pending_detail(require_audio=require_audio)
+            )
+            raise MediaBackendError(
+                f"LiveKit startup timed out after {LIVEKIT_STARTUP_SECONDS:g}s: "
+                f"{detail}",
+                ending=ERROR,
+            ) from timed_out
+        except MediaBackendError:
+            self._log_startup("failed", require_audio=require_audio)
+            raise
+        self._log_startup("ready", require_audio=require_audio)
         return self._room_name
+
+    def _log_startup(self, outcome: str, *, require_audio: bool) -> None:
+        log_event(
+            logger,
+            logging.INFO if outcome == "ready" else logging.WARNING,
+            f"egma.livekit.startup_{outcome}",
+            f"LiveKit startup {outcome}",
+            attributes={
+                "egma.startup.pending_condition": self._startup.pending_condition(
+                    require_audio=require_audio
+                ),
+                "egma.startup.require_audio": require_audio,
+            },
+        )
 
     def startup_duration_failure(
         self, seconds: float, *, require_audio: bool = False
     ) -> str:
+        self._log_startup("failed", require_audio=require_audio)
         if self._startup.no_participant_seen:
             return (
                 f"{self._nobody_came(seconds)}; the simulation's configured "
