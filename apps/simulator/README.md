@@ -125,18 +125,15 @@ limit trips (both limits report `limit_reached`, with a reason naming
 which), or a cancel directive stops it. A limit ending is deliberate and
 never the agent failing.
 
-LiveKit startup waits up to 60 seconds by default for the agent to join, complete the
+LiveKit startup waits up to a fixed 60 seconds for the agent to join, complete the
 Egma SDK exchange, publish an initialized session state, and provide its
 audio track (voice only). The simulation's duration limit or cancellation
 can stop this wait earlier. Persona replies wait for startup; an early
 agent greeting is retained. A startup failure names the missing step and
 does not produce a completed simulation for grading.
 
-Set `EGMA_SIMULATOR_LIVEKIT_STARTUP_SECONDS` to a positive number of seconds
-to allow more time for cold workers. The API forwards this setting to new
-Daytona voice workers; the standing simulator reads it for chat and self-hosted
-voice. Restart the API and standing workers after changing it. The simulation's
-own duration and the one-shot execution deadline still apply. No participant
+The startup limit is defined in code. The simulation's own duration and the
+one-shot execution deadline still apply. No participant
 seen is reported as `agent_never_joined`; incomplete setup after a participant
 joins is reported as `error`, including a missing audio track.
 
@@ -332,7 +329,6 @@ transport and process settings only.
 | `EGMA_SIMULATOR_THREAD_POOL_WORKERS` | mode-dependent | Native thread pool size. Defaults to one in one-shot mode; persistent mode retains its existing pool settings. |
 | `EGMA_SIMULATOR_CLAIMANT` | `egma-simulator-<host>-<pid>` | The name stamped on claims. |
 | `EGMA_SIMULATOR_HEARTBEAT_SECONDS` | `5` | Beat interval per running simulation. |
-| `EGMA_SIMULATOR_LIVEKIT_STARTUP_SECONDS` | `60` | Positive, finite wait for the LiveKit agent's SDK, session and voice audio track. Also set on the API when it launches Daytona workers. The simulation duration can end this wait sooner. |
 | `EGMA_SIMULATOR_CLAIM_WAIT_SECONDS` | `30` | How long one claim request is willing to hang, sent as the claim's `wait_seconds` so the control plane holds no longer than the client will wait. The control plane caps its own hold below this default. |
 | `EGMA_SIMULATOR_REPORT_DEADLINE_SECONDS` | `120` | How long one report is resent before the log on disk becomes its only record. |
 | `EGMA_SIMULATOR_VAD_PROVIDER` | `scripted` | What hears the agent start and stop speaking: `scripted`, which reads the test tone exactly, or `silero`. Needs no key either way — Silero ships inside the pinned pipecat wheel and downloads nothing. |

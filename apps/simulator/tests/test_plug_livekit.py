@@ -1474,7 +1474,6 @@ async def room_walk(
     controls: ConversationControls | None = None,
     built_by=livekit_spec,
     spans: list[tuple[str, str, int, int]] | None = None,
-    startup_seconds: float = 60.0,
     **overrides: object,
 ) -> tuple[Conducted, list[tuple[str, str]], list[tuple[str, float, int]], object]:
     """Build through the registry and service pipeline, selecting access through
@@ -1496,10 +1495,7 @@ async def room_walk(
         measures.append((measure, (ended - began) / 1_000_000, ended))
 
     assembled = assemble(
-        spec,
-        blobs=FilesystemBlobStore(tmp_path),
-        speech=SCRIPTED_PAIR,
-        livekit_startup_seconds=startup_seconds,
+        spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
     )
     assert assembled.conductor is not None
     conducted = await assembled.conductor.conduct(
@@ -3760,6 +3756,7 @@ async def test_startup_has_its_own_deadline_and_reports_the_missing_step(
     missing,
     caplog,
 ):
+    monkeypatch.setattr(livekit_room_module, "LIVEKIT_STARTUP_SECONDS", 0.1)
     stub = RoomStub(
         greeting="Front desk.",
         replies=["Noted."],
@@ -3778,7 +3775,6 @@ async def test_startup_has_its_own_deadline_and_reports_the_missing_step(
                 spans=spans,
                 scenario="One point.",
                 max_duration_seconds=600,
-                startup_seconds=0.1,
             ),
             3,
         )

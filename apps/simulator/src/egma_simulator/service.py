@@ -319,7 +319,6 @@ class RunningSimulation:
                     self._config.media, self._spec.platform.carrier
                 ),
                 on_provider_reference=self._register_provider_reference,
-                livekit_startup_seconds=self._config.livekit_startup_seconds,
             )
             self._assembled = assembled
             persona = Persona(

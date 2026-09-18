@@ -193,7 +193,6 @@ export function daytonaVoiceFleet(
         EGMA_SIMULATOR_CLAIMANT: name,
         EGMA_SIMULATOR_CONTROL_PLANE_URL: settings.controlPlaneUrl,
         EGMA_SIMULATOR_VAD_PROVIDER: "silero",
-        EGMA_SIMULATOR_LIVEKIT_STARTUP_SECONDS: String(settings.livekitStartupSeconds),
       },
       secrets: {
         EGMA_SIMULATOR_SERVICE_TOKEN: settings.serviceTokenSecret,

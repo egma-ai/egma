@@ -6,7 +6,6 @@ export type DaytonaVoiceFleetSettings = {
   readonly snapshot: string;
   readonly releaseSha: string;
   readonly ttlMinutes: number;
-  readonly livekitStartupSeconds: number;
   readonly serviceTokenSecret: string;
   readonly providerSecrets: Readonly<Record<string, string>>;
   readonly controlPlaneUrl: string;

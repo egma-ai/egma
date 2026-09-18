@@ -18,7 +18,6 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from ..background import BackgroundSound, soundfile_mixer
-from ..config import DEFAULT_LIVEKIT_STARTUP_SECONDS
 from ..media import MediaBackendError, VoiceMedia
 from ..media.livekit_room import LiveKitRoomBackend, RoomSettings
 from ..mock_tools import MockToolSeam
@@ -44,7 +43,6 @@ class LiveKitRoom:
         driver: Any = None,
         on_provider_reference: Callable[[str], Awaitable[None]] | None = None,
         background: BackgroundSound | None = None,
-        startup_seconds: float = DEFAULT_LIVEKIT_STARTUP_SECONDS,
     ) -> None:
         # A room is reached with this connection's URL and authority. It does
         # not use the deployment's phone media bridge or the platform carrier
@@ -75,7 +73,6 @@ class LiveKitRoom:
             mock_tools=mock_tools,
             job_dispatch_metadata=job_dispatch_metadata,
             on_provider_reference=on_provider_reference,
-            startup_seconds=startup_seconds,
         )
         self._media: VoiceMedia | None = None
         self._reference: str | None = None

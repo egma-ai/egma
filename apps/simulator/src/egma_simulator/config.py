@@ -46,8 +46,6 @@ VAD_PROVIDERS = ("scripted", "silero")
 an account or a network: ``silero`` ships inside the pinned pipecat wheel
 and downloads nothing, and ``scripted`` reads the test codec exactly."""
 
-DEFAULT_LIVEKIT_STARTUP_SECONDS = 60.0
-
 MEDIA_BACKENDS = ("scripted", "livekit")
 """How a phone call's audio may travel. Naming one is what makes a
 simulator able to dial at all, and what makes that backend's own
@@ -497,9 +495,6 @@ class SimulatorConfig:
     execution_deadline_seconds: float = 900.0
     """Whole claim-to-report allowance for one-shot mode."""
 
-    livekit_startup_seconds: float = DEFAULT_LIVEKIT_STARTUP_SECONDS
-    """Maximum wait for the LiveKit agent's SDK, session, and media readiness."""
-
     runtime: str | None = None
     """Hosted runtime marker sent on claims; absent for self-hosting."""
 
@@ -533,13 +528,6 @@ class SimulatorConfig:
 
     def __post_init__(self) -> None:
         """Require exactly one recording store: blob_dir or object_store."""
-        if (
-            not math.isfinite(self.livekit_startup_seconds)
-            or self.livekit_startup_seconds <= 0
-        ):
-            raise ValueError(
-                "EGMA_SIMULATOR_LIVEKIT_STARTUP_SECONDS must be finite and positive"
-            )
         if (self.blob_dir is None) == (self.object_store is None):
             raise ValueError(
                 "a simulator needs exactly one place to put recordings: "
@@ -668,10 +656,6 @@ class SimulatorConfig:
             modalities=modalities,
             execution_deadline_seconds=_seconds(
                 "EGMA_SIMULATOR_EXECUTION_DEADLINE_SECONDS", 900.0
-            ),
-            livekit_startup_seconds=_seconds(
-                "EGMA_SIMULATOR_LIVEKIT_STARTUP_SECONDS",
-                DEFAULT_LIVEKIT_STARTUP_SECONDS,
             ),
             runtime=_one_of("EGMA_SIMULATOR_RUNTIME", ("daytona",), "daytona")
             if _text("EGMA_SIMULATOR_RUNTIME") is not None

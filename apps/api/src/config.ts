@@ -352,11 +352,6 @@ function voiceFleetSettings(
     throw new Error("EGMA_RELEASE_SHA is required by EGMA_VOICE_FLEET_LAUNCHER");
   }
   const ttlMinutes = positiveWhole(environment, "DAYTONA_SANDBOX_TTL_MINUTES") ?? 30;
-  const startupValue = environment.EGMA_SIMULATOR_LIVEKIT_STARTUP_SECONDS?.trim();
-  const livekitStartupSeconds = startupValue ? Number(startupValue) : 60;
-  if (!Number.isFinite(livekitStartupSeconds) || livekitStartupSeconds <= 0) {
-    throw new Error("EGMA_SIMULATOR_LIVEKIT_STARTUP_SECONDS must be finite and positive");
-  }
   const providerSecrets = jsonStringMap(environment, "DAYTONA_SANDBOX_SECRETS");
   const missingProviderSecrets = REQUIRED_DAYTONA_PROVIDER_SECRET_ENVIRONMENT.filter(
     (variable) => providerSecrets[variable] === undefined,
@@ -378,7 +373,6 @@ function voiceFleetSettings(
     snapshot: required("DAYTONA_SNAPSHOT_ID"),
     releaseSha: context.releaseSha,
     ttlMinutes,
-    livekitStartupSeconds,
     serviceTokenSecret: required("DAYTONA_SERVICE_TOKEN_SECRET"),
     providerSecrets,
     controlPlaneUrl: context.baseUrl,

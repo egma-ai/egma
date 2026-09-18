@@ -222,21 +222,12 @@ describe("configuration", () => {
       snapshot: "snapshot-id",
       releaseSha: "a".repeat(40),
       ttlMinutes: 30,
-      livekitStartupSeconds: 60,
       providerSecrets: {
         EGMA_OPENAI_API_KEY: "openai-secret",
         EGMA_DEEPGRAM_API_KEY: "deepgram-secret",
         EGMA_CARTESIA_API_KEY: "cartesia-secret",
       },
     });
-    expect(loadConfig({
-      ...environment, EGMA_SIMULATOR_LIVEKIT_STARTUP_SECONDS: "120.5",
-    }).voiceFleet?.livekitStartupSeconds).toBe(120.5);
-    for (const value of ["0", "-1", "NaN", "Infinity", "invalid"]) {
-      expect(() => loadConfig({
-        ...environment, EGMA_SIMULATOR_LIVEKIT_STARTUP_SECONDS: value,
-      })).toThrow("EGMA_SIMULATOR_LIVEKIT_STARTUP_SECONDS");
-    }
   });
 
   it("rejects incomplete or malformed Daytona settings", () => {
