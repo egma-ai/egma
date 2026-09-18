@@ -1,6 +1,7 @@
 """Initial STT handshakes use the pinned Pipecat connection path, offline."""
 
 import asyncio
+import socket
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -48,7 +49,10 @@ def ear(monkeypatch, outcomes):
 
 @pytest.mark.parametrize(
     "fault",
-    [refused(502), refused(503), refused(504), TimeoutError(), ConnectionResetError()],
+    [
+        refused(502), refused(503), refused(504), TimeoutError(),
+        ConnectionResetError(), socket.gaierror(socket.EAI_AGAIN, "temporary DNS"),
+    ],
 )
 async def test_initial_connection_recovers_before_reporting_pipeline_error(
     monkeypatch,
@@ -75,6 +79,13 @@ async def test_permanent_refusals_are_not_retried(monkeypatch, status):
     assert connector.await_count == 1
     leg.push_error.assert_awaited_once()
     assert str(status) in leg.push_error.call_args.kwargs["error_msg"]
+
+
+async def test_unknown_hostname_is_not_retried(monkeypatch):
+    leg, connector = ear(monkeypatch, [socket.gaierror(socket.EAI_NONAME, "unknown")])
+    await leg._connect()
+    assert connector.await_count == 1
+    leg.push_error.assert_awaited_once()
 
 
 async def test_retries_stop_after_three_attempts(monkeypatch):

@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import math
+import socket
 import struct
 import sys
 import urllib.parse
@@ -1037,14 +1038,20 @@ def _openai_realtime_ears(
         async def _connect_attempts(self, uri: str, **kwargs: Any) -> Any:
             for attempt in range(1, OPENAI_STT_CONNECT_ATTEMPTS + 1):
                 try:
-                    socket = await super()._websocket_connect(uri, **kwargs)
-                except (InvalidStatus, TimeoutError, ConnectionError) as fault:
+                    connection = await super()._websocket_connect(uri, **kwargs)
+                except (
+                    InvalidStatus, TimeoutError, ConnectionError, socket.gaierror
+                ) as fault:
                     status = (
                         fault.response.status_code
                         if isinstance(fault, InvalidStatus)
                         else None
                     )
-                    retryable = status is None or status in {502, 503, 504}
+                    retryable = (
+                        fault.errno == socket.EAI_AGAIN
+                        if isinstance(fault, socket.gaierror)
+                        else status is None or status in {502, 503, 504}
+                    )
                     retry = retryable and attempt < OPENAI_STT_CONNECT_ATTEMPTS
                     log_event(
                         logger,
@@ -1067,7 +1074,7 @@ def _openai_realtime_ears(
                     )
                 else:
                     self._initial_connection_complete = True
-                    return socket
+                    return connection
 
         async def _handle_transcription_completed(self, evt: dict) -> None:
             """Keep what the provider says the transcription cost.
