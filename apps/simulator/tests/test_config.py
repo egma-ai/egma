@@ -27,12 +27,28 @@ def test_one_variable_is_enough(env, tmp_path):
     assert config.mode == "persistent"
     assert config.modalities is None
     assert config.execution_deadline_seconds == 900.0
+    assert config.livekit_startup_seconds == 60.0
     assert config.thread_pool_workers is None
     assert config.vad_provider == "scripted"
     assert config.service_token is None
     assert config.claimant.startswith("egma-simulator-")
     assert config.log_level == "INFO"
     assert config.blob_dir == tmp_path / "blobs"
+
+
+@pytest.mark.parametrize("value, expected", [("", 60.0), ("120", 120.0), ("0.5", 0.5)])
+def test_livekit_startup_deadline_is_configurable(env, value, expected):
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv("EGMA_SIMULATOR_LIVEKIT_STARTUP_SECONDS", value)
+    assert SimulatorConfig.from_env().livekit_startup_seconds == expected
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "NaN", "Infinity", "invalid"])
+def test_livekit_startup_deadline_rejects_unbounded_values(env, value):
+    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
+    env.setenv("EGMA_SIMULATOR_LIVEKIT_STARTUP_SECONDS", value)
+    with pytest.raises(ValueError, match="EGMA_SIMULATOR_LIVEKIT_STARTUP_SECONDS"):
+        SimulatorConfig.from_env()
 
 
 def test_empty_means_unset(env):

@@ -1218,6 +1218,7 @@ describe("one source of execution truth", () => {
       snapshot: "snapshot",
       releaseSha: "a".repeat(40),
       ttlMinutes: 30,
+      livekitStartupSeconds: 60,
       serviceTokenSecret: "service-token",
       providerSecrets: {
         EGMA_OPENAI_API_KEY: "openai-secret",

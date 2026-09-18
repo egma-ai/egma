@@ -40,6 +40,7 @@ from operator import attrgetter
 from typing import Any
 from urllib.parse import urlsplit
 
+from ..config import DEFAULT_LIVEKIT_STARTUP_SECONDS
 from ..contract import AGENT_NEVER_JOINED, ERROR
 from ..mock_tools import (
     HELLO_METHOD,
@@ -197,10 +198,6 @@ what is being waited for has already been sent.
 
 class _UnsafeEndpointAddress(OSError):
     """The token endpoint resolved to an address Egma must not reach."""
-
-
-LIVEKIT_STARTUP_SECONDS = 60.0
-"""Maximum wait for the dispatched agent's SDK, session, and media readiness."""
 
 
 class LiveKitStartup:
@@ -932,10 +929,12 @@ class RoomLifecycle:
         endpoint_resolver: Any = None,
         confirm_remote_end: Callable[[], Awaitable[bool]] | None = None,
         on_provider_reference: Callable[[str], Awaitable[None]] | None = None,
+        startup_seconds: float = DEFAULT_LIVEKIT_STARTUP_SECONDS,
     ) -> None:
         self._settings = settings
         self._mock_tools = mock_tools
         self._startup = LiveKitStartup(mock_tools)
+        self._startup_seconds = startup_seconds
         self._endpoint_resolver = endpoint_resolver
         self._confirm_remote_end = confirm_remote_end
         self._on_provider_reference = on_provider_reference
@@ -1036,19 +1035,21 @@ class RoomLifecycle:
         if room is None:
             raise MediaBackendError("an agent was waited for before a room")
         try:
-            async with asyncio.timeout(LIVEKIT_STARTUP_SECONDS):
+            async with asyncio.timeout(self._startup_seconds):
                 await self._startup.wait(room, require_audio=require_audio)
         except TimeoutError as timed_out:
             self._log_startup("failed", require_audio=require_audio)
             detail = (
-                self._nobody_came(LIVEKIT_STARTUP_SECONDS)
+                self._nobody_came(self._startup_seconds)
                 if self._startup.no_participant_seen
                 else self._startup.pending_detail(require_audio=require_audio)
             )
             raise MediaBackendError(
-                f"LiveKit startup timed out after {LIVEKIT_STARTUP_SECONDS:g}s: "
+                f"LiveKit startup timed out after {self._startup_seconds:g}s: "
                 f"{detail}",
-                ending=ERROR,
+                ending=(
+                    AGENT_NEVER_JOINED if self._startup.no_participant_seen else ERROR
+                ),
             ) from timed_out
         except MediaBackendError:
             self._log_startup("failed", require_audio=require_audio)
@@ -1072,14 +1073,18 @@ class RoomLifecycle:
 
     def startup_duration_failure(
         self, seconds: float, *, require_audio: bool = False
-    ) -> str:
+    ) -> MediaBackendError:
         self._log_startup("failed", require_audio=require_audio)
         if self._startup.no_participant_seen:
-            return (
+            return MediaBackendError(
                 f"{self._nobody_came(seconds)}; the simulation's configured "
-                f"{seconds:g}s duration expired during startup"
+                f"{seconds:g}s duration expired during startup",
+                ending=AGENT_NEVER_JOINED,
             )
-        return self._startup.duration_failure(seconds, require_audio=require_audio)
+        return MediaBackendError(
+            self._startup.duration_failure(seconds, require_audio=require_audio),
+            ending=ERROR,
+        )
 
     async def _way_in(self) -> WayIn:
         """A token and a room, however this connection comes by them.

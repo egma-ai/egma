@@ -13,7 +13,7 @@ from dataclasses import dataclass, field, replace
 from .background import BackgroundSound
 from .blob import BlobStore
 from .conductor import DEFAULT_CONDUCT, ConductParameters, VoiceConductor
-from .config import MediaSettings
+from .config import DEFAULT_LIVEKIT_STARTUP_SECONDS, MediaSettings
 from .live import LiveConductor
 from .mock_tools import MockToolSeam, ReportedToolCall
 from .model import ModelClient
@@ -69,6 +69,7 @@ def assemble(
     speech: SpeechProviders | None,
     backend_model: ModelClient | None = None,
     media: MediaSettings | None = None,
+    livekit_startup_seconds: float = DEFAULT_LIVEKIT_STARTUP_SECONDS,
     parameters: ConductParameters | None = None,
     on_provider_reference: Callable[[str], Awaitable[None]] | None = None,
 ) -> Assembled:
@@ -86,7 +87,10 @@ def assemble(
     # it and drops it, and the seam then says there is nothing to claim.
     mock_tools = MockToolSeam(spec.mock_tools)
     registration = (
-        {"on_provider_reference": on_provider_reference}
+        {
+            "on_provider_reference": on_provider_reference,
+            "startup_seconds": livekit_startup_seconds,
+        }
         if spec.connection_type == "livekit_room"
         else {}
     )

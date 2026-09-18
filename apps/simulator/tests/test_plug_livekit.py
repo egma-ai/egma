@@ -1474,6 +1474,7 @@ async def room_walk(
     controls: ConversationControls | None = None,
     built_by=livekit_spec,
     spans: list[tuple[str, str, int, int]] | None = None,
+    startup_seconds: float = 60.0,
     **overrides: object,
 ) -> tuple[Conducted, list[tuple[str, str]], list[tuple[str, float, int]], object]:
     """Build through the registry and service pipeline, selecting access through
@@ -1495,7 +1496,10 @@ async def room_walk(
         measures.append((measure, (ended - began) / 1_000_000, ended))
 
     assembled = assemble(
-        spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
+        spec,
+        blobs=FilesystemBlobStore(tmp_path),
+        speech=SCRIPTED_PAIR,
+        livekit_startup_seconds=startup_seconds,
     )
     assert assembled.conductor is not None
     conducted = await assembled.conductor.conduct(
@@ -2035,7 +2039,7 @@ async def test_a_worker_that_never_comes_is_never_the_agent_failing(
     # What the record would carry, asked the way the service asks it: a
     # failed simulation whose ending says nothing was tested, so there is
     # nothing for a grader to judge the agent on.
-    assert failed_ending(never_came.value) == ERROR
+    assert failed_ending(never_came.value) == "agent_never_joined"
     told = str(never_came.value)
     assert "no agent named" in told
     assert "configured 1s duration expired" in told
@@ -2044,7 +2048,7 @@ async def test_a_worker_that_never_comes_is_never_the_agent_failing(
     assert stub.deleted == [stub.rooms[0].name]
 
 
-async def test_a_worker_that_joins_and_publishes_nothing_never_joined_either(
+async def test_a_worker_that_joins_without_audio_has_a_startup_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """A participant with no audio is a worker that crashed on its first
@@ -3483,7 +3487,7 @@ async def test_the_agent_nobody_dispatched_is_the_endpoints_duty(
                 max_duration_seconds=1,
             )
 
-    assert failed_ending(never_came.value) == ERROR
+    assert failed_ending(never_came.value) == "agent_never_joined"
     told = str(never_came.value)
     assert "no agent named" in told
     assert "configured 1s duration expired" in told
@@ -3756,7 +3760,6 @@ async def test_startup_has_its_own_deadline_and_reports_the_missing_step(
     missing,
     caplog,
 ):
-    monkeypatch.setattr(livekit_room_module, "LIVEKIT_STARTUP_SECONDS", 0.1)
     stub = RoomStub(
         greeting="Front desk.",
         replies=["Noted."],
@@ -3775,6 +3778,7 @@ async def test_startup_has_its_own_deadline_and_reports_the_missing_step(
                 spans=spans,
                 scenario="One point.",
                 max_duration_seconds=600,
+                startup_seconds=0.1,
             ),
             3,
         )
@@ -3785,6 +3789,9 @@ async def test_startup_has_its_own_deadline_and_reports_the_missing_step(
         "agent": "front-desk",
     }
     assert expected[missing] in str(failure.value)
+    assert failure.value.ending == (
+        "agent_never_joined" if missing == "agent" else "error"
+    )
     assert not [span for span in spans if span[0] == "human"]
     assert stub.deleted == [stub.rooms[0].name]
     event = next(r for r in caplog.records if r.msg == "LiveKit startup failed")

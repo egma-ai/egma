@@ -20,6 +20,7 @@ const settings: DaytonaVoiceFleetSettings = {
   snapshot: "snapshot-exact",
   releaseSha: "a".repeat(40),
   ttlMinutes: 30,
+  livekitStartupSeconds: 120.5,
   serviceTokenSecret: "simulator-service-token-secret",
   providerSecrets: { EGMA_OPENAI_API_KEY: "platform-openai-secret" },
   controlPlaneUrl: "https://egma.example",
@@ -436,6 +437,7 @@ describe("Daytona voice fleet", () => {
       EGMA_SIMULATOR_MODE: "one-shot",
       EGMA_SIMULATOR_MODALITIES: "voice",
       EGMA_SIMULATOR_VAD_PROVIDER: "silero",
+      EGMA_SIMULATOR_LIVEKIT_STARTUP_SECONDS: "120.5",
     });
     expect(Object.keys(request.envVars)).not.toEqual(
       expect.arrayContaining([

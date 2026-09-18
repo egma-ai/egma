@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from ..config import DEFAULT_LIVEKIT_STARTUP_SECONDS
 from ..media import MediaBackendError
 from ..media.livekit_room import AgentTurn, LiveKitChatRoomBackend
 from ..mock_tools import MockToolSeam
@@ -73,6 +74,7 @@ class LiveKitChat:
         media: object = None,
         driver: Any = None,
         on_provider_reference: Callable[[str], Awaitable[None]] | None = None,
+        startup_seconds: float = DEFAULT_LIVEKIT_STARTUP_SECONDS,
     ) -> None:
         # LiveKit forwards test dispatch metadata but has no platform agent version
         # or rendered-variable interface. This chat connection uses no phone media.
@@ -92,6 +94,7 @@ class LiveKitChat:
             mock_tools=mock_tools,
             job_dispatch_metadata=job_dispatch_metadata,
             on_provider_reference=on_provider_reference,
+            startup_seconds=startup_seconds,
         )
         self._reference: str | None = None
 
@@ -134,9 +137,10 @@ class LiveKitChat:
         _typing_or_nothing(greeting)
         return greeting.text
 
-    def startup_duration_failure(self, seconds: float) -> str:
+    def startup_duration_failure(self, seconds: float) -> PlugError:
         """Explain why startup was still pending when the simulation ended."""
-        return self._backend.startup_duration_failure(seconds)
+        fault = self._backend.startup_duration_failure(seconds)
+        return PlugError(str(fault), ending=fault.ending)
 
     async def deliver(self, text: str) -> AgentReply:
         """Type the persona's turn in, and read the agent's answer back."""

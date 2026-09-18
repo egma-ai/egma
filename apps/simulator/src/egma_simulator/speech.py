@@ -21,6 +21,8 @@ from array import array
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from functools import cache
 from typing import Any
 
@@ -968,6 +970,34 @@ def _openai_mouth(
     return leg, spoken_with, (leg._client.close,)
 
 
+def _rate_limit_retry_delay(response: Any) -> float | None:
+    """Honor Retry-After for a rate limit, excluding an explicit exhausted quota."""
+    try:
+        body = json.loads(response.body)
+    except (ValueError, TypeError):
+        body = None
+    error = body.get("error") if isinstance(body, dict) else None
+    if isinstance(error, dict) and "insufficient_quota" in (
+        error.get("code"), error.get("type")
+    ):
+        return None
+    values = response.headers.get_all("Retry-After")
+    if len(values) != 1:
+        return None
+    value = values[0].strip()
+    try:
+        if value.isascii() and value.isdigit():
+            delay = float(value)
+        else:
+            date = parsedate_to_datetime(value)
+            if date.tzinfo is None:
+                return None
+            delay = max(0.0, (date - datetime.now(UTC)).total_seconds())
+    except (ValueError, TypeError, OverflowError):
+        return None
+    return delay if math.isfinite(delay) else None
+
+
 def _openai_realtime_ears(
     providers: SpeechProviders, *, language: str | None = None
 ) -> tuple[FrameProcessor, Callable[[], Awaitable[None]] | None]:
@@ -1026,7 +1056,9 @@ def _openai_realtime_ears(
             deadline = asyncio.timeout(budget)
             try:
                 async with deadline:
-                    return await self._connect_attempts(uri, **kwargs)
+                    return await self._connect_attempts(
+                        uri, deadline=deadline, **kwargs
+                    )
             except TimeoutError as fault:
                 if deadline.expired():
                     raise TimeoutError(
@@ -1035,7 +1067,10 @@ def _openai_realtime_ears(
                     ) from fault
                 raise
 
-        async def _connect_attempts(self, uri: str, **kwargs: Any) -> Any:
+        async def _connect_attempts(
+            self, uri: str, *, deadline: asyncio.Timeout, **kwargs: Any
+        ) -> Any:
+            rate_limit_retried = False
             for attempt in range(1, OPENAI_STT_CONNECT_ATTEMPTS + 1):
                 try:
                     connection = await super()._websocket_connect(uri, **kwargs)
@@ -1052,6 +1087,17 @@ def _openai_realtime_ears(
                         if isinstance(fault, socket.gaierror)
                         else status is None or status in {502, 503, 504}
                     )
+                    delay = OPENAI_STT_RETRY_DELAY_SECONDS * 2 ** (attempt - 1)
+                    if status == 429:
+                        requested_delay = _rate_limit_retry_delay(fault.response)
+                        retryable = (
+                            requested_delay is not None and not rate_limit_retried
+                        )
+                        if requested_delay is not None:
+                            delay = requested_delay
+                        rate_limit_retried = True
+                    remaining = deadline.when() - asyncio.get_running_loop().time()
+                    retryable = retryable and delay < remaining
                     retry = retryable and attempt < OPENAI_STT_CONNECT_ATTEMPTS
                     log_event(
                         logger,
@@ -1069,9 +1115,7 @@ def _openai_realtime_ears(
                     )
                     if not retry:
                         raise
-                    await asyncio.sleep(
-                        OPENAI_STT_RETRY_DELAY_SECONDS * 2 ** (attempt - 1)
-                    )
+                    await asyncio.sleep(delay)
                 else:
                     self._initial_connection_complete = True
                     return connection

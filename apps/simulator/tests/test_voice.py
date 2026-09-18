@@ -1195,8 +1195,10 @@ async def test_startup_duration_failure_wins_over_cleanup_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     class StartupFailure(_NeverAnswers):
-        def startup_duration_failure(self, seconds: float) -> str:
-            return f"the agent did not join within {seconds}s"
+        def startup_duration_failure(self, seconds: float) -> PlugError:
+            return PlugError(
+                f"the agent did not join within {seconds}s", ending="agent_never_joined"
+            )
 
     spec = spec_for(max_duration_seconds=7)
     controls = ConversationControls()
@@ -1214,10 +1216,11 @@ async def test_startup_duration_failure_wins_over_cleanup_failure(
         raise RuntimeError("cleanup failed too")
 
     monkeypatch.setattr(conductor, "close", close_then_fail)
-    with pytest.raises(PlugError, match="agent did not join within 7s"):
+    with pytest.raises(PlugError, match="agent did not join within 7s") as failure:
         await observe(
             conductor, Assembled(conductor=conductor), spec, controls=controls
         )
+    assert failure.value.ending == "agent_never_joined"
 
 
 async def stopped_while_opening(
