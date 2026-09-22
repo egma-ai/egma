@@ -72,12 +72,20 @@ own machine or container, so use a reachable address for a remote deployment.
     import { monitor } from "@egma/livekit";
     ```
 
-    Call the hook at the start of the job entrypoint, before starting the
-    `AgentSession`:
+    Create the session, then pass it to the hook before `ctx.connect` or
+    `session.start`:
 
     ```typescript
-    monitor(ctx);
+    const session = new voice.AgentSession({
+      // Your existing session options.
+    });
+    monitor(ctx, { session });
+    await ctx.connect();
+    await session.start({ agent, room: ctx.room });
     ```
+
+    Passing the session includes greetings and other `session.say()` messages
+    saved to the conversation history.
 
     Monitoring requires Node.js 22 or newer and `@livekit/agents>=1.5.5 <2`.
   </Tab>

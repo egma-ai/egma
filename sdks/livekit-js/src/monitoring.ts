@@ -1,15 +1,18 @@
-import { type JobContext } from "@livekit/agents";
+import { type JobContext, type voice } from "@livekit/agents";
 
-import { installExport, type ExportOptions } from "./export.ts";
+import { collectConversation, installExport, type ExportOptions } from "./export.ts";
 import { SIMULATION_ROOM_PREFIX } from "./room.ts";
 
 export const MONITOR_VERB = "egma.monitor";
 
-export type MonitorOptions = ExportOptions;
+export type MonitorOptions = ExportOptions & {
+  /** Capture committed say() messages as well as native model reply spans. */
+  readonly session?: voice.AgentSession;
+};
 
 /**
- * Export production spans to Egma. Call first in the job entrypoint, before
- * AgentSession.start. Repeated calls reuse the exporter; each job gets a final flush.
+ * Export production spans to Egma. Call before connecting or starting the session.
+ * Repeated calls reuse the exporter; each job gets a final flush.
  *
  * Throws Error for invalid settings, unsupported LiveKit telemetry APIs, an unsafe
  * tracer provider, or different settings in a second job. Export failures do not
@@ -32,6 +35,7 @@ export function monitor(ctx: JobContext, options: MonitorOptions = {}): void {
   }
 
   installExport(ctx, options, MONITOR_VERB, "");
+  if (options.session !== undefined) collectConversation(options.session);
 }
 
 export {

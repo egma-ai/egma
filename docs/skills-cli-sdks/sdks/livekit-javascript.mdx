@@ -62,6 +62,8 @@ await session.start({ agent, room: ctx.room });
 
 This is required for every voice and text simulation, even when the test has no mock tools. It sends the agent's traces to the simulation and lets egma answer the tools named under `## Mock tools` in the test. Other tools run their real implementations and are recorded too.
 
+It also records committed assistant messages, including greetings made with `session.say()`, when LiveKit does not include them in a native turn trace. Repeated phrases remain separate messages. Interrupted messages retain LiveKit's interruption flag and committed text; that text can include words that did not finish playing. Speech with `addToChatCtx: false` is not a committed conversation message.
+
 The SDK recognises simulation rooms by the `egma-sim-` prefix. In other rooms, `simulation` does nothing. Keep that prefix reserved for egma simulations.
 
 For text simulations, disable audio and transcription pacing in `egma-sim-chat-` rooms. Use this start call, keeping your normal voice settings in the other branch:
@@ -91,17 +93,17 @@ When the configured simulation ends, Egma finishes its pending output and leaves
 
 ### B. Production monitoring
 
-Call `monitor(ctx)` at the start of the job entrypoint, before `ctx.connect` and `session.start`:
+Call `monitor(ctx, { session })` after creating the session, before `ctx.connect` and `session.start`:
 
 ```typescript
 import { monitor } from "@egma/livekit";
 
-monitor(ctx);
+monitor(ctx, { session });
 ```
 
-It sends production traces to egma Monitoring. It does nothing in simulation rooms.
+It sends production traces and committed assistant messages to egma Monitoring. `monitor(ctx)` also works when you only need the native traces. The helper does nothing in simulation rooms.
 
-If you want both testing and monitoring, add both calls: `monitor(ctx)` at the start of the entrypoint, then `await simulation(agent, ctx, session)` before the session starts. Both use the same environment settings.
+If you want both testing and monitoring, call `monitor(ctx, { session })`, then `await simulation(agent, ctx, session)` before the session starts. Both use the same environment settings.
 
 Keep LiveKit's default of one job per process. The SDK's exporter and mock tools use process-wide state, so overlapping jobs cannot share a worker process.
 
@@ -127,7 +129,7 @@ const options = {
   },
 };
 
-monitor(ctx, options);
+monitor(ctx, { ...options, session });
 await simulation(agent, ctx, session, options);
 ```
 

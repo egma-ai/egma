@@ -21,7 +21,7 @@ answered by a test mock are marked **mocked**; other tools run their real
 implementation and their calls are also recorded. The voice recording keeps
 what the simulated caller heard.
 
-To capture real conversations, add `monitor(ctx)` as described in
+To capture real conversations, add the `monitor` hook as described in
 [Set up monitoring](/docs/integrations/livekit/monitor). Both hooks can stay in
 one worker: `simulation` acts only in simulation rooms, and `monitor` acts
 only in production rooms.

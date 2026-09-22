@@ -86,7 +86,7 @@ export async function integrate(
   ctx: JobContext,
   session: voice.AgentSession,
 ): Promise<void> {
-  monitor(ctx);
+  monitor(ctx, { session });
   await simulation(agent, ctx, session);
   const isEgmaChat =
     ctx.job.room?.name?.startsWith("egma-sim-chat-") ?? false;
@@ -406,6 +406,18 @@ if (hasMonitoringSeam) {
 `,
   );
   run(process.execPath, ["monitoring.mjs", liveKitVersion]);
+
+  const [major, minor, patch] = liveKitVersion.split(".").map(Number);
+  if (major > 1 || (major === 1 && (minor > 5 || (minor === 5 && patch >= 5)))) {
+    await writeFile(
+      path.join(directory, "conversation.mjs"),
+      await readFile(new URL("./conversation-compatibility-probe.mjs", import.meta.url), "utf8"),
+    );
+    run(process.execPath, ["conversation.mjs"]);
+    if (major > 1 || (major === 1 && minor >= 9)) {
+      run(process.execPath, ["conversation.mjs", "private"]);
+    }
+  }
 
   process.stdout.write(
     `packed @egma/livekit is compatible with @livekit/agents@${liveKitVersion}\n`,

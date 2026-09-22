@@ -574,6 +574,121 @@ describe.skipIf(!storage.available)("LiveKit evidence while the call is running"
 });
 
 describe.skipIf(!storage.available)(
+  "committed LiveKit conversation items",
+  () => {
+    it("shows a committed greeting before native turns without a production duplicate", async () => {
+      const room = "egma-sim-committed-greeting";
+      const landed = await aLandedSimulation(
+        acme,
+        "committed greeting",
+        room,
+        A_LIVEKIT_AGENT,
+      );
+      const wireTraceId = "223344556677889900aabbccddeeff11";
+      const rootSpanId = "2233445566778801";
+      const at = (seconds: number): string =>
+        String(
+          BigInt(CONVERSATION_STARTED_AT.getTime() + seconds * 1_000) *
+            1_000_000n,
+        );
+      const exported: OtlpExport = {
+        resourceSpans: [{
+          scopeSpans: [
+            {
+              scope: { name: "egma.livekit" },
+              spans: [{
+                traceId: wireTraceId,
+                spanId: "2233445566778802",
+                parentSpanId: rootSpanId,
+                name: "conversation_item",
+                startTimeUnixNano: at(1),
+                endTimeUnixNano: at(3),
+                attributes: [
+                  { key: "egma.conversation_item.id", value: { stringValue: "greeting-1" } },
+                  { key: "egma.conversation_item.role", value: { stringValue: "assistant" } },
+                  { key: "lk.pii.response.text", value: { stringValue: "Hello, I can book an appointment." } },
+                ],
+              }],
+            },
+            {
+              scope: { name: "livekit-agents", version: "1.9.0" },
+              spans: [
+                {
+                  traceId: wireTraceId,
+                  spanId: rootSpanId,
+                  name: "agent_session",
+                  startTimeUnixNano: at(0),
+                  endTimeUnixNano: at(10),
+                },
+                {
+                  traceId: wireTraceId,
+                  spanId: "2233445566778803",
+                  parentSpanId: rootSpanId,
+                  name: "user_turn",
+                  startTimeUnixNano: at(4),
+                  endTimeUnixNano: at(6),
+                  attributes: [{
+                    key: "lk.pii.user_transcript",
+                    value: { stringValue: "Is Tuesday available?" },
+                  }],
+                },
+                {
+                  traceId: wireTraceId,
+                  spanId: "2233445566778804",
+                  parentSpanId: rootSpanId,
+                  name: "agent_turn",
+                  startTimeUnixNano: at(7),
+                  endTimeUnixNano: at(9),
+                  attributes: [{
+                    key: "lk.pii.response.text",
+                    value: { stringValue: "Tuesday at ten is available." },
+                  }],
+                },
+              ],
+            },
+          ],
+        }],
+      };
+
+      const posted = await post(naming(exported, room), acmeKey);
+      expect(posted.statusCode, posted.body).toBe(200);
+      expect(posted.json()).toEqual({});
+      await api.drainEvidence();
+
+      const read = await api.app.inject({
+        method: "GET",
+        url: `/v1/simulations/${landed.simulationId}`,
+        headers: { authorization: `Bearer ${acmeKey}` },
+      });
+      expect(read.statusCode, read.body).toBe(200);
+      const body = read.json() as {
+        agentPovComplete: boolean;
+        transcript: { traceId: string; turns: DetailSpan[] } | null;
+      };
+      expect(body.agentPovComplete).toBe(true);
+      expect(body.transcript?.traceId).toBe(landed.traceId);
+      expect(body.transcript?.turns.map(({ text, pov }) => ({ text, pov }))).toEqual([
+        { text: "Hello, I can book an appointment.", pov: "agent" },
+        { text: "Is Tuesday available?", pov: "agent" },
+        { text: "Tuesday at ten is available.", pov: "agent" },
+      ]);
+
+      const production = await api.app.inject({
+        method: "GET",
+        url: `/v1/traces?from=${CONVERSATION_STARTED_AT.toISOString()}&to=${CONVERSATION_ENDED_AT.toISOString()}&source=production`,
+        headers: { authorization: `Bearer ${acmeKey}` },
+      });
+      expect(production.statusCode, production.body).toBe(200);
+      const productionIds = (production.json() as {
+        traces: { traceId: string }[];
+      }).traces.map(({ traceId }) => traceId);
+      expect(productionIds).not.toContain(wireTraceId);
+      expect(productionIds).not.toContain(landed.traceId);
+    });
+  },
+);
+
+describe.skipIf(!storage.available)(
   "a project-key export naming its simulation",
   () => {
     let landed: { simulationId: string; runId: string; traceId: string };
