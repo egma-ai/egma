@@ -49,6 +49,8 @@ const globex = {
 
 /** Acme was created on the 15th, so its month turns over on the 15th. */
 const ACME_ANCHOR = new Date("2026-01-15T08:00:00.000Z");
+/** Globex has its own fixed reset day, independent of when this test runs. */
+const GLOBEX_ANCHOR = new Date("2026-01-10T10:00:00.000Z");
 /** The instant every read below asks about: inside the September period. */
 const NOW = new Date("2026-09-20T12:00:00.000Z");
 const PERIOD_STARTED = new Date("2026-09-15T08:00:00.000Z");
@@ -265,7 +267,10 @@ async function conversation(
 
 beforeAll(async () => {
   database = await createConnectedDatabase("allowance_usage");
-  for (const who of [acme, globex]) {
+  for (const [who, anchor] of [
+    [acme, ACME_ANCHOR],
+    [globex, GLOBEX_ANCHOR],
+  ] as const) {
     await seedOrganization(database, who.organizationId, [
       { id: who.projectId, slug: `p${who.projectId.slice(-6).toLowerCase()}` },
       {
@@ -274,11 +279,11 @@ beforeAll(async () => {
       },
     ]);
     await seedUser(database, who.userId, `${who.userId}@example.test`);
+    await database.sql("update organization set created_at = $2 where id = $1", [
+      who.organizationId,
+      anchor,
+    ]);
   }
-  await database.sql("update organization set created_at = $2 where id = $1", [
-    acme.organizationId,
-    ACME_ANCHOR,
-  ]);
 });
 
 afterAll(async () => {
@@ -293,9 +298,8 @@ describe("a period with nothing in it", () => {
       web_call_minutes: 0,
       phone_minutes: 0,
     });
-    // Globex's own anchor is when the fixture made it, so only the shape is
-    // asserted here; Acme's dates are asserted exactly below.
-    expect(usage.resetsAt.getTime()).toBeGreaterThan(usage.startedAt.getTime());
+    expect(usage.startedAt).toEqual(new Date("2026-09-10T10:00:00.000Z"));
+    expect(usage.resetsAt).toEqual(new Date("2026-10-10T10:00:00.000Z"));
   });
 });
 
