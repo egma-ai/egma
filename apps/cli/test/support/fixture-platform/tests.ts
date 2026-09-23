@@ -6,7 +6,9 @@
 import {
   LARGEST_JOB_DISPATCH_METADATA_BYTES,
   LARGEST_MOCK_TOOL_ANSWER_BYTES,
+  LARGEST_PIPECAT_BODY_PARAMS_BYTES,
   RESERVED_ENV_VARIABLE_PREFIX,
+  RESERVED_PIPECAT_BODY_KEY,
 } from "@egma/db";
 
 import { given, newId, NOT_AUTHENTICATED, refuse, text, textList } from "./reading.ts";
@@ -223,8 +225,30 @@ const ENV_KEYS = [
   "pipecat_body_params",
 ] as const;
 
-/** The platform's limit on a serialized pipecat_body_params. */
-const LARGEST_PIPECAT_BODY_PARAMS_BYTES = 512 * 1024;
+/** The keys as the platform's refusals name them. */
+const ENV_KEYS_NAMED = "retell_dynamic_variables, job_dispatch_metadata and pipecat_body_params";
+
+/** A UTF-16 surrogate with no partner: valid JSON text with no UTF-8 form. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
+
+/** Every string a JSON value holds, keys included. */
+function* stringsIn(value: unknown): Generator<string> {
+  if (typeof value === "string") {
+    yield value;
+  } else if (Array.isArray(value)) {
+    for (const item of value) yield* stringsIn(item);
+  } else if (typeof value === "object" && value !== null) {
+    for (const [key, held] of Object.entries(value)) {
+      yield key;
+      yield* stringsIn(held);
+    }
+  }
+}
+
+function holdsLoneSurrogate(value: unknown): boolean {
+  for (const text of stringsIn(value)) if (LONE_SURROGATE.test(text)) return true;
+  return false;
+}
 
 /**
  * The env as it will be stored, or null where the test asks for nothing.
@@ -236,17 +260,13 @@ const LARGEST_PIPECAT_BODY_PARAMS_BYTES = 512 * 1024;
 function envFrom(value: unknown): FixtureEnv | null {
   if (value === undefined || value === null) return null;
   if (!isRecord(value)) {
-    throw new Unprocessable(
-      "env is an object with at most retell_dynamic_variables, " +
-        "job_dispatch_metadata and pipecat_body_params in it",
-    );
+    throw new Unprocessable(`env is an object with at most ${ENV_KEYS_NAMED} in it`);
   }
   for (const key of Object.keys(value)) {
     if ((ENV_KEYS as readonly string[]).includes(key)) continue;
     throw new Unprocessable(
       `env has no ${JSON.stringify(key)} in it. An env carries ` +
-        "retell_dynamic_variables, job_dispatch_metadata and " +
-        "pipecat_body_params, and nothing else.",
+        `${ENV_KEYS_NAMED}, and nothing else.`,
     );
   }
 
@@ -293,12 +313,20 @@ function envFrom(value: unknown): FixtureEnv | null {
           'which looks like {"tenant": "acme"}',
       );
     }
+    if (holdsLoneSurrogate(dispatch)) {
+      throw new Unprocessable(
+        "env.job_dispatch_metadata holds a lone surrogate, which is valid " +
+          "JSON but has no UTF-8 form, so LiveKit could not carry it on the " +
+          "dispatch. Send well-formed text.",
+      );
+    }
     const bytes = Buffer.byteLength(JSON.stringify(dispatch), "utf8");
     if (bytes > LARGEST_JOB_DISPATCH_METADATA_BYTES) {
       throw new Unprocessable(
         `env.job_dispatch_metadata is ${bytes} bytes once serialized, and ` +
           `LiveKit carries at most ${LARGEST_JOB_DISPATCH_METADATA_BYTES} on ` +
-          `the dispatch.`,
+          `the dispatch; hold a large value in your own store and put its id ` +
+          `here instead.`,
       );
     }
     if (Object.keys(dispatch).length > 0) env.job_dispatch_metadata = dispatch;
@@ -313,10 +341,18 @@ function envFrom(value: unknown): FixtureEnv | null {
           'looks like {"tenant": "acme"}',
       );
     }
-    if (Object.hasOwn(pipecatBody, "egma")) {
+    if (Object.hasOwn(pipecatBody, RESERVED_PIPECAT_BODY_KEY)) {
       throw new Unprocessable(
-        'env.pipecat_body_params holds the key "egma", which Egma keeps for ' +
-          "its own simulation marker in the start request. Name the key something else.",
+        `env.pipecat_body_params holds the key "${RESERVED_PIPECAT_BODY_KEY}", ` +
+          "which Egma keeps for its own simulation marker in the start request. " +
+          "Name the key something else.",
+      );
+    }
+    if (holdsLoneSurrogate(pipecatBody)) {
+      throw new Unprocessable(
+        "env.pipecat_body_params holds a lone surrogate, which is valid JSON " +
+          "but has no UTF-8 form, so the start request could not carry it. " +
+          "Send well-formed text.",
       );
     }
     const bytes = Buffer.byteLength(JSON.stringify(pipecatBody), "utf8");
