@@ -97,6 +97,51 @@ describe("what a browser is told about a simulation connection", () => {
     expect(phone?.credentialHelp).not.toBe("");
   });
 
+  it("keeps every help text to one short plain line, as the form rule demands", () => {
+    // A connect form carries one faint help line per field at most, and no
+    // paragraph under its title or a field (`DESIGN.md`). The CLI's option
+    // listing prints the same strings, so they stay plain text too.
+    const oneShortLine = (text: string) => {
+      expect(text.length).toBeLessThanOrEqual(60);
+      expect(text).not.toContain("\n");
+      expect(text).not.toContain("`");
+      // One sentence: nothing ends before the last full stop.
+      expect(text.slice(0, -1)).not.toMatch(/[.!?] /u);
+    };
+    for (const option of connectionOptionMetadata()) {
+      for (const field of option.fields) oneShortLine(field.help);
+      for (const field of option.credentialFields) oneShortLine(field.help);
+      if (option.credentialHelp !== "") oneShortLine(option.credentialHelp);
+      // A credential is explained by its own fields' lines. Only a shape that
+      // takes none says so in a line of its own.
+      if (option.credentialRule !== "forbidden") {
+        expect(option.credentialHelp).toBe("");
+      }
+    }
+
+    const helpOf = (accessVariant: string, key: string) => {
+      const option = connectionOptionMetadata().find(
+        (one) => one.accessVariant === accessVariant,
+      );
+      return (
+        option?.fields.find((field) => field.key === key)?.help ??
+        option?.credentialFields.find((field) => field.field === key)?.help
+      );
+    };
+    const endpoint = "livekit_room.customer_token_endpoint";
+    expect(helpOf(endpoint, "agentName")).toBe("As shown in LiveKit Cloud.");
+    expect(helpOf(endpoint, "tokenEndpoint")).toBe(
+      "Public HTTPS URL that returns a room token.",
+    );
+    expect(helpOf(endpoint, "headers")).toBe("Sent with every token request.");
+    expect(helpOf("livekit_room.project_credentials", "agentName")).toBe(
+      "As shown in LiveKit Cloud.",
+    );
+    expect(helpOf("retell_text_mode.api_key", "retellAgentId")).toBe(
+      "Starts with agent_.",
+    );
+  });
+
   it("marks every config key a form must demand, and lists no other", () => {
     const keyPair = connectionOptionMetadata().find(
       (one) => one.accessVariant === "livekit_room.project_credentials",

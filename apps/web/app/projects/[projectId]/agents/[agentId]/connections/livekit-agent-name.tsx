@@ -10,6 +10,8 @@ export type LiveKitAgentNameForm = {
   /** Whether this connection is one whose config holds a worker name at all. */
   readonly enabled: boolean;
   readonly agentName: string;
+  /** The registry's help line for the name, or empty when it has none. */
+  readonly agentNameHelp: string;
   /** Whether the edit can be saved: a LiveKit room needs the name. */
   readonly ready: boolean;
   /** The option with the name taken out, because it is drawn on its own. */
@@ -37,6 +39,9 @@ export function liveKitAgentNameForm({
   return {
     enabled,
     agentName,
+    agentNameHelp: enabled
+      ? (option?.fields.find((field) => field.key === "agentName")?.help ?? "")
+      : "",
     ready: !enabled || agentName.trim().length > 0,
     option:
       enabled && option !== undefined
@@ -51,16 +56,19 @@ export function liveKitAgentNameForm({
 /** The one LiveKit field an edit owns. */
 export function LiveKitAgentName({
   agentName,
+  help,
   onAgentNameChange,
 }: {
   readonly agentName: string;
+  /** The registry's one help line for the name; empty draws none. */
+  readonly help: string;
   readonly onAgentNameChange: (name: string) => void;
 }) {
   return (
     <Field
       label="LiveKit agent name*"
       htmlFor="livekit-agent-name"
-      hint="Enter the exact agent name registered by the deployed LiveKit worker. A different name prevents the agent from joining the room."
+      {...(help === "" ? {} : { hint: help })}
     >
       <Input
         id="livekit-agent-name"

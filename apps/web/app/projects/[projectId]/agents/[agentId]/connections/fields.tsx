@@ -12,6 +12,14 @@ import type {
 } from "../../../../../../lib/connection-options.ts";
 
 /**
+ * The registry's help for a field, drawn as the field's one faint help line.
+ * An empty help draws no line at all.
+ */
+function helpLine(help: string): string | undefined {
+  return help === "" ? undefined : help;
+}
+
+/**
  * Render controls from catalog field definitions. The server owns validation;
  * field kind selects the input shape without duplicating provider-specific rules.
  */
@@ -35,13 +43,13 @@ function ConfigControl({
   readonly onChange: (value: string) => void;
 }) {
   const id = `config-${field.key}`;
-  const helpId = `${id}-help`;
 
   return (
     <Field
       /* One label grammar everywhere (`DESIGN.md`): `*` on a mandatory field, nothing on the rest. */
       label={field.required ? `${field.label}*` : field.label}
       htmlFor={id}
+      hint={helpLine(field.help)}
     >
       {field.kind === "json" ? (
         <Textarea
@@ -50,7 +58,6 @@ function ConfigControl({
           rows={3}
           disabled={disabled}
           placeholder={placeholder}
-          aria-describedby={helpId}
           aria-required={field.required ? true : undefined}
           onChange={(event) => onChange(event.target.value)}
         />
@@ -61,14 +68,12 @@ function ConfigControl({
           disabled={disabled}
           placeholder={placeholder}
           type={field.kind === "url" ? "url" : "text"}
-          aria-describedby={helpId}
           aria-required={field.required ? true : undefined}
           autoComplete="off"
           spellCheck={false}
           onChange={(event) => onChange(event.target.value)}
         />
       )}
-      <Help id={helpId}>{field.help}</Help>
     </Field>
   );
 }
@@ -87,12 +92,12 @@ function CredentialControl({
   readonly onChange: (value: string) => void;
 }) {
   const id = `credential-${field.field}`;
-  const helpId = `${id}-help`;
 
   return (
     <Field
       label={field.required ? `${field.label}*` : field.label}
       htmlFor={id}
+      hint={helpLine(field.help)}
     >
       {field.kind === "json" ? (
         // A set of headers is secret in its values and ordinary in its names,
@@ -104,7 +109,6 @@ function CredentialControl({
           rows={3}
           disabled={disabled}
           placeholder={placeholder}
-          aria-describedby={helpId}
           aria-required={field.required ? true : undefined}
           onChange={(event) => onChange(event.target.value)}
         />
@@ -116,13 +120,11 @@ function CredentialControl({
           disabled={disabled}
           placeholder={placeholder}
           autoComplete="new-password"
-          aria-describedby={helpId}
           aria-required={field.required ? true : undefined}
           spellCheck={false}
           onChange={(event) => onChange(event.target.value)}
         />
       )}
-      <Help id={helpId}>{field.help}</Help>
     </Field>
   );
 }
@@ -184,7 +186,9 @@ export function ConnectionFields({
 
       {credentialsEditable && option.credentialRule !== "forbidden" ? (
         <>
-          <Help>{option.credentialHelp}</Help>
+          {option.credentialHelp === "" ? null : (
+            <Help>{option.credentialHelp}</Help>
+          )}
           {option.credentialFields.map((field) => (
             <CredentialControl
               key={field.field}

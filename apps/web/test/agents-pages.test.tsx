@@ -229,12 +229,12 @@ const TYPES = {
           label: "Retell agent ID",
           kind: "text",
           required: true,
-          help: "The agent's own identifier in Retell.",
+          help: "Starts with agent_.",
           afterCredentials: false,
         },
       ],
       credentialRule: "required",
-      credentialHelp: "Egma seals your key and never shows it again.",
+      credentialHelp: "",
       credentialFields: [
         {
           field: "apiKey",
@@ -261,12 +261,12 @@ const TYPES = {
           label: "Retell agent ID",
           kind: "text",
           required: true,
-          help: "The voice agent's own identifier in Retell.",
+          help: "Starts with agent_.",
           afterCredentials: false,
         },
       ],
       credentialRule: "required",
-      credentialHelp: "Egma seals your key and never shows it again.",
+      credentialHelp: "",
       credentialFields: [
         {
           field: "apiKey",
@@ -293,12 +293,12 @@ const TYPES = {
           label: "Retell agent ID",
           kind: "text",
           required: true,
-          help: "The voice agent's own identifier in Retell.",
+          help: "Starts with agent_.",
           afterCredentials: false,
         },
       ],
       credentialRule: "required",
-      credentialHelp: "Egma seals your key and never shows it again.",
+      credentialHelp: "",
       credentialFields: [
         {
           field: "apiKey",
@@ -357,12 +357,12 @@ const TYPES = {
           label: "LiveKit agent name",
           kind: "text",
           required: true,
-          help: "The exact name registered by the deployed LiveKit worker.",
+          help: "As shown in LiveKit Cloud.",
           afterCredentials: false,
         },
       ],
       credentialRule: "required",
-      credentialHelp: "Used to create the room.",
+      credentialHelp: "",
       credentialFields: [
         {
           field: "apiKey",
@@ -409,12 +409,12 @@ const TYPES = {
           label: "LiveKit agent name",
           kind: "text",
           required: true,
-          help: "The exact name registered by the deployed LiveKit worker.",
+          help: "As shown in LiveKit Cloud.",
           afterCredentials: false,
         },
       ],
       credentialRule: "required",
-      credentialHelp: "Used to create the room.",
+      credentialHelp: "",
       credentialFields: [
         {
           field: "apiKey",
@@ -448,7 +448,7 @@ const TYPES = {
           label: "Token endpoint",
           kind: "url",
           required: true,
-          help: "The service that creates room tokens.",
+          help: "Public HTTPS URL that returns a room token.",
           afterCredentials: false,
         },
         {
@@ -456,19 +456,19 @@ const TYPES = {
           label: "LiveKit agent name",
           kind: "text",
           required: true,
-          help: "The worker Egma asks your endpoint to dispatch.",
+          help: "As shown in LiveKit Cloud.",
           afterCredentials: false,
         },
       ],
       credentialRule: "required",
-      credentialHelp: "Auth headers for the endpoint.",
+      credentialHelp: "",
       credentialFields: [
         {
           field: "headers",
           label: "Auth headers",
           kind: "json",
           required: true,
-          help: "Header names and secret values sent to the endpoint.",
+          help: "Sent with every token request.",
         },
       ],
     },
@@ -488,7 +488,7 @@ const TYPES = {
           label: "Token endpoint",
           kind: "url",
           required: true,
-          help: "The service that creates room tokens.",
+          help: "Public HTTPS URL that returns a room token.",
           afterCredentials: false,
         },
         {
@@ -496,19 +496,19 @@ const TYPES = {
           label: "LiveKit agent name",
           kind: "text",
           required: true,
-          help: "The worker Egma asks your endpoint to dispatch.",
+          help: "As shown in LiveKit Cloud.",
           afterCredentials: false,
         },
       ],
       credentialRule: "required",
-      credentialHelp: "Auth headers for the endpoint.",
+      credentialHelp: "",
       credentialFields: [
         {
           field: "headers",
           label: "Auth headers",
           kind: "json",
           required: true,
-          help: "Header names and secret values sent to the endpoint.",
+          help: "Sent with every token request.",
         },
       ],
     },
@@ -1289,11 +1289,7 @@ describe("goal-first agent setup", () => {
     expect(
       screen.getByPlaceholderText("your-livekit-agent-name"),
     ).toBeDefined();
-    expect(
-      screen.getByText(
-        "Enter the exact agent name shown in your LiveKit Cloud dashboard.",
-      ),
-    ).toBeDefined();
+    expect(screen.getByText("As shown in LiveKit Cloud.")).toBeDefined();
     expect(
       screen.getByPlaceholderText("wss://your-project.livekit.cloud"),
     ).toBeDefined();
@@ -1361,7 +1357,14 @@ describe("goal-first agent setup", () => {
 
     fireEvent.click(screen.getByRole("radio", { name: "Retell" }));
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    expect(await screen.findByLabelText("Retell API key*")).toBeDefined();
+    const retellKey = await screen.findByLabelText("Retell API key*");
+    // The field's one help line says where the key comes from, and nothing
+    // stands under the title as a paragraph.
+    expect(
+      document.getElementById(retellKey.getAttribute("aria-describedby") ?? "")
+        ?.textContent,
+    ).toBe("Copied from your Retell dashboard.");
+    expect(screen.queryByText(/Egma uses it to find the agents/u)).toBeNull();
     expect(screen.queryByText("Retell · Connection")).toBeNull();
     expect(screen.queryByText("Your key stays private.")).toBeNull();
     expect(screen.queryByText(/Egma stores it securely/)).toBeNull();
@@ -2440,6 +2443,12 @@ describe("goal-first agent setup", () => {
       "phone:+14155550100",
     ]);
     expect(numbers.value).toBe("phone:+14155550100");
+    // One help line on the field, and no paragraph under the title or after it.
+    expect(
+      document.getElementById(numbers.getAttribute("aria-describedby") ?? "")
+        ?.textContent,
+    ).toBe("Routed to Front desk in Retell.");
+    expect(screen.queryByText(/does not change your Retell routing/u)).toBeNull();
   });
 
   it("uses one Retell key for Both and stores the selected voice route", async () => {
@@ -3063,11 +3072,19 @@ describe("goal-first agent setup", () => {
       }),
     ).toBeDefined();
     expect(screen.getByLabelText("LiveKit agent name*")).toBeDefined();
-    expect(
-      screen.getByText(
-        "Enter the exact agent name shown in your LiveKit Cloud dashboard.",
-      ),
-    ).toBeDefined();
+    // One short help line per field, each tied to its control, and no
+    // paragraph under the title or a field (`DESIGN.md`'s form rule).
+    for (const [label, help] of [
+      ["LiveKit agent name*", "As shown in LiveKit Cloud."],
+      ["Token endpoint*", "Public HTTPS URL that returns a room token."],
+      ["Auth headers*", "Sent with every token request."],
+    ] as const) {
+      const control = screen.getByLabelText(label);
+      const said = control.getAttribute("aria-describedby") ?? "";
+      expect(document.getElementById(said)?.textContent).toBe(help);
+    }
+    expect(screen.queryByText(/short-lived room token/u)).toBeNull();
+    expect(screen.queryByText(/header name to header value/u)).toBeNull();
     expect(screen.queryByLabelText("API secret*")).toBeNull();
     // The endpoint answers with the server, so the form never asks for it.
     expect(screen.queryByLabelText("WebSocket URL*")).toBeNull();
@@ -3079,11 +3096,6 @@ describe("goal-first agent setup", () => {
     ).toBeDefined();
     expect(
       screen.getByPlaceholderText('{"Authorization":"Bearer your-token"}'),
-    ).toBeDefined();
-    expect(
-      screen.getByText(
-        "Enter a non-empty JSON object that maps each header name to a non-empty string value.",
-      ),
     ).toBeDefined();
 
     fireEvent.change(screen.getByLabelText("LiveKit agent name*"), {

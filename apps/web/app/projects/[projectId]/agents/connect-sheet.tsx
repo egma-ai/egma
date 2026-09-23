@@ -1214,10 +1214,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       case "retell-key":
         return (
           <div className="flex flex-col gap-5">
-            <StepIntro
-              title="Connect your Retell account"
-              description="Enter your Retell API key. Egma uses it to find the agents in this account."
-            />
+            <StepIntro title="Connect your Retell account" />
             {storedRetellKey ? (
               <InfoBox>
                 {"This agent already holds its Retell key (ending " +
@@ -1225,7 +1222,11 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                   "). Egma will use it to find the account's agents."}
               </InfoBox>
             ) : (
-              <Field label="Retell API key*" htmlFor="retell-api-key">
+              <Field
+                label="Retell API key*"
+                htmlFor="retell-api-key"
+                hint="Copied from your Retell dashboard."
+              >
                 <Input
                   id="retell-api-key"
                   aria-required="true"
@@ -1347,15 +1348,16 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       case "retell-phone":
         return (
           <div className="flex flex-col gap-5">
-            <StepIntro
-              title="Choose a phone number"
-              description={
-                "Retell already routes these numbers to " +
+            <StepIntro title="Choose a phone number" />
+            <Field
+              label="Phone number*"
+              htmlFor="retell-phone-number"
+              hint={
+                "Routed to " +
                 String(selectedRetellAgent?.name ?? "this agent") +
-                ". Choose the one Egma should use."
+                " in Retell."
               }
-            />
-            <Field label="Phone number*" htmlFor="retell-phone-number">
+            >
               <Select
                 id="retell-phone-number"
                 aria-required="true"
@@ -1382,10 +1384,6 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                 ],
               ]}
             />
-            <Help>
-              Egma reads this number from Retell. It does not change your Retell
-              routing.
-            </Help>
           </div>
         );
       case "livekit-modality":
@@ -1728,7 +1726,9 @@ function LiveKitSimulationStep({
   readonly onAgentNameChange: (value: string) => void;
   readonly onDraftChange: (draft: Draft) => void;
 }) {
-  const endpoint = access === TOKEN_ENDPOINT;
+  const agentNameHelp = option?.fields.find(
+    (field) => field.key === "agentName",
+  )?.help;
   const presentedOption =
     option === undefined
       ? undefined
@@ -1748,13 +1748,6 @@ function LiveKitSimulationStep({
             if (field.field === "apiSecret") {
               return { ...field, label: "API secret" };
             }
-            if (field.field === "headers") {
-              return {
-                ...field,
-                help:
-                  "Enter a non-empty JSON object that maps each header name to a non-empty string value.",
-              };
-            }
             return field;
           }),
         };
@@ -1765,11 +1758,6 @@ function LiveKitSimulationStep({
           option === undefined
             ? "Connect LiveKit for simulations"
             : `Connect LiveKit ${modalityLabel(option.modality)} for simulations`
-        }
-        description={
-          endpoint
-            ? "For every simulation Egma asks your endpoint for a short-lived room token, your LiveKit server URL, and the dispatch of the worker named below."
-            : undefined
         }
       />
       {chooseAccess ? (
@@ -1790,7 +1778,9 @@ function LiveKitSimulationStep({
       <Field
         label="LiveKit agent name*"
         htmlFor="livekit-agent-name"
-        hint="Enter the exact agent name shown in your LiveKit Cloud dashboard."
+        {...(agentNameHelp === undefined || agentNameHelp === ""
+          ? {}
+          : { hint: agentNameHelp })}
       >
         <Input
           id="livekit-agent-name"

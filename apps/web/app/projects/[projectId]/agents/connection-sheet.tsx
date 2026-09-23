@@ -267,6 +267,7 @@ export function ConnectionSheet({
               !liveKitForm.enabled ? undefined : (
                 <LiveKitAgentName
                   agentName={liveKitForm.agentName}
+                  help={liveKitForm.agentNameHelp}
                   onAgentNameChange={(agentName) =>
                     setEditing((current) =>
                       current === null
