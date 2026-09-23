@@ -280,6 +280,8 @@ importers:
         specifier: ^4.1.8
         version: 4.4.3
 
+  fixtures/pipecat-e2e: {}
+
   packages/db:
     dependencies:
       '@clickhouse/client':

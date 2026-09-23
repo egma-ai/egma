@@ -1,0 +1,12 @@
+{
+  "name": "@egma/pipecat-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "pnpm's door into the Pipecat test bot: the real toolchain is uv. See README.md.",
+  "scripts": {
+    "lint": "uv run --frozen ruff check . && uv run --frozen ruff format --check .",
+    "bot": "uv run --frozen bot.py -t daily",
+    "client": "uv run --frozen tools/rtvi_client.py",
+    "deploy": "./deploy.sh"
+  }
+}
