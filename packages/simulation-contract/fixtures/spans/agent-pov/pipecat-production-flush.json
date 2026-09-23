@@ -1,0 +1,107 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "pipecat"
+            }
+          },
+          {
+            "key": "session.id",
+            "value": {
+              "stringValue": "8a1f0c33-pcc-session"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "egma.pipecat",
+            "version": "0.4.0"
+          },
+          "spans": [
+            {
+              "traceId": "7d2c9a0e5b1f4c3aa8e6b0d4c2f19e57",
+              "spanId": "cc10000000000002",
+              "parentSpanId": "cc10000000000001",
+              "name": "user_turn",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1790146807000000000",
+              "endTimeUnixNano": "1790146808000000000",
+              "attributes": [
+                {
+                  "key": "egma.turn.text",
+                  "value": {
+                    "stringValue": "What are your hours on Saturday?"
+                  }
+                }
+              ]
+            },
+            {
+              "traceId": "7d2c9a0e5b1f4c3aa8e6b0d4c2f19e57",
+              "spanId": "cc10000000000003",
+              "parentSpanId": "cc10000000000002",
+              "name": "user_speaking",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1790146807000000000",
+              "endTimeUnixNano": "1790146807900000000"
+            },
+            {
+              "traceId": "7d2c9a0e5b1f4c3aa8e6b0d4c2f19e57",
+              "spanId": "cc10000000000004",
+              "parentSpanId": "cc10000000000001",
+              "name": "agent_turn",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1790146808300000000",
+              "endTimeUnixNano": "1790146810200000000",
+              "attributes": [
+                {
+                  "key": "egma.turn.text",
+                  "value": {
+                    "stringValue": "We are open nine to one on Saturdays."
+                  }
+                }
+              ]
+            },
+            {
+              "traceId": "7d2c9a0e5b1f4c3aa8e6b0d4c2f19e57",
+              "spanId": "cc10000000000005",
+              "parentSpanId": "cc10000000000004",
+              "name": "agent_speaking",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1790146808600000000",
+              "endTimeUnixNano": "1790146810200000000"
+            },
+            {
+              "traceId": "7d2c9a0e5b1f4c3aa8e6b0d4c2f19e57",
+              "spanId": "cc10000000000001",
+              "parentSpanId": "",
+              "name": "pipecat_session",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1790146805000000000",
+              "endTimeUnixNano": "1790146811000000000",
+              "attributes": [
+                {
+                  "key": "egma.pipecat.version",
+                  "value": {
+                    "stringValue": "1.11.0"
+                  }
+                },
+                {
+                  "key": "egma.pipecat.transport",
+                  "value": {
+                    "stringValue": "daily"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

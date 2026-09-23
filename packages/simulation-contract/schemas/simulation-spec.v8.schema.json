@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:egma:simulation-contract:spec:v8",
+  "title": "Simulation spec (v8)",
+  "description": "Version 7 and the Pipecat Daily room. A daily_room work order is always version 8, so only a simulator that says it reads version 8 is handed one; every other work order stays version 7. Version 8 adds the test's Pipecat body params and holds a daily_room connection to its two access variants.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "simulation_id", "modality", "connection", "persona", "scenario", "limits", "models"],
+  "properties": {
+    "contract_version": { "const": 8 },
+    "simulation_id": { "$ref": "urn:egma:simulation-contract:spec:v7#/properties/simulation_id" },
+    "modality": { "$ref": "urn:egma:simulation-contract:spec:v7#/properties/modality" },
+    "connection": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/connection" },
+    "persona": { "$ref": "urn:egma:simulation-contract:spec:v7#/properties/persona" },
+    "scenario": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/scenario" },
+    "limits": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/limits" },
+    "agent_version": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/agent_version" },
+    "dynamic_variables": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/dynamic_variables" },
+    "job_dispatch_metadata": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/job_dispatch_metadata" },
+    "mock_tools": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/mock_tools" },
+    "platform": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/platform" },
+    "runtime": { "$ref": "urn:egma:simulation-contract:spec:v6#/properties/runtime" },
+    "models": { "$ref": "urn:egma:simulation-contract:spec:v7#/properties/models" },
+    "pipecat_body_params": {
+      "description": "The test's own JSON for a Pipecat bot, exactly as the test wrote it. The simulator merges it into the start request's body beside Egma's own egma key, which the bot reads at runner_args.body. The key egma is Egma's simulation marker and never appears here. Absent is the ordinary case.",
+      "type": "object",
+      "not": { "type": "object", "properties": { "egma": {} }, "required": ["egma"] }
+    }
+  },
+  "allOf": [
+    { "$ref": "urn:egma:simulation-contract:spec:v7#/allOf/0" },
+    { "$ref": "urn:egma:simulation-contract:spec:v7#/allOf/1" },
+    { "$ref": "urn:egma:simulation-contract:spec:v7#/allOf/2" },
+    { "$ref": "urn:egma:simulation-contract:spec:v7#/allOf/3" },
+    {
+      "description": "Pipecat body params belong to a Daily room and to nothing else.",
+      "if": {
+        "type": "object",
+        "properties": { "connection": { "type": "object", "properties": { "connection_type": { "const": "daily_room" } }, "required": ["connection_type"] } },
+        "required": ["connection"]
+      },
+      "then": true,
+      "else": { "not": { "type": "object", "properties": { "pipecat_body_params": {} }, "required": ["pipecat_body_params"] } }
+    },
+    {
+      "description": "A Daily room reaches a Pipecat bot through one of two access variants, each with its own config and credentials, and carries no other platform's start data.",
+      "if": {
+        "type": "object",
+        "properties": { "connection": { "type": "object", "properties": { "connection_type": { "const": "daily_room" } }, "required": ["connection_type"] } },
+        "required": ["connection"]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "connection": { "$ref": "#/$defs/daily_room_connection" }
+        },
+        "not": {
+          "anyOf": [
+            { "type": "object", "properties": { "job_dispatch_metadata": {} }, "required": ["job_dispatch_metadata"] },
+            { "type": "object", "properties": { "dynamic_variables": {} }, "required": ["dynamic_variables"] },
+            { "type": "object", "properties": { "agent_version": {} }, "required": ["agent_version"] },
+            { "type": "object", "properties": { "platform": {} }, "required": ["platform"] },
+            { "type": "object", "properties": { "runtime": {} }, "required": ["runtime"] }
+          ]
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "daily_room_connection": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "agent_platform": { "const": "pipecat" },
+            "access_variant": { "const": "daily_room.pipecat_cloud" },
+            "config": {
+              "description": "The Pipecat Cloud agent the start request names.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["agentName"],
+              "properties": { "agentName": { "type": "string", "minLength": 1 } }
+            },
+            "credentials": {
+              "description": "The Pipecat Cloud public API key the start request is authorised with.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["publicApiKey"],
+              "properties": { "publicApiKey": { "type": "string", "minLength": 1 } }
+            }
+          },
+          "required": ["agent_platform", "access_variant", "config", "credentials"]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "agent_platform": { "const": "pipecat" },
+            "access_variant": { "const": "daily_room.self_hosted" },
+            "config": {
+              "description": "The customer's own starter, which answers the same start request Pipecat Cloud does.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["startUrl"],
+              "properties": { "startUrl": { "type": "string", "minLength": 1 } }
+            },
+            "credentials": {
+              "description": "The auth headers sent with every start request: a JSON object of header name to value, written in a string exactly as it was sealed.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["headers"],
+              "properties": { "headers": { "type": "string", "minLength": 1 } }
+            }
+          },
+          "required": ["agent_platform", "access_variant", "config", "credentials"]
+        }
+      ]
+    }
+  }
+}
