@@ -3919,7 +3919,7 @@ describe("goal-first agent setup", () => {
       }),
     ).toBeDefined();
     const said = document.body.textContent ?? "";
-    expect(said).toContain("egma agent monitoring --agent agt_pipecat");
+    expect(said).toContain("egma agent monitoring setup --agent agt_pipecat --platform pipecat");
     expect(said).toContain("EGMA_API_KEY=<agent-monitoring-key>");
     expect(said).not.toContain("<your-project-api-key>");
   });
@@ -3939,7 +3939,7 @@ describe("goal-first agent setup", () => {
     );
     // A new agent in Both gets its real id with its simulation connection.
     expect(document.body.textContent).toContain(
-      "egma agent monitoring --agent <agent-id>",
+      "egma agent monitoring setup --agent <agent-id> --platform pipecat",
     );
     expect(document.body.textContent).not.toContain("egma agent register");
     // Python only: no language question.
