@@ -663,6 +663,10 @@ const VALUES = [
   "credentialRuleOf",
   "productLabelOf",
   "accessVariantById",
+  // Which platforms' agents push their own traces through the Egma SDK, read
+  // by the web's monitoring copy and the monitoring-key route alike.
+  "PLATFORMS_PUSHING_TRACES",
+  "platformPushesTraces",
   // A run's four machinery words, exported so the door that filters a history
   // by one refuses anything else by name rather than from a second copy of the
   // list.
