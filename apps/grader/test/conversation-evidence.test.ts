@@ -61,7 +61,7 @@ function trace(connectionType: string, turns: TraceSpan[], spans: TraceSpan[] = 
 const mock = span("persona", { kind: "tool", text: "", toolName: "book_appointment", toolResult: '{"mocked":true}' });
 
 describe("the evidence used to grade a platform simulation", () => {
-  it.each(["retell_web_call", "livekit_room"])("does not substitute simulator evidence when %s evidence is missing", (lane) => {
+  it.each(["retell_web_call", "livekit_room", "daily_room"])("does not substitute simulator evidence when %s evidence is missing", (lane) => {
     const conversation = conversationOfSimulation(simulation, trace(lane, [span("persona")], [mock]), lane);
     expect(conversation.transcript).toEqual([]);
     expect(conversation.events).toEqual([]);
@@ -98,6 +98,28 @@ describe("the evidence used to grade a platform simulation", () => {
       .toMatch(/platform.*incomplete/i);
   });
 
+  it("grades a Pipecat simulation from the agent's own record and tool calls", () => {
+    const actual = span("agent", {
+      kind: "tool",
+      text: "",
+      toolName: "check_calendar",
+      toolResult: '{"slots":[]}',
+    });
+    const conversation = conversationOfSimulation(
+      simulation,
+      trace("daily_room", [span("agent"), span("persona")], [actual, mock]),
+      "daily_room",
+    );
+
+    expect(conversation.nothingToJudgeBecause).toBeNull();
+    expect(conversation.transcript).toEqual([
+      expect.objectContaining({ text: "The platform's words" }),
+    ]);
+    expect(conversation.events).toEqual([
+      expect.objectContaining({ name: "check_calendar", result: '{"slots":[]}' }),
+    ]);
+  });
+
   it.each(["phone_number", "retell_text_mode"])("keeps the native record for %s", (lane) => {
     const conversation = conversationOfSimulation(simulation, trace(lane, [span("persona")]), lane);
     expect(conversation.nothingToJudgeBecause).toBeNull();
@@ -128,7 +150,7 @@ describe("the evidence used to grade a platform simulation", () => {
     },
   );
 
-  it.each(["retell_web_call", "livekit_room"])("uses the frozen %s lane when provider spans omit it", (lane) => {
+  it.each(["retell_web_call", "livekit_room", "daily_room"])("uses the frozen %s lane when provider spans omit it", (lane) => {
     const providerTrace = trace("", [span("agent"), span("persona")], [mock]);
     expect(conversationOfSimulation(simulation, providerTrace, lane).events).toEqual([]);
     const partial = { ...providerTrace, agentEvidenceComplete: false };
