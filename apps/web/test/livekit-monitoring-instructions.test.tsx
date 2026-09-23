@@ -108,9 +108,6 @@ describe("LiveKit monitoring instructions", () => {
     );
     expect(copy).toContain("const session = new voice.AgentSession(...);");
     expect(copy).toContain("monitor(ctx, { session });");
-    expect(copy).toContain(
-      "Passing the session includes greetings and other session.say() messages saved to the conversation history.",
-    );
     expect(copy).not.toContain("Make the hook the first line of entrypoint");
     expect(copy.indexOf("const session = new voice.AgentSession(...);")).toBeLessThan(
       copy.indexOf("monitor(ctx, { session });"),

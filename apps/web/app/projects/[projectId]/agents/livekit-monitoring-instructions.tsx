@@ -71,8 +71,7 @@ function WorkerSteps({
       {language === "javascript" ? (
         <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
           JavaScript monitoring needs LiveKit Agents 1.5.5 or newer in the 1.x
-          line. Passing the session includes greetings and other session.say()
-          messages saved to the conversation history.
+          line.
         </p>
       ) : null}
       <ol className="m-0 flex list-none flex-col gap-5 p-0">
