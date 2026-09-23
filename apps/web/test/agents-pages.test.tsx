@@ -513,6 +513,134 @@ const TYPES = {
       ],
     },
     {
+      agentPlatform: "pipecat",
+      agentPlatformLabel: "Pipecat",
+      connectionType: "daily_room",
+      accessVariant: "daily_room.pipecat_cloud",
+      accessVariantLabel: "Pipecat Cloud",
+      modality: "voice",
+      productLabel: "Pipecat Cloud",
+      topology: "hosted-broker",
+      simulatorAdapter: true,
+      fields: [
+        {
+          key: "agentName",
+          label: "Pipecat Cloud agent name",
+          kind: "text",
+          required: true,
+          help: "As in pcc-deploy.toml.",
+          afterCredentials: false,
+        },
+      ],
+      credentialRule: "required",
+      credentialHelp: "",
+      credentialFields: [
+        {
+          field: "publicApiKey",
+          label: "Public API key",
+          kind: "secret",
+          required: true,
+          help: "Starts with pk_.",
+        },
+      ],
+    },
+    {
+      agentPlatform: "pipecat",
+      agentPlatformLabel: "Pipecat",
+      connectionType: "daily_room",
+      accessVariant: "daily_room.pipecat_cloud",
+      accessVariantLabel: "Pipecat Cloud",
+      modality: "chat",
+      productLabel: "Pipecat Cloud chat",
+      topology: "hosted-broker",
+      simulatorAdapter: true,
+      fields: [
+        {
+          key: "agentName",
+          label: "Pipecat Cloud agent name",
+          kind: "text",
+          required: true,
+          help: "As in pcc-deploy.toml.",
+          afterCredentials: false,
+        },
+      ],
+      credentialRule: "required",
+      credentialHelp: "",
+      credentialFields: [
+        {
+          field: "publicApiKey",
+          label: "Public API key",
+          kind: "secret",
+          required: true,
+          help: "Starts with pk_.",
+        },
+      ],
+    },
+    {
+      agentPlatform: "pipecat",
+      agentPlatformLabel: "Pipecat",
+      connectionType: "daily_room",
+      accessVariant: "daily_room.self_hosted",
+      accessVariantLabel: "Self-hosted",
+      modality: "voice",
+      productLabel: "Pipecat self-hosted",
+      topology: "hosted-broker",
+      simulatorAdapter: true,
+      fields: [
+        {
+          key: "startUrl",
+          label: "Start URL",
+          kind: "url",
+          required: true,
+          help: "Public HTTPS URL of your bot starter.",
+          afterCredentials: false,
+        },
+      ],
+      credentialRule: "required",
+      credentialHelp: "",
+      credentialFields: [
+        {
+          field: "headers",
+          label: "Auth headers",
+          kind: "json",
+          required: true,
+          help: "Sent with every start request.",
+        },
+      ],
+    },
+    {
+      agentPlatform: "pipecat",
+      agentPlatformLabel: "Pipecat",
+      connectionType: "daily_room",
+      accessVariant: "daily_room.self_hosted",
+      accessVariantLabel: "Self-hosted",
+      modality: "chat",
+      productLabel: "Pipecat self-hosted chat",
+      topology: "hosted-broker",
+      simulatorAdapter: true,
+      fields: [
+        {
+          key: "startUrl",
+          label: "Start URL",
+          kind: "url",
+          required: true,
+          help: "Public HTTPS URL of your bot starter.",
+          afterCredentials: false,
+        },
+      ],
+      credentialRule: "required",
+      credentialHelp: "",
+      credentialFields: [
+        {
+          field: "headers",
+          label: "Auth headers",
+          kind: "json",
+          required: true,
+          help: "Sent with every start request.",
+        },
+      ],
+    },
+    {
       agentPlatform: null,
       agentPlatformLabel: "Any or unknown",
       connectionType: "phone_number",
@@ -1216,7 +1344,7 @@ describe("goal-first agent setup", () => {
 
   async function choose(
     goal: "Run simulations" | "Monitor production" | "Set up both",
-    platform: "Retell" | "LiveKit",
+    platform: "Retell" | "LiveKit" | "Pipecat",
   ): Promise<void> {
     fireEvent.click(
       await screen.findByRole("radio", { name: new RegExp(`^${goal}`) }),
@@ -3454,6 +3582,350 @@ describe("goal-first agent setup", () => {
       }),
     ).toBeDefined();
     expect(screen.getByLabelText("LiveKit agent name*")).toBeDefined();
+  });
+
+  const pipecatAgent = {
+    ...AGENT,
+    id: "agt_pipecat",
+    name: "lakeside-front-desk",
+    agentPlatform: "pipecat",
+  };
+
+  const pipecatConnection = {
+    ...CONNECTION,
+    id: "con_pipecat",
+    agentId: "agt_pipecat",
+    name: "pipecat_voice-1",
+    agentPlatform: "pipecat",
+    connectionType: "daily_room",
+    accessVariant: "daily_room.pipecat_cloud",
+    productLabel: "Pipecat Cloud",
+    modality: "voice",
+    topology: "hosted-broker",
+    environment: null,
+    config: { agentName: "lakeside-front-desk" },
+  };
+
+  /** The help line tied to a control, as a screen reader hears it. */
+  function helpOf(label: string): string | null | undefined {
+    const control = screen.getByLabelText(label);
+    return document.getElementById(control.getAttribute("aria-describedby") ?? "")
+      ?.textContent;
+  }
+
+  it("walks Pipecat through LiveKit's steps and saves a Pipecat Cloud connection on a Pipecat agent", async () => {
+    sheetAnswers({
+      "/v1/agents": [
+        { status: 200, body: { agents: [], nextPageToken: null } },
+        {
+          status: 201,
+          body: {
+            result: "created",
+            agent: pipecatAgent,
+            connection: pipecatConnection,
+          },
+        },
+        {
+          status: 200,
+          body: {
+            agents: [{ ...pipecatAgent, connections: [pipecatConnection] }],
+            nextPageToken: null,
+          },
+        },
+      ],
+    });
+    render(<RegisterAgentPage />);
+    await choose("Run simulations", "Pipecat");
+
+    // The modality question, in Pipecat's words: chat needs no more code.
+    expect(
+      await screen.findByRole("heading", {
+        name: "How do you want to test this agent?",
+      }),
+    ).toBeDefined();
+    expect(screen.getAllByRole("radio").map((one) => one.textContent)).toEqual([
+      "VoiceEgma speaks to the agent in the room, the way a person reaches it. Your bot needs the Egma testing hook, which Egma shows you next.",
+      "ChatEgma types to the agent and reads its words back. Fast, and it spends nothing on speech. The same testing hook covers it.",
+    ]);
+    fireEvent.click(screen.getByRole("radio", { name: /^Voice/u }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Connect Pipecat Voice for simulations",
+      }),
+    ).toBeDefined();
+    const connectionType = screen.getByRole("combobox", {
+      name: "Connection type*",
+    }) as HTMLSelectElement;
+    expect(connectionType.value).toBe("daily_room.pipecat_cloud");
+    expect(connectionType.getAttribute("aria-required")).toBe("true");
+    expect([...connectionType.options].map((one) => one.text)).toEqual([
+      "Pipecat Cloud",
+      "Self-hosted",
+    ]);
+    // The registry's two fields, one short help line each, and nothing else:
+    // no paragraph under the title, no name field beside the agent name.
+    expect(helpOf("Pipecat Cloud agent name*")).toBe("As in pcc-deploy.toml.");
+    expect(helpOf("Public API key*")).toBe("Starts with pk_.");
+    expect(
+      screen.getByLabelText("Pipecat Cloud agent name*").getAttribute("aria-required"),
+    ).toBe("true");
+    expect(
+      (screen.getByLabelText("Public API key*") as HTMLInputElement).type,
+    ).toBe("password");
+    expect(screen.queryByLabelText("Agent name*")).toBeNull();
+    expect(screen.queryByLabelText("LiveKit agent name*")).toBeNull();
+    const form = screen.getByRole("dialog", { name: "Set up an agent" });
+    expect(
+      [...form.querySelectorAll("p")].filter(
+        (line) => (line.textContent ?? "").split(". ").length > 1,
+      ),
+    ).toEqual([]);
+
+    const save = screen.getByRole("button", { name: "Continue to testing" });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Pipecat Cloud agent name*"), {
+      target: { value: " lakeside-front-desk " },
+    });
+    fireEvent.change(screen.getByLabelText("Public API key*"), {
+      target: { value: "pk_lakeside_public_key" },
+    });
+    fireEvent.click(save);
+
+    await waitFor(() => {
+      expect(
+        sent.some((call) => call.url === "/v1/agents?projectId=prj_1"),
+      ).toBe(true);
+    });
+    // The agent is registered on Pipecat, named after its Pipecat Cloud agent.
+    expect(
+      sent.find((call) => call.url === "/v1/agents?projectId=prj_1")?.body,
+    ).toEqual({
+      name: "lakeside-front-desk",
+      agentPlatform: "pipecat",
+      connection: {
+        agentPlatform: "pipecat",
+        connectionType: "daily_room",
+        accessVariant: "daily_room.pipecat_cloud",
+        modality: "voice",
+        config: { agentName: "lakeside-front-desk" },
+        credentials: { publicApiKey: "pk_lakeside_public_key" },
+      },
+    });
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Add simulation testing to your Pipecat agent",
+      }),
+    ).toBeDefined();
+    const said = document.body.textContent ?? "";
+    expect(said).toContain('pip install "egma[pipecat]"');
+    expect(said).toContain("await simulation(worker, runner_args)");
+    expect(said).toContain("min_agents = 1");
+    // The connection is saved, so the only way on is out: no Back across it.
+    expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Return to agents" })).toBeDefined();
+  });
+
+  it("asks a new self-hosted Pipecat agent for its name, its start URL and its headers", async () => {
+    const selfHosted = {
+      ...pipecatConnection,
+      accessVariant: "daily_room.self_hosted",
+      productLabel: "Pipecat self-hosted",
+      config: { startUrl: "https://bots.lakeside.example/start" },
+    };
+    sheetAnswers({
+      "/v1/agents": [
+        { status: 200, body: { agents: [], nextPageToken: null } },
+        {
+          status: 201,
+          body: {
+            result: "created",
+            agent: { ...pipecatAgent, name: "Lakeside bot" },
+            connection: selfHosted,
+          },
+        },
+        {
+          status: 200,
+          body: { agents: [], nextPageToken: null },
+        },
+      ],
+    });
+    render(<RegisterAgentPage />);
+    await choose("Run simulations", "Pipecat");
+    fireEvent.click(await screen.findByRole("radio", { name: /^Chat/u }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    fireEvent.change(
+      await screen.findByRole("combobox", { name: "Connection type*" }),
+      { target: { value: "daily_room.self_hosted" } },
+    );
+    expect(
+      screen.getByRole("heading", { name: "Connect Pipecat Chat for simulations" }),
+    ).toBeDefined();
+    expect(screen.queryByLabelText("Pipecat Cloud agent name*")).toBeNull();
+    expect(screen.queryByLabelText("Public API key*")).toBeNull();
+    // No field of a self-hosted connection names the agent, so a new one is
+    // asked for its name first, with no help line under it.
+    const name = screen.getByLabelText("Agent name*");
+    expect(name.getAttribute("aria-required")).toBe("true");
+    expect(name.getAttribute("aria-describedby")).toBeNull();
+    expect(helpOf("Start URL*")).toBe("Public HTTPS URL of your bot starter.");
+    expect(helpOf("Auth headers*")).toBe("Sent with every start request.");
+    expect(
+      screen.getByPlaceholderText("https://bots.example.com/start"),
+    ).toBeDefined();
+    expect(
+      screen.getByPlaceholderText('{"Authorization":"Bearer your-token"}'),
+    ).toBeDefined();
+
+    fireEvent.change(screen.getByLabelText("Start URL*"), {
+      target: { value: "https://bots.lakeside.example/start" },
+    });
+    fireEvent.change(screen.getByLabelText("Auth headers*"), {
+      target: { value: '{"Authorization":"Bearer lakeside"}' },
+    });
+    const save = screen.getByRole("button", { name: "Continue to testing" });
+    // Nothing is saved until the agent has a name.
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(name, { target: { value: "Lakeside bot" } });
+    fireEvent.click(save);
+
+    await waitFor(() => {
+      expect(
+        sent.some((call) => call.url === "/v1/agents?projectId=prj_1"),
+      ).toBe(true);
+    });
+    expect(
+      sent.find((call) => call.url === "/v1/agents?projectId=prj_1")?.body,
+    ).toEqual({
+      name: "Lakeside bot",
+      agentPlatform: "pipecat",
+      connection: {
+        agentPlatform: "pipecat",
+        connectionType: "daily_room",
+        accessVariant: "daily_room.self_hosted",
+        modality: "chat",
+        config: { startUrl: "https://bots.lakeside.example/start" },
+        credentials: { headers: '{"Authorization":"Bearer lakeside"}' },
+      },
+    });
+    expect(
+      await screen.findByRole("heading", {
+        name: "Add simulation testing to your Pipecat agent",
+      }),
+    ).toBeDefined();
+    expect(document.body.textContent).toContain(
+      "egma agent dev --agent agt_pipecat --port 7860",
+    );
+  });
+
+  it("adds a self-hosted connection to an existing Pipecat agent without asking its name", async () => {
+    routed.params = { ...routed.params, agentId: "agt_pipecat" };
+    sheetAnswers({
+      "/v1/agents": {
+        status: 200,
+        body: {
+          agents: [{ ...pipecatAgent, connections: [pipecatConnection] }],
+          nextPageToken: null,
+        },
+      },
+      "/v1/agents/agt_pipecat/connections": {
+        status: 201,
+        body: {
+          connection: {
+            ...pipecatConnection,
+            id: "con_self",
+            accessVariant: "daily_room.self_hosted",
+            config: { startUrl: "https://bots.lakeside.example/start" },
+          },
+        },
+      },
+    });
+    render(<NewConnectionPage />);
+
+    // The agent is Pipecat's, so Pipecat is the only platform offered.
+    fireEvent.click(
+      await screen.findByRole("radio", { name: /^Run simulations/u }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    expect(
+      await screen.findByRole("heading", { name: "Choose your agent platform" }),
+    ).toBeDefined();
+    expect(screen.getAllByRole("radio").map((one) => one.textContent)).toEqual([
+      "Pipecat",
+    ]);
+    fireEvent.click(screen.getByRole("radio", { name: "Pipecat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(await screen.findByRole("radio", { name: /^Voice/u }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.change(
+      await screen.findByRole("combobox", { name: "Connection type*" }),
+      { target: { value: "daily_room.self_hosted" } },
+    );
+    expect(screen.queryByLabelText("Agent name*")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Start URL*"), {
+      target: { value: "https://bots.lakeside.example/start" },
+    });
+    fireEvent.change(screen.getByLabelText("Auth headers*"), {
+      target: { value: '{"Authorization":"Bearer lakeside"}' },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Continue to testing" }));
+
+    await waitFor(() => {
+      expect(
+        sent.some(
+          (call) =>
+            call.url === "/v1/agents/agt_pipecat/connections?projectId=prj_1",
+        ),
+      ).toBe(true);
+    });
+    expect(
+      sent.find(
+        (call) => call.url === "/v1/agents/agt_pipecat/connections?projectId=prj_1",
+      )?.body,
+    ).toEqual({
+      agentPlatform: "pipecat",
+      connectionType: "daily_room",
+      accessVariant: "daily_room.self_hosted",
+      modality: "voice",
+      config: { startUrl: "https://bots.lakeside.example/start" },
+      credentials: { headers: '{"Authorization":"Bearer lakeside"}' },
+    });
+  });
+
+  it("shows Pipecat monitoring as code, and carries Both on into the simulation walk", async () => {
+    sheetAnswers();
+    render(<RegisterAgentPage />);
+    await choose("Set up both", "Pipecat");
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Add monitoring to your Pipecat agent",
+      }),
+    ).toBeDefined();
+    expect(document.body.textContent).toContain(
+      "await monitor(worker, runner_args)",
+    );
+    // Python only: no language question.
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.queryByRole("button", { name: /start monitoring/iu })).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Continue to simulation" }),
+    );
+    expect(
+      await screen.findByRole("heading", {
+        name: "How do you want to test this agent?",
+      }),
+    ).toBeDefined();
+    // Back from the modality returns to the monitoring screen, as on LiveKit.
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(
+      await screen.findByRole("heading", {
+        name: "Add monitoring to your Pipecat agent",
+      }),
+    ).toBeDefined();
   });
 });
 

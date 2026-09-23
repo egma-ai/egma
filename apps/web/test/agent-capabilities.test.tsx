@@ -95,6 +95,43 @@ function connection({
   };
 }
 
+/** A Pipecat connection, on Pipecat Cloud or behind a self-hosted starter. */
+function pipecatConnection({
+  id,
+  agentId,
+  modality = "voice",
+  config,
+}: {
+  readonly id: string;
+  readonly agentId: string;
+  readonly modality?: "voice" | "chat";
+  readonly config:
+    | { readonly agentName: string }
+    | { readonly startUrl: string };
+}) {
+  const cloud = "agentName" in config;
+  return {
+    id,
+    agentId,
+    projectId: "prj_1",
+    name: `pipecat_${modality}-${id}`,
+    agentPlatform: "pipecat",
+    connectionType: "daily_room",
+    accessVariant: cloud ? "daily_room.pipecat_cloud" : "daily_room.self_hosted",
+    modality,
+    productLabel: cloud ? "Pipecat Cloud" : "Pipecat self-hosted",
+    topology: "hosted-broker",
+    environment: null,
+    config,
+    credentialPresent: true,
+    credentialsHint: cloud ? "WXYZ" : "Authorization",
+    archived: false,
+    archivedAt: null,
+    createdAt: MOMENT,
+    updatedAt: MOMENT,
+  };
+}
+
 function agent({
   id,
   name,
@@ -109,14 +146,17 @@ function agent({
 }: {
   readonly id: string;
   readonly name: string;
-  readonly agentPlatform?: "retell" | "livekit";
+  readonly agentPlatform?: "retell" | "livekit" | "pipecat";
   readonly retellModality?: "voice" | "chat" | null;
   readonly platformAgentId?: string | null;
   readonly monitoringApiKeyHint?: string | null;
   readonly monitoringConfigured?: boolean;
   readonly pullProductionCalls?: boolean;
   readonly lastReceivedAt?: string | null;
-  readonly connections?: readonly ReturnType<typeof connection>[];
+  readonly connections?: readonly (
+    | ReturnType<typeof connection>
+    | ReturnType<typeof pipecatConnection>
+  )[];
 }) {
   return {
     id,
@@ -420,6 +460,126 @@ describe("Paper agent capability states", () => {
       "/projects/prj_1/agents?sheet=connect&agent=agt_livekit&goal=monitoring&platform=livekit",
     );
     expect(detail.queryByRole("button", { name: /(?:start|stop) monitoring/i })).toBeNull();
+  });
+
+  /** A Pipecat Cloud agent with its voice and chat connections. */
+  function pipecatCloudAgent() {
+    return agent({
+      id: "agt_pipecat",
+      name: "lakeside-front-desk",
+      agentPlatform: "pipecat",
+      connections: [
+        pipecatConnection({
+          id: "con_voice",
+          agentId: "agt_pipecat",
+          config: { agentName: "lakeside-front-desk" },
+        }),
+        pipecatConnection({
+          id: "con_chat",
+          agentId: "agt_pipecat",
+          modality: "chat",
+          config: { agentName: "lakeside-front-desk" },
+        }),
+      ],
+    });
+  }
+
+  it("lists a Pipecat agent with LiveKit's code-configured monitoring state", async () => {
+    answerWith(pipecatCloudAgent());
+
+    render(<AgentsPage />);
+    await screen.findByRole("table", { name: "Agents in this project" });
+    const row = within(rowNamed("lakeside-front-desk"));
+    expect(row.getByText("Pipecat")).toBeDefined();
+    expect(row.getByText("Configured")).toBeDefined();
+    expect(row.getByText("Configured via code").className).toContain(
+      "text-warning",
+    );
+  });
+
+  it("shows a Pipecat Cloud agent with LiveKit's shape: two facts and code-configured monitoring", async () => {
+    routed.search = "?sheet=agent&agent=agt_pipecat";
+    answerWith(pipecatCloudAgent());
+
+    render(<AgentsPage />);
+    const detail = within(
+      await screen.findByRole("dialog", { name: "lakeside-front-desk" }),
+    );
+    const agentFact = detail.getByText("Pipecat agent").parentElement;
+    expect(agentFact?.textContent).toBe("Pipecat agentlakeside-front-desk");
+    expect(agentFact?.querySelector("dd")?.className).toContain("font-mono");
+    expect(detail.getByText("Start URL").parentElement?.textContent).toBe(
+      "Start URLPipecat Cloud",
+    );
+    expect(detail.getByText("Configured via code")).toBeDefined();
+    expect(
+      detail.getByRole("link", { name: "View setup instructions" }).getAttribute("href"),
+    ).toBe(
+      "/projects/prj_1/agents?sheet=connect&agent=agt_pipecat&goal=monitoring&platform=pipecat",
+    );
+    expect(detail.queryByRole("link", { name: "Set up simulation" })).toBeNull();
+    expect(detail.queryByRole("button", { name: /(?:start|stop) monitoring/i })).toBeNull();
+  });
+
+  it("names a self-hosted Pipecat agent by its own name and its start URL", async () => {
+    routed.search = "?sheet=agent&agent=agt_self";
+    answerWith(
+      agent({
+        id: "agt_self",
+        name: "Lakeside bot",
+        agentPlatform: "pipecat",
+        connections: [
+          pipecatConnection({
+            id: "con_self",
+            agentId: "agt_self",
+            config: { startUrl: "https://bots.lakeside.example/start" },
+          }),
+        ],
+      }),
+    );
+
+    render(<AgentsPage />);
+    const detail = within(
+      await screen.findByRole("dialog", { name: "Lakeside bot" }),
+    );
+    expect(detail.getByText("Pipecat agent").parentElement?.textContent).toBe(
+      "Pipecat agentLakeside bot",
+    );
+    expect(detail.getByText("Start URL").parentElement?.textContent).toBe(
+      "Start URLhttps://bots.lakeside.example/start",
+    );
+  });
+
+  it("says a Pipecat agent reached both ways varies by connection", async () => {
+    routed.search = "?sheet=agent&agent=agt_both";
+    answerWith(
+      agent({
+        id: "agt_both",
+        name: "Front desk",
+        agentPlatform: "pipecat",
+        connections: [
+          pipecatConnection({
+            id: "con_cloud",
+            agentId: "agt_both",
+            config: { agentName: "front-desk" },
+          }),
+          pipecatConnection({
+            id: "con_dev",
+            agentId: "agt_both",
+            config: { startUrl: "https://quiet-river.trycloudflare.com/start" },
+          }),
+        ],
+      }),
+    );
+
+    render(<AgentsPage />);
+    const detail = within(await screen.findByRole("dialog", { name: "Front desk" }));
+    expect(detail.getByText("Pipecat agent").parentElement?.textContent).toBe(
+      "Pipecat agentfront-desk",
+    );
+    expect(detail.getByText("Start URL").parentElement?.textContent).toBe(
+      "Start URLVaries by connection",
+    );
   });
 
   it("stops Retell monitoring from details and changes the durable state", async () => {
