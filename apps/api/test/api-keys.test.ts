@@ -254,7 +254,7 @@ describe("minting a key", () => {
     expect(another.statusCode).toBe(201);
   });
 
-  it("accepts only a living LiveKit agent for a reserved worker key", async () => {
+  it("accepts only a living agent of this project for a reserved monitoring key", async () => {
     api = await createApi("keys_monitoring_agent_validation");
     const ada = await signUp("ada@acme.example", "Acme");
     const agentId = await liveKitAgent(ada, "appointment agent");
