@@ -1,0 +1,38 @@
+# The Flows variant of the bot: a declarative flow, as in Pipecat's Flows
+# quickstart. The tools live in flow_handlers.py; every transition lives here.
+initial_node: front_desk
+nodes:
+  front_desk:
+    role_message: >-
+      You are the phone assistant of Maple Street Hardware. Your replies are
+      spoken aloud, so use short plain sentences with no lists, emojis or
+      formatting.
+    task_messages:
+      - role: developer
+        content: >-
+          Greet the caller in one short sentence as Maple Street Hardware and
+          ask how you can help. When the caller asks when the store is open on
+          a day, call check_store_hours for that day. When the caller wants to
+          return an item, call begin_return.
+    functions:
+      - name: check_store_hours
+      - name: begin_return
+        transition_to: returns
+  returns:
+    task_messages:
+      - role: developer
+        content: >-
+          Ask the caller for the order number and the reason for the return,
+          then call record_return with both.
+    functions:
+      - name: record_return
+        transition_to: wrap_up
+  wrap_up:
+    task_messages:
+      - role: developer
+        content: >-
+          Read the caller the return label from the record_return result,
+          thank them and say goodbye. Call check_store_hours only if the caller
+          asks about opening hours.
+    functions:
+      - name: check_store_hours

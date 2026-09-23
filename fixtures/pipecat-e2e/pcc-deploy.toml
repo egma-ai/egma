@@ -1,0 +1,7 @@
+agent_name = "egma-e2e"
+secret_set = "egma-e2e-secrets"
+agent_profile = "agent-1x"
+region = "us-west"
+
+[scaling]
+min_agents = 1

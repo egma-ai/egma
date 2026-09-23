@@ -100,8 +100,29 @@ describe("folder config format 4", () => {
     ].join("\n");
 
     expect(() => parseConfig(document, "config.yaml")).toThrow(
-      /must contain platform retell or livekit/i,
+      /must contain platform retell, livekit or pipecat\./i,
     );
+  });
+
+  it("reads a stored Pipecat agent and writes it back", () => {
+    const document = [
+      "format: 4",
+      "platform:",
+      "project:",
+      "agents:",
+      `  - id: ${FIRST_AGENT_ID}`,
+      "    name: Front desk",
+      "    platform: pipecat",
+      "    connections: []",
+      "",
+    ].join("\n");
+
+    const config = parseConfig(document, "config.yaml");
+    expect(config.agents).toEqual([
+      { id: FIRST_AGENT_ID, name: "Front desk", platform: "pipecat", connections: [] },
+    ]);
+    expect(serializeConfig(config)).toContain("    platform: pipecat\n");
+    expect(parseConfig(serializeConfig(config), "config.yaml")).toEqual(config);
   });
 
   it("refuses a provider Agent ID on a stored agent", () => {

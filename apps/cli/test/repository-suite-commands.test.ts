@@ -612,6 +612,7 @@ describe("complete repository suite commands", () => {
         env: {
           retell_dynamic_variables: { caller_name: "Margaret" },
           job_dispatch_metadata: { tenant: "acme" },
+          pipecat_body_params: { tenant: "lakeside", caller: { plan: "gold" } },
         },
       });
       await createEgmaFolder({
@@ -637,6 +638,7 @@ describe("complete repository suite commands", () => {
       expect(file.test.env).toEqual({
         retell_dynamic_variables: { caller_name: "Margaret" },
         job_dispatch_metadata: { tenant: "acme" },
+        pipecat_body_params: { tenant: "lakeside", caller: { plan: "gold" } },
       });
       const afterPull = await readFile(file.file, "utf8");
       expect(afterPull).toContain("## Mock tools");

@@ -361,7 +361,7 @@ def test_a_tunnel_start_url_that_cannot_be_reached_names_egma_agent_dev():
         "Egma could not reach your start URL "
         "(quiet-river-1234.trycloudflare.com/start): HTTP 530. If this start URL "
         "belongs to egma agent dev, run `egma agent dev` on the machine that "
-        "runs your bot."
+        "runs your bot, and start your bot's development runner there."
     )
     assert refused.value.ending == NOT_ANSWERED
 

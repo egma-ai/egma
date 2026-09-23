@@ -78,6 +78,8 @@ const APPROVED_FLAGS = [
       "--livekit-url",
       "--modality",
       "--name",
+      "--pipecat-agent-name",
+      "--pipecat-start-url",
       "--retell-agent",
       "--retell-phone-number",
     ],
@@ -90,6 +92,7 @@ const APPROVED_FLAGS = [
     words: ["agent", "monitoring", "stop"],
     flags: ["--agent", "--cwd", "--platform"],
   },
+  { words: ["agent", "dev"], flags: ["--agent", "--cwd", "--port"] },
   { words: ["project", "api-key", "create"], flags: ["--cwd", "--name"] },
   { words: ["persona", "list"], flags: ["--cwd"] },
   { words: ["persona", "settings"], flags: ["--cwd"] },
@@ -179,7 +182,7 @@ describe("the skills-first public command surface", () => {
 
     expect(result).toMatchObject({ code: 0, stderr: "" });
     expect(result.stdout).toContain(
-      "--platform <retell|livekit>  Agent platform whose Connection choices to list.",
+      "--platform <retell|livekit|pipecat> Agent platform whose Connection choices to list.",
     );
   });
 
@@ -331,6 +334,7 @@ describe("the skills-first public command surface", () => {
     ["agent", "connection", "add", "--agent", "agt_one"],
     ["agent", "monitoring", "setup", "--agent", "agt_one", "--platform", "retell"],
     ["agent", "monitoring", "stop", "--agent", "agt_one", "--platform", "retell"],
+    ["agent", "dev", "--agent", "agt_one", "--port", "7860"],
     ["project", "api-key", "create", "--name", "Local agent"],
     ["persona", "list"],
     ["suite", "create", "release", "--name", "Release"],
