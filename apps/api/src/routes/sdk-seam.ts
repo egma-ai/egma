@@ -1,20 +1,19 @@
 import {
-  authorize,
   LARGEST_MOCK_TOOL_ANSWER_BYTES,
-  NotPermittedError,
   recordAgentReport,
   resolveLiveDailyRoomSimulation,
   type AgentReportTool,
   type AuthContext,
   type LiveDailyRoomSimulation,
   type NewAgentReport,
-  type TestMockTool,
 } from "@egma/db";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import { resolveApiKeyRequest } from "../auth/api-key.ts";
+import { traceWritingOf } from "../auth/trace-writing.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { tooManyRequests } from "../http/refusals.ts";
+import { taggedMockAnswer } from "../mock-answers.ts";
 import { toIdentityRequest } from "../http/web-handler.ts";
 import { platformEvent } from "../platform-log.ts";
 
@@ -245,10 +244,6 @@ function helloRefusal(
   return undefined;
 }
 
-/** The tagged answer, byte for byte as the in-room seam serves it. */
-function taggedAnswer(mock: TestMockTool): string {
-  return JSON.stringify("error" in mock ? { error: mock.error } : { answer: mock.answer ?? null });
-}
 
 type ToolCall = {
   readonly providerReference: string;
@@ -297,24 +292,18 @@ export async function sdkSeamRoutes(
     if (key === null) return reply.code(401).send(NOT_AUTHENTICATED);
 
     const { auth } = key;
-    if (auth.projectId === undefined) {
-      return reply.code(403).send(NOT_PROJECT_SCOPED);
-    }
-    try {
-      authorize(auth, "ingest_traces", {
-        organizationId: auth.organizationId,
-        projectId: auth.projectId,
-      });
-    } catch (cause) {
-      if (cause instanceof NotPermittedError) {
-        return reply.code(403).send(CANNOT_SEND_TRACES);
-      }
-      throw cause;
-    }
-
+    // The budget is spent before the key's scope is checked, as at the OTLP
+    // door the same SDK exports to.
     const verdict = options.rateLimit.reached(auth.organizationId);
     if (!verdict.allowed) {
       return tooManyRequests(reply, verdict.retryAfterSeconds);
+    }
+
+    const writing = traceWritingOf(auth);
+    if (!writing.may) {
+      return reply
+        .code(403)
+        .send(writing.why === "no_project" ? NOT_PROJECT_SCOPED : CANNOT_SEND_TRACES);
     }
 
     request.sdkAuth = auth;
@@ -412,7 +401,8 @@ export async function sdkSeamRoutes(
       );
     }
 
-    const answer = taggedAnswer(mock);
+    // The tagged answer, byte for byte as the in-room seam serves it.
+    const answer = JSON.stringify(taggedMockAnswer(mock));
     const bytes = utf8Bytes(answer);
     if (bytes > LARGEST_MOCK_TOOL_ANSWER_BYTES) {
       return refused(
