@@ -5,10 +5,16 @@
  * for a random `https://<words>.trycloudflare.com` address, then connects to
  * Cloudflare's edge. Both facts arrive only as log lines, so this module reads
  * the child's output: the address line, the metrics-server line, and the first
- * "Registered tunnel connection" line, which is when the address works.
+ * "Registered tunnel connection" line.
+ *
+ * The new hostname reaches trycloudflare.com's authoritative DNS a few seconds
+ * after that line, and the zone caches a miss for 30 minutes. A resolver that
+ * asks too early keeps failing that long, so a tunnel is handed out only once
+ * every authoritative server answers for its hostname.
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
+import { promises as dnsPromises, Resolver } from "node:dns";
 import { constants } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import path from "node:path";
@@ -82,6 +88,11 @@ export type TunnelExit = {
 export type RunningTunnel = {
   /** `https://<words>.trycloudflare.com`, fixed for this process's life. */
   readonly url: string;
+  /**
+   * False when the hostname was not yet in public DNS when the wait ended;
+   * absent when nothing checked.
+   */
+  readonly inPublicDns?: boolean;
   /** Settles when the process ends, for any reason. */
   readonly exited: Promise<TunnelExit>;
   /**
@@ -122,7 +133,70 @@ export type CloudflaredOptions = {
   readonly stopTimeoutMs?: number;
   readonly spawnImpl?: typeof spawn;
   readonly fetchImpl?: typeof fetch;
+  /** Waits until the hostname is in public DNS. Default: ask the authoritative servers. */
+  readonly waitForDns?: (hostname: string, signal: AbortSignal) => Promise<boolean>;
 };
+
+/** How long a new hostname may take to reach every authoritative server. */
+const DNS_WAIT_MS = 30_000;
+/** Extra time after the last authoritative answer, for other points of presence. */
+const DNS_SETTLE_MS = 2_000;
+
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function answersFrom(server: string, hostname: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const resolver = new Resolver({ timeout: 1_500, tries: 1 });
+    resolver.setServers([server]);
+    resolver.resolve4(hostname, (error, addresses) => resolve(error === null && addresses.length > 0));
+  });
+}
+
+/**
+ * Wait until every authoritative server of the hostname's zone answers for it.
+ * Only authoritative servers are asked, so no caching resolver learns a miss.
+ * Without them (no network to find them), wait a fixed time instead.
+ */
+export async function waitUntilInPublicDns(hostname: string, signal: AbortSignal): Promise<boolean> {
+  const zone = hostname.split(".").slice(-2).join(".");
+  let servers: string[] = [];
+  try {
+    const names = await dnsPromises.resolveNs(zone);
+    for (const name of names) servers.push(...(await dnsPromises.resolve4(name)));
+  } catch {
+    servers = [];
+  }
+  if (servers.length === 0) {
+    await pause(10_000, signal);
+    return false;
+  }
+  const until = Date.now() + DNS_WAIT_MS;
+  while (!signal.aborted && Date.now() < until) {
+    const answers = await Promise.all(servers.map((server) => answersFrom(server, hostname)));
+    if (answers.every(Boolean)) {
+      await pause(DNS_SETTLE_MS, signal);
+      return true;
+    }
+    await pause(250, signal);
+  }
+  return false;
+}
 
 /** Children still running, killed outright if this process exits first. */
 const living = new Set<ChildProcess>();
@@ -162,6 +236,7 @@ export function cloudflaredLauncher(
   const stopTimeoutMs = options.stopTimeoutMs ?? 5_000;
   const spawnImpl = options.spawnImpl ?? spawn;
   const fetchImpl = options.fetchImpl ?? fetch;
+  const waitForDns = options.waitForDns ?? waitUntilInPublicDns;
 
   return (start) =>
     new Promise<RunningTunnel>((resolve, reject) => {
@@ -213,13 +288,26 @@ export function cloudflaredLauncher(
         reject(new TunnelStartFailure(message, [...lastLines]));
       };
 
-      const succeed = (url: string): void => {
-        if (settled) return;
-        settled = true;
+      let registered = false;
+      const succeed = async (url: string): Promise<void> => {
+        if (settled || registered) return;
+        registered = true;
         clearTimeout(timer);
+        const inPublicDns = await waitForDns(new URL(url).hostname, start.signal);
+        if (settled) return;
+        if (start.signal.aborted) {
+          onAbort();
+          return;
+        }
+        if (exit !== null) {
+          fail(`cloudflared stopped before the tunnel was ready (${exitWords(exit)}).`);
+          return;
+        }
+        settled = true;
         start.signal.removeEventListener("abort", onAbort);
         resolve({
           url,
+          inPublicDns,
           exited,
           stop,
           async connected() {
@@ -272,7 +360,7 @@ export function cloudflaredLauncher(
           }
           return;
         }
-        if (saysRegistered(clean)) succeed(address);
+        if (saysRegistered(clean)) void succeed(address);
       };
 
       for (const stream of [child.stdout, child.stderr]) {

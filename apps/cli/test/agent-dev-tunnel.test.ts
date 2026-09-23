@@ -74,6 +74,9 @@ if (mode === "silent") {
 let folder: string;
 let script: string;
 
+/** Tests never ask real DNS about the stand-in's hostname. */
+const IN_DNS = async (): Promise<boolean> => true;
+
 beforeAll(async () => {
   folder = await mkdtemp(path.join(tmpdir(), "egma-fake-cloudflared-"));
   script = path.join(folder, "fake-cloudflared.mjs");
@@ -144,7 +147,7 @@ describe("finding cloudflared", () => {
 describe("the cloudflared launcher", () => {
   it("runs `cloudflared tunnel --no-autoupdate --url <target>` and resolves once connected", async () => {
     const fake = await fakeCloudflared("normal");
-    const tunnel = await cloudflaredLauncher(fake.executable)({
+    const tunnel = await cloudflaredLauncher(fake.executable, { waitForDns: IN_DNS })({
       target: "http://127.0.0.1:43210",
       signal: new AbortController().signal,
     });
@@ -163,9 +166,36 @@ describe("the cloudflared launcher", () => {
     expect(await tunnel.connected()).toBe(false);
   });
 
+  it("hands the tunnel out only after its hostname is in public DNS", async () => {
+    const fake = await fakeCloudflared("normal");
+    let answer: (inDns: boolean) => void = () => undefined;
+    const asked: string[] = [];
+    const starting = cloudflaredLauncher(fake.executable, {
+      waitForDns: (hostname) => {
+        asked.push(hostname);
+        return new Promise<boolean>((resolve) => {
+          answer = resolve;
+        });
+      },
+    })({ target: "http://127.0.0.1:43210", signal: new AbortController().signal });
+    let handedOut = false;
+    void starting.then(() => {
+      handedOut = true;
+    });
+
+    await vi.waitFor(() => expect(asked).toEqual(["street-concert-contracting-decor.trycloudflare.com"]));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(handedOut).toBe(false);
+    answer(false);
+    const tunnel = await starting;
+    stops.push(() => tunnel.stop());
+
+    expect(tunnel.inPublicDns).toBe(false);
+  });
+
   it("reports a dropped edge connection through /ready", async () => {
     const fake = await fakeCloudflared("drop");
-    const tunnel = await cloudflaredLauncher(fake.executable)({
+    const tunnel = await cloudflaredLauncher(fake.executable, { waitForDns: IN_DNS })({
       target: "http://127.0.0.1:43210",
       signal: new AbortController().signal,
     });
@@ -176,7 +206,7 @@ describe("the cloudflared launcher", () => {
 
   it("fails with cloudflared's last lines when it ends before the tunnel is ready", async () => {
     const fake = await fakeCloudflared("die");
-    const failure = await cloudflaredLauncher(fake.executable)({
+    const failure = await cloudflaredLauncher(fake.executable, { waitForDns: IN_DNS })({
       target: "http://127.0.0.1:43210",
       signal: new AbortController().signal,
     }).catch((error: unknown) => error);
@@ -191,7 +221,7 @@ describe("the cloudflared launcher", () => {
   it("gives up when no address arrives in time, and ends the process", async () => {
     const fake = await fakeCloudflared("silent");
     const started = Date.now();
-    const failure = await cloudflaredLauncher(fake.executable, { addressTimeoutMs: 800, stopTimeoutMs: 500 })({
+    const failure = await cloudflaredLauncher(fake.executable, { addressTimeoutMs: 800, stopTimeoutMs: 500, waitForDns: IN_DNS })({
       target: "http://127.0.0.1:43210",
       signal: new AbortController().signal,
     }).catch((error: unknown) => error);
@@ -203,7 +233,7 @@ describe("the cloudflared launcher", () => {
 
   it("gives up when the address never connects to Cloudflare", async () => {
     const fake = await fakeCloudflared("no-edge");
-    const failure = await cloudflaredLauncher(fake.executable, { connectTimeoutMs: 800 })({
+    const failure = await cloudflaredLauncher(fake.executable, { connectTimeoutMs: 800, waitForDns: IN_DNS })({
       target: "http://127.0.0.1:43210",
       signal: new AbortController().signal,
     }).catch((error: unknown) => error);
@@ -215,7 +245,7 @@ describe("the cloudflared launcher", () => {
 
   it("ends a process that ignores SIGTERM with SIGKILL", async () => {
     const fake = await fakeCloudflared("stubborn");
-    const tunnel = await cloudflaredLauncher(fake.executable, { stopTimeoutMs: 300 })({
+    const tunnel = await cloudflaredLauncher(fake.executable, { stopTimeoutMs: 300, waitForDns: IN_DNS })({
       target: "http://127.0.0.1:43210",
       signal: new AbortController().signal,
     });
@@ -228,7 +258,7 @@ describe("the cloudflared launcher", () => {
   it("ends the process and rejects when the command is stopped while it starts", async () => {
     const fake = await fakeCloudflared("silent");
     const controller = new AbortController();
-    const starting = cloudflaredLauncher(fake.executable, { stopTimeoutMs: 300 })({
+    const starting = cloudflaredLauncher(fake.executable, { stopTimeoutMs: 300, waitForDns: IN_DNS })({
       target: "http://127.0.0.1:43210",
       signal: controller.signal,
     });

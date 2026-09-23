@@ -377,6 +377,14 @@ function sayGuardEvent(port: number, out: (line: string) => void): (event: Guard
   };
 }
 
+function sayDnsLag(options: AgentDevCommandOptions, tunnel: RunningTunnel): void {
+  if (tunnel.inPublicDns === false) {
+    options.fail(
+      "The tunnel's address is not in public DNS yet. A simulation that starts in the next few minutes can fail to reach it.",
+    );
+  }
+}
+
 function sayTunnelFailure(options: AgentDevCommandOptions, failure: unknown): void {
   if (failure instanceof TunnelStartFailure) {
     options.fail(failure.message);
@@ -452,6 +460,7 @@ async function supervise(
     tunnel = replacement;
     holder.tunnel = tunnel;
     options.out(`Tunnel: ${tunnel.url}`);
+    sayDnsLag(options, tunnel);
 
     // Point the connections at it, retrying while Egma cannot be reached.
     const startUrl = `${tunnel.url}/start`;
@@ -567,6 +576,7 @@ export async function runAgentDevCommand(options: AgentDevCommandOptions): Promi
     }
     const tunnel = holder.tunnel;
     options.out(`Tunnel: ${tunnel.url}`);
+    sayDnsLag(options, tunnel);
 
     const startUrl = `${tunnel.url}/start`;
     const written = await writeMachineConnections(session, startUrl);
