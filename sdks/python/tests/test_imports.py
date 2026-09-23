@@ -6,15 +6,27 @@ test process already holds whatever other tests imported.
 
 from __future__ import annotations
 
-import importlib.util
 import subprocess
 import sys
 import textwrap
+from importlib.metadata import PackageNotFoundError, distribution
 
 import pytest
 
+
+def _installed(name: str) -> bool:
+    try:
+        distribution(name)
+    except PackageNotFoundError:
+        return False
+    return True
+
+
 needs_livekit = pytest.mark.skipif(
-    importlib.util.find_spec("livekit") is None, reason="LiveKit is not installed"
+    not _installed("livekit-agents"), reason="LiveKit is not installed"
+)
+needs_pipecat = pytest.mark.skipif(
+    not _installed("pipecat-ai"), reason="Pipecat is not installed"
 )
 
 BLOCK_LIVEKIT = textwrap.dedent(
@@ -149,10 +161,6 @@ BLOCK_PIPECAT = (
     BLOCK_LIVEKIT.replace('"livekit"', '"pipecat"')
     .replace('"livekit."', '"pipecat."')
     .replace("NoLiveKit", "NoPipecat")
-)
-
-needs_pipecat = pytest.mark.skipif(
-    importlib.util.find_spec("pipecat") is None, reason="Pipecat is not installed"
 )
 
 

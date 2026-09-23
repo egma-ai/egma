@@ -2,18 +2,26 @@
 
 from __future__ import annotations
 
-import importlib.util
 import re
 from importlib.metadata import PackageNotFoundError, distribution, requires
 
 import pytest
 from packaging.requirements import Requirement
 
+
+def _installed(name: str) -> bool:
+    try:
+        distribution(name)
+    except PackageNotFoundError:
+        return False
+    return True
+
+
 needs_livekit = pytest.mark.skipif(
-    importlib.util.find_spec("livekit") is None, reason="LiveKit is not installed"
+    not _installed("livekit-agents"), reason="LiveKit is not installed"
 )
 needs_pipecat = pytest.mark.skipif(
-    importlib.util.find_spec("pipecat") is None, reason="Pipecat is not installed"
+    not _installed("pipecat-ai"), reason="Pipecat is not installed"
 )
 
 

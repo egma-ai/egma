@@ -444,7 +444,7 @@ wheels = [
 
 [[package]]
 name = "egma"
-version = "0.3.4"
+version = "0.4.0"
 source = { editable = "../../sdks/python" }
 dependencies = [
     { name = "opentelemetry-exporter-otlp-proto-http" },
@@ -459,16 +459,18 @@ livekit = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", marker = "extra == 'pipecat'", specifier = ">=3.11.12,<4" },
     { name = "livekit-agents", marker = "extra == 'livekit'", specifier = ">=1.6.6,<1.9" },
     { name = "openai", marker = "extra == 'livekit'", specifier = ">=2,<3" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.39,<2" },
     { name = "opentelemetry-sdk", specifier = ">=1.39,<2" },
+    { name = "pipecat-ai", marker = "extra == 'pipecat'", specifier = ">=1.9,<1.12" },
 ]
-provides-extras = ["livekit"]
+provides-extras = ["livekit", "pipecat"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "egma", extras = ["livekit"] },
+    { name = "egma", extras = ["livekit", "pipecat"] },
     { name = "livekit-plugins-openai", specifier = ">=1.6.6,<1.9" },
     { name = "pytest", specifier = ">=8.4.2" },
     { name = "pytest-asyncio", specifier = ">=1.2.0" },

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("pipecat")
+pytest.importorskip("pipecat.frames.frames")
 
 import asyncio
 import json

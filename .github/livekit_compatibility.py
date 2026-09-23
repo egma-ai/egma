@@ -19,9 +19,12 @@ PYTHON_SDK = ROOT / "sdks/python"
 JS_VERSIONS = ("1.5.5", "1.6.0", "1.6.4", "1.7.0", "1.7.1")
 # Keep the previously locked version and the releases between the floor and lock.
 PYTHON_INTERMEDIATE_VERSIONS = ("1.6.9", "1.7.0", "1.7.1")
-LIVE_TESTS = ("livekit/test_live_room_detection.py", "livekit/test_live_mockable.py")
+LIVE_TESTS = (
+    "livekit_tests/test_live_room_detection.py",
+    "livekit_tests/test_live_mockable.py",
+)
 # Pipecat suites need Pipecat, which these LiveKit environments never install.
-OTHER_FRAMEWORK_TESTS = ("pipecat",)
+OTHER_FRAMEWORK_TESTS = ("pipecat_tests",)
 
 
 def python_versions():
@@ -115,7 +118,7 @@ def check_python(wheel, version, dev_dependencies, directory, log):
     )
 
 
-def parallel_checks(versions, check, directory):
+def parallel_checks(versions, check, directory, framework="LiveKit"):
     """Wait for every result, retain readable logs, and fail on any failed version."""
     results = {}
     started = time.monotonic()
@@ -131,14 +134,14 @@ def parallel_checks(versions, check, directory):
                 return False
         return True
 
-    print(f"Checking LiveKit {', '.join(versions)} in parallel", flush=True)
+    print(f"Checking {framework} {', '.join(versions)} in parallel", flush=True)
     with ThreadPoolExecutor(max_workers=len(versions)) as executor:
         pending = {executor.submit(worker, version): version for version in versions}
         for future in as_completed(pending):
             version = pending[future]
             passed = future.result()
             results[version] = passed
-            label = f"LiveKit {version}: {'PASS' if passed else 'FAIL'}"
+            label = f"{framework} {version}: {'PASS' if passed else 'FAIL'}"
             print(f"::group::{label}")
             print((directory / version / "check.log").read_text())
             print("::endgroup::")
@@ -149,7 +152,7 @@ def parallel_checks(versions, check, directory):
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a") as output:
-            output.write("| LiveKit | Result |\n|---|---|\n")
+            output.write(f"| {framework} | Result |\n|---|---|\n")
             for version in versions:
                 output.write(
                     f"| {version} | {'PASS' if results[version] else 'FAIL'} |\n"
