@@ -329,6 +329,13 @@ const CONTEXT_REQUIRING = [
   // connection's credentials at this seam.
   "resolveSimulationConnection",
   "registerSimulationProviderReference",
+  // The HTTPS seam of a Pipecat bot's SDK: which live Daily room simulation of
+  // the key's project a provider reference names, the latest hello kept on
+  // that row, and the simulator's read of it while it waits for the bot. Each
+  // takes the context; the simulator's read refuses every other kind.
+  "resolveLiveDailyRoomSimulation",
+  "recordAgentReport",
+  "readAgentReport",
   // The same door one moment later, for the platform that exports nothing of
   // its own: a Retell simulation's record is pulled by egma when the
   // conversation ends, so this unseals the same key to collect the record of
@@ -710,7 +717,9 @@ const THE_RETELL_BUDGET = ["MOST_RETELL_CALL_ATTEMPTS", "DRAIN_ADVISORY_LOCK"];
 const THE_MOCKED_WORLD = [
   "LARGEST_MOCK_TOOL_ANSWER_BYTES",
   "LARGEST_JOB_DISPATCH_METADATA_BYTES",
+  "LARGEST_PIPECAT_BODY_PARAMS_BYTES",
   "RESERVED_ENV_VARIABLE_PREFIX",
+  "RESERVED_PIPECAT_BODY_KEY",
   "serializedJobDispatchMetadata",
   "mockMetadataFrom",
   "mockMetadataRow",

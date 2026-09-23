@@ -15,11 +15,12 @@ from referencing import Registry, Resource
 
 CONTRACT_DIR_ENV = "EGMA_SIMULATION_CONTRACT_DIR"
 
-SPEC_SCHEMA_FILENAME = "simulation-spec.v7.schema.json"
+SPEC_SCHEMA_FILENAME = "simulation-spec.v8.schema.json"
 SPEC_SCHEMA_FILENAMES = {
     5: "simulation-spec.v5.schema.json",
     6: "simulation-spec.v6.schema.json",
-    7: SPEC_SCHEMA_FILENAME,
+    7: "simulation-spec.v7.schema.json",
+    8: SPEC_SCHEMA_FILENAME,
 }
 REPORT_SCHEMA_FILENAME = "simulation-report.v1.schema.json"
 

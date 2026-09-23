@@ -619,15 +619,20 @@ function defaultNameStem(
   connectionType: ConnectionType,
   modality: Modality,
 ): string {
-  if (connectionType !== "livekit_room") return connectionType;
-  return modality === "chat" ? "livekit_chat" : "livekit_voice";
+  if (connectionType === "livekit_room") {
+    return modality === "chat" ? "livekit_chat" : "livekit_voice";
+  }
+  if (connectionType === "daily_room") {
+    return modality === "chat" ? "pipecat_chat" : "pipecat_voice";
+  }
+  return connectionType;
 }
 
 /**
  * The smallest free `<kind>-<n>` among the agent's living names, so an unnamed
  * add always lands — a removed connection's number comes back into play the
- * same way its name does. LiveKit includes its modality because one worker can
- * have both a chat connection and a voice connection.
+ * same way its name does. LiveKit and Pipecat include the modality because one
+ * worker or bot can have both a chat connection and a voice connection.
  */
 async function freeDefaultName(
   on: Queryable,
