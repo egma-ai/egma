@@ -1,0 +1,264 @@
+{
+  "this_document": "The mock-tool exchange a Pipecat bot speaks with egma's server over HTTPS, as literal requests and answers. The messages are the in-room seam's (mock-tool-exchange.v1.json): the same protocol version, the same hello census and reply, the same tagged tool answer, the same refusal codes and the same answer cap. HTTPS adds the route, the project key, the provider reference that names the simulation, and one refusal the room never needs: a mocked Pipecat Flows function. The egma SDK, egma's API and egma's simulator each test against this file, so a route, a status, a code or a sentence that moves on one side fails a hermetic test on that side. Compare JSON by value; where a `bytes` string is given, the answer body is exactly those bytes.",
+  "protocol_version": 1,
+  "routes": {
+    "hello": "/sdk/v1/hello",
+    "tool": "/sdk/v1/tool",
+    "confirm": "/sdk/v1/confirm",
+    "agent_report": "/v1/simulations/{simulation_id}/agent-report"
+  },
+  "auth": {
+    "sdk_routes": "Authorization: Bearer <project API key, egma_sk_…>",
+    "agent_report_route": "Authorization: Bearer <simulator service token, egma_st_…>"
+  },
+  "limits": {
+    "largest_answer_bytes": 15360,
+    "largest_hello_request_bytes": 262144,
+    "largest_tool_request_bytes": 65536,
+    "largest_confirm_request_bytes": 4096,
+    "largest_provider_reference_characters": 512
+  },
+  "timeouts_seconds": {
+    "hello_attempt": 10,
+    "hello_attempts": 3,
+    "hello_all_attempts": 30,
+    "tool_attempt": 10,
+    "confirm_attempt": 5,
+    "agent_report_poll_interval": 1,
+    "readiness_window": 120
+  },
+  "refusals": [
+    { "code": 901, "error": "seam_refused", "means": "A message this exchange cannot read at all." },
+    { "code": 902, "error": "seam_refused", "means": "A call for a name this simulation has no answer for." },
+    { "code": 903, "error": "seam_refused", "means": "An answer that would not fit on the wire." },
+    { "code": 904, "error": "seam_refused", "means": "A hello in a version of this exchange egma does not speak." },
+    { "code": 905, "error": "flows_function_mocked", "means": "A mocked tool that is a Pipecat Flows function, which egma cannot mock yet." }
+  ],
+  "not_a_simulation": {
+    "status": 404,
+    "body": {
+      "error": "not_a_simulation",
+      "message": "This provider reference does not name a live Egma simulation in this API key's project."
+    },
+    "says": "The only answer that makes the SDK inert. Any other 404 — a wrong EGMA_URL, a proxy — is a failure, never inertness."
+  },
+  "worlds": {
+    "calendar": {
+      "says": "The simulation most exchanges below run against: its pinned test version mocks two tools, one answering and one failing.",
+      "simulation_id": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP",
+      "mock_tools": [
+        { "tool": "check_calendar", "answer": { "slots": [] } },
+        { "tool": "cancel_booking", "error": "the calendar service is unavailable" }
+      ]
+    },
+    "flows": {
+      "says": "A second simulation whose test mocks a Pipecat Flows function, which the hello refuses.",
+      "simulation_id": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZQ",
+      "mock_tools": [
+        { "tool": "route_to_billing", "answer": { "next": "billing" } }
+      ]
+    }
+  },
+  "exchanges": {
+    "hello": {
+      "world": "calendar",
+      "route": "hello",
+      "request": {
+        "provider_reference": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP",
+        "protocol_version": 1,
+        "tools": [
+          { "name": "check_calendar", "schema": { "type": "object", "properties": { "day": { "type": "string" } } } },
+          { "name": "charge_card", "schema": { "type": "object", "properties": { "amount_cents": { "type": "integer" } } } },
+          { "name": "route_to_billing", "schema": { "type": "object", "properties": {} }, "flows": true }
+        ]
+      },
+      "status": 200,
+      "response": { "protocol_version": 1, "mocked_tools": ["check_calendar", "cancel_booking"] },
+      "bytes": "{\"protocol_version\":1,\"mocked_tools\":[\"check_calendar\",\"cancel_booking\"]}",
+      "records": {
+        "state": "accepted",
+        "protocol_version": 1,
+        "tools": [
+          { "name": "check_calendar", "schema": { "type": "object", "properties": { "day": { "type": "string" } } } },
+          { "name": "charge_card", "schema": { "type": "object", "properties": { "amount_cents": { "type": "integer" } } } },
+          { "name": "route_to_billing", "schema": { "type": "object", "properties": {} }, "flows": true }
+        ],
+        "mocked_tools": ["check_calendar", "cancel_booking"]
+      },
+      "says": "Every name the test mocks, in authored order, whether or not the census holds it — the in-room rule. The Flows function in the census is not mocked, so nothing is refused. The stored report also carries first_at and at, which are instants and so are not pinned here."
+    },
+    "hello_repeated": {
+      "world": "calendar",
+      "route": "hello",
+      "request_is": "exchanges.hello.request",
+      "status": 200,
+      "response": { "protocol_version": 1, "mocked_tools": ["check_calendar", "cancel_booking"] },
+      "says": "A second identical hello answers the same. The census is replaced, at moves, first_at is kept."
+    },
+    "hello_flows_mocked": {
+      "world": "flows",
+      "route": "hello",
+      "request": {
+        "provider_reference": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZQ",
+        "protocol_version": 1,
+        "tools": [
+          { "name": "route_to_billing", "schema": { "type": "object", "properties": {} }, "flows": true }
+        ]
+      },
+      "status": 422,
+      "response": {
+        "error": "flows_function_mocked",
+        "code": 905,
+        "message": "the test mocks \"route_to_billing\", and this is a Pipecat Flows function; Egma cannot mock it yet. Remove it from the test's mock tools. Flows functions that are not mocked run for real and are recorded."
+      },
+      "records": {
+        "state": "refused",
+        "code": 905,
+        "message": "the test mocks \"route_to_billing\", and this is a Pipecat Flows function; Egma cannot mock it yet. Remove it from the test's mock tools. Flows functions that are not mocked run for real and are recorded.",
+        "tools": [
+          { "name": "route_to_billing", "schema": { "type": "object", "properties": {} }, "flows": true }
+        ]
+      },
+      "several_names_message": "the test mocks \"route_to_billing\", \"route_to_support\", and these are Pipecat Flows functions; Egma cannot mock them yet. Remove them from the test's mock tools. Flows functions that are not mocked run for real and are recorded.",
+      "says": "The SDK raises NotReported with this message and the bot's start fails; the simulator reads the refusal from the agent-report route and fails the simulation with the same sentence."
+    },
+    "hello_wrong_version": {
+      "world": "calendar",
+      "route": "hello",
+      "request": { "provider_reference": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP", "protocol_version": 2, "tools": [] },
+      "status": 422,
+      "response": {
+        "error": "seam_refused",
+        "code": 904,
+        "message": "this hello speaks protocol version 2, and Egma speaks 1. Upgrade the egma package."
+      }
+    },
+    "hello_malformed": {
+      "world": "calendar",
+      "route": "hello",
+      "request": { "provider_reference": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP", "protocol_version": 1, "tools": [{ "schema": {} }] },
+      "status": 422,
+      "response": {
+        "error": "seam_refused",
+        "code": 901,
+        "message": "egma.hello carries the agent's tools as a list of {\"name\": …} objects and names the simulation in provider_reference; this one does not."
+      }
+    },
+    "hello_not_a_simulation": {
+      "route": "hello",
+      "request": { "provider_reference": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZZ", "protocol_version": 1, "tools": [] },
+      "status": 404,
+      "response_is": "not_a_simulation.body"
+    },
+    "tool_answer": {
+      "world": "calendar",
+      "route": "tool",
+      "request": { "provider_reference": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP", "name": "check_calendar", "arguments": { "day": "2026-08-13" } },
+      "status": 200,
+      "response": { "answer": { "slots": [] } },
+      "bytes": "{\"answer\":{\"slots\":[]}}"
+    },
+    "tool_error": {
+      "world": "calendar",
+      "route": "tool",
+      "request": { "provider_reference": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP", "name": "cancel_booking", "arguments": { "booking": "B-7" } },
+      "status": 200,
+      "response": { "error": "the calendar service is unavailable" },
+      "bytes": "{\"error\":\"the calendar service is unavailable\"}",
+      "says": "A forced failure is still HTTP 200: the tag decides whether the model is handed a value or an error."
+    },
+    "tool_without_arguments": {
+      "world": "calendar",
+      "route": "tool",
+      "request": { "provider_reference": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP", "name": "check_calendar" },
+      "status": 200,
+      "response": { "answer": { "slots": [] } }
+    },
+    "tool_unknown": {
+      "world": "calendar",
+      "route": "tool",
+      "request": { "provider_reference": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP", "name": "charge_card", "arguments": { "amount_cents": 1200 } },
+      "status": 422,
+      "response": {
+        "error": "seam_refused",
+        "code": 902,
+        "message": "this simulation has no mock tool for 'charge_card', so Egma has nothing to answer with. It answers for: check_calendar, cancel_booking"
+      }
+    },
+    "tool_flows_mocked": {
+      "world": "flows",
+      "route": "tool",
+      "request": { "provider_reference": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZQ", "name": "route_to_billing", "arguments": {}, "flows": true },
+      "status": 422,
+      "response": {
+        "error": "flows_function_mocked",
+        "code": 905,
+        "message": "the test mocks \"route_to_billing\", and this is a Pipecat Flows function; Egma cannot mock it yet. Remove it from the test's mock tools. Flows functions that are not mocked run for real and are recorded."
+      }
+    },
+    "tool_not_a_simulation": {
+      "route": "tool",
+      "request": { "provider_reference": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZZ", "name": "check_calendar" },
+      "status": 404,
+      "response_is": "not_a_simulation.body"
+    },
+    "confirm_live": {
+      "world": "calendar",
+      "route": "confirm",
+      "request": { "provider_reference": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP" },
+      "status": 200,
+      "response": { "simulation": true }
+    },
+    "confirm_not_a_simulation": {
+      "route": "confirm",
+      "request": { "provider_reference": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZZ" },
+      "status": 404,
+      "response_is": "not_a_simulation.body"
+    },
+    "unauthenticated": {
+      "route": "hello",
+      "request_is": "exchanges.hello.request",
+      "without_authorization": true,
+      "status": 401,
+      "response": {
+        "error": "not_authenticated",
+        "message": "The Egma SDK needs your project API key in Authorization: Bearer egma_sk_…"
+      }
+    }
+  },
+  "agent_report": {
+    "route": "agent_report",
+    "request": { "claimant": "egma-simulator-1" },
+    "waiting": {
+      "status": 200,
+      "response": { "simulation_id": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP", "state": "waiting" }
+    },
+    "accepted": {
+      "after": "exchanges.hello",
+      "status": 200,
+      "response": {
+        "simulation_id": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP",
+        "state": "accepted",
+        "at": "2026-09-23T07:00:05.120Z",
+        "tools": ["check_calendar", "charge_card", "route_to_billing"],
+        "mocked_tools": ["check_calendar", "cancel_booking"]
+      },
+      "says": "at is the latest hello's instant; compare every other key by value."
+    },
+    "refused": {
+      "after": "exchanges.hello_flows_mocked",
+      "status": 200,
+      "response": {
+        "simulation_id": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZQ",
+        "state": "refused",
+        "at": "2026-09-23T07:00:05.120Z",
+        "code": 905,
+        "message": "the test mocks \"route_to_billing\", and this is a Pipecat Flows function; Egma cannot mock it yet. Remove it from the test's mock tools. Flows functions that are not mocked run for real and are recorded."
+      }
+    },
+    "not_the_claimant": {
+      "status": 409,
+      "response": { "error": "conflict", "message": "This claim does not hold that simulation." }
+    }
+  }
+}
