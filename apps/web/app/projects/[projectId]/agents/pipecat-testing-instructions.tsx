@@ -143,11 +143,6 @@ export function PipecatTestingInstructions({
       >
         Add simulation testing to your Pipecat agent
       </h3>
-      <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
-        {access === "pipecat_cloud"
-          ? "A Python bot on Pipecat Cloud needs the Egma testing hook and the Egma values in its secret set."
-          : "A Python bot needs the Egma testing hook and the Egma values where it runs."}
-      </p>
       <InstructionSteps steps={pipecatTestingSteps(access, agentId)} />
       <ProjectKeyNote projectId={projectId} reachedBy="your bot" />
       <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">

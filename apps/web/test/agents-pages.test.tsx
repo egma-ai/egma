@@ -4023,6 +4023,31 @@ describe("one connection's page", () => {
     expect(screen.queryByText(/archive/i)).toBeNull();
   });
 
+  it("shows a self-hosted Pipecat connection's header names whole", async () => {
+    answersWith({
+      ...CONNECTION,
+      name: "dev-lakeside-macbook-voice",
+      agentPlatform: "pipecat",
+      connectionType: "daily_room",
+      accessVariant: "daily_room.self_hosted",
+      productLabel: "Pipecat self-hosted",
+      modality: "voice",
+      topology: "hosted-broker",
+      config: { startUrl: "https://quiet-river.trycloudflare.com/start" },
+      credentialsHint: "X-Egma-Dev-Secret",
+    });
+    render(<ConnectionDetailPage />);
+
+    // An ordinary self-hosted connection, whoever wrote it.
+    expect(await screen.findByText("Self-hosted")).toBeDefined();
+    expect(
+      screen.getByText("Start URL").parentElement?.textContent,
+    ).toBe("Start URLhttps://quiet-river.trycloudflare.com/start");
+    expect(
+      screen.getByText("Credentials").parentElement?.textContent,
+    ).toBe("CredentialsX-Egma-Dev-Secret");
+  });
+
   it("keeps credential copy out of ordinary edits that take no credential", async () => {
     for (const connection of [
       {
