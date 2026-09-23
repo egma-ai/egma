@@ -337,6 +337,7 @@ def main() -> int:
     parser.add_argument("--no-audio-response", action="store_true")
     parser.add_argument("--not-immediately", action="store_true")
     parser.add_argument("--wait-bot", type=float, default=150.0)
+    parser.add_argument("--wait-ready", type=float, default=15.0)
     parser.add_argument("--greeting-wait", type=float, default=30.0)
     parser.add_argument("--turn-limit", type=float, default=60.0)
     parser.add_argument("--linger", type=float, default=3.0)
@@ -429,7 +430,7 @@ def main() -> int:
             },
         )
     greeting_from = rec.now()
-    if not client.bot_ready.wait(15):
+    if not client.bot_ready.wait(args.wait_ready):
         rec.log("timeout", waiting_for="bot-ready")
     greeting = wait_turn_over(client, rec, greeting_from, args.greeting_wait)
     summary["greeting"] = {**greeting, **summarize_turn(rec, client, greeting_from, rec.now())}

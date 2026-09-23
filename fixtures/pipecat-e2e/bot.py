@@ -9,10 +9,12 @@ line between `PipelineWorker(...)` and `runner.add_workers(worker)`.
 Each session picks its shape from `runner_args.body["e2e"]`, falling back to
 environment variables:
 
-    variant  plain | flows    E2E_VARIANT   (default plain)
-    rtvi     on | off         E2E_RTVI      (default on)
-    sdk      auto | on | off  EGMA_SDK      (default auto: use the SDK when installed)
-    monitor  on | off         EGMA_MONITOR  (default off)
+    variant   plain | flows    E2E_VARIANT   (default plain)
+    rtvi      on | off         E2E_RTVI      (default on)
+    sdk       auto | on | off  EGMA_SDK      (default auto: use the SDK when installed)
+    monitor   on | off         EGMA_MONITOR  (default off)
+    skip_tts  on | off         E2E_SKIP_TTS  (default off; on silences every reply from the
+                                              start, which is what an SDK could do for chat)
 
 Run locally with Pipecat's development runner:
 
@@ -36,7 +38,7 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.flows import Flow, FlowConfig, FlowManager
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMConfigureOutputFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -74,6 +76,7 @@ class Options:
     rtvi: bool
     sdk: str
     monitor: bool
+    skip_tts: bool
 
 
 def read_options(body: dict[str, Any]) -> Options:
@@ -94,6 +97,7 @@ def read_options(body: dict[str, Any]) -> Options:
         rtvi=pick("rtvi", "E2E_RTVI", "on") != "off",
         sdk=sdk,
         monitor=pick("monitor", "EGMA_MONITOR", "off") == "on",
+        skip_tts=pick("skip_tts", "E2E_SKIP_TTS", "off") == "on",
     )
 
 
@@ -235,6 +239,11 @@ async def run_bot(
 
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(worker)
+
+    if options.skip_tts:
+        # Enters at the top of the pipeline, so RTVI records it too and a
+        # send-text with audio_response false has nothing to restore.
+        await worker.queue_frames([LLMConfigureOutputFrame(skip_tts=True)])
 
     if options.variant == "flows":
         flow = Flow(FlowConfig.from_file(FLOW_CONFIG_PATH), handlers=flow_handlers)
