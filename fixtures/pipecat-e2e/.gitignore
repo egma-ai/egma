@@ -1,0 +1,5 @@
+__pycache__/
+.venv/
+.env
+# The staged Pipecat Cloud build context that deploy.sh assembles.
+.build/

@@ -64,7 +64,7 @@ export function agentPlatformText(
  * reverse for the same two platforms. A platform this list does not hold is
  * named after the ones it does, in the order the connections named it.
  */
-const PLATFORM_ORDER: readonly string[] = ["retell", "livekit"];
+const PLATFORM_ORDER: readonly string[] = ["retell", "livekit", "pipecat"];
 
 function platformRank(platform: string): number {
   const at = PLATFORM_ORDER.indexOf(platform);

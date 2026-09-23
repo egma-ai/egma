@@ -1415,7 +1415,7 @@ export function transcriptToolCalls(
 }
 
 type SimulationTranscriptAttribution = {
-  readonly platform: "Retell" | "LiveKit" | null;
+  readonly platform: "Retell" | "LiveKit" | "Pipecat" | null;
   readonly pov: EvidenceStep["pov"] | undefined;
   readonly label: string | null;
 };
@@ -1428,6 +1428,13 @@ function simulationTranscriptAttribution(
     case "livekit_room":
       return {
         platform: "LiveKit",
+        pov: "agent",
+        label: "Conversation recorded by the customer agent",
+      };
+    // The Egma SDK in the bot writes the agent's own record, as on LiveKit.
+    case "daily_room":
+      return {
+        platform: "Pipecat",
         pov: "agent",
         label: "Conversation recorded by the customer agent",
       };

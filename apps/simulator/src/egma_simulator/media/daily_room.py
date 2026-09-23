@@ -175,7 +175,8 @@ def cloud_refused_failure(agent: str, status: int) -> MediaBackendError:
 def start_unreachable_failure(start_url: str, cause: str) -> MediaBackendError:
     advice = (
         " If this start URL belongs to egma agent dev, run `egma agent dev` on "
-        "the machine that runs your bot."
+        "the machine that runs your bot, and start your bot's development "
+        "runner there."
         if _is_tunnel(start_url)
         else ""
     )

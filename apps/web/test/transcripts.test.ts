@@ -174,6 +174,7 @@ describe("agent platform labels", () => {
   it("uses product names for known platforms and keeps an unknown name", () => {
     expect(agentPlatformLabel("retell")).toBe("Retell");
     expect(agentPlatformLabel("livekit")).toBe("LiveKit");
+    expect(agentPlatformLabel("pipecat")).toBe("Pipecat");
     expect(agentPlatformLabel("future_platform")).toBe("Future platform");
   });
 });

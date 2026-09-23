@@ -89,6 +89,8 @@ export function agentPlatformLabel(value: string): string {
       return "Retell";
     case "livekit":
       return "LiveKit";
+    case "pipecat":
+      return "Pipecat";
     default:
       return humanizeIdentifier(value);
   }

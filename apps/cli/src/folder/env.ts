@@ -1,18 +1,21 @@
 /**
- * Parse test-owned Env JSON: retell_dynamic_variables and job_dispatch_metadata.
- * Both version with the test. Reject reserved egma_ variable names.
+ * Parse test-owned Env JSON: retell_dynamic_variables, job_dispatch_metadata
+ * and pipecat_body_params. All version with the test. Reject reserved egma_
+ * variable names and the reserved egma body key.
  * Validate shape here; the platform measures compact JSON size when saving.
  */
 
 import { FolderProblem } from "./problem.ts";
 import { sameJsonValue } from "./json-value.ts";
 
-/** The world one test is conducted in. Both halves are optional. */
+/** The world one test is conducted in. Every key is optional. */
 export type TestEnv = {
   /** What Retell substitutes into the agent's prompt, as text. */
   readonly retell_dynamic_variables?: Readonly<Record<string, string>>;
   /** What LiveKit hands the worker when the job is dispatched. */
   readonly job_dispatch_metadata?: Readonly<Record<string, unknown>>;
+  /** What Egma merges into the body of a Pipecat start request. */
+  readonly pipecat_body_params?: Readonly<Record<string, unknown>>;
 };
 
 /** The section heading, as egma writes it. */
@@ -24,8 +27,23 @@ export const ENV_LINE = /^#{1,6}\s*env\s*$/iu;
 /** Three backticks or more, with or without a language after them. */
 const FENCE_LINE = /^(`{3,})\s*(\S*)\s*$/u;
 
-/** The two keys an env holds, and no others. */
-const ENV_KEYS = ["retell_dynamic_variables", "job_dispatch_metadata"] as const;
+/** The keys an env holds, in the order the format writes them, and no others. */
+const ENV_KEYS = [
+  "retell_dynamic_variables",
+  "job_dispatch_metadata",
+  "pipecat_body_params",
+] as const;
+
+/** The env's keys as one phrase: `a, b and c`. */
+const ENV_KEYS_SAID = `${ENV_KEYS.slice(0, -1).join(", ")} and ${ENV_KEYS.at(-1) as string}`;
+
+/**
+ * The key a test may not put in pipecat_body_params.
+ *
+ * Egma writes its own simulation marker under this key in the start request's
+ * body, so a test value there would be overwritten.
+ */
+export const RESERVED_PIPECAT_BODY_KEY = "egma";
 
 /**
  * The prefix a test may not use for a dynamic variable.
@@ -117,6 +135,29 @@ function dispatchMetadataIn(
   return value;
 }
 
+function pipecatBodyParamsIn(
+  value: unknown,
+  where: string,
+): Readonly<Record<string, unknown>> {
+  if (!isRecord(value)) {
+    throw new EnvProblem(
+      where,
+      `pipecat_body_params says ${JSON.stringify(value)}. It is JSON merged ` +
+        `into the body of the start request, which your Pipecat bot reads at ` +
+        `runner_args.body, written as an object — like {"tenant": "acme"}.`,
+    );
+  }
+  if (Object.hasOwn(value, RESERVED_PIPECAT_BODY_KEY)) {
+    throw new EnvProblem(
+      where,
+      `Env holds pipecat_body_params.${RESERVED_PIPECAT_BODY_KEY}; Egma keeps ` +
+        `the key "${RESERVED_PIPECAT_BODY_KEY}" for its own simulation marker. ` +
+        `Name the key something else.`,
+    );
+  }
+  return value;
+}
+
 /** One block, as the env it says. `{}` is read as no env at all. */
 function envFrom(block: string | null, where: string): TestEnv | null {
   if (block === null || block.trim() === "") {
@@ -144,7 +185,7 @@ function envFrom(block: string | null, where: string): TestEnv | null {
     throw new EnvProblem(
       where,
       `the block under Env says ${JSON.stringify(read)}, and an env is written ` +
-        `as an object holding ${ENV_KEYS.join(" and ")}.`,
+        `as an object holding ${ENV_KEYS_SAID}.`,
     );
   }
 
@@ -152,7 +193,7 @@ function envFrom(block: string | null, where: string): TestEnv | null {
     if ((ENV_KEYS as readonly string[]).includes(key)) continue;
     throw new EnvProblem(
       where,
-      `Env holds "${key}"; it holds ${ENV_KEYS.join(" and ")}, and nothing else.`,
+      `Env holds "${key}"; it holds ${ENV_KEYS_SAID}, and nothing else.`,
     );
   }
 
@@ -162,9 +203,13 @@ function envFrom(block: string | null, where: string): TestEnv | null {
   const dispatch = held(read["job_dispatch_metadata"], (value) =>
     dispatchMetadataIn(value, where),
   );
+  const pipecatBody = held(read["pipecat_body_params"], (value) =>
+    pipecatBodyParamsIn(value, where),
+  );
   return orNothing({
     ...(variables === null ? {} : { retell_dynamic_variables: variables }),
     ...(dispatch === null ? {} : { job_dispatch_metadata: dispatch }),
+    ...(pipecatBody === null ? {} : { pipecat_body_params: pipecatBody }),
   });
 }
 
@@ -228,6 +273,9 @@ export function writeEnv(env: TestEnv | null): readonly string[] {
       : {}),
     ...(filled(env.job_dispatch_metadata)
       ? { job_dispatch_metadata: env.job_dispatch_metadata }
+      : {}),
+    ...(filled(env.pipecat_body_params)
+      ? { pipecat_body_params: env.pipecat_body_params }
       : {}),
   };
   if (Object.keys(written).length === 0) return [];

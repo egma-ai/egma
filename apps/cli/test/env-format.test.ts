@@ -160,3 +160,81 @@ describe("the env in a file", () => {
     ).toBe(false);
   });
 });
+
+describe("pipecat_body_params in a file", () => {
+  it("writes it after the other two keys, and reads back exactly what was written", () => {
+    const env: TestEnv = {
+      pipecat_body_params: { tenant: "lakeside", caller: { plan: "gold" } },
+      job_dispatch_metadata: { tenant: "acme" },
+      retell_dynamic_variables: { caller_name: "Margaret" },
+    };
+
+    expect(writeEnv(env).join("\n")).toBe(
+      [
+        "## Env",
+        "```json",
+        "{",
+        '  "retell_dynamic_variables": {',
+        '    "caller_name": "Margaret"',
+        "  },",
+        '  "job_dispatch_metadata": {',
+        '    "tenant": "acme"',
+        "  },",
+        '  "pipecat_body_params": {',
+        '    "tenant": "lakeside",',
+        '    "caller": {',
+        '      "plan": "gold"',
+        "    }",
+        "  }",
+        "}",
+        "```",
+      ].join("\n"),
+    );
+    expect(readWorld(writeEnv(env).join("\n"))).toEqual(env);
+  });
+
+  it("reads a Pipecat-only env, and drops an empty one", () => {
+    expect(
+      readWorld(
+        ["## Env", "```json", '{"pipecat_body_params": {"tenant": "acme", "n": [1, null]}}', "```"].join(
+          "\n",
+        ),
+      ),
+    ).toEqual({ pipecat_body_params: { tenant: "acme", n: [1, null] } });
+    expect(readWorld(["## Env", "```json", '{"pipecat_body_params": {}}', "```"].join("\n"))).toBeNull();
+    expect(writeEnv({ pipecat_body_params: {} })).toEqual([]);
+  });
+
+  it("refuses the key egma inside it, with the contract's sentence", () => {
+    const document = [
+      "## Env",
+      "```json",
+      '{"pipecat_body_params": {"tenant": "acme", "egma": {"simulation_id": "sim_1"}}}',
+      "```",
+    ].join("\n");
+
+    expect(() => readWorld(document)).toThrow(EnvProblem);
+    expect(() => readWorld(document)).toThrow(
+      `${WHERE}: Env holds pipecat_body_params.egma; Egma keeps the key "egma" for its own simulation marker. Name the key something else.`,
+    );
+  });
+
+  it.each([
+    ["an array", '{"pipecat_body_params": ["acme"]}'],
+    ["text", '{"pipecat_body_params": "acme"}'],
+    ["a number", '{"pipecat_body_params": 3}'],
+  ])("refuses a value that is %s", (_name, block) => {
+    const document = ["## Env", "```json", block, "```"].join("\n");
+
+    expect(() => readWorld(document)).toThrow(EnvProblem);
+    expect(() => readWorld(document)).toThrow(/pipecat_body_params.*runner_args\.body.*written as an\s+object/su);
+  });
+
+  it("names all three keys when it refuses an invented one", () => {
+    const document = ["## Env", "```json", '{"webhooks": {}}', "```"].join("\n");
+
+    expect(() => readWorld(document)).toThrow(
+      /"webhooks"; it holds retell_dynamic_variables, job_dispatch_metadata and pipecat_body_params, and nothing else/u,
+    );
+  });
+});

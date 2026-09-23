@@ -46,7 +46,11 @@ export type ConfigFieldMetadata = {
   readonly key: string;
   readonly label: string;
   readonly kind: ConfigFieldKind;
-  /** One sentence a person can act on. Never names a validator or a rule id. */
+  /**
+   * One short plain-text line: what to write, or where the value comes from.
+   * Forms show it under the field and the CLI prints it. Never names a
+   * validator or a rule id.
+   */
   readonly help: string;
   /** Place this supporting field after credentials when the form requests that order. */
   readonly afterCredentials?: true;
@@ -156,9 +160,10 @@ export type AccessVariantDescriptor = {
   readonly fields: readonly ConfigFieldMetadata[];
   readonly credentials: CredentialRule;
   /**
-   * What a person is told about this access variant's credential, in words safe to put
-   * on a screen. Never the refusal sentences: those name egma's internals and
-   * are written for a terminal.
+   * One short line about this access variant's credential as a whole, or the
+   * empty string when the fields' own help lines say enough. Forms and the CLI
+   * show nothing for an empty one. Never the refusal sentences: those name
+   * egma's internals and are written for a terminal.
    */
   readonly credentialHelp: string;
   /** The credential's fields, in the order a form asks for them. */
@@ -909,7 +914,7 @@ export const CONNECTION_REGISTRY: Readonly<
             key: "retellAgentId",
             label: "Retell agent ID",
             kind: "text",
-            help: "The agent's own identifier in Retell, which starts with agent_.",
+            help: "Starts with agent_.",
           },
         ],
         credentials: {
@@ -917,10 +922,7 @@ export const CONNECTION_REGISTRY: Readonly<
           fields: ["apiKey"],
           hint: lastFourOf("apiKey"),
         },
-        credentialHelp:
-          "Egma stores your Retell API key sealed and never shows it again. " +
-          "It opens the text exchanges this connection conducts. A read gives " +
-          "back its last four characters, so you can tell two keys apart.",
+        credentialHelp: "",
         credentialFields: [
           {
             field: "apiKey",
@@ -971,7 +973,7 @@ export const CONNECTION_REGISTRY: Readonly<
             key: "retellAgentId",
             label: "Retell agent ID",
             kind: "text",
-            help: "The agent's own identifier in Retell, which starts with agent_.",
+            help: "Starts with agent_.",
           },
         ],
         credentials: {
@@ -979,10 +981,7 @@ export const CONNECTION_REGISTRY: Readonly<
           fields: ["apiKey"],
           hint: lastFourOf("apiKey"),
         },
-        credentialHelp:
-          "Egma stores your Retell API key sealed and never shows it again. " +
-          "It opens the web calls this connection places. A read gives back " +
-          "its last four characters, so you can tell two keys apart.",
+        credentialHelp: "",
         credentialFields: [
           {
             field: "apiKey",
@@ -1025,9 +1024,7 @@ export const CONNECTION_REGISTRY: Readonly<
             help: "In international form, like +15551234567.",
           },
         ],
-        credentialHelp:
-          "A phone connection takes no credential. Egma dials the number " +
-          "with its own telephony configuration.",
+        credentialHelp: "A phone connection takes no credential.",
         credentialFields: [],
         // No reuse rule, deliberately: a number is where egma dials, not who
         // answers, and two agents can legitimately share one. Registering the
@@ -1085,19 +1082,16 @@ export const CONNECTION_REGISTRY: Readonly<
             key: "url",
             label: "LiveKit WebSocket URL",
             kind: "url",
-            help: "Your LiveKit project or self-hosted server, like wss://example.livekit.cloud.",
+            help: "Your LiveKit project or self-hosted server.",
           },
           {
             key: "agentName",
             label: "LiveKit agent name",
             kind: "text",
-            help: "The name your worker registers under. Egma dispatches that worker by name for every simulation, so the record names the agent it graded.",
+            help: "As shown in LiveKit Cloud.",
           },
         ],
-        credentialHelp:
-          "This is the quickest setup. Egma mints its own room tokens from " +
-          "this pair and stores it sealed. A read gives back the last four " +
-          "characters of the key, never the secret.",
+        credentialHelp: "",
         credentialFields: [
           {
             field: "apiKey",
@@ -1152,26 +1146,22 @@ export const CONNECTION_REGISTRY: Readonly<
             key: "tokenEndpoint",
             label: "Token endpoint",
             kind: "url",
-            help: "The public HTTPS URL where Egma asks for one room token per simulation. It answers with the token and your LiveKit server URL. Private network addresses are refused.",
+            help: "Public HTTPS URL that returns a room token.",
           },
           {
             key: "agentName",
             label: "LiveKit agent name",
             kind: "text",
-            help: "The name your worker registers under. Egma asks your endpoint to dispatch that worker by name for every simulation, so the record names the agent it graded.",
+            help: "As shown in LiveKit Cloud.",
           },
         ],
-        credentialHelp:
-          "This is a customer-operated integration. Auth headers are sent " +
-          "when Egma asks your public HTTPS endpoint for a token. They are " +
-          "required so another caller cannot mint a room token. " +
-          "A read gives back the header names and never their values.",
+        credentialHelp: "",
         credentialFields: [
           {
             field: "headers",
             label: "Auth headers",
             kind: "json",
-            help: 'A JSON object of header name to header value, like {"Authorization":"Bearer …"}.',
+            help: "Sent with every token request.",
           },
         ],
         credentials: {

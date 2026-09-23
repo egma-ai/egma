@@ -23,7 +23,7 @@ import { RelativeInstant } from "@/ui/relative-time.tsx";
 
 import { RowMenu, RowMenuDestructive, RowMenuItem } from "./row-menu.tsx";
 
-export type AgentProvider = "retell" | "livekit";
+export type AgentProvider = "retell" | "livekit" | "pipecat";
 export type SimulationCapability = "Configured" | "Not configured";
 export type MonitoringCapability =
   | "Active"
@@ -34,19 +34,24 @@ export type MonitoringCapability =
  * The provider that owns this agent's setup flow.
  *
  * A live connection is stronger evidence than an older declaration on the
- * agent. When both providers are present, the declaration decides which
+ * agent. When several providers are present, the declaration decides which
  * provider-specific monitoring model the details sheet must explain.
  */
 export function providerOf(agent: ListedAgentWithConnections): AgentProvider {
-  const retell = agent.connections.some(
-    (connection) => connection.agentPlatform === "retell",
+  const connected = new Set(
+    agent.connections.map((connection) => connection.agentPlatform),
   );
-  const livekit = agent.connections.some(
-    (connection) => connection.agentPlatform === "livekit",
-  );
-  if (retell && !livekit) return "retell";
-  if (livekit && !retell) return "livekit";
+  const [only] = connected;
+  if (connected.size === 1 && only !== undefined) return only;
   return agent.agentPlatform;
+}
+
+/**
+ * LiveKit and Pipecat agents are monitored by the Egma SDK in their own code,
+ * so Egma holds no on/off state for them to show.
+ */
+function monitoredInCode(provider: AgentProvider): boolean {
+  return provider === "livekit" || provider === "pipecat";
 }
 
 /** A saved simulation connection is the whole configured state. */
@@ -56,6 +61,7 @@ export function simulationCapabilityOf(
   const configured = agent.connections.some(
     (connection) =>
       connection.connectionType === "livekit_room" ||
+      connection.connectionType === "daily_room" ||
       connection.connectionType === "retell_text_mode" ||
       connection.connectionType === "retell_web_call" ||
       (connection.connectionType === "phone_number" &&
@@ -65,13 +71,13 @@ export function simulationCapabilityOf(
 }
 
 /**
- * Retell has a durable pull switch. LiveKit does not, so its one truthful UI
- * state says that monitoring is configured in the customer's code.
+ * Retell has a durable pull switch. LiveKit and Pipecat do not, so their one
+ * truthful UI state says that monitoring is configured in the customer's code.
  */
 export function monitoringCapabilityOf(
   agent: ListedAgentWithConnections,
 ): MonitoringCapability {
-  if (providerOf(agent) === "livekit") {
+  if (monitoredInCode(providerOf(agent))) {
     return "Configured via code";
   }
   if (agent.pullProductionCalls) return "Active";
@@ -106,7 +112,7 @@ export function MonitoringEvidence({
   const provider = providerOf(agent);
   const state = monitoringCapabilityOf(agent);
 
-  if (provider === "livekit") return null;
+  if (monitoredInCode(provider)) return null;
 
   if (state === "Active" && agent.lastReceivedAt !== null) {
     return (
@@ -270,12 +276,12 @@ export function AgentDetailsSheet({
                 label="Production monitoring"
                 state={<CapabilityState state={monitoring} />}
                 detail={
-                  provider === "livekit" ? undefined : (
+                  monitoredInCode(provider) ? undefined : (
                     <MonitoringEvidence agent={agent} now={now} />
                   )
                 }
                 action={
-                  provider === "livekit" ? (
+                  monitoredInCode(provider) ? (
                     <Link
                       className="text-sm underline decoration-border underline-offset-4 pointer-hover:decoration-foreground"
                       href={setup("monitoring")}
@@ -456,6 +462,8 @@ function providerFacts(
     ];
   }
 
+  if (provider === "pipecat") return pipecatFacts(agent);
+
   const rooms = agent.connections.filter(
     (connection) => connection.connectionType === "livekit_room",
   );
@@ -491,6 +499,48 @@ function providerFacts(
       mono:
         rooms.length > 0 &&
         rooms.every((connection) => connection.config["url"] === webSocketUrl),
+    },
+  ];
+}
+
+/**
+ * LiveKit's two facts, in Pipecat's words: the Pipecat Cloud agent the
+ * connections start, and where a self-hosted bot is started.
+ *
+ * A self-hosted connection names no Pipecat agent, so the Egma agent's own
+ * name stands in; a Pipecat Cloud connection has no start URL of its own, so
+ * `Pipecat Cloud` stands in.
+ */
+function pipecatFacts(agent: ListedAgentWithConnections): readonly Fact[] {
+  const rooms = agent.connections.filter(
+    (connection) => connection.connectionType === "daily_room",
+  );
+  const cloudNames = rooms.flatMap((connection) => {
+    const name = connection.config["agentName"];
+    return connection.accessVariant === "daily_room.pipecat_cloud" &&
+      name !== undefined
+      ? [name]
+      : [];
+  });
+  const startUrls = rooms.map((connection) =>
+    connection.accessVariant === "daily_room.self_hosted"
+      ? (connection.config["startUrl"] ?? "Not saved")
+      : "Pipecat Cloud",
+  );
+  const pipecatAgent = sharedConnectionValue(cloudNames, agent.name);
+  const startUrl = sharedConnectionValue(startUrls, "Not saved");
+  return [
+    {
+      label: "Pipecat agent",
+      value: pipecatAgent,
+      mono: cloudNames.length > 0 && cloudNames.every((one) => one === pipecatAgent),
+    },
+    {
+      label: "Start URL",
+      value: startUrl,
+      mono:
+        rooms.length > 0 &&
+        rooms.every((connection) => connection.config["startUrl"] === startUrl),
     },
   ];
 }

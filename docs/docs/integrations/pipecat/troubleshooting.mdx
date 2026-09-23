@@ -13,7 +13,7 @@ A failed simulation shows its reason on the run page. Find the message below.
 | `Pipecat Cloud had no free capacity for agent "…"` | Every start request for 120 seconds was answered HTTP 429. Raise the agent's `max_agents` in Pipecat Cloud, or run fewer simulations at once with a lower `--concurrency`. |
 | `Pipecat Cloud refused the start request for agent "…" (HTTP …)` | Check the agent's deployment status in Pipecat Cloud. |
 | `Egma could not reach Pipecat Cloud to start agent "…"` | Egma retried for 120 seconds. Try again later. A self-hosted Egma instance needs outbound access to Pipecat Cloud and Daily. |
-| `Egma could not reach your start URL` | Check that your starter is running and that its URL resolves and answers over HTTPS. For a `trycloudflare.com` address, run `egma agent dev` on the machine that runs your bot. |
+| `Egma could not reach your start URL` | Check that your starter is running and that its URL resolves and answers over HTTPS. For a `trycloudflare.com` address, run `egma agent dev` on the machine that runs your bot, and start your bot's development runner there. |
 | `your start URL (…) refused the start request (HTTP 401)` or `(HTTP 403)` | Check the connection's auth headers against what your starter expects. |
 | `your start URL (…) answered HTTP 429` | Your starter refused every start request for 120 seconds. Give it more capacity or run fewer simulations at once. |
 | `your start URL (…) refused the start request (HTTP …)` | Check your starter's logs for that request. |

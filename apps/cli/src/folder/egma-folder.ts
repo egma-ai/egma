@@ -12,6 +12,11 @@ import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import {
+  agentPlatformsSaid,
+  isAgentPlatform,
+  type AgentPlatform,
+} from "../platform/agent-platforms.ts";
 import { normalizePlatformOrigin } from "../platform/url.ts";
 import { parseTestFile, serializeTestFile, type TestFile } from "./test-file.ts";
 import {
@@ -63,7 +68,7 @@ export type FolderConnection = IdentifiedThing;
 /** One agent in this project, and every committed way Egma can reach it. */
 export type FolderAgent = IdentifiedThing & {
   /** Which provider runs this agent. */
-  readonly platform: "retell" | "livekit";
+  readonly platform: AgentPlatform;
   readonly connections: readonly FolderConnection[];
 };
 
@@ -259,9 +264,9 @@ export function parseConfig(document: string, where: string): FolderConfig {
       `${where} agent ${String(index + 1)}`,
     );
     const platform = textAt(entry, "platform");
-    if (platform !== "retell" && platform !== "livekit") {
+    if (!isAgentPlatform(platform)) {
       throw new FolderProblem(where, 
-        `${where} agent ${String(index + 1)} must contain platform retell or livekit.`,
+        `${where} agent ${String(index + 1)} must contain platform ${agentPlatformsSaid()}.`,
       );
     }
     if (agentIds.has(agent.id)) {

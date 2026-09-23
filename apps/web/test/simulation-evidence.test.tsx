@@ -1374,13 +1374,16 @@ describe("the agent's POV is what a reader is shown", () => {
 
   it.each([
     ["livekit_room", "Conversation recorded by the customer agent"],
+    ["daily_room", "Conversation recorded by the customer agent"],
     ["retell_web_call", "Conversation from Retell"],
     ["retell_text_mode", "Conversation from the Retell API"],
     ["phone_number", "Conversation recorded by the persona"],
   ] as const)("attributes the %s conversation source", async (connectionType, label) => {
     const read = evidence({
       agentPovComplete:
-        connectionType === "livekit_room" || connectionType === "retell_web_call",
+        connectionType === "livekit_room" ||
+        connectionType === "daily_room" ||
+        connectionType === "retell_web_call",
       connectionSnapshot: {
         ...evidence().connectionSnapshot,
         connectionType,
@@ -1465,6 +1468,23 @@ describe("the agent's POV is what a reader is shown", () => {
     expect(await screen.findByText("LiveKit transcript unavailable", {}, { timeout: 4000 })).toBeTruthy();
   });
 
+  it("waits for a Pipecat simulation's agent record by the platform's own name", async () => {
+    page({
+      read: evidence({
+        agentPovComplete: false,
+        agentPovIncomplete: false,
+        transcript: null,
+        connectionSnapshot: {
+          ...evidence().connectionSnapshot,
+          connectionType: "daily_room",
+        },
+      }),
+    });
+    render(<SimulationEvidencePage />);
+
+    expect(await screen.findByText("Waiting for Pipecat transcript")).toBeTruthy();
+  });
+
   it("keeps reading a partial LiveKit transcript until its final record arrives", async () => {
     const read = evidence({
       agentPovComplete: false,
@@ -1492,7 +1512,7 @@ describe("the agent's POV is what a reader is shown", () => {
     expect(screen.queryByText("You are all set for Tuesday.")).toBeNull();
   });
 
-  it.each(["retell_web_call", "livekit_room"])("shows only platform evidence on the %s simulation page", async (connectionType) => {
+  it.each(["retell_web_call", "livekit_room", "daily_room"])("shows only platform evidence on the %s simulation page", async (connectionType) => {
     page({
       read: evidence({
         agentPovComplete: true,
@@ -1512,7 +1532,7 @@ describe("the agent's POV is what a reader is shown", () => {
     expect(screen.queryByLabelText("Tool call, book_appointment")).toBeNull();
   });
 
-  it.each(["retell_web_call", "livekit_room"])("keeps zero platform tools empty on the %s simulation page", async (connectionType) => {
+  it.each(["retell_web_call", "livekit_room", "daily_room"])("keeps zero platform tools empty on the %s simulation page", async (connectionType) => {
     page({
       read: evidence({
         agentPovComplete: true,

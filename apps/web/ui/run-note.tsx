@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * Describe connection support for the selected tests' mock tools and env at
- * run setup. Include LiveKit SDK requirements and unsupported capabilities.
+ * run setup. Include the LiveKit and Pipecat SDK requirements and unsupported
+ * capabilities.
  * Compute notes from current selections; if limiting output, omit whole facts
  * rather than separating a title from its explanation.
  */
@@ -26,6 +27,7 @@ export type RunNoteTest = {
   readonly env: {
     readonly retell_dynamic_variables?: unknown;
     readonly job_dispatch_metadata?: unknown;
+    readonly pipecat_body_params?: unknown;
   } | null;
 };
 
@@ -89,27 +91,31 @@ function carryOf(count: number, total: number): string {
 /**
  * Which of the tests carry something, counted once for every line below.
  *
- * The three facts are separate because a connection can support one and not
+ * The facts are separate because a connection can support one and not
  * another: a Retell phone call passes neither mock tools nor dynamic
- * variables, while a LiveKit connection of either kind carries a test's
- * dispatch metadata — on its own dispatch where egma holds the key pair, and
- * inside the token request where the customer's endpoint mints the token.
+ * variables, a LiveKit connection of either kind carries a test's dispatch
+ * metadata — on its own dispatch where egma holds the key pair, and inside the
+ * token request where the customer's endpoint mints the token — and a Pipecat
+ * connection carries the test's body params in its start request.
  */
 function counted(tests: readonly RunNoteTest[]): {
   readonly total: number;
   readonly mocks: number;
   readonly retellVars: number;
   readonly dispatch: number;
+  readonly pipecatBody: number;
 } {
   let mocks = 0;
   let retellVars = 0;
   let dispatch = 0;
+  let pipecatBody = 0;
   for (const test of tests) {
     if (test.mockTools.length > 0) mocks += 1;
     if (test.env?.retell_dynamic_variables !== undefined) retellVars += 1;
     if (test.env?.job_dispatch_metadata !== undefined) dispatch += 1;
+    if (test.env?.pipecat_body_params !== undefined) pipecatBody += 1;
   }
-  return { total: tests.length, mocks, retellVars, dispatch };
+  return { total: tests.length, mocks, retellVars, dispatch, pipecatBody };
 }
 
 /**
@@ -122,7 +128,7 @@ export function runNoteLines(
   connection: RunNoteConnection,
   tests: readonly RunNoteTest[],
 ): readonly RunNoteLine[] {
-  const { total, mocks, retellVars, dispatch } = counted(tests);
+  const { total, mocks, retellVars, dispatch, pipecatBody } = counted(tests);
   if (total === 0) return [];
   const groups: RunNoteGroup[] = [];
 
@@ -132,6 +138,7 @@ export function runNoteLines(
     connection.connectionType === "retell_chat_api" ||
     connection.connectionType === "phone_number";
   const livekit = connection.connectionType === "livekit_room";
+  const pipecat = connection.connectionType === "daily_room";
 
   /*
    * A phone call is the customer's own published number answered by Retell.
@@ -189,11 +196,17 @@ export function runNoteLines(
    * the mock-tools sentence joins it only when some test carries one — on
    * LiveKit the customer's own agent serves the mock, through that same SDK.
    */
-  if (livekit) {
+  /*
+   * Pipecat is the same: its agent reports to egma and serves the test's mock
+   * tools through the same SDK, so the requirement is said on every Pipecat
+   * run in the same two lines.
+   */
+  const sdkPlatform = livekit ? "LiveKit" : pipecat ? "Pipecat" : null;
+  if (sdkPlatform !== null) {
     groups.push({
       accent: "brand",
       lines: [
-        "A LiveKit simulation needs the Egma SDK in your agent.",
+        `A ${sdkPlatform} simulation needs the Egma SDK in your agent.`,
         ...(mocks > 0
           ? [
               <>
@@ -208,32 +221,33 @@ export function runNoteLines(
   }
 
   /*
-   * And the two quiet facts: data the other platform simply has no use for.
+   * And the quiet facts: env keys the run's platform simply has no use for.
    * Each is one line and its own group, because each says the whole of itself.
    */
-  if (livekit && retellVars > 0) {
+  const unused = (count: number, key: string, platform: string) => {
+    if (count === 0) return;
     groups.push({
       accent: "quiet",
       lines: [
         <>
-          {`${carry(retellVars)} `}
-          <Key>retell_dynamic_variables</Key>
-          {", which a LiveKit connection does not use."}
+          {`${carry(count)} `}
+          <Key>{key}</Key>
+          {`, which a ${platform} connection does not use.`}
         </>,
       ],
     });
+  };
+  if (livekit) {
+    unused(retellVars, "retell_dynamic_variables", "LiveKit");
+    unused(pipecatBody, "pipecat_body_params", "LiveKit");
   }
-  if (retell && dispatch > 0) {
-    groups.push({
-      accent: "quiet",
-      lines: [
-        <>
-          {`${carry(dispatch)} `}
-          <Key>job_dispatch_metadata</Key>
-          {", which a Retell connection does not use."}
-        </>,
-      ],
-    });
+  if (retell) {
+    unused(dispatch, "job_dispatch_metadata", "Retell");
+    unused(pipecatBody, "pipecat_body_params", "Retell");
+  }
+  if (pipecat) {
+    unused(retellVars, "retell_dynamic_variables", "Pipecat");
+    unused(dispatch, "job_dispatch_metadata", "Pipecat");
   }
 
   /*
@@ -260,7 +274,7 @@ export function runNoteLines(
  *
  * Nothing applying is an ordinary case — a Retell suite with no mock tools and
  * no env that connection would use says nothing, because there is nothing to
- * say. A LiveKit run always has the SDK requirement to say. The box is
+ * say. A LiveKit or Pipecat run always has the SDK requirement to say. The box is
  * therefore drawn or not drawn; it never stands open and empty under the
  * Connection field.
  */

@@ -1,10 +1,29 @@
 import type { DiscoverAgentsResponse } from "@egma/platform-api/client";
 
+import { modalityLabel } from "./agents.ts";
+
 /** The job a person asks the Connect agent flow to complete. */
 export type AgentSetupGoal = "simulation" | "monitoring" | "both";
 
-/** The two platforms the goal-first flow offers today. */
-export type AgentSetupPlatform = "retell" | "livekit";
+/** The platforms the goal-first flow offers. */
+export type AgentSetupPlatform = "retell" | "livekit" | "pipecat";
+
+/**
+ * The platforms whose agent carries the Egma SDK: LiveKit and Pipecat.
+ *
+ * They share one walk — the modality, one connection form, then the source
+ * instructions — because Egma reaches both the same way: it starts the agent
+ * for a simulation, and the agent reports to Egma through the SDK. Only the
+ * fields and the words differ, and those come from the tables below and the
+ * connection catalog.
+ */
+export type SdkPlatform = Exclude<AgentSetupPlatform, "retell">;
+
+export function isSdkPlatform(
+  platform: AgentSetupPlatform | "",
+): platform is SdkPlatform {
+  return platform === "livekit" || platform === "pipecat";
+}
 
 /** The language of the customer-owned LiveKit worker. */
 export type LiveKitWorkerLanguage = "python" | "javascript";
@@ -33,7 +52,7 @@ export type AgentSetupPlan = {
    * registering it).
    */
   readonly pullWithoutConnection: boolean;
-  /** Whether the UI shows LiveKit instructions without recording an on/off state. */
+  /** Whether the UI shows SDK instructions without recording an on/off state. */
   readonly monitoringInstructions: boolean;
   /**
    * Whether this plan asks the one question — how should Egma test this agent.
@@ -105,6 +124,37 @@ const PLANS: Readonly<
       platform: "livekit",
       // Both languages continue into simulation setup after the customer has
       // the matching production-monitoring instructions.
+      mayWriteConnection: true,
+      pullWithConnection: false,
+      pullWithoutConnection: false,
+      monitoringInstructions: true,
+      asksHowToTest: false,
+    },
+  },
+  // Pipecat's plans are LiveKit's: monitoring is configured in the bot's code,
+  // and a simulation saves one connection after the modality question.
+  pipecat: {
+    simulation: {
+      goal: "simulation",
+      platform: "pipecat",
+      mayWriteConnection: true,
+      pullWithConnection: false,
+      pullWithoutConnection: false,
+      monitoringInstructions: false,
+      asksHowToTest: false,
+    },
+    monitoring: {
+      goal: "monitoring",
+      platform: "pipecat",
+      mayWriteConnection: false,
+      pullWithConnection: false,
+      pullWithoutConnection: false,
+      monitoringInstructions: true,
+      asksHowToTest: false,
+    },
+    both: {
+      goal: "both",
+      platform: "pipecat",
       mayWriteConnection: true,
       pullWithConnection: false,
       pullWithoutConnection: false,
@@ -245,7 +295,11 @@ export function retellCandidateValue(candidate: RetellConnectionCandidate): stri
   return `${candidate.connectionType}:${candidate.config.retellAgentId ?? ""}`;
 }
 
-/** The visible desktop states in the approved setup flow. */
+/**
+ * The visible desktop states in the approved setup flow.
+ *
+ * The four `sdk-` steps serve LiveKit and Pipecat alike (`SdkPlatform`).
+ */
 export type AgentSetupStep =
   | "goal"
   | "platform"
@@ -253,41 +307,41 @@ export type AgentSetupStep =
   | "retell-agent"
   | "retell-lanes"
   | "retell-phone"
-  | "livekit-modality"
-  | "livekit-simulation"
-  | "livekit-testing"
-  | "livekit-monitoring";
+  | "sdk-modality"
+  | "sdk-connection"
+  | "sdk-testing"
+  | "sdk-monitoring";
 
 /**
  * Provider capability decides the first provider-specific screen.
  *
- * LiveKit Simulation asks only what changes its connection: the modality.
- * Monitoring and Both start with instructions whose language toggle changes
- * the source hook, not the room connection.
+ * An SDK platform's Simulation asks only what changes its connection: the
+ * modality. Monitoring and Both start with the monitoring instructions, which
+ * change the agent's source, not the connection.
  */
 export function stepAfterPlatform(
   goal: AgentSetupGoal,
   platform: AgentSetupPlatform,
 ): AgentSetupStep {
   if (platform === "retell") return "retell-key";
-  return goal === "simulation" ? "livekit-modality" : "livekit-monitoring";
+  return goal === "simulation" ? "sdk-modality" : "sdk-monitoring";
 }
 
 /**
- * What follows a saved LiveKit simulation connection.
+ * What follows a saved SDK-platform simulation connection.
  *
- * Every worker needs the testing hook. Chat adds silent room handling.
+ * Every agent needs the testing hook; LiveKit chat adds silent room handling.
  * This is a screen and not a recorded state: Egma cannot see the source change
  * from the web application, so the sheet claims no completion for it.
  */
-export function stepAfterLiveKitCredentials(
+export function stepAfterSdkConnection(
   _plan: AgentSetupPlan,
 ): AgentSetupStep {
-  return "livekit-testing";
+  return "sdk-testing";
 }
 
 /** What follows the testing instructions, or `null` when the flow is done. */
-export function stepAfterLiveKitTesting(
+export function stepAfterSdkTesting(
   _plan: AgentSetupPlan,
 ): AgentSetupStep | null {
   // A Both flow completes Monitoring before it starts simulation setup.
@@ -333,10 +387,10 @@ export function previousAgentSetupStep({
       return "goal";
     case "retell-key":
       return "platform";
-    case "livekit-modality":
+    case "sdk-modality":
       // Both has already shown Monitoring. Simulation entered here directly,
       // because language changes source instructions rather than a connection.
-      return goal === "both" ? "livekit-monitoring" : "platform";
+      return goal === "both" ? "sdk-monitoring" : "platform";
     case "retell-agent":
       return "retell-key";
     case "retell-lanes":
@@ -346,13 +400,111 @@ export function previousAgentSetupStep({
       // a simulation, and straight from the agent for Both, which skips it.
       // Monitoring never arrives here: it finishes on the agent choice.
       return goal === "simulation" ? "retell-lanes" : "retell-agent";
-    case "livekit-simulation":
-      return "livekit-modality";
-    case "livekit-testing":
+    case "sdk-connection":
+      return "sdk-modality";
+    case "sdk-testing":
       // The connection is already persisted before this screen appears. Do
       // not let Back cross that write and change the modality it describes.
       return null;
-    case "livekit-monitoring":
+    case "sdk-monitoring":
       return "platform";
   }
 }
+
+/** Each SDK platform's name, as the setup screens say it. */
+export const SDK_PLATFORM_LABELS: Readonly<Record<SdkPlatform, string>> = {
+  livekit: "LiveKit",
+  pipecat: "Pipecat",
+};
+
+/** The one connection type each SDK platform's simulation saves. */
+export const SDK_CONNECTION_TYPES: Readonly<Record<SdkPlatform, string>> = {
+  livekit: "livekit_room",
+  pipecat: "daily_room",
+};
+
+/** One entry of the connection form's `Connection type` select. */
+export type SdkAccessChoice = {
+  readonly accessVariant: string;
+  readonly label: string;
+};
+
+/**
+ * The `Connection type` select's entries, first one preselected.
+ *
+ * Which of them a modality offers is the catalog's answer; these are only the
+ * short words the select shows for each access variant.
+ */
+export const SDK_ACCESS_CHOICES: Readonly<
+  Record<SdkPlatform, readonly SdkAccessChoice[]>
+> = {
+  livekit: [
+    { accessVariant: "livekit_room.project_credentials", label: "Project credentials" },
+    { accessVariant: "livekit_room.customer_token_endpoint", label: "Token endpoint" },
+  ],
+  pipecat: [
+    { accessVariant: "daily_room.pipecat_cloud", label: "Pipecat Cloud" },
+    { accessVariant: "daily_room.self_hosted", label: "Self-hosted" },
+  ],
+};
+
+/** The access variant a fresh connection form starts on. */
+export function firstSdkAccess(platform: SdkPlatform): string {
+  return SDK_ACCESS_CHOICES[platform][0]?.accessVariant ?? "";
+}
+
+/** The connection form's title: `Connect Pipecat Voice for simulations`. */
+export function sdkConnectionTitle(
+  platform: SdkPlatform,
+  modality: "chat" | "voice" | "",
+): string {
+  const label = SDK_PLATFORM_LABELS[platform];
+  return modality === ""
+    ? `Connect ${label} for simulations`
+    : `Connect ${label} ${modalityLabel(modality)} for simulations`;
+}
+
+/**
+ * What each modality is, said as the difference a person is choosing between.
+ *
+ * Which of the two are offered is the catalog's answer and never this file's.
+ * What each one means is product language, and it is written once here so the
+ * card cannot say one thing while the surface after it says another. A
+ * Pipecat bot needs nothing for chat beyond the one testing line.
+ */
+export const SDK_MODALITY_CHOICES: Readonly<
+  Record<
+    SdkPlatform,
+    Readonly<
+      Record<
+        "chat" | "voice",
+        { readonly title: string; readonly description: string }
+      >
+    >
+  >
+> = {
+  livekit: {
+    voice: {
+      title: "Voice",
+      description:
+        "Egma speaks to the agent in the room, the way a person reaches it. Your worker needs the Egma testing hook, which Egma shows you next.",
+    },
+    chat: {
+      title: "Chat",
+      description:
+        "Egma types to the agent and reads its words back. Fast, and it spends nothing on speech. Your worker needs a short setup, which Egma shows you next.",
+    },
+  },
+  pipecat: {
+    voice: {
+      title: "Voice",
+      description:
+        "Egma speaks to the agent in the room, the way a person reaches it. Your bot needs the Egma testing hook, which Egma shows you next.",
+    },
+    chat: {
+      title: "Chat",
+      description:
+        "Egma types to the agent and reads its words back. Fast, and it spends nothing on speech. The same testing hook covers it.",
+    },
+  },
+};
