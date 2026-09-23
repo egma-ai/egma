@@ -248,25 +248,30 @@ class Client(EventHandler):
 
 
 def wait_turn_over(client: Client, rec: Recorder, since: float, limit: float) -> dict[str, Any]:
-    """Wait until the model stopped with no tool call in flight and RTVI went quiet."""
+    """Wait until the turn is over, then for RTVI and the bot's audio to go quiet.
+
+    Over: a `bot-llm-stopped` came after the last `llm-function-call-stopped`,
+    and every `llm-function-call-started` has its `llm-function-call-stopped`.
+    A tool result that starts no new completion ends the turn after the quiet
+    time alone. Events are compared by arrival order, not by time.
+    """
     deadline = time.monotonic() + limit
     while time.monotonic() < deadline:
         time.sleep(0.2)
         events = [e for e in rec.events if e["t"] >= since and e["kind"] == "rtvi"]
-        started = sum(1 for e in events if e["type"] == "llm-function-call-in-progress")
-        stopped = sum(1 for e in events if e["type"] == "llm-function-call-stopped")
-        llm_stops = [e["t"] for e in events if e["type"] == "bot-llm-stopped"]
-        tool_stops = [e["t"] for e in events if e["type"] == "llm-function-call-stopped"]
+        order = {id(e): i for i, e in enumerate(events)}
+        started = [e for e in events if e["type"] == "llm-function-call-started"]
+        stopped = [e for e in events if e["type"] == "llm-function-call-stopped"]
+        llm_stops = [e for e in events if e["type"] == "bot-llm-stopped"]
         quiet = time.monotonic() - max(client.last_rtvi, client.audio_last_loud)
-        if (
-            llm_stops
-            and started == stopped
-            and (not tool_stops or llm_stops[-1] > tool_stops[-1])
-            and quiet >= TURN_QUIET_S
-            and not client.audio_active
-        ):
-            return {"over": True, "at": llm_stops[-1]}
-    return {"over": False, "at": None}
+        if len(started) > len(stopped) or quiet < TURN_QUIET_S or client.audio_active:
+            continue
+        answered = llm_stops and (not stopped or order[id(llm_stops[-1])] > order[id(stopped[-1])])
+        if answered:
+            return {"over": True, "at": llm_stops[-1]["t"], "by": "model stopped"}
+        if stopped:
+            return {"over": True, "at": stopped[-1]["t"], "by": "quiet after a tool result"}
+    return {"over": False, "at": None, "by": None}
 
 
 def summarize_turn(rec: Recorder, client: Client, since: float, until: float) -> dict[str, Any]:
