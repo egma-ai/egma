@@ -32,7 +32,7 @@ import {
  */
 
 /** The products or frameworks that run or expose an agent. */
-export const AGENT_PLATFORMS = ["retell", "livekit"] as const;
+export const AGENT_PLATFORMS = ["retell", "livekit", "pipecat"] as const;
 export type AgentPlatform = (typeof AGENT_PLATFORMS)[number];
 
 /** The direct paths Egma's simulator can select to reach an agent. */
@@ -41,6 +41,7 @@ export const CONNECTION_TYPES = [
   "retell_web_call",
   "phone_number",
   "livekit_room",
+  "daily_room",
 ] as const;
 export type ConnectionType = (typeof CONNECTION_TYPES)[number];
 
@@ -51,14 +52,15 @@ const PERSISTED_CONNECTION_TYPES = [
 ] as const;
 
 /**
- * Connection types that can supply an agent POV (ADR-0024 §2): LiveKit SDK push
- * and Retell web-call record pull. Phone and text-mode connections
+ * Connection types that can supply an agent POV (ADR-0024 §2): LiveKit and
+ * Pipecat SDK push, and Retell web-call record pull. Phone and text-mode connections
  * have no supported second-POV path. Grading also requires this simulation's
  * provider reference before waiting; capability alone is not enough.
  */
 export const LANES_WITH_AN_AGENT_POV = [
   "retell_web_call",
   "livekit_room",
+  "daily_room",
 ] as const satisfies readonly ConnectionType[];
 
 /** Whether a conversation over this connection could have a second account. */
@@ -75,6 +77,8 @@ export const ACCESS_VARIANTS = [
   "phone_number.public_e164",
   "livekit_room.project_credentials",
   "livekit_room.customer_token_endpoint",
+  "daily_room.pipecat_cloud",
+  "daily_room.self_hosted",
 ] as const;
 export type AccessVariant = (typeof ACCESS_VARIANTS)[number];
 

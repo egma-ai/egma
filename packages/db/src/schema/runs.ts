@@ -408,10 +408,18 @@ export const simulation = pgTable(
      * The platform's own identifier for this exchange on the connection's
      * side — a Retell chat id, a telephony provider's id for the dialed leg.
      * The one join between egma's record and the agent's own telemetry, since
-     * no trace context crosses an audio channel. Registered before dispatch for LiveKit rooms, otherwise carried by the
+     * no trace context crosses an audio channel. Registered before dispatch for LiveKit rooms and
+     * before the start request for Pipecat Daily rooms, otherwise carried by the
      * terminal report; null when the plug had none to offer.
      */
     providerReference: text("provider_reference"),
+    /**
+     * The latest hello the egma SDK sent over HTTPS for this simulation — the
+     * agent's tool census and whether egma accepted it — or null while none has
+     * arrived. Written by the SDK seam routes of a Daily room simulation and read
+     * by the simulator while it waits for the agent to be ready.
+     */
+    agentReport: jsonb("agent_report"),
 
     createdAt: createdAt(),
   },
@@ -523,6 +531,10 @@ export const simulation = pgTable(
     check(
       "simulation_provider_reference_after_claim",
       sql`${table.status} <> 'queued' or ${table.providerReference} is null`,
+    ),
+    check(
+      "simulation_agent_report_is_object",
+      sql`${table.agentReport} is null or jsonb_typeof(${table.agentReport}) = 'object'`,
     ),
     check(
       "simulation_turn_count_is_a_count",

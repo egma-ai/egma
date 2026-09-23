@@ -1,7 +1,8 @@
 /**
  * Mock capability and temporary-version requirements by connection type.
  * Retell web calls need a temporary version; text mode carries replies per request;
- * LiveKit uses the room RPC seam. Phone and Retell chat API connections do not mock.
+ * LiveKit uses the room RPC seam; Pipecat Daily rooms use the SDK's HTTPS seam.
+ * Phone and Retell chat API connections do not mock.
  * Block claims for runs that require a temporary version until it is recorded.
  * Read mock tools from pinned test versions, never a connection switch.
  */
@@ -25,12 +26,14 @@ const mockedVersion = alias(testVersion, "mocked_test_version");
 
 /**
  * Connection types with a mock reply path. Add types only when their adapter
- * can serve test-owned answers: text-mode requests, web-call URLs, or LiveKit RPC.
+ * can serve test-owned answers: text-mode requests, web-call URLs, LiveKit RPC,
+ * or the SDK's HTTPS seam for Daily rooms.
  */
 export const LANES_SERVING_MOCK_TOOLS = [
   "retell_text_mode",
   "retell_web_call",
   "livekit_room",
+  "daily_room",
 ] as const satisfies readonly ConnectionType[];
 
 /**
