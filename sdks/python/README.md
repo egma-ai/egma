@@ -1,62 +1,66 @@
-# Egma SDK for livekit Python agents
+# Egma SDK for Python voice agents
 
-This SDK connects your livekit agent to egma for simulation testing and production monitoring. It records the agent's POV during simulations and lets egma inject mock tools.
+This SDK connects your LiveKit or Pipecat agent to egma for simulation testing and production monitoring. It records the agent's POV during simulations and lets egma answer the test's mock tools.
 
 We need to do four things to set it up.
 
 ## 1. Install the SDK
 
-Install the latest compatible release in the repo where your livekit worker runs. Use the package manager the repo already uses.
+Install the latest compatible release in the repo where your agent runs, with the extra for your framework. Use the package manager the repo already uses.
 
-```bash
-pip install --upgrade egma
-```
+| Framework | pip | uv |
+| --- | --- | --- |
+| LiveKit Agents | `pip install --upgrade "egma[livekit]"` | `uv add --upgrade "egma[livekit]"` |
+| Pipecat | `pip install --upgrade "egma[pipecat]"` | `uv add --upgrade "egma[pipecat]"` |
 
-For a repo using uv:
+The SDK supports Python 3.11 or newer.
 
-```bash
-uv add --upgrade egma
-```
+- **LiveKit:** `livekit-agents>=1.6.6,<1.9`, including LiveKit 1.8. The `livekit` extra holds that range and OpenAI Python 2.
+- **Pipecat:** `pipecat-ai>=1.9,<1.12`. Each Pipecat minor is tested before it joins the range. The `pipecat` extra installs no LiveKit package.
 
-The SDK supports Python 3.11 or newer and `livekit-agents>=1.6.6,<1.9`, including LiveKit 1.8. It uses OpenAI Python 2. Check compatibility with the worker's existing dependencies before upgrading and keep the resolved versions in the repo's lockfile.
+Check compatibility with the agent's existing dependencies before upgrading and keep the resolved versions in the repo's lockfile.
 
-## 2. Setup the worker's environment
+## 2. Set up the agent's environment
 
 Use an egma API key scoped to the project you want to send data to. You can create it through the CLI or the UI.
 
 - **CLI:** from a repo with a logged-in egma CLI and the right project in `egma/config.yaml`, run the command below. Use `egma login` if you need to sign in, and `egma init` if the repo does not have a project setup yet.
 
   ```bash
-  egma project api-key create --name livekit-worker
+  egma project api-key create --name voice-agent
   ```
 
 - **UI:** open your project in [egma](https://app.egma.ai), go to **Settings → API keys**, enter a name, select your project under **Scope**, and click **Create key**.
 
 Copy the key when it is shown. The secret is shown once, and the CLI does not save it.
 
-Set these values in the worker's environment:
+Set these values in the agent's environment:
 
 ```bash
-EGMA_URL=https://api.egma.ai
+EGMA_URL=https://app.egma.ai
 EGMA_API_KEY=<your project API key>
 ```
 
-For self-hosted egma, use your egma API URL. The worker must be able to reach it. Put the key in the worker's secret store or a gitignored environment file. For a cloud worker, set it in the deployed environment as well.
+For self-hosted egma, use your egma URL. The agent must be able to reach it. Put the key in the agent's secret store or a gitignored environment file. For a cloud deployment, set it in the deployed environment as well. On Pipecat Cloud, add both values to the agent's secret set and redeploy.
 
 ## 3. Add the integration
 
-There are two functions depending on what you want to setup.
+Follow the section for your framework. Each has two functions: `simulation` for simulation testing and `monitor` for production monitoring.
 
-### A. Simulation testing
+### LiveKit
+
+#### A. Simulation testing
 
 Call and await `simulation(agent, ctx, session)` after creating the agent and session, before `session.start`. Add this around the existing start call in your job entrypoint:
 
 ```python
-from egma import simulation
+from egma.livekit import simulation
 
 await simulation(agent, ctx, session)
 await session.start(agent=agent, room=ctx.room)
 ```
+
+`from egma import simulation, monitor` names the same LiveKit functions, so existing workers keep working.
 
 This is required for every voice and text simulation, even when the test has no mock tools. It sends the agent's traces to the simulation and lets egma answer the tools named under `## Mock tools` in the test. Other tools run their real implementations and are recorded too.
 
@@ -89,12 +93,12 @@ If the worker cannot complete the handshake with egma, `simulation` raises `NotR
 
 When the configured simulation ends, Egma finishes its pending output and leaves the room. The SDK then closes the `AgentSession` that you supplied. An abrupt room disconnect closes it too. This completes LiveKit's native session trace and lets an entrypoint that waits for session close finish without its own timer. The listener is installed only after the exact Egma participant has accepted the tool report, and it is never installed in a production room.
 
-### B. Production monitoring
+#### B. Production monitoring
 
 Call `monitor(ctx)` at the start of the job entrypoint, before `ctx.connect` and `session.start`:
 
 ```python
-from egma import monitor
+from egma.livekit import monitor
 
 monitor(ctx)
 ```
@@ -105,16 +109,68 @@ If you want both testing and monitoring, add both calls: `monitor(ctx)` at the s
 
 The SDK adds egma to a compatible existing OpenTelemetry provider. Keep LiveKit's default of one job per process, so each job's traces stay attached to its own room.
 
-## 4. Run the updated worker and verify
+### Pipecat
 
-For simulations, register the agent and a connection in egma if you have not already done so. Start the updated worker with an explicit `agent_name` matching that connection. Supply the job dispatch metadata your worker needs for startup.
+Both functions take the `PipelineWorker` your bot builds and the `runner_args` its `bot()` received. Put them after `PipelineWorker(...)` and before the runner starts the worker. If your pipeline is built in a helper, pass `runner_args` to it:
 
-Keep a local worker running during tests. To use a cloud worker, deploy the SDK changes and environment settings there first. A successful local run does not deploy those changes.
+```python
+from egma.pipecat import monitor, simulation
+
+
+async def run_bot(transport, runner_args):
+    ...
+    worker = PipelineWorker(pipeline, params=PipelineParams(...))
+
+    await simulation(worker, runner_args)  # simulation testing
+    await monitor(worker, runner_args)  # production monitoring, optional
+
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker)
+    await runner.run()
+
+
+async def bot(runner_args):
+    ...
+    await run_bot(transport, runner_args)
+```
+
+#### A. Simulation testing
+
+`simulation` is required for every voice and chat simulation, even when the test has no mock tools.
+
+Egma starts each simulation with a start request whose body carries an `egma` key, which your bot reads at `runner_args.body`. Without that key, `simulation` does nothing and makes no network request. With it, `simulation` asks egma whether the simulation is live in your API key's project. For a live simulation it:
+
+- reports the bot's tools and answers the tools named under `## Mock tools` in the test. Other tools run their real implementations and are recorded too. This covers tools registered with `register_function`, tools given in the LLM context as a `FunctionSchema` or a direct function, and tools of a realtime model.
+- records the conversation from the bot's side: every turn, every tool call with its arguments and result, and when each side spoke. You do not need to turn on Pipecat's own tracing. The SDK writes through its own OpenTelemetry provider, so your own tracing setup is not changed.
+- keeps a chat simulation text only. Chat simulations need RTVI, which Pipecat turns on by default.
+
+If egma says the body does not name a live simulation, the bot runs as production and nothing is changed.
+
+If the bot cannot report to egma, `simulation` raises `NotReported`. Let it stop the bot: a mocked tool would otherwise run for real. If a mocked tool cannot reach egma during a simulation, the model receives an error for that call and the real tool does not run.
+
+A test cannot mock a Pipecat Flows function yet. If a test mocks one, the simulation fails with a message that names the function. Flows functions that are not mocked run for real and are recorded.
+
+Keep the body key `egma` for egma. Do not use it in your own start requests.
+
+On Pipecat Cloud, a cold start can take longer than a simulation waits. Keep one instance warm with `min_agents = 1` in `pcc-deploy.toml` for the agent egma tests.
+
+#### B. Production monitoring
+
+`monitor` sends each conversation of the bot to egma Monitoring. It does nothing in a simulation that egma has confirmed live: one that `simulation` reported in the same process, or, when `simulation` is not called, one egma confirms on request. A start request with an `egma` key that egma does not confirm is treated as production.
+
+## 4. Run the updated agent and verify
+
+For simulations, register the agent and a connection in egma if you have not already done so.
+
+- **LiveKit:** start the updated worker with an explicit `agent_name` matching that connection. Supply the job dispatch metadata your worker needs for startup.
+- **Pipecat:** deploy the bot to Pipecat Cloud, or run it where your connection's start URL reaches it.
+
+Keep a local agent running during tests. To use a cloud deployment, deploy the SDK changes and environment settings there first. A successful local run does not deploy those changes.
 
 - **Testing:** run a simulation, wait for it to finish, and check that it completed with the agent's POV. If the agent calls a mocked tool, check its recorded arguments and answer too.
 - **Monitoring:** make a production conversation and check that it appears in egma Monitoring.
 
-If no worker joins, check the worker process and agent name. If the handshake fails, check the SDK call and room connection. If traces are missing, check the project key, `EGMA_URL`, and the worker's export logs.
+If no agent joins, check the agent process and the connection. If the handshake fails, check the SDK call and that the agent can reach `EGMA_URL`. If traces are missing, check the project key, `EGMA_URL`, and the agent's logs.
 
 ## License
 

@@ -268,7 +268,7 @@ def _pinned_livekit_image() -> str:
     tag the same way: a second copy of a version is a second thing to
     forget, and the one that rots is always the one nobody runs.
     """
-    compose = Path(__file__).resolve().parents[3] / "docker-compose.yml"
+    compose = Path(__file__).resolve().parents[4] / "docker-compose.yml"
     try:
         lines = compose.read_text(encoding="utf-8").splitlines()
     except OSError:
