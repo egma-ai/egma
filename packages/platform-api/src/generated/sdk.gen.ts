@@ -177,21 +177,21 @@ export const listAgents = <ThrowOnError extends boolean = false>(parameters?: {
 export const registerAgent = <ThrowOnError extends boolean = false>(parameters: {
     projectId?: string;
     name: string;
-    agentPlatform: 'retell' | 'livekit';
+    agentPlatform: 'retell' | 'livekit' | 'pipecat';
     connection?: {
         /**
          * Optional connection display name. If omitted, Egma chooses the next available numbered name.
          */
         name?: string;
-        agentPlatform: 'retell' | 'livekit' | null;
+        agentPlatform: 'retell' | 'livekit' | 'pipecat' | null;
         /**
-         * Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room connections can use voice or chat.
+         * Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room and Pipecat Daily room connections can use voice or chat.
          */
-        connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+        connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room' | 'daily_room';
         /**
          * Credential method for the connection type, copied from the same catalog entry.
          */
-        accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+        accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint' | 'daily_room.pipecat_cloud' | 'daily_room.self_hosted';
         /**
          * How simulations communicate with the agent. Use a modality offered by the selected catalog entry.
          */
@@ -201,13 +201,13 @@ export const registerAgent = <ThrowOnError extends boolean = false>(parameters: 
          */
         environment?: string;
         /**
-         * Non-secret settings for the selected access variant. Use only its catalog fields. Retell API variants use retellAgentId; a Retell phone connection uses phoneNumber. LiveKit project credentials use url and agentName. LiveKit token endpoints use tokenEndpoint and agentName; tokenEndpoint must be a public HTTPS URL. agentName must match the name registered by your LiveKit worker. When platformAgentId is supplied for a Retell API variant, Egma derives and confirms retellAgentId from that selection.
+         * Non-secret settings for the selected access variant. Use only its catalog fields. Retell API variants use retellAgentId; a Retell phone connection uses phoneNumber. LiveKit project credentials use url and agentName. LiveKit token endpoints use tokenEndpoint and agentName; tokenEndpoint must be a public HTTPS URL. agentName must match the name registered by your LiveKit worker. Pipecat Cloud uses agentName, the agent name in pcc-deploy.toml. A self-hosted Pipecat starter uses startUrl, a public HTTPS URL. When platformAgentId is supplied for a Retell API variant, Egma derives and confirms retellAgentId from that selection.
          */
         config?: {
             [key: string]: unknown;
         };
         /**
-         * Secret fields for the selected access variant. Retell uses apiKey. LiveKit project credentials use apiKey and apiSecret. A LiveKit token endpoint requires headers: a JSON-encoded string containing a non-empty object of header names to string values. For an additional Retell connection, platformAgentId can reuse the agent's saved Retell key when credentials are omitted. For a Retell phone connection, the key confirms provider identity and is held on the agent; the phone connection itself stores no key. Responses return credential presence and hints, never the secret values.
+         * Secret fields for the selected access variant. Retell uses apiKey. LiveKit project credentials use apiKey and apiSecret. A LiveKit token endpoint requires headers: a JSON-encoded string containing a non-empty object of header names to string values. Pipecat Cloud uses publicApiKey, the public key that starts with pk_. A self-hosted Pipecat starter requires headers in the same JSON-encoded form. For an additional Retell connection, platformAgentId can reuse the agent's saved Retell key when credentials are omitted. For a Retell phone connection, the key confirms provider identity and is held on the agent; the phone connection itself stores no key. Responses return credential presence and hints, never the secret values.
          */
         credentials?: {
             [key: string]: unknown;
@@ -318,9 +318,9 @@ export const addConnection = <ThrowOnError extends boolean = false>(parameters: 
     agentId: string;
     projectId?: string;
     name?: string;
-    agentPlatform: 'retell' | 'livekit' | null;
-    connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
-    accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+    agentPlatform: 'retell' | 'livekit' | 'pipecat' | null;
+    connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room' | 'daily_room';
+    accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint' | 'daily_room.pipecat_cloud' | 'daily_room.self_hosted';
     modality: 'voice' | 'chat';
     environment?: string;
     config?: {
@@ -1776,6 +1776,12 @@ export const applyRepositoryChangeSet = <ThrowOnError extends boolean = false>(p
             job_dispatch_metadata?: {
                 [key: string]: unknown;
             };
+            /**
+             * JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.
+             */
+            pipecat_body_params?: {
+                [key: string]: unknown;
+            };
         } | null;
         expectedVersionId?: string;
         expectedRevision?: string;
@@ -2217,6 +2223,12 @@ export const createTest = <ThrowOnError extends boolean = false>(parameters: {
         job_dispatch_metadata?: {
             [key: string]: unknown;
         };
+        /**
+         * JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.
+         */
+        pipecat_body_params?: {
+            [key: string]: unknown;
+        };
     } | null;
 }, options?: Options<never, ThrowOnError>): RequestResult<CreateTestResponses, CreateTestErrors, ThrowOnError> => {
     const params = buildClientParams([parameters], [{ args: [
@@ -2351,6 +2363,12 @@ export const updateTest = <ThrowOnError extends boolean = false>(parameters: {
          * Context delivered to the LiveKit worker in ctx.job.metadata.
          */
         job_dispatch_metadata?: {
+            [key: string]: unknown;
+        };
+        /**
+         * JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.
+         */
+        pipecat_body_params?: {
             [key: string]: unknown;
         };
     } | null;

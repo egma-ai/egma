@@ -69,6 +69,24 @@ const validators = {
 } as const;
 
 /**
+ * Later spec versions, compiled after version 6 so their references to it
+ * resolve. A Daily room work order is version 8 and is checked against it; the
+ * other golden work orders are version 6.
+ */
+const laterSpecValidators = {
+  7: ajv.compile(await readJson("schemas", "simulation-spec.v7.schema.json")),
+  8: ajv.compile(await readJson("schemas", "simulation-spec.v8.schema.json")),
+} as const;
+
+/** The validator a golden work order is held to, by the version it names. */
+function specValidatorFor(document: Record<string, unknown>) {
+  const version = document.contract_version;
+  return version === 7 || version === 8
+    ? laterSpecValidators[version]
+    : validators.spec;
+}
+
+/**
  * Why each deliberately invalid fixture is invalid: the exact place Ajv must
  * point at, and the keyword that must fail there. A substring check over the
  * pooled error text would be looser than it reads — under a oneOf, Ajv
@@ -202,6 +220,23 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
     at: "/models/stt",
     keyword: "required",
     property: "key",
+  },
+  // A Pipecat bot reads its start data at runner_args.body, where Egma's own
+  // `egma` key marks a simulation, so the test's own data may never hold it.
+  "spec/pipecat-body-params-holding-egma.json": {
+    at: "/pipecat_body_params",
+    keyword: "not",
+  },
+  // Pipecat start data belongs to a Daily room and to nothing else.
+  "spec/pipecat-body-params-off-daily-room.json": {
+    at: "",
+    keyword: "not",
+  },
+  // A Pipecat Cloud start request is authorised with the public key.
+  "spec/pipecat-cloud-without-public-key.json": {
+    at: "/connection/credentials",
+    keyword: "required",
+    property: "publicApiKey",
   },
   "report/completed-claiming-never-ran.json": {
     at: "/events/0/facts/ending",
@@ -884,7 +919,10 @@ for (const direction of ["spec", "report"] as const) {
       expect(all.length).toBeGreaterThan(0);
 
       for (const fixture of all) {
-        const validate = validators[direction];
+        const validate =
+          direction === "spec"
+            ? specValidatorFor(fixture.document)
+            : validators[direction];
         const answer = validate(fixture.document);
         expect(
           answer,
@@ -907,7 +945,10 @@ for (const direction of ["spec", "report"] as const) {
       );
 
       for (const fixture of all) {
-        const validate = validators[direction];
+        const validate =
+          direction === "spec"
+            ? specValidatorFor(fixture.document)
+            : validators[direction];
         expect(validate(fixture.document), `${fixture.name} was accepted`).toBe(
           false,
         );
@@ -1328,5 +1369,80 @@ describe("the exported report check, which the report route reads through", () =
   it("complains about a document that is not an object at all", () => {
     expect(reportComplaints(null).length).toBeGreaterThan(0);
     expect(reportComplaints("a string").length).toBeGreaterThan(0);
+  });
+});
+
+describe("a Daily room work order, which is version 8", () => {
+  it("carries the test's body params only on a Daily room, and never egma's key", async () => {
+    const cloud = await readJson("fixtures", "spec", "valid", "voice-pipecat-cloud.json");
+    expect(specComplaints(cloud)).toEqual([]);
+
+    const withEgma = structuredClone(cloud);
+    (withEgma.pipecat_body_params as Record<string, unknown>).egma = { simulation_id: "sim_x" };
+    expect(specComplaints(withEgma)).toContain("/pipecat_body_params: must NOT be valid");
+
+    // Version 7 is unchanged: it has no slot for Pipecat start data at all.
+    const asSeven = { ...structuredClone(cloud), contract_version: 7 };
+    expect(specComplaints(asSeven)).toContain(
+      ": must NOT have additional properties",
+    );
+  });
+
+  it("carries no other platform's start data", async () => {
+    const selfHosted = await readJson(
+      "fixtures",
+      "spec",
+      "valid",
+      "voice-pipecat-self-hosted.json",
+    );
+    expect(specComplaints(selfHosted)).toEqual([]);
+    for (const [key, value] of [
+      ["job_dispatch_metadata", { tenant: "acme" }],
+      ["dynamic_variables", { caller_name: "Margaret" }],
+      ["agent_version", 3],
+    ] as const) {
+      const carrying = { ...structuredClone(selfHosted), [key]: value };
+      expect(specComplaints(carrying), key).toContain(": must NOT be valid");
+    }
+  });
+
+  it("holds each access variant to its own config and credentials", async () => {
+    const selfHosted = await readJson(
+      "fixtures",
+      "spec",
+      "valid",
+      "voice-pipecat-self-hosted.json",
+    );
+    const headersAsObject = structuredClone(selfHosted);
+    (headersAsObject.connection as Record<string, unknown>).credentials = {
+      headers: { Authorization: "Bearer x" },
+    };
+    expect(specComplaints(headersAsObject)).toContain(
+      "/connection/credentials/headers: must be string",
+    );
+
+    const mixed = structuredClone(selfHosted);
+    (mixed.connection as Record<string, unknown>).config = {
+      startUrl: "https://bots.example.com/start",
+      agentName: "front-desk",
+    };
+    expect(specComplaints(mixed)).toContain(
+      "/connection/config: must NOT have additional properties",
+    );
+
+    const livekitPlatform = structuredClone(selfHosted);
+    (livekitPlatform.connection as Record<string, unknown>).agent_platform = "livekit";
+    expect(specComplaints(livekitPlatform)).toContain(
+      "/connection/agent_platform: must be equal to constant",
+    );
+  });
+
+  it("still admits every other connection at version 8 without body params", async () => {
+    const livekit = await readJson("fixtures", "spec", "valid", "voice-pipecat-cloud.json");
+    const chat = await readJson("fixtures", "spec", "valid", "chat-livekit.json");
+    const connection = chat.connection;
+    const asLivekit = { ...structuredClone(livekit), connection };
+    delete asLivekit.pipecat_body_params;
+    expect(specComplaints(asLivekit)).toEqual([]);
   });
 });

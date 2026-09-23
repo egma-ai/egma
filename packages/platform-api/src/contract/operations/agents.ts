@@ -17,7 +17,7 @@ const agent = {
     name: { type: "string" },
     agentPlatform: {
       type: "string",
-      enum: ["retell", "livekit"],
+      enum: ["retell", "livekit", "pipecat"],
     },
     platformAgentId: nullable({ type: "string" }),
     retellModality: nullable({ type: "string", enum: ["voice", "chat"] }),
@@ -67,7 +67,7 @@ const connection = {
     name: { type: "string" },
     agentPlatform: {
       type: "string",
-      enum: ["retell", "livekit"],
+      enum: ["retell", "livekit", "pipecat"],
     },
     connectionType: {
       type: "string",
@@ -77,6 +77,7 @@ const connection = {
         "retell_web_call",
         "phone_number",
         "livekit_room",
+        "daily_room",
       ],
     },
     accessVariant: {
@@ -88,6 +89,8 @@ const connection = {
         "phone_number.public_e164",
         "livekit_room.project_credentials",
         "livekit_room.customer_token_endpoint",
+        "daily_room.pipecat_cloud",
+        "daily_room.self_hosted",
       ],
     },
     modality: { type: "string", enum: ["voice", "chat"] },
@@ -171,17 +174,18 @@ const connectionInput = {
     },
     agentPlatform: nullable({
       type: "string",
-      enum: ["retell", "livekit"],
+      enum: ["retell", "livekit", "pipecat"],
       description: "The platform that runs the agent. It must be compatible with the selected connection type and agent.",
     }),
     connectionType: {
       type: "string",
-      description: "Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room connections can use voice or chat.",
+      description: "Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room and Pipecat Daily room connections can use voice or chat.",
       enum: [
         "retell_text_mode",
         "retell_web_call",
         "phone_number",
         "livekit_room",
+        "daily_room",
       ],
     },
     accessVariant: {
@@ -193,6 +197,8 @@ const connectionInput = {
         "phone_number.public_e164",
         "livekit_room.project_credentials",
         "livekit_room.customer_token_endpoint",
+        "daily_room.pipecat_cloud",
+        "daily_room.self_hosted",
       ],
     },
     modality: {
@@ -213,11 +219,14 @@ const connectionInput = {
         "Retell API variants use retellAgentId; a Retell phone connection uses phoneNumber. " +
         "LiveKit project credentials use url and agentName. LiveKit token endpoints use tokenEndpoint and agentName; " +
         "tokenEndpoint must be a public HTTPS URL. agentName must match the name registered by your LiveKit worker. " +
+        "Pipecat Cloud uses agentName, the agent name in pcc-deploy.toml. A self-hosted Pipecat starter uses startUrl, a public HTTPS URL. " +
         "When platformAgentId is supplied for a Retell API variant, Egma derives and confirms retellAgentId from that selection.",
       examples: [
         { retellAgentId: "agent_receptionist" },
         { url: "wss://example.livekit.cloud", agentName: "receptionist" },
         { tokenEndpoint: "https://voice.example.com/egma/token", agentName: "receptionist" },
+        { agentName: "receptionist" },
+        { startUrl: "https://bots.example.com/start" },
       ],
     },
     credentials: {
@@ -226,6 +235,7 @@ const connectionInput = {
       description:
         "Secret fields for the selected access variant. Retell uses apiKey. LiveKit project credentials use apiKey and apiSecret. " +
         "A LiveKit token endpoint requires headers: a JSON-encoded string containing a non-empty object of header names to string values. " +
+        "Pipecat Cloud uses publicApiKey, the public key that starts with pk_. A self-hosted Pipecat starter requires headers in the same JSON-encoded form. " +
         "For an additional Retell connection, platformAgentId can reuse the agent's saved Retell key when credentials are omitted. " +
         "For a Retell phone connection, the key confirms provider identity and is held on the agent; the phone connection itself stores no key. " +
         "Responses return credential presence and hints, never the secret values.",
@@ -233,6 +243,7 @@ const connectionInput = {
         { apiKey: "YOUR_RETELL_API_KEY" },
         { apiKey: "YOUR_LIVEKIT_API_KEY", apiSecret: "YOUR_LIVEKIT_API_SECRET" },
         { headers: '{"Authorization":"Bearer YOUR_ENDPOINT_TOKEN"}' },
+        { publicApiKey: "pk_YOUR_PIPECAT_PUBLIC_KEY" },
       ],
     },
     platformAgentId: {
@@ -486,7 +497,7 @@ export const agentOperations = {
               properties: {
                 agentPlatform: nullable({
                   type: "string",
-                  enum: ["retell", "livekit"],
+                  enum: ["retell", "livekit", "pipecat"],
                 }),
                 agentPlatformLabel: { type: "string" },
                 connectionType: {
@@ -496,6 +507,7 @@ export const agentOperations = {
                     "retell_web_call",
                     "phone_number",
                     "livekit_room",
+                    "daily_room",
                   ],
                 },
                 accessVariant: {
@@ -506,6 +518,8 @@ export const agentOperations = {
                     "phone_number.public_e164",
                     "livekit_room.project_credentials",
                     "livekit_room.customer_token_endpoint",
+                    "daily_room.pipecat_cloud",
+                    "daily_room.self_hosted",
                   ],
                 },
                 accessVariantLabel: { type: "string" },
@@ -592,7 +606,7 @@ export const agentOperations = {
           name: { type: "string", description: "Display name for the agent in Egma.", examples: ["Receptionist"] },
           agentPlatform: {
             type: "string",
-            enum: ["retell", "livekit"],
+            enum: ["retell", "livekit", "pipecat"],
             description: "The product or framework that runs your agent.",
           },
           connection: connectionInput,

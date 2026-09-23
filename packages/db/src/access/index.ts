@@ -321,6 +321,15 @@ export {
   type TestVersion,
   type TestVersionPage,
 } from "./tests.ts";
+export {
+  readAgentReport,
+  recordAgentReport,
+  resolveLiveDailyRoomSimulation,
+  type AgentReport,
+  type AgentReportTool,
+  type LiveDailyRoomSimulation,
+  type NewAgentReport,
+} from "./agent-reports.ts";
 
 export {
   getGraderLibraryEntry,
