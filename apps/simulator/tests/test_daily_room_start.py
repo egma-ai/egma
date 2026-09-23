@@ -282,8 +282,18 @@ async def test_pipecat_cloud_unreachable_is_retried_then_named(
 @pytest.mark.parametrize(
     ("status", "tail", "ending"),
     [
-        (401, "refused the start request (HTTP 401). Check the connection's auth headers.", ERROR),
-        (403, "refused the start request (HTTP 403). Check the connection's auth headers.", ERROR),
+        (
+            401,
+            "refused the start request (HTTP 401). Check the connection's auth "
+            "headers.",
+            ERROR,
+        ),
+        (
+            403,
+            "refused the start request (HTTP 403). Check the connection's auth "
+            "headers.",
+            ERROR,
+        ),
         (404, "refused the start request (HTTP 404).", ERROR),
         (500, "refused the start request (HTTP 500).", ERROR),
         (307, "refused the start request (HTTP 307).", ERROR),
