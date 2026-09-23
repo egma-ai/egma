@@ -103,6 +103,23 @@ def post_start(url: str, payload: dict, headers: dict[str, str], timeout: float)
     }
 
 
+def synthesize(text: str) -> bytes:
+    """Speech for `text` as 24 kHz 16-bit mono PCM, from OpenAI (OPENAI_API_KEY)."""
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/audio/speech",
+        data=json.dumps(
+            {"model": "gpt-4o-mini-tts", "voice": "alloy", "input": text, "response_format": "pcm"}
+        ).encode(),
+        headers={
+            "Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}",
+            "content-type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        return response.read()
+
+
 class Recorder:
     """Timestamps every event relative to the start request and writes JSONL."""
 
@@ -300,6 +317,11 @@ def summarize_turn(rec: Recorder, client: Client, since: float, until: float) ->
         "types_seen": sorted({e["type"] for e in rtvi}),
         "llm_text": llm_text,
         "tts_text": tts_text,
+        "user_transcription": [
+            e["data"].get("text")
+            for e in rtvi
+            if e["type"] == "user-transcription" and (e.get("data") or {}).get("final")
+        ],
         "bot_output": output,
         "bot_transcription": [
             e["data"].get("text")
@@ -339,6 +361,9 @@ def main() -> int:
         default="bot-joined",
     )
     parser.add_argument("--say", action="append", default=[], help="send-text, in order")
+    parser.add_argument(
+        "--speak", action="append", default=[], help="spoken into the room, after --say"
+    )
     parser.add_argument("--no-audio-response", action="store_true")
     parser.add_argument("--not-immediately", action="store_true")
     parser.add_argument("--wait-bot", type=float, default=150.0)
@@ -388,6 +413,11 @@ def main() -> int:
         token = os.environ.get(args.token_env or "", "") or None
 
     Daily.init()
+    microphone = (
+        Daily.create_microphone_device("egma-e2e-mic", sample_rate=24000, channels=1)
+        if args.speak
+        else None
+    )
     client = Client(rec)
     call = CallClient(event_handler=client)
     client.call = call
@@ -412,10 +442,13 @@ def main() -> int:
             rec.log("joined", id=client.local_id, is_owner=local.get("info", {}).get("isOwner"))
         joined.set()
 
+    inputs: dict[str, Any] = {"camera": False, "microphone": False}
+    if microphone is not None:
+        inputs["microphone"] = {"isEnabled": True, "settings": {"deviceId": "egma-e2e-mic"}}
     call.join(
         room_url,
         meeting_token=token,
-        client_settings={"inputs": {"camera": False, "microphone": False}},
+        client_settings={"inputs": inputs},
         completion=on_joined,
     )
     joined.wait(30)
@@ -456,6 +489,18 @@ def main() -> int:
         over = wait_turn_over(client, rec, since, args.turn_limit)
         summary["turns"].append(
             {"said": text, **over, **summarize_turn(rec, client, since, rec.now())}
+        )
+
+    for text in args.speak:
+        assert microphone is not None
+        speech = synthesize(text)
+        since = rec.now()
+        rec.log("speaking", text=text, seconds=round(len(speech) / 48000, 2))
+        microphone.write_frames(speech)
+        microphone.write_frames(b"\x00" * 48000 * 2)
+        over = wait_turn_over(client, rec, since, args.turn_limit)
+        summary["turns"].append(
+            {"spoke": text, **over, **summarize_turn(rec, client, since, rec.now())}
         )
 
     time.sleep(args.linger)
