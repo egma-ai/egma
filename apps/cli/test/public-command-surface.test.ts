@@ -78,6 +78,8 @@ const APPROVED_FLAGS = [
       "--livekit-url",
       "--modality",
       "--name",
+      "--pipecat-agent-name",
+      "--pipecat-start-url",
       "--retell-agent",
       "--retell-phone-number",
     ],
@@ -179,7 +181,7 @@ describe("the skills-first public command surface", () => {
 
     expect(result).toMatchObject({ code: 0, stderr: "" });
     expect(result.stdout).toContain(
-      "--platform <retell|livekit>  Agent platform whose Connection choices to list.",
+      "--platform <retell|livekit|pipecat> Agent platform whose Connection choices to list.",
     );
   });
 

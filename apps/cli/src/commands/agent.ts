@@ -26,6 +26,12 @@ import {
   type RegisterOutcome,
   type RegisterOptions,
 } from "../platform/agents.ts";
+import {
+  AGENT_PLATFORM_LABELS,
+  CHOOSE_PLATFORM,
+  isAgentPlatform,
+  type AgentPlatform,
+} from "../platform/agent-platforms.ts";
 import { ConnectionCredentials } from "../platform/connection-credentials.ts";
 import {
   connectionOptionsForPlatform,
@@ -58,6 +64,8 @@ export const RETELL_PHONE_NUMBER_ACCESS = "retell-phone-number";
 export const LIVEKIT_PROJECT_CREDENTIALS_ACCESS =
   "livekit-project-credentials";
 export const LIVEKIT_TOKEN_ENDPOINT_ACCESS = "livekit-token-endpoint";
+export const PIPECAT_CLOUD_ACCESS = "pipecat-cloud";
+export const PIPECAT_SELF_HOSTED_ACCESS = "pipecat-self-hosted";
 
 export const AGENT_EXIT = {
   done: 0,
@@ -70,7 +78,6 @@ export const AGENT_EXIT = {
   interrupted: 130,
 } as const;
 
-type AgentPlatform = "retell" | "livekit";
 type Modality = "chat" | "voice";
 type CommandIO = {
   readonly access: PlatformAccess;
@@ -100,6 +107,8 @@ type ConnectionFlags = {
   readonly livekitUrl: string | null;
   readonly livekitAgentName: string | null;
   readonly livekitTokenEndpoint: string | null;
+  readonly pipecatAgentName?: string | null;
+  readonly pipecatStartUrl?: string | null;
 };
 
 export type AgentRegisterCommandOptions = CommandIO & {
@@ -158,7 +167,7 @@ function platformWord(
 ): AgentPlatform | { readonly said: string } | null {
   const word = clean(value).toLowerCase();
   if (word === "") return null;
-  return word === "retell" || word === "livekit" ? word : { said: word };
+  return isAgentPlatform(word) ? word : { said: word };
 }
 
 function modalityWord(
@@ -255,6 +264,20 @@ function publicAccess(option: ConnectionOption): string | null {
   ) {
     return LIVEKIT_TOKEN_ENDPOINT_ACCESS;
   }
+  if (
+    option.agentPlatform === "pipecat" &&
+    option.connectionType === "daily_room" &&
+    option.accessVariant === "daily_room.pipecat_cloud"
+  ) {
+    return PIPECAT_CLOUD_ACCESS;
+  }
+  if (
+    option.agentPlatform === "pipecat" &&
+    option.connectionType === "daily_room" &&
+    option.accessVariant === "daily_room.self_hosted"
+  ) {
+    return PIPECAT_SELF_HOSTED_ACCESS;
+  }
   return null;
 }
 
@@ -295,21 +318,35 @@ function selectedOption(
   return sayFailure(options, "unsupported-connection", message, AGENT_EXIT.incomplete);
 }
 
-function connectionFlag(key: string): string | null {
-  if (key === "retellAgentId") return "--retell-agent";
-  return CONFIG_FLAGS.find(([field]) => field === key)?.[1] ?? null;
+/** The flag that carries one config field on one platform. */
+function connectionFlag(platform: AgentPlatform, key: string): string | null {
+  if (platform === "retell" && key === "retellAgentId") return "--retell-agent";
+  return (
+    CONFIG_FLAGS.find(
+      ([owner, field]) => owner === platform && field === key,
+    )?.[2] ?? null
+  );
 }
 
-function flagValue(key: string, flags: ConnectionFlags): string {
-  const descriptor = CONFIG_FLAGS.find(([field]) => field === key);
-  return descriptor === undefined ? "" : clean(flags[descriptor[2]]);
+function flagValue(
+  platform: AgentPlatform,
+  key: string,
+  flags: ConnectionFlags,
+): string {
+  const descriptor = CONFIG_FLAGS.find(
+    ([owner, field]) => owner === platform && field === key,
+  );
+  return descriptor === undefined ? "" : clean(flags[descriptor[3]]);
 }
 
+/** Platform, config field, public flag, and the parsed flag property. */
 const CONFIG_FLAGS = [
-  ["phoneNumber", "--retell-phone-number", "retellPhoneNumber"],
-  ["url", "--livekit-url", "livekitUrl"],
-  ["agentName", "--livekit-agent-name", "livekitAgentName"],
-  ["tokenEndpoint", "--livekit-token-endpoint", "livekitTokenEndpoint"],
+  ["retell", "phoneNumber", "--retell-phone-number", "retellPhoneNumber"],
+  ["livekit", "url", "--livekit-url", "livekitUrl"],
+  ["livekit", "agentName", "--livekit-agent-name", "livekitAgentName"],
+  ["livekit", "tokenEndpoint", "--livekit-token-endpoint", "livekitTokenEndpoint"],
+  ["pipecat", "agentName", "--pipecat-agent-name", "pipecatAgentName"],
+  ["pipecat", "startUrl", "--pipecat-start-url", "pipecatStartUrl"],
 ] as const;
 
 function irrelevantConnectionFlags(
@@ -319,8 +356,11 @@ function irrelevantConnectionFlags(
 ): readonly string[] {
   const accepted = new Set(option.fields.map((field) => field.key));
   const irrelevant: string[] = CONFIG_FLAGS.flatMap(
-    ([field, flag, property]) =>
-      clean(flags[property]) !== "" && !accepted.has(field) ? [flag] : [],
+    ([owner, field, flag, property]) =>
+      clean(flags[property]) !== "" &&
+      (owner !== platform || !accepted.has(field))
+        ? [flag]
+        : [],
   );
   if (clean(flags.retellAgentId) !== "" && platform !== "retell") {
     irrelevant.push("--retell-agent");
@@ -350,6 +390,7 @@ type BuiltConfig =
 
 /** Build only the fields the selected server option names. */
 function configForOption(
+  platform: AgentPlatform,
   option: ConnectionOption,
   flags: ConnectionFlags,
   io: Pick<CommandIO, "out" | "fail">,
@@ -358,10 +399,10 @@ function configForOption(
   const config: Record<string, string> = {};
   for (const field of option.fields) {
     const fromDiscovery = discovered?.[field.key];
-    const value = clean(fromDiscovery ?? flagValue(field.key, flags));
+    const value = clean(fromDiscovery ?? flagValue(platform, field.key, flags));
     const issue = connectionFieldIssue(field, value);
     if (issue !== null) {
-      const flag = connectionFlag(field.key);
+      const flag = connectionFlag(platform, field.key);
       const message =
         flag === null
           ? `This Egma platform requires connection field ${field.key}, but this CLI does not map it yet. Update the CLI and try again.`
@@ -443,6 +484,12 @@ function credentialEnvironmentVariable(
   if (platform === "livekit" && field === "headers") {
     return "EGMA_LIVEKIT_TOKEN_ENDPOINT_HEADERS";
   }
+  if (platform === "pipecat" && field === "publicApiKey") {
+    return "EGMA_PIPECAT_PUBLIC_KEY";
+  }
+  if (platform === "pipecat" && field === "headers") {
+    return "EGMA_PIPECAT_START_HEADERS";
+  }
   return null;
 }
 
@@ -455,7 +502,7 @@ function incompatibleCatalog(
   const unsupported = catalog.some(
     (option) =>
       publicAccess(option) === null ||
-      option.fields.some((field) => connectionFlag(field.key) === null) ||
+      option.fields.some((field) => connectionFlag(platform, field.key) === null) ||
       option.credentialFields.some(
         (field) =>
           credentialEnvironmentVariable(platform, field.field) === null,
@@ -693,7 +740,7 @@ function optionCommand(
   }
   for (const field of option.fields) {
     if (!field.required || field.key === "retellAgentId") continue;
-    const flag = connectionFlag(field.key);
+    const flag = connectionFlag(platform, field.key);
     if (flag !== null && !parts.includes(flag)) {
       parts.push(flag, shellWord(`<${field.label}>`));
     }
@@ -765,14 +812,14 @@ function sayConnectionOption(
   out(`  Access: ${access}`);
   const required = option.fields
     .filter((field) => field.required)
-    .flatMap((field) => connectionFlag(field.key) ?? []);
+    .flatMap((field) => connectionFlag(platform, field.key) ?? []);
   const optional = option.fields
     .filter((field) => !field.required)
-    .flatMap((field) => connectionFlag(field.key) ?? []);
+    .flatMap((field) => connectionFlag(platform, field.key) ?? []);
   out(`  Required flags: ${required.length === 0 ? "none" : required.join(", ")}`);
   out(`  Optional flags: ${optional.length === 0 ? "none" : optional.join(", ")}`);
   for (const field of option.fields) {
-    const flag = connectionFlag(field.key);
+    const flag = connectionFlag(platform, field.key);
     if (flag === null) continue;
     const requirement = field.required ? "required" : "optional";
     const help = field.help === "" ? field.label : field.help;
@@ -793,7 +840,7 @@ export async function runAgentConnectionOptionsCommand(
     return sayFailure(
       options,
       platform === null ? "platform-required" : "unsupported-platform",
-      "Choose --platform retell or --platform livekit.",
+      CHOOSE_PLATFORM,
       AGENT_EXIT.incomplete,
     ).code;
   }
@@ -894,17 +941,23 @@ export async function runAgentConnectionOptionsCommand(
     return AGENT_EXIT.done;
   }
 
+  const label = AGENT_PLATFORM_LABELS[platform];
   if (clean(options.agentId) !== "") {
     return sayFailure(
       options,
       "agent-not-used",
-      "--agent is only used to reuse a stored Retell credential. Remove it for LiveKit connection options.",
+      `--agent is only used to reuse a stored Retell credential. Remove it for ${label} connection options.`,
       AGENT_EXIT.incomplete,
     ).code;
   }
 
-  options.out("LiveKit connection options");
+  options.out(`${label} connection options`);
   for (const option of catalog) sayConnectionOption(platform, option, options.out);
+  if (platform === "pipecat") {
+    options.out("");
+    options.out("For a bot on this computer, egma agent dev opens a tunnel and keeps this machine's self-hosted Connections current:");
+    options.out(`  Command: egma agent dev --agent ${shellWord("<Egma Agent ID>")} --port 7860`);
+  }
   return AGENT_EXIT.done;
 }
 
@@ -1099,12 +1152,13 @@ function interruptedAfterWrite(
 }
 
 function reportedConfig(
+  platform: AgentPlatform,
   option: ConnectionOption,
   flags: ConnectionFlags,
   options: Pick<CommandIO, "out" | "fail">,
   discovered?: Readonly<Record<string, string>>,
 ): BuiltConfig {
-  return configForOption(option, flags, options, discovered);
+  return configForOption(platform, option, flags, options, discovered);
 }
 
 /** Register one Egma Agent identity. Connections are separate resources. */
@@ -1118,7 +1172,7 @@ export async function runAgentRegisterCommand(
     return sayFailure(
       options,
       platform === null ? "platform-required" : "unsupported-platform",
-      "Choose --platform retell or --platform livekit.",
+      CHOOSE_PLATFORM,
       AGENT_EXIT.incomplete,
     ).code;
   }
@@ -1332,7 +1386,7 @@ export async function runAgentConnectionAddCommand(
       options,
     );
     if (irrelevant !== null) return irrelevant.code;
-    const builtConfig = reportedConfig(choice, options, options, candidate.config);
+    const builtConfig = reportedConfig("retell", choice, options, options, candidate.config);
     if (builtConfig.kind === "stop") return builtConfig.stop.code;
     const config = builtConfig.config;
     connection = {
@@ -1360,7 +1414,7 @@ export async function runAgentConnectionAddCommand(
       options,
     );
     if (irrelevant !== null) return irrelevant.code;
-    const builtConfig = reportedConfig(choice, options, options);
+    const builtConfig = reportedConfig(loaded.platform, choice, options, options);
     if (builtConfig.kind === "stop") return builtConfig.stop.code;
     const config = builtConfig.config;
     const credentials = await credentialsForOption(
@@ -1371,7 +1425,7 @@ export async function runAgentConnectionAddCommand(
     if (credentials.kind === "stop") return credentials.stop.code;
     connection = {
       name: clean(options.name) || choice.productLabel,
-      agentPlatform: "livekit",
+      agentPlatform: loaded.platform,
       connectionType: choice.connectionType,
       accessVariant: choice.accessVariant,
       modality: choice.modality,
