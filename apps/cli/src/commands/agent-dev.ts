@@ -165,7 +165,7 @@ function whenDisconnected(
     let timer: NodeJS.Timeout | undefined;
     const tick = async (): Promise<void> => {
       if (stop.aborted) return;
-      const connected = await tunnel.connected();
+      const connected = await tunnel.connected().catch(() => undefined);
       if (stop.aborted) return;
       if (connected === false) {
         downSince ??= Date.now();
@@ -565,6 +565,7 @@ export async function runAgentDevCommand(options: AgentDevCommandOptions): Promi
     launch: options.launchTunnel ?? cloudflaredLauncher(cloudflared),
   };
   const holder: { tunnel: RunningTunnel | null } = { tunnel: null };
+  let wasReady = false;
   try {
     options.out("Opening a Cloudflare quick tunnel.");
     try {
@@ -593,7 +594,7 @@ export async function runAgentDevCommand(options: AgentDevCommandOptions): Promi
       options.out(`  egma run create <suite-directory> --agent ${agentId} --connection ${connection.id}`);
     }
     options.out("Press Ctrl-C to stop.");
-    if (options.signal.aborted) return stoppedEarly(options);
+    wasReady = true;
 
     const code = await supervise(session, tunnel, holder);
     options.out("Stopping.");
@@ -601,7 +602,7 @@ export async function runAgentDevCommand(options: AgentDevCommandOptions): Promi
   } finally {
     await holder.tunnel?.stop();
     await guard.close();
-    if (options.signal.aborted) {
+    if (wasReady && options.signal.aborted) {
       options.out(
         "Stopped. The tunnel is closed. This machine's Connections stay; the next egma agent dev writes its new start URL into them.",
       );

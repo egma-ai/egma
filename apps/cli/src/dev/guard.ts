@@ -20,11 +20,7 @@ import type { AddressInfo } from "node:net";
 /** The header that carries the session's secret. */
 export const DEV_SECRET_HEADER = "X-Egma-Dev-Secret";
 
-/** A request carrying the secret and this header is answered by the guard itself. */
-export const DEV_PROBE_HEADER = "X-Egma-Dev-Probe";
-
 const SECRET_HEADER_KEY = DEV_SECRET_HEADER.toLowerCase();
-const PROBE_HEADER_KEY = DEV_PROBE_HEADER.toLowerCase();
 
 const REFUSAL_BODY = JSON.stringify({
   error: "egma agent dev refused a request without its secret header",
@@ -159,6 +155,8 @@ export async function startGuard(options: GuardOptions): Promise<Guard> {
     upstream.on("error", (error: NodeJS.ErrnoException) => {
       incoming.unpipe(upstream);
       incoming.resume();
+      // The caller is gone already; there is nobody to answer.
+      if (outgoing.destroyed || outgoing.writableEnded) return;
       if (outgoing.headersSent) {
         outgoing.destroy(error);
         return;
@@ -188,12 +186,6 @@ export async function startGuard(options: GuardOptions): Promise<Guard> {
       incoming.resume();
       answerJson(outgoing, 401, REFUSAL_BODY);
       tell({ kind: "refused", method, path: pathOf(incoming.url) });
-      return;
-    }
-    const probe = incoming.headers[PROBE_HEADER_KEY];
-    if (typeof probe === "string" && probe !== "") {
-      incoming.resume();
-      answerJson(outgoing, 200, JSON.stringify({ probe }));
       return;
     }
     forward(incoming, outgoing);

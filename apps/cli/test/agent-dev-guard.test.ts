@@ -10,7 +10,6 @@ import { connect, type AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  DEV_PROBE_HEADER,
   DEV_SECRET_HEADER,
   startGuard,
   type Guard,
@@ -290,23 +289,43 @@ describe("the egma agent dev guard", () => {
     ]);
   });
 
-  it("answers its own probe without reaching the bot, and only with the secret", async () => {
-    const local = await starter();
-    const events: GuardEvent[] = [];
-    const guard = await guardOn(local.port, events);
-
-    const probed = await send(guard, {
-      method: "GET",
-      path: "/",
-      headers: { [DEV_SECRET_HEADER]: SECRET, [DEV_PROBE_HEADER]: "nonce-1" },
+  it("keeps serving after a caller goes away in the middle of an answer", async () => {
+    let seenAbort = false;
+    const local = await starter((seen, response) => {
+      if (seen.url === "/slow") {
+        response.writeHead(200, { "content-type": "text/plain" });
+        response.write("partial ");
+        response.on("close", () => {
+          seenAbort = true;
+        });
+        return;
+      }
+      response.writeHead(200, { "content-type": "text/plain" });
+      response.end("fine");
     });
-    const stranger = await send(guard, { method: "GET", path: "/", headers: { [DEV_PROBE_HEADER]: "nonce-1" } });
+    const guard = await guardOn(local.port);
 
-    expect(probed.status).toBe(200);
-    expect(JSON.parse(probed.body)).toEqual({ probe: "nonce-1" });
-    expect(stranger.status).toBe(401);
-    expect(local.seen).toHaveLength(0);
-    expect(events).toEqual([{ kind: "refused", method: "GET", path: "/" }]);
+    await new Promise<void>((resolve, reject) => {
+      const outgoing = httpRequest(
+        { host: "127.0.0.1", port: guard.port, method: "GET", path: "/slow", headers: { [DEV_SECRET_HEADER]: SECRET } },
+        (incoming) => {
+          incoming.once("data", () => {
+            outgoing.destroy();
+            resolve();
+          });
+        },
+      );
+      outgoing.on("error", () => undefined);
+      outgoing.on("close", () => resolve());
+      outgoing.end();
+      setTimeout(() => reject(new Error("no first chunk")), 5_000);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const next = await send(guard, { method: "GET", path: "/next", headers: { [DEV_SECRET_HEADER]: SECRET } });
+
+    expect(seenAbort).toBe(true);
+    expect(next.status).toBe(200);
+    expect(next.body).toBe("fine");
   });
 
   it("closes, and refuses new connections after that", async () => {
