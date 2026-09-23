@@ -276,6 +276,45 @@ describe("the hello kept on the simulation", () => {
     ]);
   });
 
+  it("lets a later refused hello replace an accepted one, as a Flows function appears mid-session", async () => {
+    const { claim, conducting } = await registered();
+    await recordAgentReport(projectKey, claim.id, {
+      state: "accepted",
+      tools: [{ name: "check_calendar" }],
+      mockedTools: ["check_calendar", "route_to_billing"],
+    });
+    const message =
+      'the test mocks "route_to_billing", and this is a Pipecat Flows function; Egma cannot mock it yet. Remove it from the test\'s mock tools. Flows functions that are not mocked run for real and are recorded.';
+    expect(
+      await recordAgentReport(projectKey, claim.id, {
+        state: "refused",
+        code: 905,
+        message,
+        tools: [{ name: "check_calendar" }, { name: "route_to_billing", flows: true }],
+      }),
+    ).toBe(true);
+    await expect(
+      readAgentReport(conducting, { simulationId: claim.id, claimant: SIMULATOR }),
+    ).resolves.toEqual({
+      state: "refused",
+      at: expect.any(String) as string,
+      code: 905,
+      message,
+      tools: [{ name: "check_calendar" }, { name: "route_to_billing", flows: true }],
+    });
+    const { rows } = await database.sql<{ agent_report: Record<string, unknown> }>(
+      "select agent_report from simulation where id = $1",
+      [claim.id],
+    );
+    expect(Object.keys(rows[0]?.agent_report ?? {}).sort()).toEqual([
+      "at",
+      "code",
+      "message",
+      "state",
+      "tools",
+    ]);
+  });
+
   it("keeps a refusal with its code and sentence, and a new attempt forgets it", async () => {
     const { claim, conducting } = await registered();
     const message =
