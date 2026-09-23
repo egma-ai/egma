@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Deploy the e2e bot to Pipecat Cloud with a cloud build.
 #
-# Stages a clean build context in .build/ (the bot's files, and the Egma SDK
-# wheel built from this checkout when it has `egma.pipecat`), then runs
-# `pipecat cloud deploy` with pcc-deploy.toml. Extra arguments go to the
-# deploy, for example `--min-agents 0` or `--force`.
+# Stages a clean build context in .build/ (the bot's files and the Egma SDK
+# wheel built from sdks/python), then runs `pipecat cloud deploy` with
+# pcc-deploy.toml. Extra arguments go to the deploy, for example
+# `--min-agents 0` or `--force`.
 #
 #   EGMA_SDK_WHEEL=off ./deploy.sh   deploys without the SDK
 set -euo pipefail
@@ -20,7 +20,7 @@ echo "Egma SDK wheels staged by deploy.sh" > "$build/wheels/README"
 cp "$here/Dockerfile" "$here/pyproject.toml" "$here/uv.lock" \
   "$here/bot.py" "$here/flow_handlers.py" "$here/store.py" "$here/flow.yaml" "$build/"
 
-if [ "${EGMA_SDK_WHEEL:-auto}" != "off" ] && [ -d "$sdk/src/egma/pipecat" ]; then
+if [ "${EGMA_SDK_WHEEL:-on}" != "off" ]; then
   (cd "$sdk" && uv build --wheel --out-dir "$build/wheels")
   echo "Staged the Egma SDK wheel: $(cd "$build/wheels" && ls ./*.whl)"
 else

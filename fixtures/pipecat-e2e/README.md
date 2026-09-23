@@ -104,7 +104,7 @@ pipecat cloud secrets set egma-e2e-secrets --file .env
 Deploy with a cloud build:
 
 ```sh
-./deploy.sh                    # the Egma SDK from this checkout, when it has egma.pipecat
+./deploy.sh                    # with the Egma SDK built from sdks/python
 EGMA_SDK_WHEEL=off ./deploy.sh # without the SDK
 ./deploy.sh --min-agents 0     # extra arguments go to pipecat cloud deploy
 ```
