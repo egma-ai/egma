@@ -18,6 +18,7 @@ None of it runs in CI.
 | `store.py` | The shop: fixed answers, no clock, no network. Every real tool run logs one `E2E_REAL_TOOL` line. |
 | `flow.yaml`, `flow_handlers.py` | The Pipecat Flows variant: a declarative flow, as in Pipecat's Flows quickstart. |
 | `tools/rtvi_client.py` | An RTVI client: sends a start request, joins the Daily room, sends `client-ready` and `send-text`, and times every event. |
+| `tools/starter.py` | A customer-style starter: its own `POST /start` behind an `Authorization` header, a separate non-owner token for the client. |
 | `Dockerfile`, `pcc-deploy.toml`, `deploy.sh` | The Pipecat Cloud deployment. |
 
 ### The tools
@@ -79,6 +80,15 @@ uv run tools/rtvi_client.py url --start-url http://localhost:7860/start \
 The runner answers `POST /start` with `{"dailyRoom", "dailyToken", "sessionId"}`,
 the same shape as Pipecat Cloud's start API, when the request carries
 `"transport": "daily"` and `"createDailyRoom": true`.
+
+To stand in for a team's own server instead of Pipecat's runner, run the
+starter. It refuses a request without `Authorization: Bearer <STARTER_SECRET>`:
+
+```sh
+STARTER_SECRET=... uv run tools/starter.py --port 7870
+uv run tools/rtvi_client.py url --start-url http://localhost:7870/start \
+  --header "Authorization: Bearer $STARTER_SECRET"
+```
 
 ## Run it on Pipecat Cloud
 
