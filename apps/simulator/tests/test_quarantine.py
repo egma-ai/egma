@@ -63,6 +63,8 @@ asked for it should pay, and CI reads the scripted codec instead."""
 MEDIA_BACKEND_MODULES = (
     "livekit",
     "pipecat.transports.livekit.transport",
+    "daily",
+    "pipecat.transports.daily.transport",
 )
 """The same rule one layer down: the bridge a phone call is placed
 through, and the modules a simulator that dials no phone must never load.
@@ -142,6 +144,7 @@ def test_no_module_imports_anything_from_outside_the_app():
         "structlog",
         "nltk",
         "livekit",
+        "daily",
         "boto3",
         "botocore",
         "opentelemetry",
@@ -359,13 +362,14 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
         print(json.dumps(sorted(
             name for name in sys.modules
             if name.split(".")[0] in (
-                "deepgram", "livekit", "boto3", "botocore"
+                "deepgram", "livekit", "daily", "boto3", "botocore"
             )
             or name.startswith("pipecat.services.deepgram")
             or name.startswith("pipecat.services.cartesia")
             or name.startswith("pipecat.services.openai.stt")
             or name.startswith("pipecat.services.openai.tts")
             or name.startswith("pipecat.transports.livekit")
+            or name.startswith("pipecat.transports.daily")
             or name == "pipecat.audio.vad.silero"
         )))
         """
