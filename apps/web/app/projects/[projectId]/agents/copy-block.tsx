@@ -115,7 +115,22 @@ export function InstructionSteps({
 /** The two values the agent's environment carries, as the steps show them. */
 export const EGMA_URL_PLACEHOLDER = "<your-public-egma-url>";
 export const API_KEY_PLACEHOLDER = "<your-project-api-key>";
-export const ENVIRONMENT_VALUES = `EGMA_URL=${EGMA_URL_PLACEHOLDER}\nEGMA_API_KEY=${API_KEY_PLACEHOLDER}`;
+export const ENVIRONMENT_VALUES = environmentValues(API_KEY_PLACEHOLDER);
+
+/** The environment values, with the key the agent should export with. */
+export function environmentValues(key: string): string {
+  return `EGMA_URL=${EGMA_URL_PLACEHOLDER}\nEGMA_API_KEY=${key}`;
+}
+
+/** What the URL placeholder stands for, where the key comes from a step. */
+export function EgmaUrlNote({ reachedBy }: { readonly reachedBy: string }) {
+  return (
+    <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
+      Set {EGMA_URL_PLACEHOLDER} to the public Egma API URL that {reachedBy} can
+      reach.
+    </p>
+  );
+}
 
 /** Where the project key comes from, and what the URL placeholder stands for. */
 export function ProjectKeyNote({

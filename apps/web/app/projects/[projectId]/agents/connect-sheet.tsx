@@ -1446,6 +1446,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
               access={
                 sdkAccess === SELF_HOSTED ? "self_hosted" : "pipecat_cloud"
               }
+              monitors={goal === "both"}
             />
           );
         }
@@ -1485,7 +1486,10 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         );
       case "sdk-monitoring":
         return sdkPlatform === "pipecat" ? (
-          <PipecatMonitoringInstructions projectId={projectId} />
+          <PipecatMonitoringInstructions
+            agentId={registeringAgent ? null : (agentId ?? null)}
+            registers={registeringAgent && goal === "monitoring"}
+          />
         ) : (
           <LiveKitMonitoringInstructions
             projectId={projectId}
