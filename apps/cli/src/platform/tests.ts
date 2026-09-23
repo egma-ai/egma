@@ -116,7 +116,7 @@ function mockToolsIn(value: GetTestResponse["mockTools"]): readonly MockToolEntr
 }
 
 /**
- * The env as the folder holds it, with the two halves in the format's order.
+ * The env as the folder holds it, with its keys in the format's order.
  *
  * Written here rather than passed through, so the bytes a file ends up with are
  * decided by the value and not by the order the platform happened to answer in.
@@ -130,11 +130,13 @@ function envIn(value: GetTestResponse["env"]): TestEnv | null {
     isRecord(held) && Object.keys(held).length > 0 ? held : null;
   const variables = said(value.retell_dynamic_variables);
   const dispatch = said(value.job_dispatch_metadata);
+  const pipecatBody = said((value as Record<string, unknown>)["pipecat_body_params"]);
   const env: TestEnv = {
     ...(variables === null
       ? {}
       : { retell_dynamic_variables: variables as Record<string, string> }),
     ...(dispatch === null ? {} : { job_dispatch_metadata: dispatch }),
+    ...(pipecatBody === null ? {} : { pipecat_body_params: pipecatBody }),
   };
   return Object.keys(env).length === 0 ? null : env;
 }

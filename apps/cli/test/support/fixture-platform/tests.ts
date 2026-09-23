@@ -20,10 +20,11 @@ export type FixtureMockTool =
   | { readonly tool: string; readonly answer: unknown }
   | { readonly tool: string; readonly error: string };
 
-/** The world one test is conducted in, in the two platforms' own words. */
+/** The world one test is conducted in, in each platform's own words. */
 export type FixtureEnv = {
   readonly retell_dynamic_variables?: Readonly<Record<string, string>>;
   readonly job_dispatch_metadata?: Readonly<Record<string, unknown>>;
+  readonly pipecat_body_params?: Readonly<Record<string, unknown>>;
 };
 
 export type SeedTest = {
@@ -215,8 +216,15 @@ function mockToolsFrom(value: unknown): readonly FixtureMockTool[] {
   return mockTools;
 }
 
-/** The two keys an env may carry, and nothing else. */
-const ENV_KEYS = ["retell_dynamic_variables", "job_dispatch_metadata"] as const;
+/** The keys an env may carry, and nothing else. */
+const ENV_KEYS = [
+  "retell_dynamic_variables",
+  "job_dispatch_metadata",
+  "pipecat_body_params",
+] as const;
+
+/** The platform's limit on a serialized pipecat_body_params. */
+const LARGEST_PIPECAT_BODY_PARAMS_BYTES = 512 * 1024;
 
 /**
  * The env as it will be stored, or null where the test asks for nothing.
@@ -229,21 +237,23 @@ function envFrom(value: unknown): FixtureEnv | null {
   if (value === undefined || value === null) return null;
   if (!isRecord(value)) {
     throw new Unprocessable(
-      "env is an object with at most retell_dynamic_variables and " +
-        "job_dispatch_metadata in it",
+      "env is an object with at most retell_dynamic_variables, " +
+        "job_dispatch_metadata and pipecat_body_params in it",
     );
   }
   for (const key of Object.keys(value)) {
     if ((ENV_KEYS as readonly string[]).includes(key)) continue;
     throw new Unprocessable(
       `env has no ${JSON.stringify(key)} in it. An env carries ` +
-        `${ENV_KEYS.join(" and ")}, and nothing else.`,
+        "retell_dynamic_variables, job_dispatch_metadata and " +
+        "pipecat_body_params, and nothing else.",
     );
   }
 
   const env: {
     retell_dynamic_variables?: Record<string, string>;
     job_dispatch_metadata?: Record<string, unknown>;
+    pipecat_body_params?: Record<string, unknown>;
   } = {};
 
   const written = value.retell_dynamic_variables;
@@ -292,6 +302,32 @@ function envFrom(value: unknown): FixtureEnv | null {
       );
     }
     if (Object.keys(dispatch).length > 0) env.job_dispatch_metadata = dispatch;
+  }
+
+  const pipecatBody = value.pipecat_body_params;
+  if (pipecatBody !== undefined && pipecatBody !== null) {
+    if (!isRecord(pipecatBody)) {
+      throw new Unprocessable(
+        "env.pipecat_body_params is a JSON object merged into the body of the " +
+          "start request, which your Pipecat bot reads at runner_args.body, and " +
+          'looks like {"tenant": "acme"}',
+      );
+    }
+    if (Object.hasOwn(pipecatBody, "egma")) {
+      throw new Unprocessable(
+        'env.pipecat_body_params holds the key "egma", which Egma keeps for ' +
+          "its own simulation marker in the start request. Name the key something else.",
+      );
+    }
+    const bytes = Buffer.byteLength(JSON.stringify(pipecatBody), "utf8");
+    if (bytes > LARGEST_PIPECAT_BODY_PARAMS_BYTES) {
+      throw new Unprocessable(
+        `env.pipecat_body_params is ${bytes} bytes once serialized, and Egma ` +
+          `sends at most ${LARGEST_PIPECAT_BODY_PARAMS_BYTES} in the start ` +
+          "request; hold a large value in your own store and put its id here instead.",
+      );
+    }
+    if (Object.keys(pipecatBody).length > 0) env.pipecat_body_params = pipecatBody;
   }
 
   return Object.keys(env).length === 0 ? null : env;
