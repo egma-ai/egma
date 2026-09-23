@@ -9,6 +9,7 @@ export const AGENT_EVIDENCE_INCOMPLETE_SQL = `spans.emitter = 'agent'
 
 export const AGENT_EVIDENCE_COMPLETE_SQL = `spans.emitter = 'agent' and (
   (spans.agent_platform = 'livekit' and spans.kind = 'root' and spans.name = 'agent_session')
+  or (spans.agent_platform = 'pipecat' and spans.kind = 'root' and spans.name = 'pipecat_session')
   or (spans.agent_platform = 'retell' and spans.kind = 'conversation' and spans.name = 'retell_call'
     and JSONExtractRaw(spans.payload, 'end_timestamp') not in ('', 'null')
     and isFinite(toFloat64OrNull(JSONExtractRaw(spans.payload, 'end_timestamp')))
