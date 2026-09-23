@@ -149,7 +149,7 @@ describe("Pipecat monitoring instructions", () => {
     );
     // Production traces are filed under the agent whose monitoring key sent
     // them, so the key is this agent's, minted by the CLI.
-    expect(copy).toContain("egma agent monitoring --agent agt_lakeside");
+    expect(copy).toContain("egma agent monitoring setup --agent agt_lakeside --platform pipecat");
     expect(copy).toContain("EGMA_URL=<your-public-egma-url>");
     expect(copy).toContain("EGMA_API_KEY=<agent-monitoring-key>");
     expect(copy).not.toContain("<your-project-api-key>");
@@ -171,7 +171,7 @@ describe("Pipecat monitoring instructions", () => {
       "egma agent register --platform pipecat",
     );
     expect(container.textContent).toContain(
-      "egma agent monitoring --agent <agent-id>",
+      "egma agent monitoring setup --agent <agent-id> --platform pipecat",
     );
   });
 
@@ -182,7 +182,7 @@ describe("Pipecat monitoring instructions", () => {
     expect(stepTitles(container)[2]).toBe("Get this agent's monitoring key");
     expect(container.textContent).not.toContain("egma agent register");
     expect(container.textContent).toContain(
-      "egma agent monitoring --agent <agent-id>",
+      "egma agent monitoring setup --agent <agent-id> --platform pipecat",
     );
 
     // The testing instructions that follow in Both carry the real id, and the
@@ -205,7 +205,7 @@ describe("Pipecat monitoring instructions", () => {
       "Add the Egma values to your secret set and redeploy",
     ]);
     const said = both.container.textContent ?? "";
-    expect(said).toContain("egma agent monitoring --agent agt_lakeside");
+    expect(said).toContain("egma agent monitoring setup --agent agt_lakeside --platform pipecat");
     expect(said).toContain("EGMA_API_KEY=<agent-monitoring-key>");
     expect(said).not.toContain("<your-project-api-key>");
     expect(screen.queryByRole("link", { name: "API keys" })).toBeNull();

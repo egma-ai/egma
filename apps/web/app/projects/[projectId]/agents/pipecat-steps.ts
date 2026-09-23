@@ -11,9 +11,9 @@ export const PIPECAT_INSTALL = 'pip install "egma[pipecat]"';
  */
 export const MONITORING_KEY_PLACEHOLDER = "<agent-monitoring-key>";
 
-/** The CLI command that mints one agent's monitoring key. */
+/** The CLI command that mints one agent's monitoring key and prints it once. */
 export function monitoringKeyCommand(agentId: string | null): string {
-  return `egma agent monitoring --agent ${agentId ?? "<agent-id>"}`;
+  return `egma agent monitoring setup --agent ${agentId ?? "<agent-id>"} --platform pipecat`;
 }
 
 /**
