@@ -14,7 +14,7 @@ environment variables:
     sdk       auto | on | off  EGMA_SDK      (default auto: use the SDK when installed)
     monitor   on | off         EGMA_MONITOR  (default off)
     skip_tts  on | off         E2E_SKIP_TTS  (default off; on silences every reply from the
-                                              start, which is what an SDK could do for chat)
+                                              start, as the Egma SDK does in a chat simulation)
 
 Run locally with Pipecat's development runner:
 

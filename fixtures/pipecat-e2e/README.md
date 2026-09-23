@@ -17,7 +17,7 @@ None of it runs in CI.
 | `bot.py` | The bot. `bot(runner_args)` is the entry point Pipecat Cloud and the development runner call. The Egma SDK line sits between `PipelineWorker(...)` and `runner.add_workers(worker)`. |
 | `store.py` | The shop: fixed answers, no clock, no network. Every real tool run logs one `E2E_REAL_TOOL` line. |
 | `flow.yaml`, `flow_handlers.py` | The Pipecat Flows variant: a declarative flow, as in Pipecat's Flows quickstart. |
-| `tools/rtvi_client.py` | An RTVI client: sends a start request, joins the Daily room, sends `client-ready` and `send-text`, and times every event. |
+| `tools/rtvi_client.py` | An RTVI client: sends a start request, joins the Daily room, sends `client-ready`, types with `send-text` (`--say`) or speaks through a virtual microphone (`--speak`, needs `OPENAI_API_KEY`), and times every event. |
 | `tools/starter.py` | A customer-style starter: its own `POST /start` behind an `Authorization` header, a separate non-owner token for the client. |
 | `Dockerfile`, `pcc-deploy.toml`, `deploy.sh` | The Pipecat Cloud deployment. |
 
@@ -48,7 +48,8 @@ Each session reads `runner_args.body["e2e"]`, so a test picks the shape in its
 
 `sdk: off` is the bot without the SDK. `rtvi: off` turns RTVI off in the
 pipeline; the bot then greets when the client connects. `skip_tts: on` silences
-every reply from the start of the session.
+every reply from the start of the session, as the Egma SDK does in a chat
+simulation.
 
 For example, a test's env block for the Flows variant:
 
