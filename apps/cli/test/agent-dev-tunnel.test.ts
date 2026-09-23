@@ -20,7 +20,10 @@ import {
   QUICK_TUNNEL_CONFIG,
   TunnelStartFailure,
   tunnelAddressIn,
+  waitUntilInPublicDns,
   writeQuickTunnelConfig,
+  type DnsAnswer,
+  type PublicDnsProbe,
 } from "../src/dev/tunnel.ts";
 
 vi.setConfig({ testTimeout: 20_000 });
@@ -293,5 +296,69 @@ describe("the cloudflared launcher", () => {
         signal: new AbortController().signal,
       }),
     ).rejects.toThrow("egma agent dev needs cloudflared.");
+  });
+});
+
+describe("waiting for a new hostname in public DNS", () => {
+  const HOST = "street-concert-contracting-decor.trycloudflare.com";
+  const TIMING = { waitMs: 600, settleMs: 10, everyMs: 20, fallbackMs: 200 };
+
+  function probe(options: {
+    readonly servers?: readonly string[];
+    readonly answers: (round: number) => DnsAnswer;
+    readonly lookup?: boolean;
+  }): PublicDnsProbe & { readonly asked: string[]; readonly lookups: number[] } {
+    let round = 0;
+    const asked: string[] = [];
+    const lookups: number[] = [];
+    const started = Date.now();
+    return {
+      asked,
+      lookups,
+      async nameServers(zone) {
+        expect(zone).toBe("trycloudflare.com");
+        return options.servers ?? ["192.0.2.1", "192.0.2.2"];
+      },
+      async ask(server) {
+        asked.push(server);
+        if (server === "192.0.2.1") round += 1;
+        return options.answers(round);
+      },
+      async lookup(hostname) {
+        expect(hostname).toBe(HOST);
+        lookups.push(Date.now() - started);
+        return options.lookup ?? false;
+      },
+    };
+  }
+
+  it("answers true once every authoritative server knows the hostname, without asking a caching resolver", async () => {
+    const fake = probe({ answers: (round) => (round < 3 ? "missing" : "found") });
+
+    expect(await waitUntilInPublicDns(HOST, new AbortController().signal, fake, TIMING)).toBe(true);
+    expect(fake.asked).toHaveLength(6);
+    expect(fake.lookups).toEqual([]);
+  });
+
+  it("answers false when the servers answer but never for this hostname", async () => {
+    const fake = probe({ answers: () => "missing" });
+
+    expect(await waitUntilInPublicDns(HOST, new AbortController().signal, fake, TIMING)).toBe(false);
+    expect(fake.lookups).toEqual([]);
+  });
+
+  it.each([
+    ["the authoritative servers cannot be reached", { answers: (): DnsAnswer => "unreachable" }],
+    ["they cannot even be found", { servers: [] as string[], answers: (): DnsAnswer => "found" }],
+  ])("falls back quietly to this machine's resolver when %s", async (_name, setup) => {
+    const quiet = probe(setup);
+    const started = Date.now();
+    expect(await waitUntilInPublicDns(HOST, new AbortController().signal, quiet, TIMING)).toBeUndefined();
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(quiet.lookups).toHaveLength(1);
+    expect(quiet.lookups[0]).toBeGreaterThanOrEqual(190);
+
+    const resolving = probe({ ...setup, lookup: true });
+    expect(await waitUntilInPublicDns(HOST, new AbortController().signal, resolving, TIMING)).toBe(true);
   });
 });

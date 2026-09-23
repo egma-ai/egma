@@ -12,7 +12,6 @@ import {
   readdir,
   rename,
   rm,
-  stat,
   writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -30,6 +29,7 @@ import {
   type FolderConfig,
   type PlatformBinding,
 } from "../folder/egma-folder.ts";
+import { whileFileLocked } from "./file-lock.ts";
 import { normalizePlatformOrigin } from "./url.ts";
 
 /**
@@ -239,43 +239,14 @@ export type WriteOptions = {
   readonly warn?: (line: string) => void;
 };
 
-/** How long a write waits for another one to finish before giving up. */
-const LOCK_WAIT_MS = 5_000;
-/** After this, a lock is a leftover from something that died holding it. */
-const LOCK_STALE_MS = 30_000;
-
 /**
  * Lock the read/merge/replace operation with atomic wx creation of a neighboring file.
- * Concurrent logins must not overwrite each other's keys. Reclaim old abandoned locks.
+ * Concurrent logins must not overwrite each other's keys. A lock whose process
+ * is gone is reclaimed.
  */
 async function whileLocked<T>(file: string, work: () => Promise<T>): Promise<T> {
   const lock = `${file}.lock`;
-  const until = Date.now() + LOCK_WAIT_MS;
-  for (;;) {
-    try {
-      await writeFile(lock, `${String(process.pid)}\n`, {
-        encoding: "utf8",
-        mode: FILE_MODE,
-        flag: "wx",
-      });
-      break;
-    } catch (cause) {
-      if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
-      const held = await stat(lock).catch(() => undefined);
-      if (held !== undefined && Date.now() - held.mtimeMs > LOCK_STALE_MS) {
-        await rm(lock, { force: true });
-        continue;
-      }
-      if (Date.now() > until) throw new CredentialsFileBusyError(file, lock);
-      await new Promise((resume) => setTimeout(resume, 50));
-    }
-  }
-
-  try {
-    return await work();
-  } finally {
-    await rm(lock, { force: true });
-  }
+  return await whileFileLocked(lock, work, () => new CredentialsFileBusyError(file, lock));
 }
 
 /** The version 2 bytes for every platform entry, in a stable order. */

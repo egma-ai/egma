@@ -27,9 +27,9 @@ Egma waits up to 120 seconds from the first start request for your bot to join t
 | --- | --- |
 | `your bot did not join within 120 seconds` | The start was accepted, but no bot joined. On Pipecat Cloud, a cold start can take this long: set `min_agents = 1` under `[scaling]` in `pcc-deploy.toml` and redeploy. Check the bot's logs for a crash at start, for example with `pipecat cloud agent logs <agent name>`. A `NotReported` error there means the SDK could not reach Egma: check `EGMA_URL` and `EGMA_API_KEY`. |
 | `your bot joined but did not report to Egma` | Add `await simulation(worker, runner_args)` from `egma.pipecat` before the runner starts the worker, and install `egma[pipecat]`. Set `EGMA_URL` and `EGMA_API_KEY` where the bot runs. On Pipecat Cloud, add them to the agent's secret set and redeploy. |
-| `the test mocks "…", and this is a Pipecat Flows function` | Egma cannot mock a Pipecat Flows function yet. The simulation fails when the flow first offers that function. Remove it from the test's mock tools. Flows functions that are not mocked run normally and are recorded. |
+| `the test mocks "…", and this is a Pipecat Flows function` | Egma does not mock Pipecat Flows functions. A simulation whose test mocks one fails when the flow first offers that function. Remove it from the test's mock tools. Flows functions that are not mocked run normally and are recorded. |
 | `your bot reported to Egma and Egma refused the report` | Read the reason in parentheses. For a protocol version, upgrade the `egma` package. |
-| `your bot has RTVI turned off` | Chat simulations need RTVI. Remove `enable_rtvi=False` from your `PipelineWorker`. Voice simulations still work without it. |
+| `your bot has RTVI turned off` | Chat simulations need RTVI. Remove `enable_rtvi=False` from your `PipelineWorker`. Voice simulations do not need RTVI. |
 | `your bot joined and reported to Egma but published no audio track` | Check that the pipeline ends in `transport.output()` and that `DailyParams` has `audio_out_enabled=True`. |
 
 A message that ends with `the simulation's configured …s duration expired during startup` means the simulation's duration limit ran out while Egma was still waiting. Fix the cause named before it.
@@ -43,7 +43,7 @@ A message that ends with `the simulation's configured …s duration expired duri
 
 - Keep `egma agent dev` and your bot's development runner running while simulations run.
 - Put `DAILY_API_KEY` in your bot's environment, and leave `DAILY_ROOM_URL` unset.
-- If simulations stop reaching your computer after it sleeps or changes network, restart `egma agent dev`.
+- When `egma agent dev` says the tunnel's address is not in public DNS yet, a simulation that starts in the next few minutes can fail to reach it.
 
 ## Read the evidence
 

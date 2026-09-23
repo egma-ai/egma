@@ -41,13 +41,14 @@ You can also run `egma pull` and read the IDs in `egma/config.yaml`.
 
 - `egma agent dev` puts a small guard in front of your port and opens a tunnel to the guard. The guard refuses any request without a secret header, then forwards the rest to your development runner. A stranger who finds the tunnel address cannot start your bot.
 - Each start creates a new tunnel address and a new secret, and writes both into the same two connections. The connection IDs never change, so your run commands stay the same.
-- The address stays the same for the whole `egma agent dev` session, including restarts of your bot. Egma reads the connection when each simulation starts, so queued simulations use the newest address.
+- The address stays the same while you restart your bot. If `cloudflared` stops, or loses its connection to Cloudflare for 3 minutes, `egma agent dev` opens a new tunnel and writes the new address into the same connections itself. Egma reads the connection when each simulation starts, so queued simulations use the newest address.
+- A new tunnel address can take a few seconds to resolve, and a lookup made too early can be cached as not found for up to 30 minutes. `egma agent dev` warns you when the address is not in public DNS yet.
 - This computer's connections are remembered in `dev-connections.json` in the CLI's machine-local folder (`~/.egma`, or `EGMA_HOME` when you set it), never in your repository. A teammate's computer gets its own connections.
 - In the web app, these are ordinary self-hosted connections that show their start URL.
 
 At start, `egma agent dev` stops if `cloudflared` is missing, and warns if nothing listens on the port yet.
 
-Press Ctrl-C to close the tunnel. The connections stay. A simulation that starts while `egma agent dev` is stopped fails with `Egma could not reach your start URL`. Run `egma agent dev` again on the machine that runs your bot. If simulations stop reaching your computer after it sleeps or changes network, restart `egma agent dev`.
+Press Ctrl-C to close the tunnel. The connections stay. A simulation that starts while `egma agent dev` is stopped fails with `Egma could not reach your start URL`. Run `egma agent dev` again on the machine that runs your bot, and start your bot's development runner there.
 
 ## Deploy when the suite passes
 

@@ -36,6 +36,8 @@ Use an Egma API key scoped to the project you want to send data to.
 
 Copy the key when it is shown. It is shown once, and the CLI does not save it.
 
+For production monitoring, use the agent's monitoring key from `egma agent monitoring setup --agent <Egma agent ID> --platform pipecat` or from the web app's Pipecat monitoring instructions. It works for `simulation` too. With an ordinary project key, production conversations arrive but show no agent. See [Monitor a Pipecat agent](/docs/integrations/pipecat/monitor#get-the-agents-monitoring-key).
+
 Set these values where the bot runs:
 
 ```bash
@@ -75,20 +77,20 @@ async def bot(runner_args: RunnerArguments):
 This line is required for every voice and chat simulation, even when the test has no mock tools.
 
 - **Production is untouched.** Egma marks each simulation with an `egma` key in the start request's body, which your bot receives at `runner_args.body`. The key holds the simulation's ID and modality. Without that key, `simulation` returns at once and makes no network request.
-- **Egma confirms every simulation.** With the key, the SDK reports your bot's tools to Egma. Egma answers only for a live simulation in your API key's project. For anything else, the SDK does nothing, so a forged key in production has no effect.
+- **Egma confirms every simulation.** With the key, the SDK reports your bot's tools to Egma, and Egma answers only for a live simulation in your API key's project. When Egma answers that the key names no live simulation, the SDK does nothing more and the conversation runs as production. When the SDK gets no answer, for example because Egma cannot be reached, `simulation` raises `NotReported` and the bot does not start. This also happens to a production start whose body carries an `egma` key.
 - **Mock tools.** Egma answers with the tools the test mocks, and the SDK wraps exactly those. A mocked call returns the test's answer or error as the function's result, and your handler does not run. Every other tool runs its real handler and is recorded too. The wrapping works for functions registered with `llm.register_function`, tools given in the LLM context, and realtime models.
-- **The record.** The SDK adds a pipeline observer that records turns with their text, each tool call with its arguments and result or error, and speaking times. It sends them to Egma every second, and sends the session's end last. You do not need to turn on Pipecat's own tracing.
+- **The record.** The SDK adds a pipeline observer that records turns with their text, each tool call with its arguments and result or error, and speaking times. It sends them to Egma every second, and sends the end of the conversation last. You do not need to turn on Pipecat's own tracing.
 - **Failures.** If the SDK cannot complete its report to Egma, `simulation` raises `NotReported` and the bot does not start. If a mocked tool cannot reach Egma during a simulation, that call returns an error instead of calling the real backend.
 
 `NotReported` can be imported from `egma.pipecat`.
 
 #### Pipecat Flows
 
-Egma cannot mock a Pipecat Flows function (from `pipecat.flows`) yet. When a test mocks one, the simulation fails as soon as the flow first offers that function, which is usually at the first node, right after the conversation starts. The message names the function, and its Flows handler does not run. Flows functions that are not mocked run normally and are recorded.
+Egma does not mock Pipecat Flows functions (from `pipecat.flows`). When a test mocks one, the simulation fails as soon as the flow first offers that function, which is usually at the first node, right after the conversation starts. The message names the function, and its Flows handler does not run. Flows functions that are not mocked run normally and are recorded.
 
 #### Chat simulations
 
-Chat simulations need no extra code. In a chat simulation, the SDK turns your bot's speech output off after Egma confirms the simulation, so the greeting and every answer stay text only. Chat needs RTVI, which `PipelineWorker` turns on by default, so do not pass `enable_rtvi=False`. If you pass your own `rtvi_observer_params`, keep `bot_llm_enabled` on.
+Chat simulations need no extra code. In a chat simulation, the SDK turns your bot's speech output off after Egma confirms the simulation, so the greeting and every answer stay text only. Chat needs RTVI; see [Chat connections and Env](/docs/integrations/pipecat/text-and-env) for the settings to keep.
 
 ### B. Production monitoring
 

@@ -53,4 +53,4 @@ tenant = runner_args.body.get("tenant")
 - The key `egma` is reserved. Egma adds its own `egma` key to every start request, and refuses a test that holds one in `pipecat_body_params`.
 - A test without this field sends a body that holds only Egma's key.
 
-Do not use the `egma` key to decide whether a session is a simulation: any client can send one. The SDK asks Egma to confirm a simulation before it acts on the key.
+Do not use the `egma` key to decide whether a conversation is a simulation: any client can send one. The SDK asks Egma to confirm a simulation before it acts on the key.

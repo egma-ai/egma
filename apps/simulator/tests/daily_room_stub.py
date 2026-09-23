@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from egma_simulator.media import VoiceMedia
+from egma_simulator.media import MediaBackendError, VoiceMedia
 from egma_simulator.media.daily_room import (
     AgentReport,
     DailyWayIn,
@@ -120,8 +120,10 @@ class FakeRoom:
         bot: FakeBot,
         bot_here_at_join: bool,
         bot_audio: bool,
+        bot_seen_before_join: bool = False,
     ) -> None:
         del quotable
+        self.bot_seen_before_join = bot_seen_before_join
         self.way_in = way_in
         self.events = events
         self.bot = bot
@@ -129,6 +131,7 @@ class FakeRoom:
         self.bot_audio = bot_audio
         self.bot_present = False
         self.sent: list[dict[str, Any]] = []
+        self.refused_before_join: list[dict[str, Any]] = []
         self.joined = False
         self.left = False
         self.departures = 0
@@ -159,10 +162,18 @@ class FakeRoom:
     # Chat.
     async def join(self, within: float) -> None:
         del within
+        if self.bot_seen_before_join:
+            # daily-python can report a present participant before the join's
+            # own completion arrives.
+            self.bot_joins()
+            await asyncio.sleep(0.05)
         self._join()
 
     # Both.
     async def send(self, message: Mapping[str, Any]) -> None:
+        if not self.joined:
+            self.refused_before_join.append(dict(message))
+            raise MediaBackendError("the call client has not joined yet")
         self.sent.append(dict(message))
         await self.bot.on_message(self, message)
 
@@ -176,7 +187,7 @@ class FakeRoom:
     def _join(self) -> None:
         self.joined = True
         self.events.joined({"participants": {"local": {"id": PERSONA_ID}}})
-        if self.bot_here_at_join:
+        if self.bot_here_at_join and not self.bot_present:
             self.bot_joins()
 
     def bot_joins(self) -> None:
@@ -243,6 +254,7 @@ def rigged(
     bot: FakeBot | None = None,
     bot_here_at_join: bool = True,
     bot_audio: bool = True,
+    bot_seen_before_join: bool = False,
     reports: list[AgentReport] | None = None,
     start_delay: float = 0.0,
     start: Callable[[], Awaitable[DailyWayIn]] | None = None,
@@ -269,6 +281,7 @@ def rigged(
                 bot=bot,
                 bot_here_at_join=bot_here_at_join,
                 bot_audio=bot_audio,
+                bot_seen_before_join=bot_seen_before_join,
             )
             rig_holder["rig"].rooms.append(room)
             return room

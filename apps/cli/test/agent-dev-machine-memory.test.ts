@@ -17,7 +17,7 @@ import {
   readMachineConnections,
   rememberMachineConnections,
 } from "../src/dev/machine-connections.ts";
-import { lockIsStale, processIsAlive } from "../src/dev/session-lock.ts";
+import { lockIsStale, processIsAlive, processRunsNode } from "../src/platform/file-lock.ts";
 
 let folder: string;
 let file: string;
@@ -89,6 +89,7 @@ describe("this machine's dev connections", () => {
     expect(processIsAlive(process.pid)).toBe(true);
     expect(processIsAlive(deadPid())).toBe(false);
     expect(processIsAlive(0)).toBe(false);
+    expect(processRunsNode(process.pid)).toBe(true);
     await writeFile(path.join(folder, "empty.lock"), "", "utf8");
     expect(await lockIsStale(path.join(folder, "empty.lock"))).toBe(false);
     expect(await lockIsStale(path.join(folder, "empty.lock"), -1)).toBe(true);

@@ -286,6 +286,41 @@ jobs:
       - name: Verify the supported LiveKit versions in parallel
         run: python3 .github/livekit_compatibility.py python "${{ steps.pack.outputs.wheel }}"
 
+  pipecat-python-compatibility:
+    name: Pipecat Python compatibility (${{ matrix.pipecat }})
+    if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
+    # Mock tools read a private part of Pipecat's LLM service, so every
+    # supported minor runs the Pipecat suite against the packaged wheel, in an
+    # environment that installs egma[pipecat] and proves no LiveKit came with it.
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        pipecat: ["1.9", "1.10", "1.11"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+        with:
+          version: "0.11.33"
+
+      - name: Build the Python SDK once
+        id: pack
+        run: |
+          dir="$(mktemp -d)"
+          uv build sdks/python --wheel --out-dir "$dir"
+          wheel="$(find "$dir" -maxdepth 1 -name '*.whl' -print -quit)"
+          test -n "$wheel"
+          echo "wheel=$wheel" >> "$GITHUB_OUTPUT"
+
+      - name: Verify Pipecat ${{ matrix.pipecat }}
+        run: python3 .github/pipecat_compatibility.py "${{ steps.pack.outputs.wheel }}" --minor "${{ matrix.pipecat }}"
+
   livekit-js-compatibility:
     name: LiveKit JS compatibility
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
@@ -759,7 +794,7 @@ jobs:
 
   deploy:
     name: Deploy
-    needs: [checks, fast, browser, simulator, livekit-python-compatibility, livekit-js-compatibility, fixture, livekit-e2e, simulation-e2e-livekit]
+    needs: [checks, fast, browser, simulator, livekit-python-compatibility, pipecat-python-compatibility, livekit-js-compatibility, fixture, livekit-e2e, simulation-e2e-livekit]
     if: >-
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')

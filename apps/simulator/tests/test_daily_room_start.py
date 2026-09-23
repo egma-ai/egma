@@ -392,9 +392,35 @@ def test_a_tunnel_start_url_that_cannot_be_reached_names_egma_agent_dev():
             Answer(raw=b'{"dailyRoom": "' + b"a" * (70 * 1024) + b'"}'),
             "the answer is larger than 65536 bytes",
         ),
+        (
+            Answer(body={"dailyRoom": "https://evil.com\\.daily.co/r"}),
+            "dailyRoom is not an https URL on daily.co",
+        ),
+        (
+            Answer(body={"dailyRoom": "https://evil.com\\@lakeside.daily.co/r"}),
+            "dailyRoom is not an https URL on daily.co",
+        ),
+        (
+            Answer(body={"dailyRoom": "https://evil.com\t.daily.co/r"}),
+            "dailyRoom is not an https URL on daily.co",
+        ),
+        (
+            Answer(body={"dailyRoom": "https://lakeside.daily.co/r\u0000x"}),
+            "dailyRoom is not an https URL on daily.co",
+        ),
+        (
+            Answer(body={"dailyRoom": "https://evil_host.daily.co/r"}),
+            "dailyRoom is not an https URL on daily.co",
+        ),
+        (
+            Answer(body={"dailyRoom": "https://daily.co/r"}),
+            "dailyRoom is not an https URL on daily.co",
+        ),
     ],
 )
-async def test_an_answer_without_a_usable_room_is_refused(answer: Answer, detail: str):
+async def test_an_answer_without_a_usable_room_is_refused(
+    answer: Answer, detail: str
+):
     with starting(answer) as served:
         starter = starter_for(cloud_settings(), served.wire_url)
         with pytest.raises(MediaBackendError) as refused:
@@ -504,6 +530,18 @@ async def test_a_start_url_on_a_private_address_is_never_reached(
             "credentials need headers",
         ),
         (
+            "daily_room.self_hosted",
+            {"startUrl": "https://evil.example\\.bots.example/start"},
+            {"headers": '{"a": "b"}'},
+            "needs config startUrl",
+        ),
+        (
+            "daily_room.self_hosted",
+            {"startUrl": "https://bots.example/st art"},
+            {"headers": '{"a": "b"}'},
+            "needs config startUrl",
+        ),
+        (
             "daily_room.elsewhere",
             {},
             None,
@@ -583,7 +621,7 @@ def test_an_unusable_connection_is_refused_before_anything_is_reached(
         ),
     ],
 )
-def test_the_readiness_failures_say_the_contract_words(
+def test_each_readiness_failure_names_its_cause_and_next_step(
     builder: Any, expected: str, ending: str
 ):
     failure = builder()
