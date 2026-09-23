@@ -36,6 +36,7 @@ async function goldenSpec(name: string): Promise<Json> {
 }
 
 const VOICE_PIPECAT_CLOUD = await goldenSpec("voice-pipecat-cloud.json");
+const VOICE_PIPECAT_CLOUD_HOSTED = await goldenSpec("voice-pipecat-cloud-hosted.json");
 const CHAT_PIPECAT_SELF_HOSTED = await goldenSpec("chat-pipecat-self-hosted.json");
 
 let api: TestApi;
@@ -215,8 +216,9 @@ describe("a Daily room claim", () => {
     ]);
   });
 
-  it("is failed at dispatch, not handed over, when the hosted voice runtime claims it", async () => {
-    const daytonaClaimRuntime = vi.fn<DaytonaClaimRuntime>();
+  it("carries the hosted runtime when the hosted voice runtime claims it", async () => {
+    const hosted = VOICE_PIPECAT_CLOUD_HOSTED.runtime as Json;
+    const daytonaClaimRuntime = vi.fn<DaytonaClaimRuntime>(async () => structuredClone(hosted) as never);
     const { ada, simulationId } = await aQueuedSimulationLike(
       "claims_pipecat_daytona",
       VOICE_PIPECAT_CLOUD,
@@ -224,22 +226,32 @@ describe("a Daily room claim", () => {
     );
 
     const answered = await claim({
+      claimant: "egma-voice-runtime-1",
       contract_versions: [5, 6, 7, 8],
       modalities: ["voice"],
       runtime: "daytona",
     });
     expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
-    expect(answered.body.specs).toEqual([]);
-    // No sandbox authority is issued for work it cannot conduct.
-    expect(daytonaClaimRuntime).not.toHaveBeenCalled();
+    const [spec] = answered.body.specs as Json[];
+    if (spec === undefined) throw new Error("no spec came back");
+
+    expect(specComplaints(spec)).toEqual([]);
+    expect(spec.contract_version).toBe(8);
+    expect(spec.runtime).toEqual(hosted);
+    expect(daytonaClaimRuntime).toHaveBeenCalledWith(
+      "egma-voice-runtime-1",
+      simulationId,
+      expect.any(AbortSignal),
+    );
+    // The golden hosted work order, apart from the id and the persona's models.
+    expect({
+      ...spec,
+      simulation_id: VOICE_PIPECAT_CLOUD_HOSTED.simulation_id,
+      models: VOICE_PIPECAT_CLOUD_HOSTED.models,
+    }).toEqual(VOICE_PIPECAT_CLOUD_HOSTED);
 
     const row = await getSimulation(contextFor(ada, "member"), simulationId);
-    expect(row).toMatchObject({
-      status: "failed",
-      endingReason: "dispatch_failed",
-      executionFailure:
-        "Egma could not dispatch this simulation: a Pipecat voice simulation cannot run on this deployment's hosted voice runtime yet",
-    });
+    expect(row).toMatchObject({ status: "claimed", claimedBy: "egma-voice-runtime-1" });
   });
 
   it("leaves a LiveKit claim at version 7 for a worker that also lists 8", async () => {

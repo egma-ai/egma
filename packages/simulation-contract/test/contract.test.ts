@@ -1437,6 +1437,42 @@ describe("a Daily room work order, which is version 8", () => {
     );
   });
 
+  it("carries the hosted runtime on a voice claim, and on a voice claim only", async () => {
+    const hosted = await readJson(
+      "fixtures",
+      "spec",
+      "valid",
+      "voice-pipecat-cloud-hosted.json",
+    );
+    expect(specComplaints(hosted)).toEqual([]);
+    expect(hosted.contract_version).toBe(8);
+    expect((hosted.runtime as { kind: string }).kind).toBe("daytona_voice");
+
+    // The same work order a standing simulator receives, plus the runtime.
+    const standing = await readJson("fixtures", "spec", "valid", "voice-pipecat-cloud.json");
+    const { runtime: _runtime, simulation_id: _id, ...rest } = hosted;
+    const { simulation_id: _standingId, ...standingRest } = standing;
+    expect(rest).toEqual(standingRest);
+
+    const chat = await readJson("fixtures", "spec", "valid", "chat-pipecat-cloud.json");
+    expect(specComplaints({ ...chat, runtime: hosted.runtime })).toContain(
+      "/modality: must be equal to constant",
+    );
+
+    const halfAuthority = structuredClone(hosted);
+    delete (halfAuthority.runtime as Record<string, unknown>).storage;
+    expect(specComplaints(halfAuthority)).toContain(
+      "/runtime: must have required property 'storage'",
+    );
+
+    // A carrier route is still no Daily room's business, hosted or not.
+    const withPlatform = {
+      ...structuredClone(hosted),
+      platform: { carrier: { trunk_address: "sip.example", trunk_number: "+15550000000" } },
+    };
+    expect(specComplaints(withPlatform).length).toBeGreaterThan(0);
+  });
+
   it("still admits every other connection at version 8 without body params", async () => {
     const livekit = await readJson("fixtures", "spec", "valid", "voice-pipecat-cloud.json");
     const chat = await readJson("fixtures", "spec", "valid", "chat-livekit.json");
