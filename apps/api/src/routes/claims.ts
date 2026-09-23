@@ -164,13 +164,6 @@ const CURRENT_CONTRACT_VERSION = 7;
  */
 const PIPECAT_CONTRACT_VERSION = 8;
 
-/**
- * Why a Daily room voice claim is failed on the hosted voice runtime. Its
- * per-claim authority is a LiveKit room and recording credentials, which a
- * Daily room spec cannot carry, so the sandbox could not conduct it.
- */
-const HOSTED_RUNTIME_CANNOT_CONDUCT_PIPECAT =
-  "a Pipecat voice simulation cannot run on this deployment's hosted voice runtime yet";
 
 type Body = Record<string, unknown>;
 
@@ -960,73 +953,71 @@ export async function claimRoutes(
           // customer's credentials to make a document nobody will receive.
           withheld.has(claim.id)
             ? ({ withheld: true } as const)
-            : ask.runtime === "daytona" && claim.connectionType === "daily_room"
-              ? ({ unbuildable: HOSTED_RUNTIME_CANNOT_CONDUCT_PIPECAT } as const)
-              : await assembledSpec(
-                  claim,
-                  pinned.get(claim.id),
-                  runs,
-                  options.providerCredentials,
-                  options.carrierRoute,
-                  options.baseUrl,
-                  responseDeadline,
-                  ask.runtime === "daytona"
-                    ? options.daytonaProviderSecretEnvironment
-                    : undefined,
-                  ask.contractVersions,
-                ).catch(
-                  (_fault: unknown): { readonly unbuildable: string } => ({
-                    // This broad catch can hold dependency or credential errors.
-                    // Unlike a simulator report, it has no secret-redaction seam,
-                    // so the retained customer-facing sentence stays generic.
-                    unbuildable:
-                      "an internal error prevented Egma from building its simulation spec",
-                  }),
-                ).then(async (spec) => {
-                  if (
-                    ask.runtime !== "daytona" ||
-                    "unbuildable" in spec ||
-                    "retryable" in spec
-                  ) {
-                    return spec;
-                  }
-                  const daytonaClaimRuntime = options.daytonaClaimRuntime;
-                  if (daytonaClaimRuntime === undefined) {
-                    return {
-                      retryable: "the Daytona claim runtime is not configured",
-                      deferredBy: "runtime" as const,
-                    };
-                  }
-                  try {
-                    const completed = {
-                      ...spec,
-                      runtime: await beforeResponseDeadline(
-                        (signal) => daytonaClaimRuntime(
-                          ask.claimant,
-                          claim.id,
-                          signal,
-                        ),
-                        responseDeadline,
-                      ),
-                    };
-                    return specComplaints(completed).length === 0
-                      ? completed
-                      : {
-                          retryable:
-                            "the Daytona sandbox received invalid simulation authority",
-                          deferredBy: "runtime" as const,
-                        };
-                  } catch (fault) {
-                    if (fault instanceof DaytonaAssignmentUncertainError) {
-                      return { runtimeAssignmentUncertain: true } as const;
-                    }
-                    return {
-                      retryable:
-                        "the Daytona sandbox could not receive simulation authority",
-                      deferredBy: "runtime" as const,
-                    };
-                  }
+            : await assembledSpec(
+                claim,
+                pinned.get(claim.id),
+                runs,
+                options.providerCredentials,
+                options.carrierRoute,
+                options.baseUrl,
+                responseDeadline,
+                ask.runtime === "daytona"
+                  ? options.daytonaProviderSecretEnvironment
+                  : undefined,
+                ask.contractVersions,
+              ).catch(
+                (_fault: unknown): { readonly unbuildable: string } => ({
+                  // This broad catch can hold dependency or credential errors.
+                  // Unlike a simulator report, it has no secret-redaction seam,
+                  // so the retained customer-facing sentence stays generic.
+                  unbuildable:
+                    "an internal error prevented Egma from building its simulation spec",
                 }),
+              ).then(async (spec) => {
+                if (
+                  ask.runtime !== "daytona" ||
+                  "unbuildable" in spec ||
+                  "retryable" in spec
+                ) {
+                  return spec;
+                }
+                const daytonaClaimRuntime = options.daytonaClaimRuntime;
+                if (daytonaClaimRuntime === undefined) {
+                  return {
+                    retryable: "the Daytona claim runtime is not configured",
+                    deferredBy: "runtime" as const,
+                  };
+                }
+                try {
+                  const completed = {
+                    ...spec,
+                    runtime: await beforeResponseDeadline(
+                      (signal) => daytonaClaimRuntime(
+                        ask.claimant,
+                        claim.id,
+                        signal,
+                      ),
+                      responseDeadline,
+                    ),
+                  };
+                  return specComplaints(completed).length === 0
+                    ? completed
+                    : {
+                        retryable:
+                          "the Daytona sandbox received invalid simulation authority",
+                        deferredBy: "runtime" as const,
+                      };
+                } catch (fault) {
+                  if (fault instanceof DaytonaAssignmentUncertainError) {
+                    return { runtimeAssignmentUncertain: true } as const;
+                  }
+                  return {
+                    retryable:
+                      "the Daytona sandbox could not receive simulation authority",
+                    deferredBy: "runtime" as const,
+                  };
+                }
+              }),
         ),
       );
       for (const [index, claim] of claims.entries()) {
