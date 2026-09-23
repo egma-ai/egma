@@ -256,7 +256,7 @@ beforeAll(async () => {
   adaKey = await projectKeyFor(api.app, ada);
 
   for (const [name, world] of Object.entries(SEAM.worlds)) {
-    const claimed = await aClaimedSimulation(name, world.mock_tools as Json[]);
+    const claimed = await aClaimedSimulation(name, world.mock_tools as unknown as Json[]);
     realIdOf.set(world.simulation_id, claimed.simulationId);
   }
 }, 120_000);
