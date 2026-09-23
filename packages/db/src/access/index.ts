@@ -105,8 +105,12 @@ export {
   createApiKey,
   revokeApiKey,
   resolveApiKey,
+  monitoredAgentOfApiKey,
+  monitoringKeyPrefix,
+  MONITORING_KEY_NAMESPACE,
   type ApiKey,
   type ListedApiKey,
+  type MonitoredAgent,
   type NewApiKey,
   type ResolvedApiKey,
 } from "./api-keys.ts";

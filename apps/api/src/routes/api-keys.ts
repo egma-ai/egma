@@ -4,6 +4,8 @@ import {
   createApiKey,
   getAgent,
   listApiKeys,
+  MONITORING_KEY_NAMESPACE,
+  monitoringKeyPrefix,
   NotPermittedError,
   ProjectOutsideOrganizationError,
   revokeApiKey,
@@ -36,15 +38,8 @@ function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-/** The only reserved key namespace exposed by this route. */
-const MONITORING_KEY_NAMESPACE = "Egma monitoring ";
-
 /** The platforms whose agents push their own production spans with a key. */
 const PUSHING_PLATFORMS: ReadonlySet<string> = new Set(["livekit", "pipecat"]);
-
-function monitoringKeyPrefix(agentId: string): string {
-  return `${MONITORING_KEY_NAMESPACE}${agentId} — `;
-}
 
 /** A key as a list is allowed to describe it. Never the secret. */
 function described(key: ApiKey): Record<string, unknown> {

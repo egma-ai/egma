@@ -66,6 +66,15 @@ const INGESTED_AT_THIS_DOOR: SpanAttribution = {
   personaVersionId: "",
 };
 
+/**
+ * A customer key's production traffic from the process of one known agent: the
+ * agent whose guarded monitoring key carried it. Still production, still the
+ * agent's own account, and still no run.
+ */
+export function productionOfAgent(agentId: string): SpanAttribution {
+  return { ...INGESTED_AT_THIS_DOOR, agentId };
+}
+
 /** The sentinel the schema declares for telemetry that named no environment. */
 const DEFAULT_ENVIRONMENT = "default";
 
