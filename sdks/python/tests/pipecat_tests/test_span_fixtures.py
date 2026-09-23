@@ -8,13 +8,16 @@ attributes, parents and JSON encodings those examples use.
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pipecat.frames.frames")
+
 import asyncio
 import json
 import os
 from pathlib import Path
 from typing import Any
 
-import pytest
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -52,9 +55,7 @@ def _examples() -> list[dict[str, Any]]:
         found = sorted(folder.glob("pipecat-*.json")) if folder.is_dir() else []
         if found:
             return [json.loads(path.read_text(encoding="utf-8")) for path in found]
-    if os.environ.get("CI"):
-        pytest.fail("the pipecat span examples are not in this checkout")
-    pytest.skip("the pipecat span examples are not in this checkout")
+    pytest.fail("the pipecat span examples are not in this checkout")
 
 
 def _value(attribute: dict[str, Any]) -> Any:

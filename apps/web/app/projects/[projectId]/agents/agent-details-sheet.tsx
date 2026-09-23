@@ -12,6 +12,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { isSdkPlatform } from "@/lib/agent-setup-flow.ts";
 import type { Refusal } from "@/lib/api.ts";
 import {
   modalityLabel,
@@ -46,13 +47,6 @@ export function providerOf(agent: ListedAgentWithConnections): AgentProvider {
   return agent.agentPlatform;
 }
 
-/**
- * LiveKit and Pipecat agents are monitored by the Egma SDK in their own code,
- * so Egma holds no on/off state for them to show.
- */
-function monitoredInCode(provider: AgentProvider): boolean {
-  return provider === "livekit" || provider === "pipecat";
-}
 
 /** A saved simulation connection is the whole configured state. */
 export function simulationCapabilityOf(
@@ -77,7 +71,7 @@ export function simulationCapabilityOf(
 export function monitoringCapabilityOf(
   agent: ListedAgentWithConnections,
 ): MonitoringCapability {
-  if (monitoredInCode(providerOf(agent))) {
+  if (isSdkPlatform(providerOf(agent))) {
     return "Configured via code";
   }
   if (agent.pullProductionCalls) return "Active";
@@ -112,7 +106,7 @@ export function MonitoringEvidence({
   const provider = providerOf(agent);
   const state = monitoringCapabilityOf(agent);
 
-  if (monitoredInCode(provider)) return null;
+  if (isSdkPlatform(provider)) return null;
 
   if (state === "Active" && agent.lastReceivedAt !== null) {
     return (
@@ -276,12 +270,12 @@ export function AgentDetailsSheet({
                 label="Production monitoring"
                 state={<CapabilityState state={monitoring} />}
                 detail={
-                  monitoredInCode(provider) ? undefined : (
+                  isSdkPlatform(provider) ? undefined : (
                     <MonitoringEvidence agent={agent} now={now} />
                   )
                 }
                 action={
-                  monitoredInCode(provider) ? (
+                  isSdkPlatform(provider) ? (
                     <Link
                       className="text-sm underline decoration-border underline-offset-4 pointer-hover:decoration-foreground"
                       href={setup("monitoring")}
@@ -505,30 +499,34 @@ function providerFacts(
 
 /**
  * LiveKit's two facts, in Pipecat's words: the Pipecat Cloud agent the
- * connections start, and where a self-hosted bot is started.
+ * connections start, and the start URL of the self-hosted ones.
  *
- * A self-hosted connection names no Pipecat agent, so the Egma agent's own
- * name stands in; a Pipecat Cloud connection has no start URL of its own, so
- * `Pipecat Cloud` stands in.
+ * Only Pipecat Cloud connections name a Pipecat agent, so an agent with none
+ * shows its own Egma name. Only self-hosted connections have a start URL:
+ * distinct URLs vary by connection, and an agent with none shows
+ * `Pipecat Cloud` when it has a Pipecat Cloud connection, else `Not saved`.
  */
 function pipecatFacts(agent: ListedAgentWithConnections): readonly Fact[] {
   const rooms = agent.connections.filter(
     (connection) => connection.connectionType === "daily_room",
   );
-  const cloudNames = rooms.flatMap((connection) => {
-    const name = connection.config["agentName"];
-    return connection.accessVariant === "daily_room.pipecat_cloud" &&
-      name !== undefined
-      ? [name]
-      : [];
-  });
-  const startUrls = rooms.map((connection) =>
-    connection.accessVariant === "daily_room.self_hosted"
-      ? (connection.config["startUrl"] ?? "Not saved")
-      : "Pipecat Cloud",
+  const valuesOf = (accessVariant: string, key: string) =>
+    rooms.flatMap((connection) => {
+      const value = connection.config[key];
+      return connection.accessVariant === accessVariant && value !== undefined
+        ? [value]
+        : [];
+    });
+  const cloudNames = valuesOf("daily_room.pipecat_cloud", "agentName");
+  const startUrls = valuesOf("daily_room.self_hosted", "startUrl");
+  const onPipecatCloud = rooms.some(
+    (connection) => connection.accessVariant === "daily_room.pipecat_cloud",
   );
   const pipecatAgent = sharedConnectionValue(cloudNames, agent.name);
-  const startUrl = sharedConnectionValue(startUrls, "Not saved");
+  const startUrl = sharedConnectionValue(
+    startUrls,
+    onPipecatCloud ? "Pipecat Cloud" : "Not saved",
+  );
   return [
     {
       label: "Pipecat agent",
@@ -538,9 +536,7 @@ function pipecatFacts(agent: ListedAgentWithConnections): readonly Fact[] {
     {
       label: "Start URL",
       value: startUrl,
-      mono:
-        rooms.length > 0 &&
-        rooms.every((connection) => connection.config["startUrl"] === startUrl),
+      mono: startUrls.length > 0 && startUrls.every((one) => one === startUrl),
     },
   ];
 }

@@ -71,6 +71,10 @@ ANSWER_TOO_LARGE = 903
 UNSUPPORTED_PROTOCOL_VERSION = 904
 """A hello in a version of this exchange egma does not speak."""
 
+FLOWS_FUNCTION_MOCKED = 905
+"""A mocked tool that is a Pipecat Flows function, which egma cannot mock yet.
+Sent over HTTPS only; the in-room exchange never carries a Flows function."""
+
 EGMA_REFUSALS = range(901, 1000)
 """Egma application refusal codes, separate from LiveKit transport codes 1001–1999."""
 
@@ -114,9 +118,14 @@ class Served:
     model, so they are the mock tool author's sentence, not this side's."""
 
 
+def hello_message(census: list[dict[str, Any]]) -> dict[str, Any]:
+    """The census, as the object ``egma.hello`` carries."""
+    return {"protocol_version": PROTOCOL_VERSION, "tools": census}
+
+
 def hello_request(census: list[dict[str, Any]]) -> str:
     """The census, in the shape ``egma.hello`` carries it."""
-    return _serialized({"protocol_version": PROTOCOL_VERSION, "tools": census})
+    return serialized(hello_message(census))
 
 
 def _is_this_version(declared: object) -> bool:
@@ -159,6 +168,14 @@ def mocked_tools_in(reply: str) -> tuple[str, ...]:
     return tuple(names)
 
 
+def tool_message(name: str, arguments: dict[str, Any] | None) -> dict[str, Any]:
+    """One call, as the object ``egma.tool`` carries. See ``tool_request``."""
+    asking: dict[str, Any] = {"name": name}
+    if arguments is not None:
+        asking["arguments"] = arguments
+    return asking
+
+
 def tool_request(name: str, arguments: dict[str, Any] | None) -> str:
     """One call, in the shape ``egma.tool`` carries it.
 
@@ -168,10 +185,7 @@ def tool_request(name: str, arguments: dict[str, Any] | None) -> str:
     put "this call had no arguments" on the record, which is a different
     and untrue thing.
     """
-    asking: dict[str, Any] = {"name": name}
-    if arguments is not None:
-        asking["arguments"] = arguments
-    return _serialized(asking)
+    return serialized(tool_message(name, arguments))
 
 
 def served_in(reply: str) -> Served:
@@ -232,7 +246,7 @@ def _object(method: str, payload: str) -> dict[str, Any]:
     return answered
 
 
-def _serialized(value: object) -> str:
+def serialized(value: object) -> str:
     """Serialize compact JSON, converting unsupported customer values to strings.
 
     Keep non-ASCII text unescaped. Message limits are measured in UTF-8

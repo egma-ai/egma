@@ -23,7 +23,6 @@ pytest.importorskip("pipecat.frames.frames")
 
 import asyncio
 import json
-import os
 import socket
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
@@ -50,6 +49,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
 from pipecat.workers.runner import WorkerRunner
 
+from egma import seam
 from egma.pipecat import export, https_seam
 
 PROJECT_KEY = f"egma_sk_{'p' * 43}"
@@ -57,11 +57,7 @@ PROJECT_KEY = f"egma_sk_{'p' * 43}"
 
 
 def seam_fixture() -> dict[str, Any]:
-    """The HTTPS seam fixture, read from the checkout.
-
-    Missing is a failure under CI, where the checkout always holds it, and a
-    skip on a branch that has not merged it yet.
-    """
+    """The HTTPS seam fixture, read from the checkout. Missing is a failure."""
     for ancestor in Path(__file__).resolve().parents:
         candidate = (
             ancestor
@@ -73,14 +69,11 @@ def seam_fixture() -> dict[str, Any]:
         )
         if candidate.is_file():
             return json.loads(candidate.read_text(encoding="utf-8"))
-    message = "sdk-https-exchange.v1.json is not in this checkout"
-    if os.environ.get("CI"):
-        pytest.fail(message)
-    pytest.skip(message)
+    pytest.fail("sdk-https-exchange.v1.json is not in this checkout")
 
 
 def compact(value: Any) -> bytes:
-    return json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode()
+    return seam.serialized(value).encode()
 
 
 # --- egma's server -----------------------------------------------------------

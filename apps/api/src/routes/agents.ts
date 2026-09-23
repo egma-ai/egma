@@ -1,5 +1,6 @@
 import {
   addConnection,
+  AGENT_PLATFORMS,
   AgentAlreadyBoundError,
   agentMonitoringKey,
   AgentWriteRefusedError,
@@ -319,12 +320,12 @@ const CONNECTION_KEYS = [
 function agentPlatformIn(value: unknown): AgentPlatform | Refusal {
   const named = textWhenGiven(value, "an agent platform");
   if (isRefusal(named)) return named;
-  if (named !== "retell" && named !== "livekit" && named !== "pipecat") {
+  if (named === undefined || !(AGENT_PLATFORMS as readonly string[]).includes(named)) {
     return invalid(
       "an agent platform is required and must be retell, livekit or pipecat",
     );
   }
-  return named;
+  return named as AgentPlatform;
 }
 
 /**

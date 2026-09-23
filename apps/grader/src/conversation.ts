@@ -98,13 +98,7 @@ export function conversationOfSimulation(
 function simulationPov(
   connectionType: string,
 ): TraceSpan["pov"] | undefined {
-  if (
-    connectionType === "livekit_room" ||
-    connectionType === "daily_room" ||
-    connectionType === "retell_web_call"
-  ) {
-    return "agent";
-  }
+  if (laneProducesAnAgentPov(connectionType)) return "agent";
   if (connectionType === "phone_number" || connectionType === "retell_text_mode") {
     return "persona";
   }

@@ -51,6 +51,43 @@ def python_versions():
     return versions, dev
 
 
+PLAIN_INSTALL = "-plain-egma"
+"""The label suffix of the upgrade check: plain egma, no extra, beside the
+worker's own livekit-agents at the floor, as `pip install -U egma` leaves it."""
+
+
+def check_plain_install(wheel, version, directory, log):
+    """An existing worker upgrades plain egma and keeps working."""
+    python = directory / "venv/bin/python"
+    run(["uv", "venv", "--python", "3.11", str(directory / "venv")], log)
+    run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(python),
+            str(Path(wheel).resolve()),
+            f"livekit-agents[openai]=={version}",
+        ],
+        log,
+    )
+    run(
+        [
+            str(python),
+            "-c",
+            "import sys; from importlib.metadata import version; "
+            "from egma import monitor, simulation; "
+            "assert callable(simulation) and callable(monitor); "
+            "assert version('livekit-agents') == sys.argv[1]; "
+            "assert version('openai').split('.')[0] == '2', version('openai')",
+            version,
+        ],
+        log,
+        cwd=directory,
+    )
+
+
 def run(command, log, *, cwd=ROOT):
     subprocess.run(
         command,
@@ -188,9 +225,16 @@ def main():
             versions, dev_dependencies = python_versions()
 
             def check(version, version_dir, log):
+                if version.endswith(PLAIN_INSTALL):
+                    floor = version.removesuffix(PLAIN_INSTALL)
+                    check_plain_install(package, floor, version_dir, log)
+                    return
                 check_python(package, version, dev_dependencies, version_dir, log)
 
-        if not parallel_checks(versions, check, directory):
+        checked = versions
+        if args.language == "python":
+            checked = (*versions, f"{versions[0]}{PLAIN_INSTALL}")
+        if not parallel_checks(checked, check, directory):
             return 1
         if args.language == "python":
             # The real-room fixture owns one fixed server port, so test the

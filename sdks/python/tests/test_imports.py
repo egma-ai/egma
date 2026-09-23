@@ -9,25 +9,8 @@ from __future__ import annotations
 import subprocess
 import sys
 import textwrap
-from importlib.metadata import PackageNotFoundError, distribution
 
-import pytest
-
-
-def _installed(name: str) -> bool:
-    try:
-        distribution(name)
-    except PackageNotFoundError:
-        return False
-    return True
-
-
-needs_livekit = pytest.mark.skipif(
-    not _installed("livekit-agents"), reason="LiveKit is not installed"
-)
-needs_pipecat = pytest.mark.skipif(
-    not _installed("pipecat-ai"), reason="Pipecat is not installed"
-)
+from installed_frameworks import needs_livekit, needs_pipecat
 
 BLOCK_LIVEKIT = textwrap.dedent(
     """

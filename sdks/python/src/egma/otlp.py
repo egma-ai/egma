@@ -147,13 +147,17 @@ def api_base(value: str, verb: str) -> SplitResult:
     return parsed
 
 
-def trace_endpoint(value: str, verb: str) -> str:
-    """Turn an Egma API base URL into the OTLP trace endpoint."""
+def api_root(value: str, verb: str) -> str:
+    """``EGMA_URL`` without a trailing ``/`` or ``/v1/traces``.
+
+    Either form of the setting names the same Egma: the trace door and the
+    SDK routes both hang off this root.
+    """
 
     parsed = api_base(value, verb)
     path = parsed.path.rstrip("/")
-    if not path.endswith(TRACE_PATH):
-        path = f"{path}{TRACE_PATH}"
+    if path.endswith(TRACE_PATH):
+        path = path[: -len(TRACE_PATH)].rstrip("/")
     return urlunsplit(
         SplitResult(
             scheme=parsed.scheme,
@@ -163,6 +167,11 @@ def trace_endpoint(value: str, verb: str) -> str:
             fragment="",
         )
     )
+
+
+def trace_endpoint(value: str, verb: str) -> str:
+    """Turn an Egma API base URL into the OTLP trace endpoint."""
+    return f"{api_root(value, verb)}{TRACE_PATH}"
 
 
 def build_exporter(endpoint: str, api_key: str, verb: str) -> SpanExporter:

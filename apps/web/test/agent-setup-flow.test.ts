@@ -388,13 +388,25 @@ describe("Pipecat in the goal-first setup", () => {
       { accessVariant: "daily_room.pipecat_cloud", label: "Pipecat Cloud" },
       { accessVariant: "daily_room.self_hosted", label: "Self-hosted" },
     ]);
-    expect(firstSdkAccess("pipecat")).toBe("daily_room.pipecat_cloud");
+    expect(
+      firstSdkAccess("pipecat", ["daily_room.self_hosted", "daily_room.pipecat_cloud"]),
+    ).toBe("daily_room.pipecat_cloud");
+    // A modality that offers only the second way in starts on it.
+    expect(firstSdkAccess("pipecat", ["daily_room.self_hosted"])).toBe(
+      "daily_room.self_hosted",
+    );
+    expect(firstSdkAccess("pipecat", [])).toBe("");
     // LiveKit's select is unchanged.
     expect(SDK_ACCESS_CHOICES.livekit.map((one) => one.label)).toEqual([
       "Project credentials",
       "Token endpoint",
     ]);
-    expect(firstSdkAccess("livekit")).toBe("livekit_room.project_credentials");
+    expect(
+      firstSdkAccess("livekit", [
+        "livekit_room.customer_token_endpoint",
+        "livekit_room.project_credentials",
+      ]),
+    ).toBe("livekit_room.project_credentials");
   });
 
   it("titles the form with the platform and the chosen modality", () => {

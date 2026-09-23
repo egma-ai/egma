@@ -3899,6 +3899,31 @@ describe("goal-first agent setup", () => {
     });
   });
 
+  it("hands an existing Pipecat agent's setup link its own monitoring key command", async () => {
+    routed.search =
+      "?sheet=connect&agent=agt_pipecat&goal=monitoring&platform=pipecat";
+    sheetAnswers({
+      "/v1/agents": {
+        status: 200,
+        body: {
+          agents: [{ ...pipecatAgent, connections: [pipecatConnection] }],
+          nextPageToken: null,
+        },
+      },
+    });
+    render(<AgentsPage />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Add monitoring to your Pipecat agent",
+      }),
+    ).toBeDefined();
+    const said = document.body.textContent ?? "";
+    expect(said).toContain("egma agent monitoring setup --agent agt_pipecat --platform pipecat");
+    expect(said).toContain("EGMA_API_KEY=<agent-monitoring-key>");
+    expect(said).not.toContain("<your-project-api-key>");
+  });
+
   it("shows Pipecat monitoring as code, and carries Both on into the simulation walk", async () => {
     sheetAnswers();
     render(<RegisterAgentPage />);
@@ -3912,6 +3937,11 @@ describe("goal-first agent setup", () => {
     expect(document.body.textContent).toContain(
       "await monitor(worker, runner_args)",
     );
+    // A new agent in Both gets its real id with its simulation connection.
+    expect(document.body.textContent).toContain(
+      "egma agent monitoring setup --agent <agent-id> --platform pipecat",
+    );
+    expect(document.body.textContent).not.toContain("egma agent register");
     // Python only: no language question.
     expect(screen.queryByRole("tablist")).toBeNull();
     expect(screen.queryByRole("button", { name: /start monitoring/iu })).toBeNull();

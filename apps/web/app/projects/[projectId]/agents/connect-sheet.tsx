@@ -54,6 +54,7 @@ import {
   RETELL_LANE_QUESTION,
   stepAfterRetellLanes,
   type RetellLane,
+  firstSdkAccess,
   isSdkPlatform,
   SDK_ACCESS_CHOICES,
   SDK_CONNECTION_TYPES,
@@ -548,10 +549,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       .filter((one) => one.modality === next)
       .map((one) => one.accessVariant);
     if (!offered.includes(sdkAccess)) {
-      const first = SDK_ACCESS_CHOICES[sdkPlatform].find((choice) =>
-        offered.includes(choice.accessVariant),
-      );
-      setSdkAccess(first?.accessVariant ?? offered[0] ?? "");
+      setSdkAccess(firstSdkAccess(sdkPlatform, offered));
     }
     setSdkModality(next);
   }
@@ -1448,6 +1446,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
               access={
                 sdkAccess === SELF_HOSTED ? "self_hosted" : "pipecat_cloud"
               }
+              monitors={goal === "both"}
             />
           );
         }
@@ -1487,7 +1486,10 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         );
       case "sdk-monitoring":
         return sdkPlatform === "pipecat" ? (
-          <PipecatMonitoringInstructions projectId={projectId} />
+          <PipecatMonitoringInstructions
+            agentId={registeringAgent ? null : (agentId ?? null)}
+            registers={registeringAgent && goal === "monitoring"}
+          />
         ) : (
           <LiveKitMonitoringInstructions
             projectId={projectId}

@@ -13,9 +13,9 @@ Install the latest compatible release in the repo where your agent runs, with th
 | LiveKit Agents | `pip install --upgrade "egma[livekit]"` | `uv add --upgrade "egma[livekit]"` |
 | Pipecat | `pip install --upgrade "egma[pipecat]"` | `uv add --upgrade "egma[pipecat]"` |
 
-The SDK supports Python 3.11 or newer.
+The SDK supports Python 3.11 or newer and uses OpenAI Python 2.
 
-- **LiveKit:** `livekit-agents>=1.6.6,<1.9`, including LiveKit 1.8. The `livekit` extra holds that range and OpenAI Python 2.
+- **LiveKit:** `livekit-agents>=1.6.6,<1.9`, including LiveKit 1.8. The `livekit` extra holds that range. Existing LiveKit workers that installed plain `egma` keep working; they may switch to `egma[livekit]`.
 - **Pipecat:** `pipecat-ai>=1.9,<1.12`. Each Pipecat minor is tested before it joins the range. The `pipecat` extra installs no LiveKit package.
 
 Check compatibility with the agent's existing dependencies before upgrading and keep the resolved versions in the repo's lockfile.

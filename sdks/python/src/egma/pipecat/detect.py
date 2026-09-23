@@ -22,6 +22,10 @@ BODY_KEY = "egma"
 SIMULATION_ID_KEY = "simulation_id"
 """Where the marker names the simulation."""
 
+LONGEST_SIMULATION_ID = 512
+"""The longest provider reference egma's server reads. A longer one is refused
+as malformed, so it can name no simulation."""
+
 MODALITY_KEY = "modality"
 """Where the marker names the simulation's modality: ``voice`` or ``chat``.
 Absent means voice."""
@@ -37,8 +41,10 @@ def body_of(runner_args: object) -> Any:
 def provider_reference_in(runner_args: object) -> str | None:
     """The simulation id egma's marker names, or None when there is no marker.
 
-    None for no body, a body without the ``egma`` key, and a marker of the
-    wrong shape. Reading it costs nothing: no network and no Pipecat.
+    None for no body, a body without the ``egma`` key, and a marker egma's
+    server would refuse to read (not text, blank, or longer than 512
+    characters): such a marker names no simulation, so the bot runs as
+    production. Reading it costs nothing: no network and no Pipecat.
     """
     body = body_of(runner_args)
     if not isinstance(body, Mapping):
@@ -47,7 +53,11 @@ def provider_reference_in(runner_args: object) -> str | None:
     if not isinstance(marker, Mapping):
         return None
     simulation_id = marker.get(SIMULATION_ID_KEY)
-    if not isinstance(simulation_id, str) or not simulation_id.strip():
+    if (
+        not isinstance(simulation_id, str)
+        or not simulation_id.strip()
+        or len(simulation_id) > LONGEST_SIMULATION_ID
+    ):
         return None
     return simulation_id
 

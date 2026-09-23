@@ -239,6 +239,8 @@ export {
   credentialRuleOf,
   productLabelOf,
   accessVariantById,
+  PLATFORMS_PUSHING_TRACES,
+  platformPushesTraces,
   type ConfigFieldKind,
   type ConfigFieldMetadata,
   type ConnectionOptionMetadata,

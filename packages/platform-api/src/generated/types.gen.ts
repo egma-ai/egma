@@ -1549,7 +1549,7 @@ export type CreateApiKeyData = {
         name: string;
         projectId: string;
         /**
-         * The living LiveKit agent this worker key serves. Egma derives and reserves its key-name prefix on the server.
+         * The living LiveKit or Pipecat agent this monitoring key serves. Egma derives and reserves its key-name prefix on the server, and files a Pipecat agent's production traces sent with this key under that agent.
          */
         monitoringAgentId: string;
     };

@@ -1129,6 +1129,7 @@ async function refreshAfterWrite(
       return stopped.code;
     }
     options.out("Updated egma/config.yaml.");
+    for (const note of refreshed.notes) options.fail(note);
     return AGENT_EXIT.done;
   } catch (cause) {
     if (options.signal.aborted) {

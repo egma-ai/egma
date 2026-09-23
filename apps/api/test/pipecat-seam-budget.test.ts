@@ -67,5 +67,28 @@ it("asks the organization's budget, and answers 429 with Retry-After once it is 
     payload: JSON.stringify({ resourceSpans: [] }),
   });
   expect(exported.statusCode).toBe(429);
+
+  // Both doors spend the budget before they look at the key's scope, so a
+  // key for the whole organization is told the same thing at each.
+  const wholeOrganization = await api.app.inject({
+    method: "POST",
+    url: SDK_HELLO_PATH,
+    headers: { "content-type": "application/json", authorization: `Bearer ${ada.secret}` },
+    payload: { provider_reference: "sim_nobody", protocol_version: 1, tools: [] },
+  });
+  const wholeOrganizationExport = await api.app.inject({
+    method: "POST",
+    url: OTLP_TRACES_PATH,
+    headers: { "content-type": "application/json", authorization: `Bearer ${ada.secret}` },
+    payload: JSON.stringify({ resourceSpans: [] }),
+  });
+  expect([wholeOrganization.statusCode, wholeOrganizationExport.statusCode]).toEqual([429, 429]);
   open = true;
+
+  expect((await api.app.inject({
+    method: "POST",
+    url: SDK_HELLO_PATH,
+    headers: { "content-type": "application/json", authorization: `Bearer ${ada.secret}` },
+    payload: { provider_reference: "sim_nobody", protocol_version: 1, tools: [] },
+  })).statusCode).toBe(403);
 });

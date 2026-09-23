@@ -7,6 +7,10 @@ minor and fail before a changed Pipecat can run a mocked tool for real.
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pipecat.frames.frames")
+
 import ast
 import dataclasses
 import inspect

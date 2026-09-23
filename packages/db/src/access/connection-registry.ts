@@ -377,6 +377,23 @@ function accessVariantMetadata(
   };
 }
 
+/**
+ * The agent platforms whose agents send their own traces to Egma through the
+ * Egma SDK. Their production monitoring lives in the agent's code with a
+ * project key (there is no pull switch), and their simulations need the SDK.
+ */
+export const PLATFORMS_PUSHING_TRACES = [
+  "livekit",
+  "pipecat",
+] as const satisfies readonly AgentPlatform[];
+
+/** Whether this platform's agents push their own traces through the Egma SDK. */
+export function platformPushesTraces(
+  platform: string,
+): platform is (typeof PLATFORMS_PUSHING_TRACES)[number] {
+  return (PLATFORMS_PUSHING_TRACES as readonly string[]).includes(platform);
+}
+
 const PLATFORM_LABELS: Readonly<Record<AgentPlatform, string>> = {
   retell: "Retell",
   livekit: "LiveKit",

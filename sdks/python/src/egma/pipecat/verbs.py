@@ -10,22 +10,31 @@ the runner starts it::
     await runner.add_workers(worker)
 
 One session per worker holds what the two verbs share: the observer that
-writes the record, the export it writes to, and the hooks on the worker's
-LLM services. The session ends when the pipeline finishes: open spans are
-ended, the root is sent last, and the HTTPS client is closed.
+writes the record, the export it writes to, the HTTPS client, and the hooks
+on the worker's LLM services. The session ends when the pipeline finishes:
+open spans are ended, the root is sent last, the hooks are removed, and the
+client and the export are closed.
+
+A bot can also fail after these calls and before its pipeline runs. Then
+the session is released when the task that called them ends with an error
+or is cancelled, and, as a backstop, when the worker is garbage collected.
+No record is written for a pipeline that never ran.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
+import weakref
 from typing import Any
 
 from .. import otlp, seam
+from .._frameworks import installed_version
 from ..errors import NotReported
 from . import census, couriers, detect, https_seam
-from .export import SessionExport, egma_version
+from .export import SessionExport
 from .observer import EgmaObserver, Recorder
 
 logger = logging.getLogger("egma")
@@ -42,6 +51,32 @@ REPORT_WAIT_SECONDS = 5.0
 _SESSION = "_egma_pipecat_session"
 
 
+class _Held:
+    """The session's open resources, reachable without the worker.
+
+    The garbage-collection backstop holds this object only, so it never keeps
+    the worker alive.
+    """
+
+    def __init__(self) -> None:
+        self.seam: https_seam.Seam | None = None
+        self.export: SessionExport | None = None
+
+    async def close(self) -> None:
+        if self.seam is not None:
+            await self.seam.close()
+        if self.export is not None:
+            await self.export.close()
+
+    def close_now(self) -> None:
+        """Release what can be released without awaiting."""
+        if self.export is not None:
+            self.export.discard()
+        if self.seam is not None:
+            with contextlib.suppress(RuntimeError):
+                asyncio.get_running_loop().create_task(self.seam.close())
+
+
 class _Session:
     """What ``simulation`` and ``monitor`` share for one worker."""
 
@@ -51,8 +86,7 @@ class _Session:
         """None, ``"accepted"``, or ``"not_a_simulation"``."""
         self.monitor: str | None = None
         """None, ``"production"``, or ``"suppressed"``."""
-        self.seam: https_seam.Seam | None = None
-        self.export: SessionExport | None = None
+        self.held = _Held()
         self.llms: list[Any] = []
         self.failures: dict[str, str] = {}
         self.census: dict[str, dict[str, Any]] = {}
@@ -65,7 +99,18 @@ class _Session:
         )
         self.session_id = detect.session_id_of(runner_args)
         self.observer: EgmaObserver | None = None
+        self._watched: set[int] = set()
+        self._release: asyncio.Task[None] | None = None
         self._finished = False
+        weakref.finalize(worker, _Held.close_now, self.held)
+
+    @property
+    def export(self) -> SessionExport | None:
+        return self.held.export
+
+    @property
+    def seam(self) -> https_seam.Seam | None:
+        return self.held.seam
 
     def _tracer(self) -> Any:
         assert self.export is not None
@@ -88,7 +133,7 @@ class _Session:
             )
             export.discard()
             return
-        self.export = export
+        self.held.export = export
         if previous is not None:
             previous.discard()
         self._attach()
@@ -106,6 +151,26 @@ class _Session:
         self.worker.add_observer(self.observer)
         self.worker.add_event_handler("on_pipeline_finished", self._pipeline_finished)
 
+    def watch_caller(self) -> None:
+        """Release the session if the calling task fails before the pipeline runs."""
+        task = asyncio.current_task()
+        if task is None or id(task) in self._watched:
+            return
+        self._watched.add(id(task))
+        task.add_done_callback(self._caller_done)
+
+    def _caller_done(self, task: asyncio.Task[Any]) -> None:
+        if self._finished or self.recorder.started:
+            return
+        if not task.cancelled() and task.exception() is None:
+            return
+        try:
+            self._release = task.get_loop().create_task(self.finish())
+        except RuntimeError:
+            self._finished = True
+            self._remove_hooks()
+            self.held.close_now()
+
     async def _pipeline_finished(self, _worker: Any, _frame: Any) -> None:
         if self.observer is not None:
             try:
@@ -119,9 +184,8 @@ class _Session:
     ) -> seam.Served:
         assert self.seam is not None
         if flows:
-            self._learn(
-                {name: {**self.census.get(name, {"name": name}), "flows": True}}
-            )
+            known = self.census.get(name, {"name": name})
+            self._learn({name: {**known, "flows": True}})
         return await self.seam.tool(name, arguments, flows=flows)
 
     def learn_tools(self, tools: Any) -> None:
@@ -160,6 +224,8 @@ class _Session:
     async def _report_again(self, flows_names: list[str]) -> None:
         if self.seam is None:
             return
+        named = ", ".join(flows_names)
+        reference = self.seam.provider_reference
         async with self._report_lock:
             try:
                 await self.seam.hello(list(self.census.values()))
@@ -167,49 +233,52 @@ class _Session:
                 logger.warning(
                     "simulation %s: the test mocks the Pipecat Flows function(s) "
                     "%s, and Egma refused them: %s",
-                    self.seam.provider_reference,
-                    ", ".join(flows_names),
+                    reference,
+                    named,
                     failed.reason,
                 )
             except https_seam.NotASimulation:
                 logger.warning(
                     "simulation %s is no longer live, so the Pipecat Flows "
                     "function(s) %s were not reported",
-                    self.seam.provider_reference,
-                    ", ".join(flows_names),
+                    reference,
+                    named,
                 )
             except Exception:
                 logger.exception(
                     "simulation %s: the Pipecat Flows function(s) %s could not "
                     "be reported to Egma",
-                    self.seam.provider_reference,
-                    ", ".join(flows_names),
+                    reference,
+                    named,
                 )
 
     def record_failure(self, tool_call_id: str, message: str) -> None:
         self.failures[tool_call_id] = message
 
+    def _remove_hooks(self) -> None:
+        for llm in self.llms:
+            couriers.uninstall(llm)
+
     async def finish(self) -> None:
-        """End the record, send it, and release what the session holds."""
+        """End the record, send it, and release what the session holds.
+
+        The record is written only for a pipeline that ran.
+        """
         if self._finished:
             return
         self._finished = True
-        if self.export is not None:
+        if self.export is not None and self.recorder.started:
             try:
                 self.recorder.finish(time.time_ns())
             except Exception:
                 logger.exception("Egma could not end this bot session's record")
-        for llm in self.llms:
-            couriers.uninstall(llm)
+        self._remove_hooks()
         if self._reports:
             pending = tuple(self._reports)
             _, late = await asyncio.wait(pending, timeout=REPORT_WAIT_SECONDS)
             for task in late:
                 task.cancel()
-        if self.seam is not None:
-            await self.seam.close()
-        if self.export is not None:
-            await self.export.close()
+        await self.held.close()
 
 
 def _session_of(worker: Any, runner_args: object, verb: str) -> _Session:
@@ -236,22 +305,20 @@ def _session_of(worker: Any, runner_args: object, verb: str) -> _Session:
 def _settings(
     endpoint: str | None, api_key: str | None, verb: str
 ) -> tuple[str, str, str]:
-    """The SDK base URL, the project key, and the trace endpoint."""
+    """The SDK root URL, the project key, and the trace endpoint."""
     url = otlp.setting(endpoint, "EGMA_URL", verb)
     key = otlp.project_key(otlp.setting(api_key, "EGMA_API_KEY", verb), verb)
-    return https_seam.sdk_base(url, verb), key, otlp.trace_endpoint(url, verb)
+    return otlp.api_root(url, verb), key, otlp.trace_endpoint(url, verb)
 
 
-def _not_reported(reference: str, failed: https_seam.HelloFailed) -> NotReported:
-    if failed.verbatim:
-        return NotReported(failed.reason)
+def _not_reported(reference: str, reason: str) -> NotReported:
     return NotReported(
         f"simulation {reference}: this bot did not report to Egma "
-        f"({failed.reason}), so it was not started. A Pipecat simulation needs "
+        f"({reason}), so it was not started. A Pipecat simulation needs "
         f"{SIMULATION_VERB} to reach Egma's server: check EGMA_URL and "
         "EGMA_API_KEY where this bot runs, and check that the egma package "
         "installed here is the one that shipped with this Egma deployment "
-        f"(this is egma {egma_version()})."
+        f"(this is egma {installed_version('egma')})."
     )
 
 
@@ -286,7 +353,7 @@ async def simulation(
     reference = detect.provider_reference_in(runner_args)
     if reference is None:
         logger.debug(
-            "this start request carried no egma simulation marker, so nothing "
+            "this start request carried no Egma simulation marker, so nothing "
             "is wrapped, nothing is exported, and every tool runs its own "
             "handler"
         )
@@ -308,46 +375,43 @@ async def simulation(
         session_id=session.session_id,
     )
     client = https_seam.Seam(base, key, reference)
+    accepted = False
     try:
-        mocked = await client.hello(tools)
-    except https_seam.NotASimulation:
-        await client.close()
-        export.discard()
-        session.simulation = "not_a_simulation"
-        logger.warning(
-            "this start request named Egma simulation %s, and Egma answered "
-            "that it is not a live simulation in this API key's project, so "
-            "this bot runs as production: nothing is wrapped and nothing is "
-            "exported as a simulation",
-            reference,
-        )
-        return
-    except https_seam.HelloFailed as failed:
-        await client.close()
-        export.discard()
-        raise _not_reported(reference, failed) from failed
-    except BaseException:
-        await client.close()
-        export.discard()
-        raise
-
-    if mocked and not llms:
-        await client.close()
-        export.discard()
-        raise _not_reported(
-            reference,
-            https_seam.HelloFailed(
+        try:
+            mocked = await client.hello(tools)
+        except https_seam.NotASimulation:
+            session.simulation = "not_a_simulation"
+            logger.warning(
+                "this start request named Egma simulation %s, and Egma answered "
+                "that it is not a live simulation in this API key's project, so "
+                "this bot runs as production: nothing is wrapped and nothing is "
+                "exported as a simulation",
+                reference,
+            )
+            return
+        except https_seam.HelloFailed as failed:
+            if failed.verbatim:
+                raise NotReported(failed.reason) from failed
+            raise _not_reported(reference, failed.reason) from failed
+        if mocked and not llms:
+            raise _not_reported(
+                reference,
                 "no Pipecat LLM service is in this worker's pipeline, so Egma "
-                f"cannot answer the mocked tools ({', '.join(mocked)})"
-            ),
-        )
+                f"cannot answer the mocked tools ({', '.join(mocked)})",
+            )
+        accepted = True
+    finally:
+        if not accepted:
+            await client.close()
+            export.discard()
 
     session.simulation = "accepted"
-    session.seam = client
+    session.held.seam = client
     session.llms = llms
     answered = frozenset(mocked)
     session.mocked = answered
     session.use_export(export)
+    session.watch_caller()
     for llm in llms:
         couriers.install(llm, answered, session.ask, session.record_failure)
     if session.monitor == "production":
@@ -452,3 +516,4 @@ async def monitor(
             session_id=session.session_id,
         )
     )
+    session.watch_caller()

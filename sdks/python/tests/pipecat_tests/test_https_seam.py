@@ -10,6 +10,10 @@ to send the fixture's requests and to read the fixture's answers.
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pipecat.frames.frames")
+
 import json
 from typing import Any
 
@@ -17,7 +21,7 @@ import aiohttp
 import pytest
 from support import PROJECT_KEY, compact, egma, fixture
 
-from egma import seam
+from egma import otlp, seam
 from egma.pipecat import https_seam
 
 
@@ -68,7 +72,7 @@ def test_the_refusal_words_and_codes_are_the_fixtures(fixture):
     assert by_code[seam.UNKNOWN_TOOL] == "seam_refused"
     assert by_code[seam.ANSWER_TOO_LARGE] == "seam_refused"
     assert by_code[seam.UNSUPPORTED_PROTOCOL_VERSION] == "seam_refused"
-    assert by_code[https_seam.FLOWS_FUNCTION_MOCKED] == "flows_function_mocked"
+    assert by_code[seam.FLOWS_FUNCTION_MOCKED] == "flows_function_mocked"
     assert fixture["not_a_simulation"]["status"] == 404
     assert fixture["not_a_simulation"]["body"]["error"] == https_seam.NOT_A_SIMULATION
 
@@ -121,7 +125,7 @@ async def test_the_double_answers_every_exchange_as_the_fixture_says(
 
 def _client(egma, fixture, world: str = "calendar", reference: str | None = None):
     return https_seam.Seam(
-        https_seam.sdk_base(egma.url, "test"),
+        otlp.api_root(egma.url, "test"),
         PROJECT_KEY,
         reference or fixture["worlds"][world]["simulation_id"],
     )
@@ -184,7 +188,7 @@ async def test_another_404_is_a_failure_never_inertness(egma, fixture):
 
 async def test_a_wrong_key_is_named_in_the_failure(egma, fixture):
     client = https_seam.Seam(
-        https_seam.sdk_base(egma.url, "test"),
+        otlp.api_root(egma.url, "test"),
         f"egma_sk_{'x' * 43}",
         fixture["worlds"]["calendar"]["simulation_id"],
     )
@@ -258,9 +262,10 @@ async def test_a_refused_tool_call_is_an_error_that_names_egmas_sentence(
     sentence = fixture["exchanges"][name]["response"]["message"]
     assert served.failed is True
     assert served.message == (
-        f'Egma could not answer the mocked tool "{request["name"]}": {sentence}. '
-        "The real tool did not run."
+        f'Egma could not answer the mocked tool "{request["name"]}": '
+        f"{sentence.rstrip('.')}. The real tool did not run."
     )
+    assert ".." not in served.message
 
 
 async def test_confirm_reads_only_a_live_simulation_as_confirmed(fixture, egma):
@@ -287,8 +292,9 @@ async def test_confirm_reads_only_a_live_simulation_as_confirmed(fixture, egma):
         ("http://127.0.0.1:3100", "http://127.0.0.1:3100"),
     ],
 )
-def test_the_sdk_base_follows_the_exporters_url_rules(setting, base):
-    assert https_seam.sdk_base(setting, "test") == base
+def test_the_sdk_routes_and_the_trace_door_share_one_root(setting, base):
+    assert otlp.api_root(setting, "test") == base
+    assert otlp.trace_endpoint(setting, "test") == f"{base}/v1/traces"
 
 
 @pytest.mark.parametrize(
@@ -296,4 +302,53 @@ def test_the_sdk_base_follows_the_exporters_url_rules(setting, base):
 )
 def test_a_bad_egma_url_is_refused(setting):
     with pytest.raises(ValueError, match="EGMA_URL"):
-        https_seam.sdk_base(setting, "test")
+        otlp.api_root(setting, "test")
+
+
+@pytest.mark.parametrize(
+    ("failure", "attempts"),
+    [
+        pytest.param(TimeoutError(), 3, id="a timeout is asked again"),
+        pytest.param(
+            aiohttp.ClientConnectionError("refused"), 3, id="a connection error too"
+        ),
+        pytest.param(
+            aiohttp.ClientPayloadError("cut short"), 1, id="an unreadable answer is not"
+        ),
+    ],
+)
+async def test_the_hello_asks_again_only_when_egma_was_not_reached(
+    monkeypatch, failure, attempts
+):
+    monkeypatch.setattr(https_seam, "HELLO_RETRY_PAUSES_SECONDS", (0.01, 0.01))
+    asked: list[str] = []
+
+    async def failing(self, route, payload, seconds):
+        asked.append(route)
+        raise failure
+
+    monkeypatch.setattr(https_seam.Seam, "_post", failing)
+    client = https_seam.Seam("https://app.egma.ai", PROJECT_KEY, "sim_x")
+
+    with pytest.raises(https_seam.HelloFailed):
+        await client.hello([])
+
+    assert len(asked) == attempts
+
+
+@pytest.mark.parametrize(
+    ("status", "attempts"),
+    [(429, 3), (502, 3), (503, 3), (504, 3), (500, 1), (401, 1), (422, 1)],
+)
+async def test_the_hello_asks_again_only_for_the_busy_statuses(egma, status, attempts):
+    egma.hello_statuses = [status] * 3
+    client = https_seam.Seam(
+        otlp.api_root(egma.url, "test"), PROJECT_KEY, "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP"
+    )
+    try:
+        with pytest.raises(https_seam.HelloFailed):
+            await client.hello([])
+    finally:
+        await client.close()
+
+    assert egma.routes_asked() == ["hello"] * attempts

@@ -103,7 +103,11 @@ let adaKey: string;
 /** The fixture's simulation ids, mapped to the ones this store minted. */
 const realIdOf = new Map<string, string>();
 
-type World = { readonly simulationId: string; readonly runId: string };
+type World = {
+  readonly simulationId: string;
+  readonly runId: string;
+  readonly agentId: string;
+};
 
 /** A value with every fixture simulation id replaced by its real one. */
 function withRealIds(value: unknown): unknown {
@@ -247,7 +251,7 @@ async function aClaimedSimulation(
       provider_reference: simulationId,
     });
   }
-  return { simulationId, runId };
+  return { simulationId, runId, agentId };
 }
 
 beforeAll(async () => {
@@ -360,9 +364,9 @@ describe("the shared seam fixture", () => {
   });
 });
 
-describe("a hello repeated mid-session", () => {
+describe("a hello repeated mid-simulation", () => {
   it("replaces an accepted report with the Flows refusal, which the simulator then reads", async () => {
-    const world = await aClaimedSimulation("mid-session flows", [
+    const world = await aClaimedSimulation("mid-simulation flows", [
       { tool: "check_calendar", answer: { slots: [] } },
       { tool: "route_to_billing", answer: { next: "billing" } },
     ]);
@@ -412,6 +416,33 @@ describe("a hello repeated mid-session", () => {
     });
   });
 
+  it("keeps the refusal for the rest of the simulation, whatever a later hello says", async () => {
+    const world = await aClaimedSimulation("final refusal", [
+      { tool: "check_calendar", answer: { slots: [] } },
+      { tool: "route_to_billing", answer: { next: "billing" } },
+    ]);
+    const census = {
+      provider_reference: world.simulationId,
+      protocol_version: 1,
+      tools: [{ name: "check_calendar" }],
+    };
+    expect((await sdk(SDK_HELLO_PATH, census)).statusCode).toBe(200);
+    const flows = await sdk(SDK_HELLO_PATH, {
+      ...census,
+      tools: [...census.tools, { name: "route_to_billing", flows: true }],
+    });
+    expect(flows.statusCode).toBe(422);
+    const refusedAt = (await agentReport(world.simulationId)).json;
+    expect(refusedAt).toMatchObject({ state: "refused", code: 905 });
+
+    // A hello that would be accepted on its own is answered with the refusal,
+    // so the simulator's next poll still reads it.
+    const later = await sdk(SDK_HELLO_PATH, census);
+    expect(later.statusCode).toBe(422);
+    expect(later.json).toEqual(flows.json);
+    expect((await agentReport(world.simulationId)).json).toEqual(refusedAt);
+  });
+
   it("names every mocked Flows function in census order", async () => {
     const world = await aClaimedSimulation("two flows functions", [
       { tool: "route_to_support", answer: { next: "support" } },
@@ -455,6 +486,63 @@ describe("the project key at the door", () => {
     );
     expect(answered.statusCode).toBe(403);
     expect(answered.json).toMatchObject({ error: "not_permitted" });
+  });
+
+  it("answers a key of another project in the same organization as if the simulation were not there", async () => {
+    const created = await api.app.inject({
+      method: "POST",
+      url: "/v1/projects",
+      headers: { cookie: ada.cookie },
+      payload: { name: "Outbound" },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const outboundKey = await mintKey(
+      api.app,
+      ada.cookie,
+      "outbound terminal",
+      String((created.json() as { id: string }).id),
+    );
+    for (const [path, body] of [
+      [SDK_HELLO_PATH, at("exchanges.hello.request")],
+      [SDK_TOOL_PATH, at("exchanges.tool_answer.request")],
+      [SDK_CONFIRM_PATH, at("exchanges.confirm_live.request")],
+    ] as const) {
+      const answered = await sdk(path, withRealIds(body), outboundKey);
+      expect(answered.statusCode, path).toBe(404);
+      expect(answered.json).toEqual(SEAM.not_a_simulation.body);
+    }
+  });
+
+  it("opens to an agent's guarded monitoring key, which is a project key that may send traces", async () => {
+    const world = await aClaimedSimulation("monitoring key", [
+      { tool: "check_calendar", answer: { slots: [] } },
+    ]);
+    const minted = await api.app.inject({
+      method: "POST",
+      url: "/v1/keys",
+      headers: { cookie: ada.cookie },
+      payload: {
+        monitoringAgentId: world.agentId,
+        projectId: ada.projectId,
+        name: `Egma monitoring ${world.agentId} — front desk bot`,
+      },
+    });
+    expect(minted.statusCode, minted.body).toBe(201);
+    const monitoringKey = (minted.json() as { secret: string }).secret;
+
+    const confirmed = await sdk(
+      SDK_CONFIRM_PATH,
+      { provider_reference: world.simulationId },
+      monitoringKey,
+    );
+    expect(confirmed.statusCode, confirmed.raw).toBe(200);
+    expect(confirmed.json).toEqual({ simulation: true });
+    const hello = await sdk(
+      SDK_HELLO_PATH,
+      { provider_reference: world.simulationId, protocol_version: 1, tools: [] },
+      monitoringKey,
+    );
+    expect(hello.raw).toBe('{"protocol_version":1,"mocked_tools":["check_calendar"]}');
   });
 
   it("answers another project's key as if the simulation were not there", async () => {

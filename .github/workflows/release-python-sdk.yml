@@ -210,7 +210,7 @@ jobs:
           clean="$(mktemp -d)"
           uv venv --python 3.11 "$clean/venv"
           uv pip install --python "$clean/venv/bin/python" \
-            "egma[livekit] @ file://$(realpath "$wheel")" "livekit-agents[openai]==1.6.6"
+            "$wheel" "livekit-agents[openai]==1.6.6"
           "$clean/venv/bin/python" - <<'PY'
           import asyncio
           import os
@@ -274,6 +274,7 @@ jobs:
 
           required = {
               "egma/__init__.py",
+              "egma/_frameworks.py",
               "egma/errors.py",
               "egma/export.py",
               "egma/livekit/__init__.py",

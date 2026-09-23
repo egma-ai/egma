@@ -7,11 +7,16 @@ installed wheel. Minors run in parallel.
 
     python3 .github/pipecat_compatibility.py dist/egma-0.4.0-py3-none-any.whl
     python3 .github/pipecat_compatibility.py <wheel> --minor 1.10
+    python3 .github/pipecat_compatibility.py --list-minors
+
+The minors come from the ``pipecat`` extra's range in ``pyproject.toml``;
+``--list-minors`` prints them as JSON for the CI matrix.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import tomllib
 from pathlib import Path
@@ -21,13 +26,13 @@ from livekit_compatibility import parallel_checks, run
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON_SDK = ROOT / "sdks/python"
-TESTS = (
-    "pipecat_tests",
-    "test_dependencies.py",
-    "test_imports.py",
-    "test_seam_bytes.py",
-)
-"""The suites that need no LiveKit. LiveKit's own tests skip themselves here."""
+
+
+def framework_free_tests() -> list[Path]:
+    """The Pipecat suite and every shared test module. LiveKit's suite is left out;
+    the shared modules skip what needs LiveKit."""
+    tests = PYTHON_SDK / "tests"
+    return [tests / "pipecat_tests", *sorted(tests.glob("test_*.py"))]
 
 
 def supported_minors() -> tuple[str, ...]:
@@ -85,6 +90,7 @@ def check(wheel: Path, minor: str, directory: Path, log) -> None:
             "assert Path(egma.__file__).is_relative_to(sys.prefix); "
             "assert version('pipecat-ai').startswith(sys.argv[1] + '.'), "
             "version('pipecat-ai'); "
+            "assert version('openai').split('.')[0] == '2', version('openai'); "
             "found = sorted(d.metadata['Name'] for d in distributions() "
             "if d.metadata['Name'].lower().startswith('livekit')); "
             "assert not found, found",
@@ -100,7 +106,7 @@ def check(wheel: Path, minor: str, directory: Path, log) -> None:
             "pytest",
             "-c",
             str(PYTHON_SDK / "pyproject.toml"),
-            *(str(PYTHON_SDK / "tests" / name) for name in TESTS),
+            *map(str, framework_free_tests()),
             "-q",
             "-o",
             f"cache_dir={directory / 'pytest-cache'}",
@@ -112,13 +118,21 @@ def check(wheel: Path, minor: str, directory: Path, log) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("wheel", type=Path)
+    parser.add_argument("wheel", type=Path, nargs="?")
     parser.add_argument(
         "--minor",
         action="append",
         help="a Pipecat minor such as 1.10; repeat for several (default: all)",
     )
+    parser.add_argument(
+        "--list-minors", action="store_true", help="print the minors as JSON"
+    )
     args = parser.parse_args()
+    if args.list_minors:
+        print(json.dumps(list(supported_minors())))
+        return 0
+    if args.wheel is None:
+        parser.error("the built wheel is required")
     wheel = args.wheel.resolve(strict=True)
     minors = tuple(args.minor) if args.minor else supported_minors()
     unsupported = sorted(set(minors) - set(supported_minors()))

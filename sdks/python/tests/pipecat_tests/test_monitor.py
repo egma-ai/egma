@@ -8,9 +8,12 @@ own confirmation request when ``simulation`` did not run.
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pipecat.frames.frames")
+
 import asyncio
 
-import pytest
 from pipecat.frames.frames import LLMContextFrame
 from pipecat.processors.aggregators.llm_context import LLMContext
 from support import (
