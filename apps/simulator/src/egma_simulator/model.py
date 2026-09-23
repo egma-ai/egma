@@ -292,6 +292,13 @@ class OpenAICompatibleModel:
                 "the model's assistant message was not an object",
                 diagnostic_attributes=diagnostics,
             )
+        if message.get("refusal"):
+            # A refusal is never a persona turn, whatever words or tools came
+            # with it.
+            raise ModelFailure(
+                "the model refused to answer",
+                diagnostic_attributes=diagnostics,
+            )
 
         try:
             tool_calls = self._tool_calls_from(message.get("tool_calls"))
@@ -310,15 +317,10 @@ class OpenAICompatibleModel:
         content = self._without_api_key(content)
         text = content.strip()
         if not text and not tool_calls:
-            # No words and no end_call is the persona staying silent. A refusal
-            # or an answer cut short is a failure, not that choice.
-            if message.get("refusal"):
-                raise ModelFailure(
-                    "the model refused to answer",
-                    diagnostic_attributes=diagnostics,
-                )
+            # No words and no end_call after a normal stop is the persona
+            # staying silent. Any other finish reason, or none, is a failure.
             finish_reason = body["choices"][0].get("finish_reason")
-            if finish_reason not in (None, "stop"):
+            if finish_reason != "stop":
                 raise ModelFailure(
                     "the model's answer had no words to speak (finish reason: "
                     f"{self._provider_detail(finish_reason)})",
@@ -381,6 +383,9 @@ class OpenAICompatibleModel:
                             refusal += delta.refusal
                         if delta.content:
                             text += delta.content
+                        # No text is released once a refusal starts; decoding
+                        # then reports the refusal as a model failure.
+                        if delta.content and not refusal:
                             safe = self._stream_prefix(text)
                             if safe != delivered:
                                 await on_text(safe[len(delivered) :])

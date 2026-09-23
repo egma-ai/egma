@@ -337,6 +337,84 @@ async def test_an_empty_answer_cut_short_is_still_a_model_failure(model_stub):
     }
 
 
+@pytest.mark.parametrize(
+    "choice",
+    [
+        {"finish_reason": None, "message": {"content": ""}},
+        {"message": {"content": ""}},
+    ],
+)
+async def test_an_empty_answer_without_a_finish_reason_is_a_model_failure(
+    model_stub, choice
+):
+    """Only an explicit stop says that the empty answer was complete."""
+    model_stub.answers.append(web.json_response({"choices": [choice]}))
+    client = OpenAICompatibleModel(
+        base_url=model_stub.base_url, api_key="k", model_name="selected"
+    )
+    try:
+        with pytest.raises(ModelFailure, match="finish reason: None") as caught:
+            await client.reply(system_and_history())
+    finally:
+        await client.close()
+    assert caught.value.diagnostic_attributes == {
+        "gen_ai.response.refusal_present": False
+    }
+
+
+@pytest.mark.parametrize(
+    ("finish_reason", "message"),
+    [
+        ("stop", {"content": "Sure, here is"}),
+        (
+            "tool_calls",
+            {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_end",
+                        "type": "function",
+                        "function": {"name": "end_call", "arguments": "{}"},
+                    }
+                ],
+            },
+        ),
+    ],
+)
+async def test_a_refusal_with_words_or_end_call_is_still_a_model_failure(
+    model_stub, finish_reason, message
+):
+    """A refusal is not spoken and does not end the call as the persona's choice."""
+    model_stub.answers.append(
+        web.json_response(
+            {
+                "choices": [
+                    {
+                        "finish_reason": finish_reason,
+                        "message": {
+                            "role": "assistant",
+                            "refusal": "private refusal text",
+                            **message,
+                        },
+                    }
+                ]
+            }
+        )
+    )
+    client = OpenAICompatibleModel(
+        base_url=model_stub.base_url, api_key="k", model_name="selected"
+    )
+    try:
+        with pytest.raises(ModelFailure, match="refused to answer") as caught:
+            await client.reply(system_and_history())
+    finally:
+        await client.close()
+    assert caught.value.diagnostic_attributes == {
+        "gen_ai.response.finish_reason": finish_reason,
+        "gen_ai.response.refusal_present": True,
+    }
+
+
 @pytest.mark.parametrize("content", [None, " "])
 async def test_a_refused_blank_completion_keeps_only_safe_provider_metadata(
     model_stub, content

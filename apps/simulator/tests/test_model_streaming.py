@@ -207,3 +207,27 @@ async def test_a_streamed_refusal_is_a_model_failure():
     assert diagnostics["gen_ai.response.refusal_present"] is True
     assert diagnostics["gen_ai.response.finish_reason"] == "stop"
     assert "help with that" not in repr(diagnostics)
+
+
+async def test_no_streamed_text_is_released_after_a_refusal_starts():
+    stream = HeldStream(
+        event({"role": "assistant", "content": "Sure. "}),
+        event({"refusal": "I can't help with that.", "content": "Here it is."})
+        + event({"content": " More words."})
+        + event(finish="stop")
+        + b"data: [DONE]\n\n",
+    )
+    stream.release.set()
+    model, _ = model_with_stream(stream)
+    heard = []
+
+    async def emit(text):
+        heard.append(text)
+
+    try:
+        with pytest.raises(ModelFailure, match="refused to answer"):
+            await model.reply_streamed(LLMContext(messages=[]), emit)
+    finally:
+        await model.close()
+
+    assert heard == ["Sure. "]
