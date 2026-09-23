@@ -87,7 +87,7 @@ describe("LiveKit monitoring instructions", () => {
     expect(copy).not.toMatch(/monitoring (ready|configured|on)/i);
   });
 
-  it("shows the JavaScript package and keeps the hook first", () => {
+  it("passes the JavaScript session to monitoring before connecting or starting it", () => {
     const { container } = render(<MonitoringInstructions />);
 
     fireEvent.click(screen.getByRole("tab", { name: "JavaScript" }));
@@ -106,13 +106,19 @@ describe("LiveKit monitoring instructions", () => {
     expect(copy).toContain(
       'import { monitor } from "@egma/livekit"',
     );
-    expect(copy.indexOf("monitor(ctx)")).toBeLessThan(
+    expect(copy).toContain("const session = new voice.AgentSession(...);");
+    expect(copy).toContain("monitor(ctx, { session });");
+    expect(copy).not.toContain("Make the hook the first line of entrypoint");
+    expect(copy.indexOf("const session = new voice.AgentSession(...);")).toBeLessThan(
+      copy.indexOf("monitor(ctx, { session });"),
+    );
+    expect(copy.indexOf("monitor(ctx, { session });")).toBeLessThan(
       copy.indexOf("await ctx.connect()"),
     );
     expect(copy.indexOf("await ctx.connect()")).toBeLessThan(
       copy.indexOf("await session.start(...)"),
     );
-    expect(copy.indexOf("monitor(ctx)")).toBeLessThan(
+    expect(copy.indexOf("monitor(ctx, { session });")).toBeLessThan(
       copy.indexOf("await session.start(...)"),
     );
     expect(copy).toContain("EGMA_URL=<your-public-egma-url>");

@@ -28,9 +28,9 @@ const JAVASCRIPT_INSTALL = "npm install @egma/livekit";
 const JAVASCRIPT_HOOK = `import { monitor } from "@egma/livekit";
 
 export async function entrypoint(ctx: JobContext) {
-  monitor(ctx);
-  await ctx.connect();
   const session = new voice.AgentSession(...);
+  monitor(ctx, { session });
+  await ctx.connect();
   await session.start(...);
 }`;
 const EGMA_URL_PLACEHOLDER = "<your-public-egma-url>";
@@ -53,7 +53,9 @@ function WorkerSteps({
       copyLabel: `${language} install command`,
     },
     {
-      title: "Make the hook the first line of entrypoint",
+      title: language === "python"
+        ? "Make the hook the first line of entrypoint"
+        : "Pass the session before connecting",
       value: language === "python" ? PYTHON_HOOK : JAVASCRIPT_HOOK,
       copyLabel: `${language} monitoring code`,
     },

@@ -1,7 +1,7 @@
 import { type JobContext, llm, voice } from "@livekit/agents";
 import { type BatchSpanProcessor } from "@opentelemetry/sdk-trace-node";
 
-import { flushNow, installExport, type ExportOptions } from "./export.ts";
+import { collectConversation, flushNow, installExport, type ExportOptions } from "./export.ts";
 import {
   HELLO_METHOD,
   HELLO_TIMEOUT_SECONDS,
@@ -87,6 +87,7 @@ export async function simulation(
     // spans are this simulation's record of what the agent did, and they are
     // arranged for before anything that can fail.
     const processor = installExport(ctx, options, SIMULATION_VERB, roomName);
+    collectConversation(session);
     flushWhenTheSessionCloses(session, processor);
 
     const census = censusMessage([agent]);

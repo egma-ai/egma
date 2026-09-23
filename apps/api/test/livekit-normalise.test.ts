@@ -65,6 +65,80 @@ function normalise(
 }
 
 describe("LiveKit Agents 1.7 trace attributes", () => {
+  it("includes a committed say greeting as customer-agent evidence", () => {
+    const result = normaliseOtlpExport({
+      resourceSpans: [{
+        resource: { attributes: attributes({ "egma.provider_reference": "egma-sim-greeting" }) },
+        scopeSpans: [{
+          scope: { name: "egma.livekit", version: "0.3.5" },
+          spans: [{
+            ...span("0011223344556620", "conversation_item", {
+              "egma.conversation_item.id": "item_greeting",
+              "egma.conversation_item.role": "assistant",
+              "lk.pii.response.text": "Hello, I can help you schedule an appointment!",
+            }),
+            parentSpanId: "0011223344556621",
+          }],
+        }],
+      }],
+    });
+
+    expect(result.rejected).toEqual([]);
+    expect(result.spans).toMatchObject([{
+      kind: "turn:agent",
+      emitter: "agent",
+      agentPlatform: "livekit",
+      text: "Hello, I can help you schedule an appointment!",
+      parentSpanId: "0011223344556621",
+      endsTrace: false,
+    }]);
+  });
+
+  it.each([
+    { role: "assistant", text: undefined },
+    { role: "assistant", text: "   " },
+    { role: "user", text: "Is Tuesday available?" },
+  ])("does not turn redacted or non-agent conversation items into agent speech ($role, $text)", ({ role, text }) => {
+    const result = normaliseOtlpExport({
+      resourceSpans: [{
+        scopeSpans: [{
+          scope: { name: "egma.livekit" },
+          spans: [span("0011223344556623", "conversation_item", {
+            "egma.conversation_item.role": role,
+            ...(text === undefined ? {} : { "lk.pii.response.text": text }),
+          })],
+        }],
+      }],
+    });
+
+    expect(result.spans).toMatchObject([{ kind: "other", text: "" }]);
+  });
+
+  it.each([
+    { flag: true, wireStatus: undefined, expected: "error" },
+    { flag: false, wireStatus: undefined, expected: "ok" },
+    { flag: false, wireStatus: 2, expected: "error" },
+    { flag: true, wireStatus: 1, expected: "error" },
+  ])("preserves LiveKit tool result status $expected ($flag, $wireStatus)", ({ flag, wireStatus, expected }) => {
+    const tool: OtlpSpan = {
+      ...span("0011223344556622", "function_tool", {}),
+      attributes: [
+        ...attributes({
+          "lk.function_tool.name": "scheduleAppointment",
+          "lk.pii.function_tool.output": flag ? "Slot unavailable" : "Booked",
+        }),
+        { key: "lk.function_tool.is_error", value: { boolValue: flag } },
+      ],
+      ...(wireStatus === undefined ? {} : { status: { code: wireStatus } }),
+    };
+    const result = normalise({}, [tool]);
+    expect(result.spans[0]).toMatchObject({
+      kind: "tool",
+      status: expected,
+      toolResult: flag ? "Slot unavailable" : "Booked",
+    });
+  });
+
   it("recovers chat caller input from the agent turn that accepted it", () => {
     const inputOnly = span("0011223344556600", "agent_turn", {
       "lk.pii.user_input": "Is Tuesday available?",

@@ -292,6 +292,26 @@ afterEach(async () => {
 });
 
 describe("egma.simulation", () => {
+  it("exports committed startup say speech under the simulation room before its completion root", async () => {
+    const agent = new voice.Agent({ instructions: "Book appointments." });
+    const ctx = context("egma-sim-sim_132_greeting");
+    const oneSession = session();
+    await simulation(agent, asJobContext(ctx), oneSession);
+    const exported = whatEgmaExports();
+    await oneSession.start({ agent });
+    await oneSession.say("Hello, I can help you schedule an appointment!").waitForPlayout();
+    await oneSession.close();
+    const spans = exported.getFinishedSpans();
+    const greeting = spans.find((span) => span.name === "conversation_item")!;
+    const root = spans.find((span) => span.name === "agent_session")!;
+    expect(greeting.attributes).toMatchObject({
+      [PROVIDER_REFERENCE]: "egma-sim-sim_132_greeting",
+      "lk.pii.response.text": "Hello, I can help you schedule an appointment!",
+    });
+    expect(greeting.spanContext().traceId).toBe(root.spanContext().traceId);
+    expect(spans.indexOf(greeting)).toBeLessThan(spans.indexOf(root));
+  });
+
   it("leaves a production room completely inert", async () => {
     const ctx = context("customer-production-room");
     const real = vi.fn(async () => "real");

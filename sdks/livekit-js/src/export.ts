@@ -19,7 +19,9 @@ import {
   type SpanProcessor,
 } from "@opentelemetry/sdk-trace-node";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
-import { telemetry, type JobContext } from "@livekit/agents";
+import { telemetry, type JobContext, type voice } from "@livekit/agents";
+
+import { ConversationCollector } from "./conversation.ts";
 
 /**
  * Shared span exporter for monitor() and simulation(), authenticated by a project API key.
@@ -93,6 +95,7 @@ export type ExportState = {
   readonly provider: TracerProvider;
   readonly processor: BatchSpanProcessor;
   readonly registerSpanProcessor: (processor: SpanProcessor) => void;
+  readonly conversation: ConversationCollector;
 };
 
 let state: ExportState | undefined;
@@ -269,6 +272,11 @@ export function installExport(
 
   registerShutdownFlush(ctx, addShutdownCallback, state.processor);
   return state.processor;
+}
+
+/** Capture committed speech on the provider configured for this job. */
+export function collectConversation(session: voice.AgentSession): void {
+  state?.conversation.attach(session);
 }
 
 /** Send whatever is buffered now, and never let the failure stop the job. */
@@ -479,6 +487,9 @@ function configureExport(
           }),
     });
 
+    const conversation = new ConversationCollector(provider.getTracer("egma.livekit"));
+    registerSpanProcessor(conversation);
+
     return {
       verb,
       endpoint,
@@ -488,6 +499,7 @@ function configureExport(
       provider,
       processor,
       registerSpanProcessor,
+      conversation,
     };
   } catch {
     void processor?.shutdown().catch(() => undefined);

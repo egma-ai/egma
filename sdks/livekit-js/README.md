@@ -89,17 +89,17 @@ When the configured simulation ends, Egma finishes its pending output and leaves
 
 ### B. Production monitoring
 
-Call `monitor(ctx)` at the start of the job entrypoint, before `ctx.connect` and `session.start`:
+Call `monitor(ctx, { session })` after creating the session, before `ctx.connect` and `session.start`:
 
 ```typescript
 import { monitor } from "@egma/livekit";
 
-monitor(ctx);
+monitor(ctx, { session });
 ```
 
-It sends production traces to egma Monitoring. It does nothing in simulation rooms.
+It sends production traces to Egma Monitoring. It does nothing in simulation rooms.
 
-If you want both testing and monitoring, add both calls: `monitor(ctx)` at the start of the entrypoint, then `await simulation(agent, ctx, session)` before the session starts. Both use the same environment settings.
+If you want both testing and monitoring, call `monitor(ctx, { session })`, then `await simulation(agent, ctx, session)` before the session starts. Both use the same environment settings.
 
 Keep LiveKit's default of one job per process. The SDK's exporter and mock tools use process-wide state, so overlapping jobs cannot share a worker process.
 
@@ -125,7 +125,7 @@ const options = {
   },
 };
 
-monitor(ctx, options);
+monitor(ctx, { ...options, session });
 await simulation(agent, ctx, session, options);
 ```
 

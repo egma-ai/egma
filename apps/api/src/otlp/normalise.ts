@@ -104,6 +104,7 @@ const PROVIDER_CALL_ID_ATTRIBUTES = [
  * Unknown names remain other with their payload retained.
  */
 const LIVEKIT_SCOPE = "livekit-agents";
+const EGMA_LIVEKIT_SCOPE = "egma.livekit";
 const LANGFUSE_SCOPE = "langfuse-sdk";
 const LANGFUSE_OBSERVATION_TYPE = "langfuse.observation.type";
 
@@ -323,6 +324,7 @@ export const WIRE_TRACE_ID_PAYLOAD_KEY = "egma.wire_trace_id";
 /** A scope proves the framework, not how the caller reached the agent. */
 const AGENT_PLATFORM_BY_SCOPE: Readonly<Record<string, string>> = {
   [LIVEKIT_SCOPE]: "livekit",
+  [EGMA_LIVEKIT_SCOPE]: "livekit",
 };
 
 const PLATFORM_AGENT_ID_ATTRIBUTES = ["lk.cloud_agent_id", "lk.agent_id"];
@@ -403,15 +405,20 @@ function firstAttribute(
   return "";
 }
 
-/** OTLP's status codes as the column's vocabulary. */
-function statusOf(span: OtlpSpan): string {
+/** OTLP status plus LiveKit's explicit tool result flag. */
+function statusOf(span: OtlpSpan, scope: OtlpScope | undefined): string {
+  if (span.status?.code === "STATUS_CODE_ERROR" || span.status?.code === 2) {
+    return "error";
+  }
+  if (scope?.name === LIVEKIT_SCOPE && span.name === "function_tool") {
+    const toolError = attribute(span.attributes, "lk.function_tool.is_error");
+    if (toolError === "true") return "error";
+    if (toolError === "false") return "ok";
+  }
   switch (span.status?.code) {
     case "STATUS_CODE_OK":
     case 1:
       return "ok";
-    case "STATUS_CODE_ERROR":
-    case 2:
-      return "error";
     default:
       return "unset";
   }
@@ -461,6 +468,13 @@ const KINDS_BY_SCOPE: Readonly<
 };
 
 function kindOf(scope: OtlpScope | undefined, span: OtlpSpan): string {
+  if (scope?.name === EGMA_LIVEKIT_SCOPE) {
+    return span.name === "conversation_item" &&
+      attribute(span.attributes, "egma.conversation_item.role") === "assistant" &&
+      attribute(span.attributes, "lk.pii.response.text").trim() !== ""
+      ? "turn:agent"
+      : "other";
+  }
   if (scope?.name === LANGFUSE_SCOPE) {
     const observationType = attribute(
       span.attributes,
@@ -480,6 +494,11 @@ function kindOf(scope: OtlpScope | undefined, span: OtlpSpan): string {
 }
 
 function textFor(scope: OtlpScope | undefined, span: OtlpSpan): string {
+  if (scope?.name === EGMA_LIVEKIT_SCOPE) {
+    return kindOf(scope, span) === "turn:agent"
+      ? attribute(span.attributes, "lk.pii.response.text")
+      : "";
+  }
   if (scope?.name === LIVEKIT_SCOPE) {
     const keys = LIVEKIT_TURN_TEXT[span.name ?? ""];
     return keys === undefined ? "" : firstAttribute([span.attributes], keys);
@@ -688,7 +707,7 @@ export function normaliseOtlpExport(
           durationNanoseconds: duration,
           name: span.name ?? "",
           kind,
-          status: statusOf(span),
+          status: statusOf(span, scope),
           text: textFor(scope, span),
           // Nothing here holds audio, and neither emitter offers a reference
           // to any yet. A guess would be worse than an empty column.

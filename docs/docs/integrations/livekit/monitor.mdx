@@ -72,11 +72,11 @@ own machine or container, so use a reachable address for a remote deployment.
     import { monitor } from "@egma/livekit";
     ```
 
-    Call the hook at the start of the job entrypoint, before starting the
-    `AgentSession`:
+    Call the hook after creating your session, before `ctx.connect` and
+    `session.start`:
 
     ```typescript
-    monitor(ctx);
+    monitor(ctx, { session });
     ```
 
     Monitoring requires Node.js 22 or newer and `@livekit/agents>=1.5.5 <2`.

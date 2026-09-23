@@ -27,16 +27,13 @@ Configuration lives in `docs.json`. Pages use MDX with YAML front matter.
 
 Do not use `eval`, `evaluator`, `digital human`, or `session` for a simulation.
 
-## Writing style
+## VERY importnat Writing style instruction
 
+- Use active voice and address the reader as “you.”
+- If you are shipping any changes to docs - make sure they contain only expose details that are truly relevant to the end developer or their coding agent. Try to convey the same thing in a brief, human-readble fashion.
 - Write the product name as **Egma** in prose and interface text. Use lowercase
   `egma` only for commands, packages, URLs, paths, identifiers, and literal values.
-- Use active voice and address the reader as “you.”
-- Keep sentences short and direct.
-- Use sentence case for headings.
-- Use bold text for interface labels.
-- Use code formatting for file names, commands, paths, fields, and values.
-- Prefer one complete working path over several partial examples.
+
 
 ## Checks
 
