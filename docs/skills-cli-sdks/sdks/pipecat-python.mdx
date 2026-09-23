@@ -74,7 +74,7 @@ async def bot(runner_args: RunnerArguments):
 
 This line is required for every voice and chat simulation, even when the test has no mock tools.
 
-- **Production is untouched.** Egma marks each simulation with an `egma` key in the start request's body, which your bot receives at `runner_args.body`. Without that key, `simulation` returns at once and makes no network request.
+- **Production is untouched.** Egma marks each simulation with an `egma` key in the start request's body, which your bot receives at `runner_args.body`. The key holds the simulation's ID and modality. Without that key, `simulation` returns at once and makes no network request.
 - **Egma confirms every simulation.** With the key, the SDK reports your bot's tools to Egma. Egma answers only for a live simulation in your API key's project. For anything else, the SDK does nothing, so a forged key in production has no effect.
 - **Mock tools.** Egma answers with the tools the test mocks, and the SDK wraps exactly those. A mocked call returns the test's answer or error as the function's result, and your handler does not run. Every other tool runs its real handler and is recorded too. The wrapping works for functions registered with `llm.register_function`, tools given in the LLM context, and realtime models.
 - **The record.** The SDK adds a pipeline observer that records turns with their text, each tool call with its arguments and result or error, and speaking times. It sends them to Egma every second, and sends the session's end last. You do not need to turn on Pipecat's own tracing.
@@ -84,11 +84,11 @@ This line is required for every voice and chat simulation, even when the test ha
 
 #### Pipecat Flows
 
-Egma cannot mock a Pipecat Flows function yet. A test that mocks one fails at the start with a message that names the function. Flows functions that are not mocked run normally and are recorded.
+Egma cannot mock a Pipecat Flows function (from `pipecat.flows`) yet. When a test mocks one, the simulation fails as soon as the flow first offers that function, which is usually at the first node, right after the conversation starts. The message names the function, and its Flows handler does not run. Flows functions that are not mocked run normally and are recorded.
 
 #### Chat simulations
 
-Chat simulations need no extra code. They need RTVI, which `PipelineWorker` turns on by default, so do not pass `enable_rtvi=False`.
+Chat simulations need no extra code. In a chat simulation, the SDK turns your bot's speech output off after Egma confirms the simulation, so the greeting and every answer stay text only. Chat needs RTVI, which `PipelineWorker` turns on by default, so do not pass `enable_rtvi=False`.
 
 ### B. Production monitoring
 

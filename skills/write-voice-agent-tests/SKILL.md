@@ -12,7 +12,7 @@ An Egma Test describes one situation that a voice agent should handle and the ex
 
 A Suite and its Tests do not store the Agent or Connection they run against. The Agent and Connection are selected later when starting a Run.
 
-Currently, Egma supports these voice agents platforms - retell & livekit-agents (python/ js) framework.
+Currently, Egma supports these voice agents platforms - retell, livekit-agents (python/ js) framework & pipecat (python).
 
 We need to do three things to create good tests:
 
@@ -56,6 +56,8 @@ D. Mock tools
     - `error` for a failed/erronous result
   - If egma tests are being written in this repo for the first time - err on the side of writing mocks for write tools. If the agent has only read tools, mock atleast one read tool. If the agent has no tools, you can skip writing mocks. 
   - For livekit agents, you will need to setup the agent with egma sdk in order to use mock tools. egma has support for livekit-agents python and js/ts with dedicated sdks. Refer [Egma livekit python package](https://pypi.org/project/egma/) or [Egma livekit js sdk](https://www.npmjs.com/package/@egma/livekit) for info on how to setup the agent code to listen for mock tools.
+  - For pipecat bots, the egma sdk line `await simulation(worker, runner_args)` from `egma.pipecat` answers mock tools; see the [Pipecat Python SDK guide](https://docs.egma.ai/skills-cli-sdks/sdks/pipecat-python). Mock any tool the bot's LLM can call, whether it was registered with `register_function` or given in the LLM context.
+  - Never mock a Pipecat Flows function (a function whose handler comes from `pipecat.flows`). Egma cannot mock it yet, and a simulation whose test mocks one fails when the flow first offers that function. Unmocked Flows functions run for real and are recorded, so write behaviors about them instead.
 
 E. Session initiation data
   - Many agents need per-session context and certain dynamic variables supplied before they speak even a single word - such as an organisation name which they represent, tenant ID, or some other agent configuration needed for the agent to do its job properly in production. Egma provides a way to supply this data for each simulation so that it is as close to the agent's production behavior as possible. 
@@ -63,6 +65,10 @@ E. Session initiation data
   - For each of the supported agent platforms, egma has a specifc field in its env json that it supplies. 
     - If the agent is based on retell - use `retell_dynamic_variables` in the env section to supply any inbound webhook and dynamic variables data used by the agent. Egma passes it as is to the retell agent as its dynamic variables. 
     - If the agent is based on livekit, use a `job_dispatch_metadata` in the env section. for values the LiveKit agent reads from `ctx.job.metadata`. Make sure the code of the livekit agent is able to read the needed data from `ctx.job.metadata`. If the agent must detect whether its running in an Egma simulation, you can add a check when `ctx.room.name` starts with `egma-sim-`. 
+    - If the agent is based on pipecat, use `pipecat_body_params` in the env section for values the bot reads from `runner_args.body` (for example `runner_args.body.get("tenant")`). It is a JSON object and its values can be any JSON (not only strings). Egma merges it into the `body` of the start request it sends for each simulation, the same body a production client sends, so the bot reads it exactly as in production.
+      - The key `egma` inside `pipecat_body_params` is reserved: Egma adds its own `egma` key to every start request, and a test that holds one is refused on `egma push`. Name the key something else.
+      - The object can be at most 512 KiB once serialized. Put a large value in the developer's own store and pass its id instead.
+      - Do not use the `egma` key to detect a simulation in the bot; the egma SDK handles it.
   - Finally, use realistic, non-secret values to pass in the env section. Ask the developer only when a required value cannot be found or safely inferred. Use the default test orgs that usually the developer uses while iterating on the voice agent themselves.
 
 ## 3. Write the Test files and push them
@@ -116,13 +122,13 @@ Call the recepionist to book an appointment at medspa "ABC" but ask for a specif
   "job_dispatch_metadata": {
     "clinic_name": "Youth Medspa, Walnut Creek branch",
     "assistant_name": "Emily"
+  },
+  "pipecat_body_params": {
+    "clinic_name": "Youth Medspa, Walnut Creek branch",
+    "assistant_name": "Emily"
   }
 }
 ```
-## Env
-```json
-{ "retell_dynamic_variables": { "caller_name": "Margaret" } }
-```
 ````
 
-The above example shows both retell_dynamic_variables & job_dispatch_metadata only for reference. In reality, you should only supply the field corresponding to the platform the agent is built on.
+The above example shows retell_dynamic_variables, job_dispatch_metadata & pipecat_body_params only for reference. In reality, you should only supply the field corresponding to the platform the agent is built on.

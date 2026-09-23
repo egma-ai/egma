@@ -131,12 +131,12 @@ Content-Type: application/json
   "dailyRoomProperties": { "exp": 1790000000, "eject_at_room_exp": true },
   "body": {
     "tenant": "oak-street",
-    "egma": { "simulation_id": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP" }
+    "egma": { "simulation_id": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP", "modality": "voice" }
   }
 }
 ```
 
-- `body` holds the test's [`pipecat_body_params`](/docs/integrations/pipecat/text-and-env#pass-data-to-a-test) and Egma's own `egma` key. Your bot reads it at `runner_args.body`.
+- `body` holds the test's [`pipecat_body_params`](/docs/integrations/pipecat/text-and-env#pass-data-to-a-test) and Egma's own `egma` key, which names the simulation and its modality (`voice` or `chat`). Your bot reads `body` at `runner_args.body`; the SDK reads the `egma` key.
 - The room expires two minutes after the simulation's duration limit. Pipecat Cloud then removes a bot that is still in the room.
 - The persona joins the room as an RTVI client and sends `client-ready`. A bot that greets in `on_client_ready`, as Pipecat's quickstart does, speaks first.
 - Egma waits up to 120 seconds for your bot to join, report to Egma, and publish audio (voice) or send RTVI `bot-ready` (chat). A warm bot starts at once.

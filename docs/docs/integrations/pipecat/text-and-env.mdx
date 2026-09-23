@@ -6,9 +6,9 @@ First [connect your Pipecat agent](/docs/integrations/pipecat/connect) and add t
 
 ## Add a chat connection
 
-A chat simulation tests your bot's reasoning and tools without speech input. Egma starts your bot with the same start request, and the persona sends each turn as text through RTVI. It reads your bot's replies from RTVI's text messages.
+A chat simulation tests your bot's reasoning and tools without speech. Egma starts your bot with the same start request, and the persona sends each turn as text through RTVI. It reads your bot's replies from RTVI's text messages.
 
-Chat needs no code beyond the SDK line. It does need RTVI, which `PipelineWorker` turns on by default. Do not pass `enable_rtvi=False`. A bot with RTVI turned off still passes voice simulations, but its chat simulations fail.
+Chat needs no code beyond the SDK line. In a chat simulation, the SDK turns your bot's speech output off, so the greeting and every answer stay text only. Chat does need RTVI, which `PipelineWorker` turns on by default. Do not pass `enable_rtvi=False`. A bot with RTVI turned off still passes voice simulations, but its chat simulations fail.
 
 Add a chat connection beside your voice connection:
 
