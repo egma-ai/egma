@@ -204,7 +204,7 @@ describe("which simulation a provider reference names", () => {
         tools: [],
         mockedTools: [],
       }),
-    ).toBe(false);
+    ).toBeUndefined();
   });
 });
 
@@ -234,7 +234,7 @@ describe("the hello kept on the simulation", () => {
         tools: census,
         mockedTools: ["check_calendar", "cancel_booking"],
       }),
-    ).toBe(true);
+    ).toMatchObject({ state: "accepted", mockedTools: ["check_calendar", "cancel_booking"] });
     const first = await readAgentReport(conducting, {
       simulationId: claim.id,
       claimant: SIMULATOR,
@@ -276,7 +276,7 @@ describe("the hello kept on the simulation", () => {
     ]);
   });
 
-  it("lets a later refused hello replace an accepted one, as a Flows function appears mid-session", async () => {
+  it("lets a later refused hello replace an accepted one, as a Flows function appears mid-simulation", async () => {
     const { claim, conducting } = await registered();
     await recordAgentReport(projectKey, claim.id, {
       state: "accepted",
@@ -292,7 +292,7 @@ describe("the hello kept on the simulation", () => {
         message,
         tools: [{ name: "check_calendar" }, { name: "route_to_billing", flows: true }],
       }),
-    ).toBe(true);
+    ).toMatchObject({ state: "refused", code: 905, message });
     await expect(
       readAgentReport(conducting, { simulationId: claim.id, claimant: SIMULATOR }),
     ).resolves.toEqual({
@@ -313,6 +313,43 @@ describe("the hello kept on the simulation", () => {
       "state",
       "tools",
     ]);
+  });
+
+  it("keeps a refusal for the simulation: a later accepted hello leaves it in place", async () => {
+    const { claim, conducting } = await registered();
+    const message =
+      'the test mocks "route_to_billing", and this is a Pipecat Flows function; Egma cannot mock it yet. Remove it from the test\'s mock tools. Flows functions that are not mocked run for real and are recorded.';
+    await recordAgentReport(projectKey, claim.id, {
+      state: "refused",
+      code: 905,
+      message,
+      tools: [{ name: "route_to_billing", flows: true }],
+    });
+    const refused = await readAgentReport(conducting, {
+      simulationId: claim.id,
+      claimant: SIMULATOR,
+    });
+
+    const later = await recordAgentReport(projectKey, claim.id, {
+      state: "accepted",
+      tools: [{ name: "check_calendar" }],
+      mockedTools: ["check_calendar"],
+    });
+    expect(later).toEqual(refused);
+    await expect(
+      readAgentReport(conducting, { simulationId: claim.id, claimant: SIMULATOR }),
+    ).resolves.toEqual(refused);
+  });
+
+  it("refuses to read an agent report in a shape Egma never writes", async () => {
+    const { claim, conducting } = await registered();
+    await database.sql(
+      `update simulation set agent_report = '{"state":"welcomed","at":"now","tools":[]}'::jsonb where id = $1`,
+      [claim.id],
+    );
+    await expect(
+      readAgentReport(conducting, { simulationId: claim.id, claimant: SIMULATOR }),
+    ).rejects.toThrow(/agent report in a shape Egma never writes/);
   });
 
   it("keeps a refusal with its code and sentence, and a new attempt forgets it", async () => {

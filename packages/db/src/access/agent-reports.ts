@@ -130,17 +130,20 @@ function storedTools(tools: readonly AgentReportTool[]): Record<string, unknown>
 }
 
 /**
- * Keep the latest hello on a still-conducting Daily room simulation. An
- * accepted report keeps the time of the first accepted one. Answers false when
- * the row is no longer live, which leaves it untouched.
+ * Keep the latest hello on a still-conducting Daily room simulation, and
+ * answer the report the simulation now holds. An accepted report keeps the
+ * time of the first accepted one. A refusal is final for the simulation: a
+ * later hello leaves it in place, so a refusal the simulator has not read yet
+ * cannot be replaced before it does. Answers undefined when the row is no
+ * longer live, which leaves it untouched.
  */
 export async function recordAgentReport(
   auth: AuthContext,
   simulationId: string,
   report: NewAgentReport,
-): Promise<boolean> {
+): Promise<AgentReport | undefined> {
   authorize(auth, "ingest_traces", here(auth));
-  if (auth.projectId === undefined) return false;
+  if (auth.projectId === undefined) return undefined;
 
   const at = new Date().toISOString();
   const stored =
@@ -166,10 +169,12 @@ export async function recordAgentReport(
             then ${simulation.agentReport}->'first_at'
             else to_jsonb(${at}::text) end)`
       : sql`${JSON.stringify(stored)}::jsonb`;
+  const kept = sql`case when ${simulation.agentReport}->>'state' = 'refused'
+    then ${simulation.agentReport} else ${written} end`;
 
   const [updated] = await db()
     .update(simulation)
-    .set({ agentReport: written })
+    .set({ agentReport: kept })
     .where(
       within(
         auth,
@@ -183,40 +188,49 @@ export async function recordAgentReport(
         ),
       ),
     )
-    .returning({ id: simulation.id });
-  return updated !== undefined;
+    .returning({ agentReport: simulation.agentReport });
+  if (updated === undefined) return undefined;
+  return reportFromRow(simulationId, updated.agentReport);
 }
 
-/** The stored report read back, or null for a row whose value is unreadable. */
-function reportFromRow(value: unknown): AgentReport | null {
+/** Every value of the list is a string, or the list is unreadable. */
+function strings(value: unknown): readonly string[] | undefined {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string")
+    ? (value as string[])
+    : undefined;
+}
+
+/** The stored report read back; a value Egma never writes is refused out loud. */
+function reportFromRow(simulationId: string, value: unknown): AgentReport {
+  const malformed = () =>
+    new Error(
+      `simulation ${simulationId} holds an agent report in a shape Egma never writes; the row needs repairing before anybody can read it`,
+    );
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return null;
+    throw malformed();
   }
   const held = value as Record<string, unknown>;
-  const tools = Array.isArray(held["tools"])
-    ? (held["tools"] as unknown[]).flatMap((tool): AgentReportTool[] => {
-        if (typeof tool !== "object" || tool === null) return [];
-        const entry = tool as Record<string, unknown>;
-        if (typeof entry["name"] !== "string") return [];
-        return [
-          {
-            name: entry["name"],
-            ...(entry["schema"] === undefined ? {} : { schema: entry["schema"] }),
-            ...(entry["flows"] === true ? { flows: true as const } : {}),
-          },
-        ];
-      })
-    : [];
-  const at = typeof held["at"] === "string" ? held["at"] : "";
+  if (!Array.isArray(held["tools"]) || typeof held["at"] !== "string") {
+    throw malformed();
+  }
+  const tools = (held["tools"] as unknown[]).map((tool): AgentReportTool => {
+    if (typeof tool !== "object" || tool === null) throw malformed();
+    const entry = tool as Record<string, unknown>;
+    if (typeof entry["name"] !== "string") throw malformed();
+    return {
+      name: entry["name"],
+      ...(entry["schema"] === undefined ? {} : { schema: entry["schema"] }),
+      ...(entry["flows"] === true ? { flows: true as const } : {}),
+    };
+  });
+  const at = held["at"];
   if (held["state"] === "accepted") {
-    const mocked = Array.isArray(held["mocked_tools"])
-      ? (held["mocked_tools"] as unknown[]).filter(
-          (name): name is string => typeof name === "string",
-        )
-      : [];
+    const mocked = strings(held["mocked_tools"]);
+    const firstAt = held["first_at"];
+    if (mocked === undefined || typeof firstAt !== "string") throw malformed();
     return {
       state: "accepted",
-      firstAt: typeof held["first_at"] === "string" ? held["first_at"] : at,
+      firstAt,
       at,
       protocolVersion: 1,
       tools,
@@ -224,15 +238,12 @@ function reportFromRow(value: unknown): AgentReport | null {
     };
   }
   if (held["state"] === "refused") {
-    return {
-      state: "refused",
-      at,
-      code: typeof held["code"] === "number" ? held["code"] : 0,
-      message: typeof held["message"] === "string" ? held["message"] : "",
-      tools,
-    };
+    const code = held["code"];
+    const message = held["message"];
+    if (typeof code !== "number" || typeof message !== "string") throw malformed();
+    return { state: "refused", at, code, message, tools };
   }
-  return null;
+  throw malformed();
 }
 
 /**
@@ -263,5 +274,7 @@ export async function readAgentReport(
     )
     .limit(1);
   if (row === undefined) return undefined;
-  return row.agentReport === null ? null : reportFromRow(row.agentReport);
+  return row.agentReport === null
+    ? null
+    : reportFromRow(input.simulationId, row.agentReport);
 }

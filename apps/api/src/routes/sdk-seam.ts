@@ -351,14 +351,24 @@ export async function sdkSeamRoutes(
             message: refusal.message,
             tools: census.tools,
           };
-    const recorded = await recordAgentReport(auth, simulation.simulationId, report);
+    const stored = await recordAgentReport(auth, simulation.simulationId, report);
     // The row left claimed/running between the lookup and the write.
-    if (!recorded) return notASimulation(reply);
+    if (stored === undefined) return notASimulation(reply);
+    // A refusal is final for the simulation, so a later hello is answered
+    // with the refusal the simulation holds.
+    const answered: SeamRefusal | undefined =
+      stored.state === "refused"
+        ? {
+            error: stored.code === FLOWS_FUNCTION_MOCKED ? "flows_function_mocked" : "seam_refused",
+            code: stored.code,
+            message: stored.message,
+          }
+        : undefined;
 
     request.log.info(
       platformEvent(
-        refusal === undefined ? "egma.sdk.hello.accepted" : "egma.sdk.hello.refused",
-        refusal === undefined
+        answered === undefined ? "egma.sdk.hello.accepted" : "egma.sdk.hello.refused",
+        answered === undefined
           ? "the Egma SDK reported the agent's tools"
           : "the Egma SDK's report was refused",
         {
@@ -366,12 +376,12 @@ export async function sdkSeamRoutes(
           "egma.run_id": simulation.runId,
           "egma.sdk.tool_count": census.tools.length,
           "egma.sdk.mocked_tool_count": mocked.length,
-          ...(refusal === undefined ? {} : { "egma.sdk.refusal_code": refusal.code }),
+          ...(answered === undefined ? {} : { "egma.sdk.refusal_code": answered.code }),
         },
       ),
     );
 
-    if (refusal !== undefined) return refused(reply, refusal);
+    if (answered !== undefined) return refused(reply, answered);
     return sendJson(reply, answer);
   });
 
