@@ -48,10 +48,10 @@ async def bot(runner_args: RunnerArguments):
     await run_bot(transport, runner_args)
 ```
 
-This line is required for every Pipecat simulation, including tests without mock tools. It reports your bot's tools, applies the test's mocks, and sends your bot's record of the conversation to Egma. When the start request carries no `egma` key, it does nothing and makes no network request, so production sessions are unchanged.
+This line is required for every Pipecat simulation, including tests without mock tools. When the start request carries no `egma` key, it does nothing and makes no network request.
 
 <Card title="Pipecat Python SDK" icon="python" href="/skills-cli-sdks/sdks/pipecat-python">
-  Supported versions, mock tools, and both SDK verbs.
+  What the line does, how mock tools and Pipecat Flows behave, and when it raises NotReported.
 </Card>
 
 Create a project API key from your initialized agent repository:

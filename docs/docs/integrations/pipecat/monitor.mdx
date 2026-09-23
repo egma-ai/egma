@@ -59,9 +59,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
 Pass `runner_args` from `bot()` into the function that builds the worker, as shown in [Prepare the bot](/docs/integrations/pipecat/connect#1-prepare-the-bot).
 
-Redeploy the bot. The line records each conversation's turns, tool calls with their arguments and results, and timings, and sends them to Egma in batches. It adds its own exporter and leaves your own tracing as it is.
-
-A simulation does not also appear as a production conversation. When the start request carries no `egma` key, `monitor` exports the conversation without asking Egma anything. When it carries one, `monitor` stays silent only after Egma confirms that the key names a live simulation in your project. A key that Egma does not confirm is production traffic, and `monitor` exports it.
+Redeploy the bot. The line records each conversation's turns, tool calls with their arguments and results, and timings, and sends them to Egma. A simulation does not also appear as a production conversation; the [SDK guide](/skills-cli-sdks/sdks/pipecat-python#b-production-monitoring) explains how `monitor` tells them apart.
 
 ## Verify a conversation
 

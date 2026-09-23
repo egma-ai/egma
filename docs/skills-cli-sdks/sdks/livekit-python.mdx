@@ -107,7 +107,7 @@ If you want both testing and monitoring, add both calls: `monitor(ctx)` at the s
 
 The SDK adds egma to a compatible existing OpenTelemetry provider. Keep LiveKit's default of one job per process, so each job's traces stay attached to its own room.
 
-Workers that import `from egma import simulation, monitor` keep working. `egma.livekit` exposes the same names, including `NotReported`.
+`from egma import simulation, monitor, NotReported` imports the same names as `from egma.livekit import simulation, monitor, NotReported`.
 
 ## 4. Run the updated worker and verify
 

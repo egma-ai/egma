@@ -23,7 +23,7 @@ For LiveKit and Pipecat, monitoring is code in the agent. There is no switch in 
 
 ### 2a. LiveKit worker
 
-- Python: install `egma[livekit]` with the repo's package manager (supports `livekit-agents>=1.6.6,<1.9`). Add `from egma.livekit import monitor` and make `monitor(ctx)` the first statement of the job entrypoint, before `ctx.connect()` and `session.start(...)`. The older `from egma import monitor` also works; do not rewrite an existing import only for that.
+- Python: install `egma[livekit]` with the repo's package manager (supports `livekit-agents>=1.6.6,<1.9`). Add `from egma.livekit import monitor` and make `monitor(ctx)` the first statement of the job entrypoint, before `ctx.connect()` and `session.start(...)`. `from egma import monitor` is the same function as `from egma.livekit import monitor`; leave an existing import as it is.
 - JavaScript/TypeScript: install `@egma/livekit` (needs Node.js 22+ and `@livekit/agents>=1.5.5 <2`). Add `import { monitor } from "@egma/livekit";` and call `monitor(ctx, { session })` after creating the session, before `ctx.connect()` and `session.start(...)`.
 - `monitor` does nothing in rooms named `egma-sim-…`, so simulations never appear twice. If the worker also runs simulations, keep both `monitor` and `simulation`.
 - Keep LiveKit's default of one job per process.
@@ -33,7 +33,7 @@ For LiveKit and Pipecat, monitoring is code in the agent. There is no switch in 
 - Install `egma[pipecat]` with the repo's package manager (supports Python 3.11+ and `pipecat-ai>=1.9,<1.12`).
 - Add `from egma.pipecat import monitor` and call `await monitor(worker, runner_args)` after the bot creates its `PipelineWorker(...)` and before `runner.add_workers(worker)`. `runner_args` is the argument of `bot(runner_args)`; pass it into the helper that builds the worker if needed.
 - If the bot also runs simulations, call `await simulation(worker, runner_args)` first, then `await monitor(worker, runner_args)`.
-- `monitor` exports every session whose start request has no `egma` key, with no extra network request. When a body carries an `egma` key, it stays silent only if egma confirms a live simulation; anything else is exported as production.
+- `monitor` exports every conversation whose start request has no `egma` key, with no extra network request. When a body carries an `egma` key, it stays silent only if egma confirms a live simulation; anything else is exported as production.
 
 ### 3. Deploy and verify
 
