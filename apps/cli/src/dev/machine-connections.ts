@@ -7,11 +7,12 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
 import { egmaFolderIn } from "../platform/credentials.ts";
+import { lockIsStale } from "./session-lock.ts";
 
 export const MACHINE_CONNECTIONS_FORMAT = 1;
 
@@ -28,7 +29,6 @@ export type MachineConnection = {
 const FILE_MODE = 0o600;
 const FOLDER_MODE = 0o700;
 const LOCK_WAIT_MS = 5_000;
-const LOCK_STALE_MS = 30_000;
 
 /** The file on this machine, beside the saved login. */
 export function machineConnectionsFileIn(env: NodeJS.ProcessEnv): string {
@@ -124,7 +124,10 @@ export function machineConnectionFor(
   );
 }
 
-/** One process at a time reads, merges and replaces the file. */
+/**
+ * One process at a time reads, merges and replaces the file. A lock whose
+ * process is gone is removed; a living holder is waited for.
+ */
 async function whileLocked<T>(file: string, work: () => Promise<T>): Promise<T> {
   const lock = `${file}.lock`;
   const until = Date.now() + LOCK_WAIT_MS;
@@ -134,8 +137,7 @@ async function whileLocked<T>(file: string, work: () => Promise<T>): Promise<T> 
       break;
     } catch (cause) {
       if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
-      const held = await stat(lock).catch(() => undefined);
-      if (held !== undefined && Date.now() - held.mtimeMs > LOCK_STALE_MS) {
+      if (await lockIsStale(lock)) {
         await rm(lock, { force: true });
         continue;
       }

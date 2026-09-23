@@ -5,6 +5,7 @@
  * the secret written into them, and the session survives a tunnel that ends.
  */
 
+import { spawnSync } from "node:child_process";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -14,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runAgentDevCommand, machineNameOf, type AgentDevCommandOptions } from "../src/commands/agent-dev.ts";
 import { DEV_SECRET_HEADER } from "../src/dev/guard.ts";
+import { sessionLockFile } from "../src/dev/session-lock.ts";
 import { TunnelStartFailure, type RunningTunnel, type TunnelExit, type TunnelLauncher } from "../src/dev/tunnel.ts";
 import { createEgmaFolder, EMPTY_CONFIG, folderPathsIn, readConfig } from "../src/folder/egma-folder.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
@@ -557,6 +559,90 @@ describe("egma agent dev", () => {
 
     expect(await session.code).toBe(1);
     expect(session.fail[0]).toContain("--port is the port your bot's development runner listens on");
+  });
+
+  it("remembers the connection it made before a later write failed, and reuses it", async () => {
+    const agentId = await register();
+    const tunnels = fakeTunnels();
+    const refuseChat: typeof fetch = async (input, init) => {
+      const body = typeof init?.body === "string" ? init.body : "";
+      if (init?.method === "POST" && String(input).includes("/connections") && body.includes('"modality":"chat"')) {
+        return new Response(JSON.stringify({ error: "internal", message: "the database is resting" }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return await fetch(input, init);
+    };
+    const failing = start(agentId, tunnels.launch, { fetchImpl: refuseChat });
+
+    expect(await failing.code).toBe(1);
+    expect(failing.fail.join("\n")).toContain("Egma did not add this machine's chat Connection");
+    const [voice] = devConnections(agentId);
+    expect(devConnections(agentId)).toHaveLength(1);
+    expect(await memory()).toEqual({
+      format: 1,
+      connections: [{ platformUrl: platform.url, agentId, modality: "voice", connectionId: voice!.id }],
+    });
+
+    const next = start(agentId, tunnels.launch);
+    await next.said("Press Ctrl-C to stop.");
+
+    expect(devConnections(agentId).map((connection) => [connection.id === voice!.id, connection.name])).toEqual([
+      [true, `dev-${MACHINE}-voice`],
+      [false, `dev-${MACHINE}-chat`],
+    ]);
+    await next.stop();
+  });
+
+  it("refuses a second session for the same agent on this machine, and allows one after", async () => {
+    const agentId = await register();
+    const tunnels = fakeTunnels();
+    const first = start(agentId, tunnels.launch);
+    await first.said("Press Ctrl-C to stop.");
+
+    const second = start(agentId, tunnels.launch);
+    expect(await second.code).toBe(1);
+    expect(second.fail).toEqual([
+      `egma agent dev is already running for Agent ${agentId} on this machine (process ${String(process.pid)}). Use that session, or stop it with Ctrl-C first.`,
+    ]);
+    expect(tunnels.opened).toHaveLength(1);
+    expect(devConnections(agentId)[0]?.config).toEqual({ startUrl: "https://fake-tunnel-1.trycloudflare.com/start" });
+
+    await first.stop();
+    const third = start(agentId, tunnels.launch);
+    await third.said("Press Ctrl-C to stop.");
+    await third.stop();
+  });
+
+  it("takes over a session lock whose process is gone", async () => {
+    const agentId = await register();
+    const gone = spawnSync(process.execPath, ["-e", ""]).pid;
+    const lock = sessionLockFile(workspace.egmaFolder, platform.url, agentId);
+    await mkdir(path.dirname(lock), { recursive: true });
+    await writeFile(lock, `${String(gone)}\n`, "utf8");
+    const tunnels = fakeTunnels();
+    const session = start(agentId, tunnels.launch);
+    await session.said("Press Ctrl-C to stop.");
+
+    expect(await readFile(lock, "utf8")).toBe(`${String(process.pid)}\n`);
+    await session.stop();
+    await expect(readFile(lock, "utf8")).rejects.toThrow();
+  });
+
+  it("says nothing about Egma not answering when Ctrl-C stops a connection write", async () => {
+    const agentId = await register();
+    const tunnels = fakeTunnels();
+    let session: Session | undefined;
+    const stopMidWrite: typeof fetch = async (input, init) => {
+      if (init?.method === "POST" && String(input).includes("/connections")) session?.controller.abort("interrupt");
+      return await fetch(input, init);
+    };
+    session = start(agentId, tunnels.launch, { fetchImpl: stopMidWrite });
+
+    expect(await session.code).toBe(130);
+    expect(session.fail).toEqual(["The command was stopped before the tunnel was ready."]);
+    expect(tunnels.opened[0]?.stopped).toBe(true);
   });
 
   it("stops before the tunnel is ready when Ctrl-C comes first", async () => {

@@ -26,6 +26,9 @@ const REFUSAL_BODY = JSON.stringify({
   error: "egma agent dev refused a request without its secret header",
 });
 
+/** Headers a `Connection` header may not remove: they frame and address the message. */
+const KEPT_WHEN_NAMED = new Set(["host", "content-length"]);
+
 /** Headers that describe one connection, never the request itself. */
 const HOP_BY_HOP = new Set([
   "connection",
@@ -88,14 +91,17 @@ function pathOf(url: string | undefined): string {
   return query === -1 ? raw : raw.slice(0, query);
 }
 
-/** Raw header pairs, minus the secret, the hop-by-hop set, and what `Connection` names. */
+/**
+ * Raw header pairs, minus the secret, the hop-by-hop set, and what `Connection`
+ * names (never `Host` or `Content-Length`).
+ */
 function forwardedHeaders(rawHeaders: readonly string[], drop: ReadonlySet<string>): string[] {
   const named = new Set<string>();
   for (let at = 0; at + 1 < rawHeaders.length; at += 2) {
     if ((rawHeaders[at] as string).toLowerCase() === "connection") {
       for (const token of (rawHeaders[at + 1] as string).split(",")) {
         const name = token.trim().toLowerCase();
-        if (name !== "") named.add(name);
+        if (name !== "" && !KEPT_WHEN_NAMED.has(name)) named.add(name);
       }
     }
   }
@@ -129,24 +135,52 @@ export async function startGuard(options: GuardOptions): Promise<Guard> {
   const dropFromRequest = new Set([SECRET_HEADER_KEY]);
   const tell = options.onEvent ?? (() => undefined);
 
+  const unreachable = (
+    outgoing: ServerResponse,
+    method: string,
+    path: string,
+    cause: string,
+  ): void => {
+    answerJson(
+      outgoing,
+      502,
+      JSON.stringify({
+        error: `egma agent dev could not reach your bot's starter on port ${String(options.targetPort)}: ${cause}`,
+      }),
+    );
+    tell({ kind: "unreachable", method, path, cause });
+  };
+
   const forward = (incoming: IncomingMessage, outgoing: ServerResponse): void => {
     const method = incoming.method ?? "GET";
     const path = pathOf(incoming.url);
+    const headers = forwardedHeaders(incoming.rawHeaders, dropFromRequest);
+    // A body that arrived chunked has no length; it leaves chunked, so the
+    // starter reads exactly this body and never takes its bytes for a request.
+    const hasLength = headers.some((name, at) => at % 2 === 0 && name.toLowerCase() === "content-length");
+    if (!hasLength && incoming.headers["transfer-encoding"] !== undefined) {
+      headers.push("Transfer-Encoding", "chunked");
+    }
     const upstream = httpRequest({
       host: "127.0.0.1",
       port: options.targetPort,
       method,
       path: incoming.url ?? "/",
-      headers: forwardedHeaders(incoming.rawHeaders, dropFromRequest),
+      headers,
+      // One upstream connection per request: nothing is pooled between callers.
+      agent: false,
     });
 
     upstream.on("response", (answer) => {
       const status = answer.statusCode ?? 502;
-      outgoing.writeHead(
-        status,
-        answer.statusMessage,
-        forwardedHeaders(answer.rawHeaders, new Set()),
-      );
+      try {
+        // The standard reason phrase for the status, never the starter's own.
+        outgoing.writeHead(status, forwardedHeaders(answer.rawHeaders, new Set()));
+      } catch {
+        answer.resume();
+        unreachable(outgoing, method, path, "its answer had headers that cannot be passed on");
+        return;
+      }
       answer.pipe(outgoing);
       answer.on("error", () => outgoing.destroy());
       tell({ kind: "forwarded", method, path, status });
@@ -161,15 +195,7 @@ export async function startGuard(options: GuardOptions): Promise<Guard> {
         outgoing.destroy(error);
         return;
       }
-      const cause = causeOf(error);
-      answerJson(
-        outgoing,
-        502,
-        JSON.stringify({
-          error: `egma agent dev could not reach your bot's starter on port ${String(options.targetPort)}: ${cause}`,
-        }),
-      );
-      tell({ kind: "unreachable", method, path, cause });
+      unreachable(outgoing, method, path, causeOf(error));
     });
 
     // The caller went away before the answer finished: stop asking for it.
@@ -198,6 +224,8 @@ export async function startGuard(options: GuardOptions): Promise<Guard> {
       resolve();
     });
   });
+  // A server error after listening must not end the CLI; each request answers for itself.
+  server.on("error", () => undefined);
   const port = (server.address() as AddressInfo).port;
 
   let closing: Promise<void> | undefined;

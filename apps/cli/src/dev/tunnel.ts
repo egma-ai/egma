@@ -16,7 +16,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { promises as dnsPromises, Resolver } from "node:dns";
 import { constants } from "node:fs";
-import { access, stat } from "node:fs/promises";
+import { access, mkdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
@@ -131,11 +131,28 @@ export type CloudflaredOptions = {
   readonly connectTimeoutMs?: number;
   /** How long `stop()` waits after SIGTERM before SIGKILL. */
   readonly stopTimeoutMs?: number;
+  /**
+   * The config file cloudflared reads instead of its default one. A user's
+   * `~/.cloudflared/config.yml` can hold ingress rules, which win over `--url`
+   * and would send the tunnel somewhere other than the guard.
+   */
+  readonly configFile?: string;
   readonly spawnImpl?: typeof spawn;
   readonly fetchImpl?: typeof fetch;
   /** Waits until the hostname is in public DNS. Default: ask the authoritative servers. */
   readonly waitForDns?: (hostname: string, signal: AbortSignal) => Promise<boolean>;
 };
+
+/** The config a quick tunnel runs with: no ingress rules, so `--url` decides. */
+export const QUICK_TUNNEL_CONFIG = "{}\n";
+
+/** Write the quick-tunnel config into a folder and return its path. */
+export async function writeQuickTunnelConfig(folder: string): Promise<string> {
+  await mkdir(folder, { recursive: true, mode: 0o700 });
+  const file = path.join(folder, "cloudflared-quick-tunnel.yml");
+  await writeFile(file, QUICK_TUNNEL_CONFIG, { encoding: "utf8", mode: 0o600 });
+  return file;
+}
 
 /** How long a new hostname may take to reach every authoritative server. */
 const DNS_WAIT_MS = 30_000;
@@ -252,7 +269,14 @@ export function cloudflaredLauncher(
       let exit: TunnelExit | null = null;
       let timer: NodeJS.Timeout | undefined;
 
-      const child = spawnImpl(executable, ["tunnel", "--no-autoupdate", "--url", start.target], {
+      const args = [
+        "tunnel",
+        "--no-autoupdate",
+        ...(options.configFile === undefined ? [] : ["--config", options.configFile]),
+        "--url",
+        start.target,
+      ];
+      const child = spawnImpl(executable, args, {
         stdio: ["ignore", "pipe", "pipe"],
         env: process.env,
       });

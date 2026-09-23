@@ -17,7 +17,7 @@ import { connect } from "node:net";
 import { hostname as systemHostname } from "node:os";
 import process from "node:process";
 
-import { DEV_SECRET_HEADER, startGuard, type GuardEvent } from "../dev/guard.ts";
+import { DEV_SECRET_HEADER, startGuard, type Guard, type GuardEvent } from "../dev/guard.ts";
 import {
   machineConnectionFor,
   machineConnectionsFileIn,
@@ -26,12 +26,14 @@ import {
   type DevModality,
   type MachineConnection,
 } from "../dev/machine-connections.ts";
+import { holdSessionLock, type HeldSession } from "../dev/session-lock.ts";
 import {
   CLOUDFLARED_MISSING,
   cloudflaredLauncher,
   findExecutable,
   TunnelStartFailure,
   tunnelExitWords,
+  writeQuickTunnelConfig,
   type RunningTunnel,
   type TunnelLauncher,
 } from "../dev/tunnel.ts";
@@ -43,7 +45,7 @@ import {
   type RegisteredConnection,
 } from "../platform/agents.ts";
 import { ConnectionCredentials } from "../platform/connection-credentials.ts";
-import type { PlatformAccess } from "../platform/credentials.ts";
+import { egmaFolderIn, type PlatformAccess } from "../platform/credentials.ts";
 import type { Fetch } from "../platform/device-flow.ts";
 import { normalizePlatformOrigin } from "../platform/url.ts";
 import { refreshProjectTargets } from "../sync/targets.ts";
@@ -309,26 +311,22 @@ async function writeMachineConnections(session: Session, startUrl: string): Prom
     }
     const created = await createMachineConnection(session, modality, startUrl);
     if ("message" in created) return { kind: "failed", message: created.message };
-    written.push({ connection: created, action: "created" });
-  }
-
-  const fresh = written.filter((one) => one.action === "created");
-  if (fresh.length > 0) {
+    // Remembered at once, so a later failure in this pass cannot orphan it.
     try {
-      await rememberMachineConnections(
-        session.file,
-        fresh.map((one) => ({
+      await rememberMachineConnections(session.file, [
+        {
           platformUrl: session.platformUrl,
           agentId: session.agentId,
-          modality: one.connection.modality,
-          connectionId: one.connection.id,
-        })),
-      );
+          modality,
+          connectionId: created.id,
+        },
+      ]);
     } catch (cause) {
       options.fail(
-        `Egma could not remember this machine's Connections in ${session.file}: ${cause instanceof Error ? cause.message : String(cause)}. The next egma agent dev creates new ones.`,
+        `Egma could not remember Connection ${created.id} in ${session.file}: ${cause instanceof Error ? cause.message : String(cause)}. The next egma agent dev creates a new one.`,
       );
     }
+    written.push({ connection: created, action: "created" });
   }
   return { kind: "written", connections: written };
 }
@@ -359,6 +357,7 @@ async function refreshConfig(session: Session, written: readonly WrittenConnecti
   } catch {
     // Said below.
   }
+  if (session.options.signal.aborted) return;
   session.options.fail("The Connections exist, but egma/config.yaml was not refreshed. Run egma pull.");
 }
 
@@ -467,6 +466,7 @@ async function supervise(
     for (let attempt = 0; ; attempt += 1) {
       if (options.signal.aborted) return AGENT_DEV_EXIT.done;
       const written = await writeMachineConnections(session, startUrl);
+      if (options.signal.aborted) return AGENT_DEV_EXIT.done;
       if (written.kind === "written") {
         sayWritten(session, written.connections);
         await refreshConfig(session, written.connections);
@@ -538,22 +538,78 @@ export async function runAgentDevCommand(options: AgentDevCommandOptions): Promi
     return AGENT_DEV_EXIT.failed;
   }
 
+  const platformUrl = normalizePlatformOrigin(ready.signedIn.url);
+  let held: HeldSession;
+  try {
+    held = await holdSessionLock(egmaFolderIn(options.env), platformUrl, agentId);
+  } catch (cause) {
+    options.fail(
+      `Egma could not write its session lock in ${egmaFolderIn(options.env)}: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+    return AGENT_DEV_EXIT.failed;
+  }
+  if (held.kind === "busy") {
+    options.fail(
+      `egma agent dev is already running for Agent ${agentId} on this machine${held.pid === null ? "" : ` (process ${String(held.pid)})`}. Use that session, or stop it with Ctrl-C first.`,
+    );
+    return AGENT_DEV_EXIT.failed;
+  }
+  try {
+    return await runSession(options, { ready, agentId, platformUrl, port, file, cloudflared });
+  } finally {
+    await held.lock.release();
+  }
+}
+
+/** Everything after the checks: guard, tunnel, connections, supervision. */
+async function runSession(
+  options: AgentDevCommandOptions,
+  checked: {
+    readonly ready: Ready;
+    readonly agentId: string;
+    readonly platformUrl: string;
+    readonly port: number;
+    readonly file: string;
+    readonly cloudflared: string;
+  },
+): Promise<number> {
+  const { ready, agentId, platformUrl, port, file, cloudflared } = checked;
   if (!(await somethingListensOn(port))) {
     options.fail(
       `Nothing is listening on port ${String(port)} yet. Start your bot's development runner (for example python bot.py -t daily), then run a simulation.`,
     );
   }
 
+  let launch = options.launchTunnel;
+  if (launch === undefined) {
+    let configFile: string;
+    try {
+      configFile = await writeQuickTunnelConfig(egmaFolderIn(options.env));
+    } catch (cause) {
+      options.fail(
+        `Egma could not write the tunnel's config in ${egmaFolderIn(options.env)}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      );
+      return AGENT_DEV_EXIT.failed;
+    }
+    launch = cloudflaredLauncher(cloudflared, { configFile });
+  }
+
   const secret = randomBytes(32).toString("base64url");
-  const guard = await startGuard({
-    secret,
-    targetPort: port,
-    onEvent: sayGuardEvent(port, options.out),
-  });
+  let guard: Guard;
+  try {
+    guard = await startGuard({
+      secret,
+      targetPort: port,
+      onEvent: sayGuardEvent(port, options.out),
+    });
+  } catch (cause) {
+    options.fail(`Egma could not start its guard on 127.0.0.1: ${cause instanceof Error ? cause.message : String(cause)}`);
+    return AGENT_DEV_EXIT.failed;
+  }
   const session: Session = {
     ready,
     agentId,
-    platformUrl: normalizePlatformOrigin(ready.signedIn.url),
+    platformUrl,
     port,
     file,
     machine: machineNameOf(options.hostname ?? systemHostname()),
@@ -562,7 +618,7 @@ export async function runAgentDevCommand(options: AgentDevCommandOptions): Promi
     }),
     options,
     guardUrl: guard.url,
-    launch: options.launchTunnel ?? cloudflaredLauncher(cloudflared),
+    launch,
   };
   const holder: { tunnel: RunningTunnel | null } = { tunnel: null };
   let wasReady = false;
@@ -581,9 +637,11 @@ export async function runAgentDevCommand(options: AgentDevCommandOptions): Promi
 
     const startUrl = `${tunnel.url}/start`;
     const written = await writeMachineConnections(session, startUrl);
+    // A Ctrl-C aborts the request in flight; that is not Egma failing to answer.
+    if (options.signal.aborted) return stoppedEarly(options);
     if (written.kind === "failed") {
       options.fail(written.message);
-      return options.signal.aborted ? AGENT_DEV_EXIT.interrupted : AGENT_DEV_EXIT.failed;
+      return AGENT_DEV_EXIT.failed;
     }
     sayWritten(session, written.connections);
     await refreshConfig(session, written.connections);

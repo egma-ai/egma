@@ -17,8 +17,10 @@ import {
   findExecutable,
   metricsAddressIn,
   saysRegistered,
+  QUICK_TUNNEL_CONFIG,
   TunnelStartFailure,
   tunnelAddressIn,
+  writeQuickTunnelConfig,
 } from "../src/dev/tunnel.ts";
 
 vi.setConfig({ testTimeout: 20_000 });
@@ -154,7 +156,7 @@ describe("the cloudflared launcher", () => {
     stops.push(() => tunnel.stop());
 
     expect(tunnel.url).toBe("https://street-concert-contracting-decor.trycloudflare.com");
-    expect((await readFile(fake.args, "utf8")).trim()).toBe(
+    expect((await readFile(fake.args, "utf8")).trim().split("\n").at(-1)).toBe(
       JSON.stringify(["tunnel", "--no-autoupdate", "--url", "http://127.0.0.1:43210"]),
     );
     expect(await tunnel.connected()).toBe(true);
@@ -164,6 +166,23 @@ describe("the cloudflared launcher", () => {
     expect(exit.code).toBe(0);
     expect(exit.lastLines.at(-1)).toContain("Initiating graceful shutdown");
     expect(await tunnel.connected()).toBe(false);
+  });
+
+  it("runs with Egma's own empty config, so a user's ingress rules cannot move the tunnel", async () => {
+    const fake = await fakeCloudflared("normal");
+    const configFile = await writeQuickTunnelConfig(path.join(folder, "egma-home"));
+    const tunnel = await cloudflaredLauncher(fake.executable, { configFile, waitForDns: IN_DNS })({
+      target: "http://127.0.0.1:43210",
+      signal: new AbortController().signal,
+    });
+    stops.push(() => tunnel.stop());
+
+    expect(configFile).toBe(path.join(folder, "egma-home", "cloudflared-quick-tunnel.yml"));
+    expect(await readFile(configFile, "utf8")).toBe(QUICK_TUNNEL_CONFIG);
+    expect(QUICK_TUNNEL_CONFIG).toBe("{}\n");
+    expect((await readFile(fake.args, "utf8")).trim().split("\n").at(-1)).toBe(
+      JSON.stringify(["tunnel", "--no-autoupdate", "--config", configFile, "--url", "http://127.0.0.1:43210"]),
+    );
   });
 
   it("hands the tunnel out only after its hostname is in public DNS", async () => {

@@ -5,7 +5,7 @@
  */
 
 import { createServer, request as httpRequest, type IncomingMessage, type Server } from "node:http";
-import { connect, type AddressInfo } from "node:net";
+import { connect, createServer as createNetServer, type AddressInfo } from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -326,6 +326,82 @@ describe("the egma agent dev guard", () => {
     expect(seenAbort).toBe(true);
     expect(next.status).toBe(200);
     expect(next.body).toBe("fine");
+  });
+
+  /** Send raw bytes to the guard and read the whole answer. */
+  function raw(guard: Guard, bytes: string): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      const socket = connect(guard.port, "127.0.0.1", () => socket.write(bytes));
+      socket.setEncoding("utf8");
+      let text = "";
+      socket.on("data", (chunk: string) => {
+        text += chunk;
+      });
+      socket.on("end", () => resolve(text));
+      socket.on("error", reject);
+    });
+  }
+
+  it("keeps Host and Content-Length when a Connection header names them", async () => {
+    const local = await starter();
+    const guard = await guardOn(local.port);
+
+    const answer = await raw(
+      guard,
+      "POST /start HTTP/1.1\r\nHost: fixture.trycloudflare.com\r\n" +
+        `${DEV_SECRET_HEADER}: ${SECRET}\r\nConnection: close, content-length, host, x-drop-me\r\n` +
+        "X-Drop-Me: gone\r\nContent-Length: 3\r\n\r\nabc",
+    );
+
+    expect(answer.split("\r\n")[0]).toBe("HTTP/1.1 200 OK");
+    expect(local.seen).toHaveLength(1);
+    expect(local.seen[0]?.body).toBe("abc");
+    expect(local.seen[0]?.headers["content-length"]).toBe("3");
+    expect(local.seen[0]?.headers["host"]).toBe("fixture.trycloudflare.com");
+    expect(local.seen[0]?.headers).not.toHaveProperty("x-drop-me");
+  });
+
+  it("forwards a chunked body as a body, never as a second request", async () => {
+    const local = await starter();
+    const guard = await guardOn(local.port);
+    const smuggled = "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n";
+
+    const answer = await raw(
+      guard,
+      "GET /start HTTP/1.1\r\nHost: x\r\n" +
+        `${DEV_SECRET_HEADER}: ${SECRET}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n` +
+        `${smuggled.length.toString(16)}\r\n${smuggled}\r\n0\r\n\r\n`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(answer.split("\r\n")[0]).toBe("HTTP/1.1 200 OK");
+    expect(local.seen.map((one) => one.url)).toEqual(["/start"]);
+    expect(local.seen[0]?.body).toBe(smuggled);
+  });
+
+  it("opens one upstream connection per request", async () => {
+    const local = await starter();
+    const guard = await guardOn(local.port);
+
+    await send(guard, { headers: { [DEV_SECRET_HEADER]: SECRET } });
+
+    expect(local.seen[0]?.headers["connection"]).toBe("close");
+  });
+
+  it("answers with the standard reason phrase, not the starter's", async () => {
+    const starterSocket = createNetServer((socket) => {
+      socket.once("data", () => {
+        socket.end("HTTP/1.1 201 Whatever The Starter Says\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
+      });
+    });
+    await new Promise<void>((resolve) => starterSocket.listen(0, "127.0.0.1", resolve));
+    closers.push(() => new Promise<void>((resolve) => starterSocket.close(() => resolve())));
+    const guard = await guardOn((starterSocket.address() as AddressInfo).port);
+
+    const answer = await raw(guard, `GET / HTTP/1.1\r\nHost: x\r\n${DEV_SECRET_HEADER}: ${SECRET}\r\nConnection: close\r\n\r\n`);
+
+    expect(answer.split("\r\n")[0]).toBe("HTTP/1.1 201 Created");
+    expect(answer.endsWith("ok")).toBe(true);
   });
 
   it("closes, and refuses new connections after that", async () => {
