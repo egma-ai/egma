@@ -1,0 +1,52 @@
+---
+title: "Troubleshooting"
+---
+
+A failed simulation shows its reason on the run page. Find the message below.
+
+## Egma could not start the bot
+
+| Message starts with | What to do |
+| --- | --- |
+| `Pipecat Cloud refused the start request for agent "…" (HTTP 401)` or `(HTTP 403)` | The public API key was not accepted. Use a `pk_` key of the Pipecat Cloud organization that deploys the agent. Add the connection again with the same agent name and modality to replace the stored key. |
+| `Pipecat Cloud has no agent named "…"` | Check the connection's agent name against `agent_name` in `pcc-deploy.toml`, and check that the key belongs to the same organization. |
+| `Pipecat Cloud had no free capacity for agent "…"` | Every start request for 120 seconds was answered HTTP 429. Raise the agent's `max_agents` in Pipecat Cloud, or run fewer simulations at once with a lower `--concurrency`. |
+| `Pipecat Cloud refused the start request for agent "…" (HTTP …)` | Check the agent's deployment status in Pipecat Cloud. |
+| `Egma could not reach Pipecat Cloud to start agent "…"` | Egma retried for 120 seconds. Try again later. A self-hosted Egma instance needs outbound access to Pipecat Cloud and Daily. |
+| `Egma could not reach your start URL` | Check that your starter is running and that its URL resolves and answers over HTTPS. For a `trycloudflare.com` address, run `egma agent dev` on the machine that runs your bot. |
+| `your start URL (…) refused the start request (HTTP 401)` or `(HTTP 403)` | Check the connection's auth headers against what your starter expects. |
+| `your start URL (…) answered HTTP 429` | Your starter refused every start request for 120 seconds. Give it more capacity or run fewer simulations at once. |
+| `your start URL (…) refused the start request (HTTP …)` | Check your starter's logs for that request. |
+| `the answer to the start request carried no usable Daily room` | Answer with a 2xx JSON object whose `dailyRoom` is an `https://…daily.co/…` URL. Do not redirect. |
+
+## The bot did not get ready
+
+Egma waits up to 120 seconds from the first start request for your bot to join the Daily room, report to Egma, and publish audio (voice) or send RTVI `bot-ready` (chat).
+
+| Message starts with | What to do |
+| --- | --- |
+| `your bot did not join within 120 seconds` | The start was accepted, but no bot joined. On Pipecat Cloud, a cold start can take this long: set `min_agents = 1` under `[scaling]` in `pcc-deploy.toml` and redeploy. Check the bot's logs for a crash at start, for example with `pipecat cloud agent logs <agent name>`. A `NotReported` error there means the SDK could not reach Egma: check `EGMA_URL` and `EGMA_API_KEY`. |
+| `your bot joined but did not report to Egma` | Add `await simulation(worker, runner_args)` from `egma.pipecat` before the runner starts the worker, and install `egma[pipecat]`. Set `EGMA_URL` and `EGMA_API_KEY` where the bot runs. On Pipecat Cloud, add them to the agent's secret set and redeploy. |
+| `the test mocks "…", and this is a Pipecat Flows function` | Egma cannot mock a Pipecat Flows function yet. Remove it from the test's mock tools. Flows functions that are not mocked run normally and are recorded. |
+| `your bot reported to Egma and Egma refused the report` | Read the reason in parentheses. For a protocol version, upgrade the `egma` package. |
+| `your bot has RTVI turned off` | Chat simulations need RTVI. Remove `enable_rtvi=False` from your `PipelineWorker`. Voice simulations still work without it. |
+| `your bot joined and reported to Egma but published no audio track` | Check that the pipeline ends in `transport.output()` and that `DailyParams` has `audio_out_enabled=True`. |
+
+A message that ends with `the simulation's configured …s duration expired during startup` means the simulation's duration limit ran out while Egma was still waiting. Fix the cause named before it.
+
+## Errors in your bot's logs
+
+- `NotReported` comes from `simulation()` when the bot cannot complete its report to Egma. The bot does not start. Check `EGMA_URL`, `EGMA_API_KEY`, and network access from the bot to Egma.
+- `Egma could not answer the mocked tool "…"` is the result a mocked tool returns when it cannot reach Egma during a simulation. The real tool did not run.
+
+## On this machine
+
+- Keep `egma agent dev` and your bot's development runner running while simulations run.
+- Put `DAILY_API_KEY` in your bot's environment, and leave `DAILY_ROOM_URL` unset.
+- If simulations stop reaching your computer after it sleeps or changes network, restart `egma agent dev`.
+
+## Read the evidence
+
+The simulation's transcript is your bot's own record: every turn, and every tool call with its arguments and result. Calls answered by a test mock are marked **mocked**; other tools run for real and are recorded too. The voice recording keeps what the simulated caller heard.
+
+To capture real conversations, add the `monitor` line as described in [Monitor a Pipecat agent](/docs/integrations/pipecat/monitor).

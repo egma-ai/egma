@@ -1,0 +1,76 @@
+---
+title: "Monitor a Pipecat agent"
+---
+
+Pipecat monitoring sends each production conversation from your bot through the Egma SDK. You do not need a test suite or a simulation connection.
+
+## Start through the UI
+
+1. Open **Agents → Connect an agent**.
+2. Choose **Monitor production**, then select **Continue**.
+3. Select **Pipecat** and follow the setup prompts.
+
+Add the project key and the SDK line to your bot as described below. Opening the wizard alone does not turn on monitoring.
+
+## Create an Egma project key
+
+In your initialized agent repository, run:
+
+```bash
+egma project api-key create --name "Pipecat monitoring"
+```
+
+Copy the key when the CLI prints it. The CLI shows it once and does not save it. You can also create a key in **Settings → API keys**.
+
+Your bot needs these settings wherever it runs. On Pipecat Cloud, add them to the agent's secret set:
+
+| Variable | Value |
+| --- | --- |
+| `EGMA_URL` | `https://api.egma.ai`, or the API URL of your self-hosted Egma instance. |
+| `EGMA_API_KEY` | The project API key you just created. |
+
+The bot must be able to reach `EGMA_URL`.
+
+## Add the monitoring line
+
+Install the [Pipecat Python SDK](/skills-cli-sdks/sdks/pipecat-python):
+
+```bash
+uv add "egma[pipecat]"
+```
+
+Add `await monitor(worker, runner_args)` after you create the `PipelineWorker` and before `runner.add_workers(worker)`. If the bot also runs simulations, keep `simulation` first:
+
+```python
+from egma.pipecat import monitor, simulation
+
+
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
+    ...
+    worker = PipelineWorker(pipeline, params=PipelineParams(...))
+
+    await simulation(worker, runner_args)
+    await monitor(worker, runner_args)
+
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker)
+    await runner.run()
+```
+
+Pass `runner_args` from `bot()` into the function that builds the worker, as shown in [Prepare the bot](/docs/integrations/pipecat/connect#1-prepare-the-bot).
+
+Redeploy the bot. The line records each conversation's turns, tool calls with their arguments and results, and timings, and sends them to Egma in batches. It adds its own exporter and leaves your own tracing as it is.
+
+A simulation does not also appear as a production conversation. When the start request carries no `egma` key, `monitor` exports the conversation without asking Egma anything. When it carries one, `monitor` stays silent only after Egma confirms that the key names a live simulation in your project. A key that Egma does not confirm is production traffic, and `monitor` exports it.
+
+## Verify a conversation
+
+Complete one normal conversation with the updated bot, then open **Traces** in the project that owns the API key. Open the new trace and check its transcript and timing.
+
+There is no Pipecat monitoring switch to turn on in Egma. The first received trace confirms that your bot can send conversations to Egma. If no conversation appears, check the bot's logs, the project key, and network access to `EGMA_URL`.
+
+To stop sending production conversations, remove the `monitor` line and redeploy. Existing conversations stay in Egma. Keep `simulation` if the bot still runs Egma tests.
+
+## Review the evidence
+
+[Review production conversations](/docs/platform/monitoring/review-conversations) to inspect transcripts, metrics, and grades. To grade them, [configure graders](/docs/platform/graders/configure-graders) with production scope.

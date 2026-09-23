@@ -1,0 +1,56 @@
+---
+title: "Chat connections and Env"
+---
+
+First [connect your Pipecat agent](/docs/integrations/pipecat/connect) and add the SDK line to your bot.
+
+## Add a chat connection
+
+A chat simulation tests your bot's reasoning and tools without speech input. Egma starts your bot with the same start request, and the persona sends each turn as text through RTVI. It reads your bot's replies from RTVI's text messages.
+
+Chat needs no code beyond the SDK line. It does need RTVI, which `PipelineWorker` turns on by default. Do not pass `enable_rtvi=False`. A bot with RTVI turned off still passes voice simulations, but its chat simulations fail.
+
+Add a chat connection beside your voice connection:
+
+```bash
+egma agent connection add \
+  --agent "$EGMA_AGENT_ID" \
+  --access pipecat-cloud \
+  --modality chat \
+  --pipecat-agent-name "$PIPECAT_AGENT_NAME" \
+  --name "Pipecat chat"
+```
+
+For a self-hosted starter, use `--access pipecat-self-hosted` with `--pipecat-start-url`, as in [Use a self-hosted starter](/docs/integrations/pipecat/self-hosted#connect-egma-to-the-starter). `egma agent dev` creates a chat connection for this machine for you.
+
+Use this connection's ID when you start a chat run. The same suite can run against either connection.
+
+## Pass data to a test
+
+If your bot reads startup data from `runner_args.body`, put that data in the test's `## Env` section:
+
+````markdown
+## Env
+
+```json
+{
+  "pipecat_body_params": {
+    "tenant": "oak-street",
+    "caller": { "plan": "gold" }
+  }
+}
+```
+````
+
+Egma adds this object to the `body` of the start request. Your bot reads it as it does in production:
+
+```python
+tenant = runner_args.body.get("tenant")
+```
+
+- Use any JSON values, with the exact keys your bot reads.
+- The object can be at most 512 KiB once serialized. Keep a larger value in your own store and pass its ID.
+- The key `egma` is reserved. Egma adds its own `egma` key to every start request, and refuses a test that holds one in `pipecat_body_params`.
+- A test without this field sends a body that holds only Egma's key.
+
+Do not use the `egma` key to decide whether a session is a simulation: any client can send one. The SDK asks Egma to confirm a simulation before it acts on the key.

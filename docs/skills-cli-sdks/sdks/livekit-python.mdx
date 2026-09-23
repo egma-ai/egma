@@ -11,16 +11,16 @@ We need to do four things to set it up.
 Install the latest compatible release in the repo where your livekit worker runs. Use the package manager the repo already uses.
 
 ```bash
-pip install --upgrade egma
+pip install --upgrade "egma[livekit]"
 ```
 
 For a repo using uv:
 
 ```bash
-uv add --upgrade egma
+uv add --upgrade "egma[livekit]"
 ```
 
-The SDK supports Python 3.11 or newer and `livekit-agents>=1.6.6,<1.9`, including LiveKit 1.8. It uses OpenAI Python 2. Check compatibility with the worker's existing dependencies before upgrading and keep the resolved versions in the repo's lockfile.
+The SDK supports Python 3.11 or newer and `livekit-agents>=1.6.6,<1.9`, including LiveKit 1.8. The `livekit` extra holds that range and OpenAI Python 2. Check compatibility with the worker's existing dependencies before upgrading and keep the resolved versions in the repo's lockfile.
 
 ## 2. Setup the worker's environment
 
@@ -54,7 +54,7 @@ There are two functions depending on what you want to setup.
 Call and await `simulation(agent, ctx, session)` after creating the agent and session, before `session.start`. Add this around the existing start call in your job entrypoint:
 
 ```python
-from egma import simulation
+from egma.livekit import simulation
 
 await simulation(agent, ctx, session)
 await session.start(agent=agent, room=ctx.room)
@@ -96,7 +96,7 @@ When the configured simulation ends, Egma finishes its pending output and leaves
 Call `monitor(ctx)` at the start of the job entrypoint, before `ctx.connect` and `session.start`:
 
 ```python
-from egma import monitor
+from egma.livekit import monitor
 
 monitor(ctx)
 ```
@@ -106,6 +106,8 @@ It sends production traces to egma Monitoring. It does nothing in simulation roo
 If you want both testing and monitoring, add both calls: `monitor(ctx)` at the start of the entrypoint, then `await simulation(agent, ctx, session)` before the session starts. Both use the same environment settings.
 
 The SDK adds egma to a compatible existing OpenTelemetry provider. Keep LiveKit's default of one job per process, so each job's traces stay attached to its own room.
+
+Workers that import `from egma import simulation, monitor` keep working. `egma.livekit` exposes the same names, including `NotReported`.
 
 ## 4. Run the updated worker and verify
 

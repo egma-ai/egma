@@ -1,0 +1,145 @@
+---
+title: "Connect a Pipecat Cloud agent"
+---
+
+## Connect through the UI
+
+1. Open **Agents → Connect an agent**.
+2. Choose **Run simulations**, then **Pipecat**.
+3. Choose **Voice** or **Chat**, then select **Continue**.
+4. Select **Pipecat Cloud** as the connection type. Enter your **Pipecat Cloud agent name** and a **Public API key**.
+5. Select **Continue to testing** and follow the SDK setup prompts. Prepare your bot as described below before you start a run.
+
+For a bot on your own servers, see [Use a self-hosted starter](/docs/integrations/pipecat/self-hosted). To test before you deploy, see [Test a bot on this machine](/docs/integrations/pipecat/this-machine).
+
+## 1. Prepare the bot
+
+Install the SDK in your bot's project:
+
+```bash
+uv add "egma[pipecat]"
+```
+
+With pip, run `pip install "egma[pipecat]"`. The SDK needs Python 3.11 or newer and `pipecat-ai` 1.9, 1.10, or 1.11.
+
+Add `await simulation(worker, runner_args)` after you create the `PipelineWorker` and before `runner.add_workers(worker)`. If your pipeline is built in a helper such as `run_bot`, pass `runner_args` from `bot()` into it:
+
+```python
+from egma.pipecat import simulation
+from pipecat.runner.types import RunnerArguments
+
+
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
+    ...
+    worker = PipelineWorker(
+        pipeline,
+        params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
+    )
+
+    await simulation(worker, runner_args)
+
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker)
+    await runner.run()
+
+
+async def bot(runner_args: RunnerArguments):
+    ...  # build the transport as before
+    await run_bot(transport, runner_args)
+```
+
+This line is required for every Pipecat simulation, including tests without mock tools. It reports your bot's tools, applies the test's mocks, and sends your bot's record of the conversation to Egma. When the start request carries no `egma` key, it does nothing and makes no network request, so production sessions are unchanged.
+
+<Card title="Pipecat Python SDK" icon="python" href="/skills-cli-sdks/sdks/pipecat-python">
+  Supported versions, mock tools, and both SDK verbs.
+</Card>
+
+Create a project API key from your initialized agent repository:
+
+```bash
+egma project api-key create --name "Pipecat bot"
+```
+
+Copy the key when the CLI prints it; it is shown only once. Your bot needs these two settings:
+
+| Variable | Value |
+| --- | --- |
+| `EGMA_URL` | `https://api.egma.ai`, or the API URL of your self-hosted Egma instance. |
+| `EGMA_API_KEY` | The project API key you just created. |
+
+Add them to the secret set named by `secret_set` in your `pcc-deploy.toml`:
+
+```bash
+pipecat cloud secrets set my-bot-secrets \
+  EGMA_URL=https://api.egma.ai \
+  EGMA_API_KEY="$EGMA_API_KEY"
+```
+
+A Pipecat Cloud cold start can take longer than Egma waits for your bot. Keep one instance warm for the agent that Egma tests:
+
+```toml
+[scaling]
+min_agents = 1
+```
+
+Pipecat Cloud charges for a reserved instance. Then redeploy the bot, for example with `pipecat cloud deploy`. The bot reads the new secrets and code only after the redeploy.
+
+## 2. Register the agent in Egma
+
+Check `egma/config.yaml`. Reuse the existing Egma agent if it is already registered. Otherwise, run:
+
+```bash
+egma agent register --platform pipecat --name "Front desk"
+```
+
+Set `EGMA_AGENT_ID` to the Egma agent ID printed by the command.
+
+## 3. Add voice and chat connections
+
+Egma needs your Pipecat Cloud agent name, which is `agent_name` in `pcc-deploy.toml`, and a public API key of the Pipecat Cloud organization that deploys it. A public key starts with `pk_`. Create one in the Pipecat Cloud dashboard or with `pipecat cloud organizations keys create`. Egma never needs a private key (`sk_`).
+
+Load the public key from your secret store, then add a voice connection:
+
+```bash
+export EGMA_PIPECAT_PUBLIC_KEY="$PIPECAT_PUBLIC_KEY"
+
+egma agent connection add \
+  --agent "$EGMA_AGENT_ID" \
+  --access pipecat-cloud \
+  --modality voice \
+  --pipecat-agent-name "$PIPECAT_AGENT_NAME" \
+  --name "Pipecat voice"
+```
+
+Run the command again with `--modality chat --name "Pipecat chat"` to add a chat connection. Chat needs no extra code; see [Chat connections and Env](/docs/integrations/pipecat/text-and-env).
+
+For a key supplied by another process, add `--credentials-stdin` and send `{"publicApiKey":"pk_..."}` through standard input. Do not put the key in command-line arguments.
+
+Keep the connection ID as `EGMA_CONNECTION_ID`, then follow the [test guide](/docs/platform/tests/write-a-test) to write a test and start a run.
+
+## What happens in a simulation
+
+Egma sends this start request to Pipecat Cloud:
+
+```http
+POST https://api.pipecat.daily.co/v1/public/front-desk/start
+Authorization: Bearer pk_...
+Content-Type: application/json
+
+{
+  "createDailyRoom": true,
+  "dailyRoomProperties": { "exp": 1790000000, "eject_at_room_exp": true },
+  "body": {
+    "tenant": "oak-street",
+    "egma": { "simulation_id": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP" }
+  }
+}
+```
+
+- `body` holds the test's [`pipecat_body_params`](/docs/integrations/pipecat/text-and-env#pass-data-to-a-test) and Egma's own `egma` key. Your bot reads it at `runner_args.body`.
+- The room expires two minutes after the simulation's duration limit. Pipecat Cloud then removes a bot that is still in the room.
+- The persona joins the room as an RTVI client and sends `client-ready`. A bot that greets in `on_client_ready`, as Pipecat's quickstart does, speaks first.
+- Egma waits up to 120 seconds for your bot to join, report to Egma, and publish audio (voice) or send RTVI `bot-ready` (chat). A warm bot starts at once.
+- When the conversation ends, the persona leaves the room. Stop your bot when its client disconnects, as the quickstart does in `on_client_disconnected`.
+
+If Pipecat Cloud answers HTTP 429 because the agent has no free capacity, Egma tries again within the 120 seconds. See [Troubleshooting](/docs/integrations/pipecat/troubleshooting) for every failure message.
