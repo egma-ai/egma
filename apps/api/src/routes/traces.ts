@@ -2,6 +2,7 @@ import { gunzipSync } from "node:zlib";
 
 import {
   authorize,
+  monitoredAgentOfApiKey,
   NotPermittedError,
   providerUsageSpan,
   resolveSimulationByProviderReference,
@@ -46,6 +47,7 @@ import {
 import {
   budgetForOneRequest,
   normaliseOtlpExport,
+  productionOfAgent,
   providerReferenceClaimedBy,
   simulationNamedBy,
   PROVIDER_REFERENCE_ATTRIBUTE,
@@ -841,19 +843,40 @@ export async function traceRoutes(
     // simulations must not buy several times the bound.
     const budget: NormalisationBudget = budgetForOneRequest();
 
-    // Production, exactly as today: one normalisation of everything that
-    // carried no reference at all, under the credential's own context. An
-    // export with no simulation resources — every export before this branch
-    // existed — reaches acceptance as the one group it always was.
-    const production = normaliseOtlpExport(
-      {
-        resourceSpans: resources.filter(
-          (resourceSpans) => claimed.get(resourceSpans)?.kind === "none",
-        ),
-      },
-      undefined,
+    // Production: one normalisation of everything that carried no reference
+    // at all, under the credential's own context. An export with no
+    // simulation resources — every export before this branch existed —
+    // reaches acceptance as the one group it always was.
+    const productionResources = resources.filter(
+      (resourceSpans) => claimed.get(resourceSpans)?.kind === "none",
+    );
+    // A Pipecat bot names no agent of its own, so its production traffic is
+    // filed under the agent whose guarded monitoring key carried it. Any
+    // other key, and any other platform's agent, leaves the traffic as it was.
+    const apiKeyId = requesterOf(request).apiKeyId;
+    const keyAgent =
+      productionResources.length === 0 || apiKeyId === undefined
+        ? undefined
+        : await monitoredAgentOfApiKey(auth, apiKeyId);
+    const pipecatAgent = keyAgent?.agentPlatform === "pipecat" ? keyAgent : undefined;
+    const normalisedProduction = normaliseOtlpExport(
+      { resourceSpans: productionResources },
+      pipecatAgent === undefined
+        ? undefined
+        : () => productionOfAgent(pipecatAgent.agentId),
       budget,
     );
+    const production =
+      pipecatAgent === undefined
+        ? normalisedProduction
+        : {
+            ...normalisedProduction,
+            spans: normalisedProduction.spans.map((span) =>
+              span.platformAgentName === ""
+                ? { ...span, platformAgentName: pipecatAgent.name }
+                : span,
+            ),
+          };
     rejected.count += production.rejected.length;
     rejected.firstReason ||= production.rejected[0]?.reason ?? "";
     const alongside: EvidenceGroup[] = [{ auth, spans: production.spans }];

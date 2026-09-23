@@ -330,10 +330,14 @@ describe.skipIf(!storage.available)("a Pipecat bot's production traffic", () => 
     );
   });
 
-  it("files under the pipecat platform with the monitoring key, ends on the root, and is graded", async () => {
+  /** A living agent of this project and its guarded monitoring key, minted as the product mints one. */
+  async function anAgentWithItsMonitoringKey(
+    agentPlatform: "pipecat" | "livekit",
+    name: string,
+  ): Promise<{ agentId: string; monitoringKey: string }> {
     const registered = await ask(api.app, "POST", "/v1/agents", lakesideKey, {
-      agentPlatform: "pipecat",
-      name: "Lakeside production bot",
+      agentPlatform,
+      name,
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
     const agentId = (registered.body.agent as { id: string }).id;
@@ -344,19 +348,65 @@ describe.skipIf(!storage.available)("a Pipecat bot's production traffic", () => 
       payload: {
         monitoringAgentId: agentId,
         projectId: lakeside.projectId,
-        name: `Egma monitoring ${agentId} — Lakeside production bot`,
+        name: `Egma monitoring ${agentId} — ${name}`,
       },
     });
     expect(minted.statusCode, minted.body).toBe(201);
-    const monitoringKey = (minted.json() as { secret: string }).secret;
+    return { agentId, monitoringKey: (minted.json() as { secret: string }).secret };
+  }
+
+  /** The production flush under another trace id, so one file can post it more than once. */
+  function productionFlushUnder(traceId: string): string {
+    return PRODUCTION_FLUSH.replaceAll(PRODUCTION_WIRE_TRACE, traceId);
+  }
+
+  type ListedRow = {
+    traceId: string;
+    agentPlatform: string;
+    agentId: string;
+    platformAgentName: string;
+    platformAgentId: string;
+  };
+
+  async function listedProduction(traceId: string): Promise<ListedRow | undefined> {
+    const listed = await api.app.inject({
+      method: "GET",
+      url: `/v1/traces?from=${STARTED_AT.toISOString()}&to=${ENDED_AT.toISOString()}&source=production`,
+      headers: { authorization: `Bearer ${lakesideKey}` },
+    });
+    expect(listed.statusCode, listed.body).toBe(200);
+    return (listed.json() as { traces: ListedRow[] }).traces.find(
+      (trace) => trace.traceId === traceId,
+    );
+  }
+
+  async function storedAgentOf(traceId: string): Promise<{ agent_id: string; platform_agent_name: string }[]> {
+    return store().rows<{ agent_id: string; platform_agent_name: string }>(
+      `select distinct agent_id, platform_agent_name from spans final where trace_id = '${traceId}'`,
+    );
+  }
+
+  it("files under the agent whose monitoring key carried it, ends on the root, and is graded", async () => {
+    const { agentId, monitoringKey } = await anAgentWithItsMonitoringKey(
+      "pipecat",
+      "Lakeside production bot",
+    );
 
     const posted = await post(PRODUCTION_FLUSH, monitoringKey);
     expect(posted.statusCode, posted.body).toBe(200);
     expect(posted.json()).toEqual({});
     await api.drainEvidence();
 
-    const rows = await store().rows<{ name: string; kind: string; agent_platform: string; source: string; provider_call_id: string }>(
-      `select name, kind, agent_platform, source, provider_call_id
+    const rows = await store().rows<{
+      name: string;
+      kind: string;
+      agent_platform: string;
+      source: string;
+      provider_call_id: string;
+      agent_id: string;
+      platform_agent_name: string;
+    }>(
+      `select name, kind, agent_platform, source, provider_call_id, agent_id, platform_agent_name
          from spans final
         where trace_id = '${PRODUCTION_WIRE_TRACE}'
         order by started_at asc, span_id asc`,
@@ -371,6 +421,17 @@ describe.skipIf(!storage.available)("a Pipecat bot's production traffic", () => 
     expect(new Set(rows.map((row) => row.agent_platform))).toEqual(new Set(["pipecat"]));
     expect(new Set(rows.map((row) => row.source))).toEqual(new Set(["production"]));
     expect(new Set(rows.map((row) => row.provider_call_id))).toEqual(new Set(["8a1f0c33-pcc-session"]));
+    expect(new Set(rows.map((row) => row.agent_id))).toEqual(new Set([agentId]));
+    expect(new Set(rows.map((row) => row.platform_agent_name))).toEqual(
+      new Set(["Lakeside production bot"]),
+    );
+
+    // Monitoring → Transcripts lists it with the agent in its Agent column.
+    expect(await listedProduction(PRODUCTION_WIRE_TRACE)).toMatchObject({
+      agentPlatform: "pipecat",
+      agentId,
+      platformAgentName: "Lakeside production bot",
+    });
 
     const auth = contextFor(lakeside, "admin");
     await expect(readProductionGradingPlan(auth, PRODUCTION_WIRE_TRACE)).resolves.toMatchObject({
@@ -383,16 +444,44 @@ describe.skipIf(!storage.available)("a Pipecat bot's production traffic", () => 
       status: "pending",
     });
 
-    const listed = await api.app.inject({
-      method: "GET",
-      url: `/v1/traces?from=${STARTED_AT.toISOString()}&to=${ENDED_AT.toISOString()}&source=production`,
-      headers: { authorization: `Bearer ${lakesideKey}` },
+    // The same key opens the SDK's seam: it is a project key that may send
+    // traces, so a reference that is no simulation answers "not a simulation"
+    // rather than a refusal of the key.
+    const confirmed = await api.app.inject({
+      method: "POST",
+      url: "/sdk/v1/confirm",
+      headers: { "content-type": "application/json", authorization: `Bearer ${monitoringKey}` },
+      payload: { provider_reference: "sim_not_a_live_one" },
     });
-    expect(listed.statusCode, listed.body).toBe(200);
-    expect(
-      (listed.json() as { traces: { traceId: string; agentPlatform: string }[] }).traces.find(
-        (trace) => trace.traceId === PRODUCTION_WIRE_TRACE,
-      ),
-    ).toMatchObject({ agentPlatform: "pipecat" });
+    expect(confirmed.statusCode, confirmed.body).toBe(404);
+    expect(confirmed.json()).toMatchObject({ error: "not_a_simulation" });
+  });
+
+  it("stays under no agent when an ordinary project key carried it, as before", async () => {
+    const traceId = "7d2c9a0e5b1f4c3aa8e6b0d4c2f19e58";
+    const posted = await post(productionFlushUnder(traceId), lakesideKey);
+    expect(posted.statusCode, posted.body).toBe(200);
+    await api.drainEvidence();
+
+    expect(await storedAgentOf(traceId)).toEqual([{ agent_id: "", platform_agent_name: "" }]);
+    expect(await listedProduction(traceId)).toMatchObject({
+      agentPlatform: "pipecat",
+      agentId: "",
+      platformAgentName: "",
+    });
+    // Unbound traffic is still production traffic, and still graded.
+    await expect(
+      getGradingJobForTrace(contextFor(lakeside, "admin"), traceId),
+    ).resolves.toMatchObject({ source: "production", traceId });
+  });
+
+  it("files nothing under a LiveKit agent whose monitoring key carried it", async () => {
+    const { monitoringKey } = await anAgentWithItsMonitoringKey("livekit", "Lakeside LiveKit desk");
+    const traceId = "7d2c9a0e5b1f4c3aa8e6b0d4c2f19e59";
+    const posted = await post(productionFlushUnder(traceId), monitoringKey);
+    expect(posted.statusCode, posted.body).toBe(200);
+    await api.drainEvidence();
+
+    expect(await storedAgentOf(traceId)).toEqual([{ agent_id: "", platform_agent_name: "" }]);
   });
 });
