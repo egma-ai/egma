@@ -158,6 +158,19 @@ const SIMULATION_LIMITS = {
 const LEGACY_CONTRACT_VERSION = 5;
 const CONTROLLED_CONTRACT_VERSION = 6;
 const CURRENT_CONTRACT_VERSION = 7;
+/**
+ * Every Daily room spec. A worker that does not list it never receives one,
+ * so a simulator without the Daily room plug cannot be handed Pipecat work.
+ */
+const PIPECAT_CONTRACT_VERSION = 8;
+
+/**
+ * Why a Daily room voice claim is failed on the hosted voice runtime. Its
+ * per-claim authority is a LiveKit room and recording credentials, which a
+ * Daily room spec cannot carry, so the sandbox could not conduct it.
+ */
+const HOSTED_RUNTIME_CANNOT_CONDUCT_PIPECAT =
+  "a Pipecat voice simulation cannot run on this deployment's hosted voice runtime yet";
 
 type Body = Record<string, unknown>;
 
@@ -497,10 +510,11 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
   if (!contractVersions.some((version) =>
     version === LEGACY_CONTRACT_VERSION ||
     version === CONTROLLED_CONTRACT_VERSION ||
-    version === CURRENT_CONTRACT_VERSION)) {
+    version === CURRENT_CONTRACT_VERSION ||
+    version === PIPECAT_CONTRACT_VERSION)) {
     return {
       refusal:
-        `this control plane sends simulation contract versions ${LEGACY_CONTRACT_VERSION}, ${CONTROLLED_CONTRACT_VERSION}, and ${CURRENT_CONTRACT_VERSION}, ` +
+        `this control plane sends simulation contract versions ${LEGACY_CONTRACT_VERSION}, ${CONTROLLED_CONTRACT_VERSION}, ${CURRENT_CONTRACT_VERSION}, and ${PIPECAT_CONTRACT_VERSION}, ` +
         "and this worker does not say it can read it. Deploy the matching " +
         "simulator before it claims work.",
     };
@@ -643,8 +657,15 @@ async function assembledSpec(
     : Object.hasOwn(personaParameters, "speech_mode")
       ? CURRENT_CONTRACT_VERSION
       : CONTROLLED_CONTRACT_VERSION;
-  if (!workerContractVersions.includes(contractVersion))
-    return { retryable: `the worker does not support simulation contract version ${contractVersion}`, deferredBy: "runtime" };
+  // A Daily room spec is version 8: version 7's persona and models, plus the
+  // test's Pipecat body params. It exists only for current persona settings.
+  const pipecat = connection.connectionType === "daily_room";
+  if (pipecat && contractVersion !== CURRENT_CONTRACT_VERSION) {
+    return { unbuildable: "a Pipecat simulation needs current persona settings" };
+  }
+  const specContractVersion = pipecat ? PIPECAT_CONTRACT_VERSION : contractVersion;
+  if (!workerContractVersions.includes(specContractVersion))
+    return { retryable: `the worker does not support simulation contract version ${specContractVersion}`, deferredBy: "runtime" };
   try {
     // The source loads here, once per simulation work order. Persona choices
     // are pinned; credentials are current. A rotated AWS bundle therefore
@@ -701,8 +722,12 @@ async function assembledSpec(
       ? evidence.env?.job_dispatch_metadata
       : undefined;
 
+  // The test's own start-request body for a Pipecat bot, verbatim; absent
+  // where the test wrote none and on every other lane.
+  const pipecatBodyParams = pipecat ? evidence.env?.pipecat_body_params : undefined;
+
   const spec = {
-    contract_version: contractVersion,
+    contract_version: specContractVersion,
     simulation_id: claim.id,
     modality: claim.modality,
     connection: {
@@ -768,6 +793,9 @@ async function assembledSpec(
     ...(jobDispatchMetadata === undefined
       ? {}
       : { job_dispatch_metadata: jobDispatchMetadata }),
+    ...(pipecatBodyParams === undefined
+      ? {}
+      : { pipecat_body_params: pipecatBodyParams }),
     // No phone route means no platform block.
     ...(platform === undefined ? {} : { platform }),
   };
@@ -932,71 +960,73 @@ export async function claimRoutes(
           // customer's credentials to make a document nobody will receive.
           withheld.has(claim.id)
             ? ({ withheld: true } as const)
-            : await assembledSpec(
-                claim,
-                pinned.get(claim.id),
-                runs,
-                options.providerCredentials,
-                options.carrierRoute,
-                options.baseUrl,
-                responseDeadline,
-                ask.runtime === "daytona"
-                  ? options.daytonaProviderSecretEnvironment
-                  : undefined,
-                ask.contractVersions,
-              ).catch(
-                (_fault: unknown): { readonly unbuildable: string } => ({
-                  // This broad catch can hold dependency or credential errors.
-                  // Unlike a simulator report, it has no secret-redaction seam,
-                  // so the retained customer-facing sentence stays generic.
-                  unbuildable:
-                    "an internal error prevented Egma from building its simulation spec",
-                }),
-              ).then(async (spec) => {
-                if (
-                  ask.runtime !== "daytona" ||
-                  "unbuildable" in spec ||
-                  "retryable" in spec
-                ) {
-                  return spec;
-                }
-                const daytonaClaimRuntime = options.daytonaClaimRuntime;
-                if (daytonaClaimRuntime === undefined) {
-                  return {
-                    retryable: "the Daytona claim runtime is not configured",
-                    deferredBy: "runtime" as const,
-                  };
-                }
-                try {
-                  const completed = {
-                    ...spec,
-                    runtime: await beforeResponseDeadline(
-                      (signal) => daytonaClaimRuntime(
-                        ask.claimant,
-                        claim.id,
-                        signal,
-                      ),
-                      responseDeadline,
-                    ),
-                  };
-                  return specComplaints(completed).length === 0
-                    ? completed
-                    : {
-                        retryable:
-                          "the Daytona sandbox received invalid simulation authority",
-                        deferredBy: "runtime" as const,
-                      };
-                } catch (fault) {
-                  if (fault instanceof DaytonaAssignmentUncertainError) {
-                    return { runtimeAssignmentUncertain: true } as const;
+            : ask.runtime === "daytona" && claim.connectionType === "daily_room"
+              ? ({ unbuildable: HOSTED_RUNTIME_CANNOT_CONDUCT_PIPECAT } as const)
+              : await assembledSpec(
+                  claim,
+                  pinned.get(claim.id),
+                  runs,
+                  options.providerCredentials,
+                  options.carrierRoute,
+                  options.baseUrl,
+                  responseDeadline,
+                  ask.runtime === "daytona"
+                    ? options.daytonaProviderSecretEnvironment
+                    : undefined,
+                  ask.contractVersions,
+                ).catch(
+                  (_fault: unknown): { readonly unbuildable: string } => ({
+                    // This broad catch can hold dependency or credential errors.
+                    // Unlike a simulator report, it has no secret-redaction seam,
+                    // so the retained customer-facing sentence stays generic.
+                    unbuildable:
+                      "an internal error prevented Egma from building its simulation spec",
+                  }),
+                ).then(async (spec) => {
+                  if (
+                    ask.runtime !== "daytona" ||
+                    "unbuildable" in spec ||
+                    "retryable" in spec
+                  ) {
+                    return spec;
                   }
-                  return {
-                    retryable:
-                      "the Daytona sandbox could not receive simulation authority",
-                    deferredBy: "runtime" as const,
-                  };
-                }
-              }),
+                  const daytonaClaimRuntime = options.daytonaClaimRuntime;
+                  if (daytonaClaimRuntime === undefined) {
+                    return {
+                      retryable: "the Daytona claim runtime is not configured",
+                      deferredBy: "runtime" as const,
+                    };
+                  }
+                  try {
+                    const completed = {
+                      ...spec,
+                      runtime: await beforeResponseDeadline(
+                        (signal) => daytonaClaimRuntime(
+                          ask.claimant,
+                          claim.id,
+                          signal,
+                        ),
+                        responseDeadline,
+                      ),
+                    };
+                    return specComplaints(completed).length === 0
+                      ? completed
+                      : {
+                          retryable:
+                            "the Daytona sandbox received invalid simulation authority",
+                          deferredBy: "runtime" as const,
+                        };
+                  } catch (fault) {
+                    if (fault instanceof DaytonaAssignmentUncertainError) {
+                      return { runtimeAssignmentUncertain: true } as const;
+                    }
+                    return {
+                      retryable:
+                        "the Daytona sandbox could not receive simulation authority",
+                      deferredBy: "runtime" as const,
+                    };
+                  }
+                }),
         ),
       );
       for (const [index, claim] of claims.entries()) {

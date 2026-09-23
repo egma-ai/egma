@@ -105,6 +105,8 @@ const PROVIDER_CALL_ID_ATTRIBUTES = [
  */
 const LIVEKIT_SCOPE = "livekit-agents";
 const EGMA_LIVEKIT_SCOPE = "egma.livekit";
+/** The egma SDK's Pipecat observer writes the agent's POV under this scope. */
+const EGMA_PIPECAT_SCOPE = "egma.pipecat";
 const LANGFUSE_SCOPE = "langfuse-sdk";
 const LANGFUSE_OBSERVATION_TYPE = "langfuse.observation.type";
 
@@ -133,6 +135,24 @@ const LIVEKIT_KINDS: Readonly<Record<string, string>> = {
   user_speaking: "speaking",
   agent_speaking: "speaking",
 };
+
+/** The span names the egma SDK's Pipecat observer writes, by storage kind. */
+const PIPECAT_KINDS: Readonly<Record<string, string>> = {
+  pipecat_session: "root",
+  user_turn: "turn:human",
+  agent_turn: "turn:agent",
+  function_call: "tool",
+  user_speaking: "speaking",
+  agent_speaking: "speaking",
+  llm_generation: "model",
+  tts_synthesis: "tts",
+};
+
+/** Pipecat turns carry what their speaker said in this one attribute. */
+const PIPECAT_TURN_NAMES: ReadonlySet<string> = new Set([
+  "user_turn",
+  "agent_turn",
+]);
 
 /** Where LiveKit puts what a turn's speaker actually said. */
 const LIVEKIT_TURN_TEXT: Readonly<Record<string, readonly string[]>> = {
@@ -168,6 +188,13 @@ const LIVEKIT_TOOL = {
     "lk.function_tool.arguments",
   ],
   result: ["lk.pii.function_tool.output", "lk.function_tool.output"],
+} as const;
+
+/** A failed Pipecat call has no result; its error text stands in the column. */
+const PIPECAT_TOOL = {
+  name: ["egma.tool.name"],
+  arguments: ["egma.tool.arguments"],
+  result: ["egma.tool.result", "egma.tool.error"],
 } as const;
 
 const LANGFUSE_TOOL = {
@@ -325,6 +352,7 @@ export const WIRE_TRACE_ID_PAYLOAD_KEY = "egma.wire_trace_id";
 const AGENT_PLATFORM_BY_SCOPE: Readonly<Record<string, string>> = {
   [LIVEKIT_SCOPE]: "livekit",
   [EGMA_LIVEKIT_SCOPE]: "livekit",
+  [EGMA_PIPECAT_SCOPE]: "pipecat",
 };
 
 const PLATFORM_AGENT_ID_ATTRIBUTES = ["lk.cloud_agent_id", "lk.agent_id"];
@@ -464,6 +492,7 @@ const KINDS_BY_SCOPE: Readonly<
   Record<string, Readonly<Record<string, string>>>
 > = {
   [LIVEKIT_SCOPE]: LIVEKIT_KINDS,
+  [EGMA_PIPECAT_SCOPE]: PIPECAT_KINDS,
   [SIMULATOR_SCOPE]: SIMULATOR_KINDS,
 };
 
@@ -508,6 +537,11 @@ function textFor(scope: OtlpScope | undefined, span: OtlpSpan): string {
       ? attribute(span.attributes, SIMULATOR_TURN_TEXT)
       : "";
   }
+  if (scope?.name === EGMA_PIPECAT_SCOPE) {
+    return PIPECAT_TURN_NAMES.has(span.name ?? "")
+      ? attribute(span.attributes, SIMULATOR_TURN_TEXT)
+      : "";
+  }
   return "";
 }
 
@@ -527,6 +561,7 @@ const TOOL_KEYS_BY_SCOPE: Readonly<
   >
 > = {
   [LIVEKIT_SCOPE]: LIVEKIT_TOOL,
+  [EGMA_PIPECAT_SCOPE]: PIPECAT_TOOL,
   [LANGFUSE_SCOPE]: LANGFUSE_TOOL,
   [SIMULATOR_SCOPE]: SIMULATOR_TOOL,
 };
@@ -800,7 +835,7 @@ export function normaliseOtlpExport(
         // Retain blank native turn records and their children as raw evidence,
         // outside the spoken transcript.
         const native =
-          scope?.name === LIVEKIT_SCOPE &&
+          (scope?.name === LIVEKIT_SCOPE || scope?.name === EGMA_PIPECAT_SCOPE) &&
           (span.name === "agent_turn" || span.name === "user_turn") &&
           normalised.text.trim() === ""
             ? { ...normalised, kind: "other" }

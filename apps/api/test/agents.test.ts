@@ -1209,7 +1209,7 @@ describe("registering an agent", () => {
       expect(refused.status).toBe(400);
       expect(refused.body).toEqual({
         error: "invalid_request",
-        message: "an agent platform is required and must be retell or livekit",
+        message: "an agent platform is required and must be retell, livekit or pipecat",
       });
       expect(await agentRowCount()).toBe(0);
     },
@@ -1291,7 +1291,7 @@ describe("a connection payload its kind will not take", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        '"retell_chat_api" is not a connection type Egma knows; expected one of retell_text_mode, retell_web_call, phone_number, livekit_room',
+        '"retell_chat_api" is not a connection type Egma knows; expected one of retell_text_mode, retell_web_call, phone_number, livekit_room, daily_room',
     });
     expect(await agentRowCount()).toBe(0);
   });
@@ -1316,7 +1316,7 @@ describe("a connection payload its kind will not take", () => {
     expect(refused.body).toEqual({
       error: "invalid_request",
       message:
-        '"vapi" is not a connection type Egma knows; expected one of retell_text_mode, retell_web_call, phone_number, livekit_room',
+        '"vapi" is not a connection type Egma knows; expected one of retell_text_mode, retell_web_call, phone_number, livekit_room, daily_room',
     });
     expect(await agentRowCount()).toBe(0);
   });
