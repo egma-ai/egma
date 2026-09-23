@@ -71,7 +71,7 @@ function projectNamed(query: Body, body: Body): string | undefined {
   return given(text(query.projectId)) ?? given(text(body.projectId));
 }
 
-/** The platform this flow supports. LiveKit is push and configures nothing. */
+/** The platform this flow supports. LiveKit and Pipecat push and configure nothing. */
 const RETELL = "retell";
 
 /** Shorter than any key a platform issues, and the access layer's own bound. */
@@ -292,8 +292,8 @@ export async function monitoringRoutes(
     if (given(text(body.agentPlatform)) !== RETELL) {
       return unprocessable(
         reply,
-        "Egma pulls production calls from Retell. A LiveKit agent " +
-          "pushes its own spans and needs no setup here.",
+        "Egma pulls production calls from Retell. A LiveKit or Pipecat " +
+          "agent pushes its own spans and needs no setup here.",
       );
     }
     const apiKeyWasSupplied = Object.hasOwn(body, "apiKey");

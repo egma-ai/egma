@@ -37,10 +37,13 @@ function text(value: unknown): string {
 }
 
 /** The only reserved key namespace exposed by this route. */
-const LIVEKIT_MONITORING_KEY_NAMESPACE = "Egma monitoring ";
+const MONITORING_KEY_NAMESPACE = "Egma monitoring ";
 
-function liveKitMonitoringKeyPrefix(agentId: string): string {
-  return `${LIVEKIT_MONITORING_KEY_NAMESPACE}${agentId} — `;
+/** The platforms whose agents push their own production spans with a key. */
+const PUSHING_PLATFORMS: ReadonlySet<string> = new Set(["livekit", "pipecat"]);
+
+function monitoringKeyPrefix(agentId: string): string {
+  return `${MONITORING_KEY_NAMESPACE}${agentId} — `;
 }
 
 /** A key as a list is allowed to describe it. Never the secret. */
@@ -117,12 +120,12 @@ export async function apiKeyRoutes(
 
       if (
         monitoringAgentId === undefined &&
-        name?.startsWith(LIVEKIT_MONITORING_KEY_NAMESPACE)
+        name?.startsWith(MONITORING_KEY_NAMESPACE)
       ) {
         return sendRefusal(
           reply,
           "invalid_request",
-          "this key name is reserved for Egma's guarded LiveKit monitoring setup",
+          "this key name is reserved for Egma's guarded monitoring setup",
         );
       }
 
@@ -148,17 +151,17 @@ export async function apiKeyRoutes(
         if (
           target === undefined ||
           target.projectId !== projectId ||
-          target.agentPlatform !== "livekit" ||
+          !PUSHING_PLATFORMS.has(target.agentPlatform) ||
           target.archivedAt !== null
         ) {
           return sendRefusal(
             reply,
             "unprocessable",
-            "monitoringAgentId must name a living LiveKit agent in the key's project",
+            "monitoringAgentId must name a living LiveKit or Pipecat agent in the key's project",
           );
         }
 
-        activeNamePrefix = liveKitMonitoringKeyPrefix(target.id);
+        activeNamePrefix = monitoringKeyPrefix(target.id);
         if (!(name as string).startsWith(activeNamePrefix)) {
           return sendRefusal(
             reply,
