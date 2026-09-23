@@ -11,14 +11,15 @@ If the developer also wants simulation testing, do monitoring first and continue
 
 ## LiveKit and Pipecat: the SDK sends production traces
 
-For LiveKit and Pipecat, monitoring is code in the agent. There is no switch in egma to turn on; the first trace that arrives confirms the setup. Do not use `egma agent monitoring setup` for these platforms.
+For LiveKit and Pipecat, monitoring is code in the agent. There is no switch in egma to turn on; the first trace that arrives confirms the setup. Do not use `egma agent monitoring setup` for LiveKit.
 
 ### 1. Create a project API key and set the environment
 
 1. Create a key: `egma project api-key create --name "<agent name> monitoring"`. It is printed once and the CLI does not save it. If simulation testing already created a key for this agent, reuse it.
+   - For Pipecat, get the agent's monitoring key instead: `egma agent monitoring setup --agent "$EGMA_AGENT_ID" --platform pipecat` prints the `EGMA_URL` and `EGMA_API_KEY` values for the bot (the web app's Pipecat monitoring instructions give the same key). A Pipecat production trace is filed under its egma agent only when the bot sends it with this key; with an ordinary project key, traces still arrive but show no agent. The same key also works for `simulation()`, so replace a project key that simulation testing set up earlier with this one.
 2. The agent needs two values wherever it runs in production:
    - `EGMA_URL` - `https://app.egma.ai`, or the public URL of the developer's self-hosted egma. The deployed agent must be able to reach it.
-   - `EGMA_API_KEY` - the project key.
+   - `EGMA_API_KEY` - the project key (for Pipecat, the agent's monitoring key).
 3. Put them where the repo already keeps the agent's deployed secrets: the LiveKit worker's secret store, the Pipecat Cloud secret set named `secret_set` in `pcc-deploy.toml` (`pipecat cloud secrets set <secret_set> EGMA_URL=... EGMA_API_KEY=...`), or the team's own server environment. Never commit the key and never print it in your messages. If you are not allowed to change deployed secrets, hand this step to the developer with the exact names.
 
 ### 2a. LiveKit worker
