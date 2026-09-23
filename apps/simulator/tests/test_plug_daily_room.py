@@ -191,6 +191,17 @@ async def test_client_ready_is_sent_exactly_once_even_without_bot_ready(
         await rig.backend.teardown()
 
 
+async def test_chat_waits_for_its_own_join_before_client_ready(quick: None):
+    """A bot reported before the join completes gets client-ready after it."""
+    rig = rigged(PipecatChatBackend, settings=cloud(), bot_seen_before_join=True)
+    try:
+        await chat_ready(rig)
+    finally:
+        await rig.backend.teardown()
+    assert rig.room.refused_before_join == []
+    assert len(client_readies(rig)) == 1
+
+
 @pytest.mark.parametrize(
     ("kind", "modality"),
     [(PipecatVoiceBackend, "voice"), (PipecatChatBackend, "chat")],
@@ -774,3 +785,28 @@ async def test_the_departure_marker_follows_the_bots_last_audio():
 
 async def _nothing(_participant_id: str) -> None:
     return None
+
+
+async def test_a_departure_without_pipecats_audio_queues_is_a_failure():
+    """The drain relies on Pipecat's queues; losing them must not pass silently."""
+
+    class Input:
+        async def push_frame(self, frame: Any) -> None:
+            raise AssertionError("no marker without a drained queue")
+
+    room = DailyVoiceRoom(
+        way_in=DailyWayIn(room_url="https://lakeside.daily.co/r"),
+        events=RoomEvents(
+            joined=lambda _data: None,
+            participant=lambda _participant: None,
+            left=_nothing,
+            message=lambda _message, _sender: None,
+            audio=lambda _participant: None,
+        ),
+        quotable=lambda told: told,
+    )
+    room._transport = object()
+    room._input = Input()
+    await room.bot_departed()
+    assert room.failed.is_set()
+    assert not room.ended.is_set()

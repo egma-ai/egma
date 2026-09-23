@@ -4,6 +4,7 @@ Readers can use nested fields without repeating schema checks.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Any
@@ -431,10 +432,39 @@ class SimulationSpec:
         runtime = () if self.runtime is None else self.runtime.secrets
         return (
             *((self.credentials,) if self.credentials is not None else ()),
+            *self._start_header_secrets(),
             *self.platform.secrets,
             *self.models.secrets,
             *runtime,
         )
+
+    def _start_header_secrets(self) -> tuple[str, ...]:
+        """Each value of a Pipecat start URL's headers, and its bearer token.
+
+        The headers arrive as one JSON string, so registering the credentials
+        alone would redact only that whole string, never one header value
+        quoted on its own.
+        """
+        if self.connection_type != "daily_room" or not isinstance(
+            self.credentials, dict
+        ):
+            return ()
+        written = self.credentials.get("headers")
+        try:
+            headers = json.loads(written) if isinstance(written, str) else None
+        except ValueError:
+            return ()
+        if not isinstance(headers, dict):
+            return ()
+        held: list[str] = []
+        for value in headers.values():
+            if not isinstance(value, str) or not value.strip():
+                continue
+            held.append(value.strip())
+            _scheme, _, token = value.strip().partition(" ")
+            if token.strip():
+                held.append(token.strip())
+        return tuple(held)
 
     @classmethod
     def from_document(cls, document: Any) -> SimulationSpec:
