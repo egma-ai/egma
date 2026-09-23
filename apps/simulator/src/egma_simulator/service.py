@@ -20,6 +20,7 @@ from typing import Protocol
 
 from .blob import BlobStore, FilesystemBlobStore, S3BlobStore
 from .client import (
+    AgentReport,
     ClaimedSpec,
     ClaimFailure,
     ControlPlaneClient,
@@ -34,7 +35,7 @@ from .conductor import (
 from .config import MediaSettings, SimulatorConfig
 from .contract import ContractViolation
 from .conversation import Conducted, ConversationControls, conduct
-from .media.daily_room import AgentReport, AgentReportLost
+from .media.daily_room import AgentReportLost
 from .model import build_model_client
 from .persona import Persona
 from .pipeline import Assembled, assemble
@@ -283,12 +284,11 @@ class RunningSimulation:
     async def _agent_report(self) -> AgentReport:
         """The control plane's record of this simulation's SDK hello."""
         try:
-            answer = await self._client.agent_report(
+            return await self._client.agent_report(
                 self.simulation_id, self._config.claimant
             )
         except SimulationNotHeld as lost:
             raise AgentReportLost(str(lost)) from lost
-        return AgentReport.from_answer(answer)
 
     async def _register_provider_reference(self, reference: str) -> None:
         await self._client.register_provider_reference(

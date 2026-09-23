@@ -19,6 +19,7 @@ from egma_simulator.contract import (
 )
 from egma_simulator.pipeline import assemble
 from egma_simulator.plugs.daily_room import DailyRoomChat, DailyRoomVoice
+from egma_simulator.redaction import REDACTED, SecretRegistry
 from egma_simulator.spec import SimulationSpec
 from egma_simulator.speech import SCRIPTED_PAIR
 
@@ -101,3 +102,26 @@ def test_a_daily_room_spec_carrying_egma_in_its_body_params_is_refused():
     document["pipecat_body_params"] = {"egma": {"simulation_id": "forged"}}
     with pytest.raises(ContractViolation):
         SimulationSpec.from_document(document)
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        (
+            "voice-pipecat-self-hosted.json",
+            ("Bearer fixture0not0a0real0token", "fixture0not0a0real0token"),
+        ),
+        ("voice-pipecat-cloud.json", ("pk_fixture0not0a0real0public0key",)),
+    ],
+)
+def test_each_start_credential_is_redacted_process_wide(
+    name: str, expected: tuple[str, ...]
+):
+    """The service registers a claim's secrets before conducting it."""
+    spec = SimulationSpec.from_document(fixture(name))
+    registry = SecretRegistry()
+    registry.register(list(spec.secrets))
+    for secret in expected:
+        told = registry.redact(f"the starter echoed {secret} back")
+        assert secret not in told
+        assert REDACTED in told

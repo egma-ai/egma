@@ -10,24 +10,26 @@ Pipecat monitoring sends each production conversation from your bot through the 
 2. Choose **Monitor production**, then select **Continue**.
 3. Select **Pipecat** and follow the setup prompts.
 
-Add the project key and the SDK line to your bot as described below. Opening the wizard alone does not turn on monitoring.
+The prompts give you the agent's monitoring key. Add it and the SDK line to your bot as described below. Opening the wizard alone does not turn on monitoring.
 
-## Create an Egma project key
+## Get the agent's monitoring key
 
-In your initialized agent repository, run:
+A production conversation is filed under your Egma agent only when the bot sends it with that agent's monitoring key. Get the key from the setup prompts above, or from your initialized agent repository:
 
 ```bash
-egma project api-key create --name "Pipecat monitoring"
+egma agent monitoring setup --agent "$EGMA_AGENT_ID" --platform pipecat
 ```
 
-Copy the key when the CLI prints it. The CLI shows it once and does not save it. You can also create a key in **Settings → API keys**.
+The command prints the `EGMA_URL` and `EGMA_API_KEY` values for your bot. Copy the key when it is shown; it is shown once. The same key also works for `simulation`, so a bot that runs tests and production needs only this one key.
 
-Your bot needs these settings wherever it runs. On Pipecat Cloud, add them to the agent's secret set:
+With an ordinary project API key, production conversations still arrive, but they show no agent.
+
+Your bot needs both values wherever it runs. On Pipecat Cloud, add them to the agent's secret set:
 
 | Variable | Value |
 | --- | --- |
 | `EGMA_URL` | `https://app.egma.ai`, or the public URL of your self-hosted Egma instance. |
-| `EGMA_API_KEY` | The project API key you just created. |
+| `EGMA_API_KEY` | The agent's monitoring key. |
 
 The bot must be able to reach `EGMA_URL`.
 

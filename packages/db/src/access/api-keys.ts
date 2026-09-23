@@ -2,6 +2,7 @@ import { newId } from "@egma/ids";
 import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { db, type Queryable } from "../client.ts";
+import { agent, type AgentPlatform } from "../schema/agents.ts";
 import { user } from "../schema/identity.ts";
 import { apiKey } from "../schema/tenancy.ts";
 import type { ApiKeyScope } from "../schema/columns.ts";
@@ -321,4 +322,83 @@ async function noteApiKeyUsed(apiKeyId: string): Promise<void> {
     .update(apiKey)
     .set({ lastUsedAt: new Date() })
     .where(eq(apiKey.id, apiKeyId));
+}
+
+/**
+ * The reserved name namespace of an agent's guarded monitoring key. A key
+ * named with this prefix can only be minted for a living agent of the key's
+ * own project, by someone who may configure monitoring there.
+ */
+export const MONITORING_KEY_NAMESPACE = "Egma monitoring ";
+
+/** Between the agent's id and the rest of a guarded monitoring key's name. */
+export const MONITORING_KEY_AGENT_SEPARATOR = " — ";
+
+function monitoringKeyPrefix(agentId: string): string {
+  return `${MONITORING_KEY_NAMESPACE}${agentId}${MONITORING_KEY_AGENT_SEPARATOR}`;
+}
+
+/** The agent a guarded monitoring key was minted for. */
+export type MonitoredAgent = {
+  readonly agentId: string;
+  readonly name: string;
+  readonly agentPlatform: AgentPlatform;
+};
+
+/**
+ * The living agent of the key's project whose guarded monitoring key this is,
+ * or undefined for any other key: an ordinary key, a revoked one, or one whose
+ * agent is archived or gone.
+ */
+export async function monitoredAgentOfApiKey(
+  auth: AuthContext,
+  apiKeyId: string,
+): Promise<MonitoredAgent | undefined> {
+  authorize(auth, "ingest_traces", here(auth));
+  if (auth.projectId === undefined) return undefined;
+
+  const [key] = await db()
+    .select({ name: apiKey.name })
+    .from(apiKey)
+    .where(
+      within(
+        auth,
+        apiKey,
+        and(
+          eq(apiKey.id, apiKeyId),
+          eq(apiKey.projectId, auth.projectId),
+          isNull(apiKey.revokedAt),
+        ),
+      ),
+    )
+    .limit(1);
+  const name = key?.name ?? "";
+  if (!name.startsWith(MONITORING_KEY_NAMESPACE)) return undefined;
+  const agentId =
+    name.slice(MONITORING_KEY_NAMESPACE.length).split(MONITORING_KEY_AGENT_SEPARATOR)[0] ?? "";
+  if (agentId === "" || !name.startsWith(monitoringKeyPrefix(agentId))) {
+    return undefined;
+  }
+
+  const [named] = await db()
+    .select({ id: agent.id, name: agent.name, agentPlatform: agent.agentPlatform })
+    .from(agent)
+    .where(
+      within(
+        auth,
+        agent,
+        and(
+          eq(agent.id, agentId),
+          eq(agent.projectId, auth.projectId),
+          isNull(agent.archivedAt),
+        ),
+      ),
+    )
+    .limit(1);
+  if (named === undefined) return undefined;
+  return {
+    agentId: named.id,
+    name: named.name,
+    agentPlatform: named.agentPlatform as AgentPlatform,
+  };
 }

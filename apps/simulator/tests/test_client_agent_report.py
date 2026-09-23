@@ -75,7 +75,7 @@ async def test_each_agent_report_answer_is_read(
     async with ControlPlaneClient(
         url, claim_wait_seconds=1, service_token="egma_st_service"
     ) as client:
-        body = await client.agent_report(simulation_id, REPORT["request"]["claimant"])
+        report = await client.agent_report(simulation_id, REPORT["request"]["claimant"])
 
     assert seen == [
         {
@@ -84,7 +84,7 @@ async def test_each_agent_report_answer_is_read(
             "authorization": "Bearer egma_st_service",
         }
     ]
-    report = AgentReport.from_answer(body)
+    assert isinstance(report, AgentReport)
     assert report.state == state
     if state == "refused":
         assert report.code == 905
@@ -113,6 +113,14 @@ async def test_an_unexpected_answer_is_transient(control_plane: Any):
 def test_an_unknown_state_is_not_read_as_waiting():
     with pytest.raises(ValueError):
         AgentReport.from_answer({"simulation_id": "sim_a", "state": "maybe"})
+
+
+async def test_an_unreadable_answer_is_transient(control_plane: Any):
+    url, chosen, _seen = control_plane
+    chosen["answer"] = {"status": 200, "response": {"state": "maybe"}}
+    async with ControlPlaneClient(url, claim_wait_seconds=1) as client:
+        with pytest.raises(TransientDeliveryFailure, match="unreadable"):
+            await client.agent_report("sim_a", "egma-simulator-1")
 
 
 async def test_the_hosted_agent_report_poll_goes_through_the_proxy(
@@ -144,11 +152,11 @@ async def test_the_hosted_agent_report_poll_goes_through_the_proxy(
             service_token="dtn_secret_placeholder",
             runtime="daytona",
         ) as client:
-            body = await client.agent_report(simulation_id, "egma-voice-1")
+            report = await client.agent_report(simulation_id, "egma-voice-1")
     finally:
         await runner.cleanup()
 
-    assert AgentReport.from_answer(body).state == "accepted"
+    assert report.state == "accepted"
     assert seen == [
         (
             f"http://control-plane.invalid/v1/simulations/{simulation_id}/agent-report",

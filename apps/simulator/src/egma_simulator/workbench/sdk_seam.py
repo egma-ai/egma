@@ -40,8 +40,8 @@ TOOL_MALFORMED = (
 
 
 @dataclass
-class AgentReport:
-    """The latest hello for one simulation, as the API stores it."""
+class StoredHello:
+    """The latest hello for one simulation, as the API stores it as its agent report."""
 
     state: str
     at: str
@@ -58,7 +58,7 @@ class SeamAnswer(Exception):
         super().__init__(body.get("message", ""))
         self.status = status
         self.body = dict(body)
-        self.report: AgentReport | None = None
+        self.report: StoredHello | None = None
 
 
 def _refused(code: int, message: str) -> SeamAnswer:
@@ -105,7 +105,7 @@ def _mocked(spec: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 def hello(
     body: Any, live: Mapping[str, Mapping[str, Any]]
-) -> tuple[dict[str, Any], AgentReport | None]:
+) -> tuple[dict[str, Any], StoredHello | None]:
     """Answer one hello and say what it records; SeamAnswer for other answers.
 
     A refused hello from a live simulation raises SeamAnswer carrying the
@@ -153,11 +153,11 @@ def hello(
     if refusal is not None:
         code, message = refusal
         refused = _refused(code, message)
-        refused.report = AgentReport(
+        refused.report = StoredHello(
             state="refused", at=_now(), tools=list(tools), code=code, message=message
         )
         raise refused
-    return reply, AgentReport(
+    return reply, StoredHello(
         state="accepted", at=_now(), tools=list(tools), mocked_tools=mocked
     )
 
@@ -198,7 +198,7 @@ def confirm(body: Any, live: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
 
 
 def agent_report_answer(
-    simulation_id: str, report: AgentReport | None
+    simulation_id: str, report: StoredHello | None
 ) -> dict[str, Any]:
     """The agent-report route's 200 body for one simulation."""
     if report is None:
