@@ -2,6 +2,7 @@ import {
   completeSimulation,
   failSimulation,
   markSimulationCanceled,
+  readAgentReport,
   recordOrphanedSimulationExecution,
   resolveSimulationStanding,
   registerSimulationProviderReference,
@@ -71,6 +72,16 @@ export type ReportRoutesOptions = {
 };
 
 export const REPORTS_PATH = "/v1/simulations/:simulationId/reports";
+export const PROVIDER_REFERENCE_PATH =
+  "/v1/simulations/:simulationId/provider-reference";
+export const AGENT_REPORT_PATH = "/v1/simulations/:simulationId/agent-report";
+
+/** The room names egma's simulator gives LiveKit simulations. */
+const LIVEKIT_ROOM_REFERENCE = /^egma-sim-(?:chat-)?[A-Za-z0-9_-]+$/;
+
+const CANNOT_REGISTER =
+  "This active claim cannot register that provider reference.";
+const NOT_THE_CLAIMANT = "This claim does not hold that simulation.";
 
 /** The path one simulation's reports land on — the client's side of the route. */
 export function reportPathFor(simulationId: string): string {
@@ -215,22 +226,27 @@ export async function reportRoutes(
     return undefined;
   });
 
-  // Acknowledged before the simulator creates or dispatches the room. The
-  // service token authenticates the sender; the active claim authorizes the
-  // row, and the stored reference remains the project-key ingest lookup key.
-  app.post("/v1/simulations/:simulationId/provider-reference", async (request, reply) => {
+  // Acknowledged before the simulator creates or dispatches the room, or sends
+  // a Pipecat start request. The service token authenticates the sender; the
+  // active claim authorizes the row, and the stored reference remains the
+  // project-key lookup key for the agent's spans and the SDK seam.
+  app.post(PROVIDER_REFERENCE_PATH, async (request, reply) => {
     const { simulationId } = request.params as { simulationId: string };
     const body = request.body as Record<string, unknown> | null;
     if (body === null || typeof body !== "object" || Array.isArray(body) ||
       Object.keys(body).some(key => key !== "claimant" && key !== "provider_reference") ||
       typeof body.claimant !== "string" || body.claimant.trim() === "" || body.claimant.length > 200 ||
       typeof body.provider_reference !== "string" || body.provider_reference.length > 512 ||
-      !/^egma-sim-(?:chat-)?[A-Za-z0-9_-]+$/.test(body.provider_reference)) {
-      return invalid(reply, "Room registration requires a claimant and a non-empty Egma LiveKit room name.");
+      !(LIVEKIT_ROOM_REFERENCE.test(body.provider_reference) ||
+        body.provider_reference === simulationId)) {
+      return invalid(
+        reply,
+        "Registration requires a claimant and a provider reference: an Egma LiveKit room name, or this simulation's id for a Pipecat simulation.",
+      );
     }
     const standing = await resolveSimulationStanding(simulationId);
     if (standing === undefined) {
-      return conflict(reply, "This active LiveKit claim cannot register that room reference.");
+      return conflict(reply, CANNOT_REGISTER);
     }
     const registered = await registerSimulationProviderReference(standing.auth, {
       simulationId,
@@ -238,9 +254,51 @@ export async function reportRoutes(
       providerReference: body.provider_reference,
     });
     if (!registered) {
-      return conflict(reply, "This active LiveKit claim cannot register that room reference.");
+      return conflict(reply, CANNOT_REGISTER);
     }
     return reply.send({ simulation_id: simulationId, provider_reference: body.provider_reference });
+  });
+
+  // Whether the Egma SDK in a Pipecat bot has reported to egma yet, polled by
+  // the simulator that holds the claim while it waits for the bot.
+  app.post(AGENT_REPORT_PATH, async (request, reply) => {
+    const { simulationId } = request.params as { simulationId: string };
+    const body = request.body as Record<string, unknown> | null;
+    if (body === null || typeof body !== "object" || Array.isArray(body) ||
+      Object.keys(body).some((key) => key !== "claimant") ||
+      typeof body.claimant !== "string" || body.claimant.trim() === "" ||
+      body.claimant.length > 200) {
+      return invalid(
+        reply,
+        'An agent-report read names the claimant that holds this simulation, like {"claimant": "egma-simulator-1"}.',
+      );
+    }
+    const standing = await resolveSimulationStanding(simulationId);
+    if (standing === undefined) return conflict(reply, NOT_THE_CLAIMANT);
+    const report = await readAgentReport(standing.auth, {
+      simulationId,
+      claimant: body.claimant.trim(),
+    });
+    if (report === undefined) return conflict(reply, NOT_THE_CLAIMANT);
+    if (report === null) {
+      return reply.send({ simulation_id: simulationId, state: "waiting" });
+    }
+    if (report.state === "accepted") {
+      return reply.send({
+        simulation_id: simulationId,
+        state: "accepted",
+        at: report.at,
+        tools: report.tools.map((tool) => tool.name),
+        mocked_tools: report.mockedTools,
+      });
+    }
+    return reply.send({
+      simulation_id: simulationId,
+      state: "refused",
+      at: report.at,
+      code: report.code,
+      message: report.message,
+    });
   });
 
   /**

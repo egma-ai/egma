@@ -43,6 +43,7 @@ import { mockEndpointRoutes } from "./routes/mock-endpoint.ts";
 import { passwordResetRoutes } from "./routes/password-reset.ts";
 import { platformApiRoutes } from "./routes/platform-api.ts";
 import { reportRoutes } from "./routes/reports.ts";
+import { sdkSeamRoutes } from "./routes/sdk-seam.ts";
 import { signOutRoutes } from "./routes/sign-out.ts";
 import { signupRoutes } from "./routes/signup.ts";
 import { traceRoutes } from "./routes/traces.ts";
@@ -603,6 +604,11 @@ export function buildApi(options: ServerOptions): Api {
   // coverage; it does not verify a body signature. Platform tool requests use
   // this gate outside the credentialed organization rate limit.
   void app.register(mockEndpointRoutes);
+
+  // The egma SDK's mock-tool seam for Pipecat bots, in a scope of its own for
+  // its body parser. The project key is its gate and it spends from the same
+  // organization budget as the OTLP door the same SDK exports to.
+  void app.register(sdkSeamRoutes, { rateLimit });
 
   // Isolate OTLP body parsers from JSON routes. Customer credentials and the
   // service token share this ingestion endpoint. Register it only for roles
