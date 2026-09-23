@@ -204,11 +204,16 @@ jobs:
           clean="$(mktemp -d)"
           uv venv --python 3.11 "$clean/venv"
           uv pip install --python "$clean/venv/bin/python" \
-            "$wheel" "livekit-agents[openai]==1.6.6"
+            "egma[livekit] @ file://$(realpath "$wheel")" "livekit-agents[openai]==1.6.6"
           "$clean/venv/bin/python" - <<'PY'
           import asyncio
           import os
+          import sys
           from importlib.metadata import version
+
+          import egma
+
+          assert "livekit" not in sys.modules
           from egma import monitor, simulation
           from egma import export
           from livekit import agents
@@ -263,9 +268,13 @@ jobs:
 
           required = {
               "egma/__init__.py",
+              "egma/errors.py",
               "egma/export.py",
+              "egma/livekit/__init__.py",
               "egma/monitoring.py",
+              "egma/otlp.py",
               "egma/room.py",
+              "egma/seam.py",
               "egma/simulation_room.py",
           }
           missing = sorted(required - wheel_names)

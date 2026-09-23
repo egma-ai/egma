@@ -45,20 +45,13 @@ from livekit.agents.llm import (
 from livekit.rtc import ConnectionState, RpcError
 
 from . import export, seam
+from .errors import NotReported
 from .room import Simulation, simulation_in
 
 logger = logging.getLogger("egma")
 
 VERB = "egma.simulation"
 """What this verb is called, for every sentence it has to say."""
-
-
-class NotReported(RuntimeError):
-    """Reporting failed in a simulation room; do not start the session.
-
-    Raised by ``simulation`` when the hello exchange cannot complete.
-    Never raised for a production room.
-    """
 
 
 EGMA_IDENTITY = "egma-persona"

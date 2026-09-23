@@ -19,14 +19,16 @@ PYTHON_SDK = ROOT / "sdks/python"
 JS_VERSIONS = ("1.5.5", "1.6.0", "1.6.4", "1.7.0", "1.7.1")
 # Keep the previously locked version and the releases between the floor and lock.
 PYTHON_INTERMEDIATE_VERSIONS = ("1.6.9", "1.7.0", "1.7.1")
-LIVE_TESTS = ("test_live_room_detection.py", "test_live_mockable.py")
+LIVE_TESTS = ("livekit/test_live_room_detection.py", "livekit/test_live_mockable.py")
+# Pipecat suites need Pipecat, which these LiveKit environments never install.
+OTHER_FRAMEWORK_TESTS = ("pipecat",)
 
 
 def python_versions():
     project = tomllib.loads((PYTHON_SDK / "pyproject.toml").read_text())
     dependency = next(
         item
-        for item in project["project"]["dependencies"]
+        for item in project["project"]["optional-dependencies"]["livekit"]
         if item.startswith("livekit-agents")
     )
     floor = re.search(r">=(\d+\.\d+\.\d+)", dependency)
@@ -37,7 +39,13 @@ def python_versions():
         item["version"] for item in lock["package"] if item["name"] == "livekit-agents"
     )
     versions = tuple(dict.fromkeys((floor[1], *PYTHON_INTERMEDIATE_VERSIONS, locked)))
-    return versions, project["dependency-groups"]["dev"]
+    # The package itself comes from the built wheel, never from an index.
+    dev = [
+        item
+        for item in project["dependency-groups"]["dev"]
+        if re.match(r"egma(\[|$|[<>=!~ ;])", item) is None
+    ]
+    return versions, dev
 
 
 def run(command, log, *, cwd=ROOT):
@@ -62,7 +70,9 @@ def check_python(wheel, version, dev_dependencies, directory, log):
             "install",
             "--python",
             str(python),
-            str(wheel),
+            # The documented install: the LiveKit extra carries the OpenAI bound
+            # that livekit-agents 1.6 does not declare itself.
+            f"egma[livekit] @ {Path(wheel).resolve().as_uri()}",
             f"livekit-agents=={version}",
             f"livekit-plugins-openai=={version}",
             *dev_dependencies,
@@ -95,6 +105,10 @@ def check_python(wheel, version, dev_dependencies, directory, log):
             "-o",
             f"cache_dir={directory / 'pytest-cache'}",
             *(f"--ignore={PYTHON_SDK / 'tests' / name}" for name in LIVE_TESTS),
+            *(
+                f"--ignore={PYTHON_SDK / 'tests' / name}"
+                for name in OTHER_FRAMEWORK_TESTS
+            ),
         ],
         log,
         cwd=directory,

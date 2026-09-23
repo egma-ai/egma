@@ -1,4 +1,4 @@
-"""Shared OTLP exporter for ``monitor`` and ``simulation``.
+"""LiveKit's OTLP exporter for ``monitor`` and ``simulation``.
 
 Use the project API key and export the simulation room as its provider
 reference. Set that reference on resources when creating a provider and
@@ -8,57 +8,38 @@ This preserves the customer's tracing setup, whose resource is immutable.
 Ingestion prefers the resource value, falling back to matching span
 values. One job per process is supported: the first job fixes exporter
 settings, and another job requesting different settings is refused.
+The framework-free parts live in ``egma.otlp``.
 """
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
-import os
-import re
 import threading
-from collections.abc import Sequence
 from dataclasses import dataclass
-from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 from livekit.agents.telemetry import set_tracer_provider
 from opentelemetry import trace
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
-    OTLPSpanExporter,
-)
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
-from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
-from opentelemetry.sdk.trace.export import (
-    BatchSpanProcessor,
-    SpanExporter,
-    SpanExportResult,
-)
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
+
+from . import otlp
+from .otlp import PROVIDER_REFERENCE, SIMULATION_BATCH_MILLIS, flush_on
+
+__all__ = [
+    "PROVIDER_REFERENCE",
+    "SIMULATION_BATCH_MILLIS",
+    "flush_on",
+    "install",
+]
 
 logger = logging.getLogger("egma")
 
-_TRACE_PATH = "/v1/traces"
 _FLUSH_MARKER = "_egma_export_flush_registered"
-_PROJECT_KEY_PATTERN = re.compile(r"egma_sk_[A-Za-z0-9_-]{43}\Z")
 
-PROVIDER_REFERENCE = "egma.provider_reference"
-"""What egma files a simulation's agent POV under: the room's name.
-
-egma's own attribute, in egma's own namespace, so it can never collide
-with a semantic convention or with a framework's own key. A resource that
-carries it is the agent's POV of one simulation; a resource without it is
-production traffic and takes the path it always took.
-"""
-
-SIMULATION_BATCH_MILLIS = 1000
-"""How long a simulation's spans may sit in the buffer: one second.
-
-Short because somebody is waiting. A simulation is graded the moment the
-agent's POV is complete, so the tail of the conversation has to land
-within a second or two of the persona leaving rather than at whatever the
-exporter's ordinary batching says. Production is not waited on the same
-way and keeps the library's own default.
-"""
+_ROOT_SPAN = "agent_session"
+"""LiveKit's session span: the end of a simulation's agent POV."""
 
 
 @dataclass(frozen=True)
@@ -77,45 +58,19 @@ _state: _Export | None = None
 _state_lock = threading.Lock()
 
 
-class _SimulationEvidenceExporter(SpanExporter):
+class _SimulationEvidenceExporter(otlp.RootLastExporter):
     """Keep a simulation completion root behind all earlier evidence."""
 
     def __init__(self, delegate: SpanExporter) -> None:
-        self._delegate = delegate
-        self._serial = threading.Lock()
-        self._failed = False
+        super().__init__(delegate, root_span_name=_ROOT_SPAN)
 
-    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        with self._serial:
-            children = [span for span in spans if span.name != "agent_session"]
-            roots = [span for span in spans if span.name == "agent_session"]
-            if children:
-                result = self._send(children)
-                if result != SpanExportResult.SUCCESS:
-                    self._failed = True
-                    return SpanExportResult.FAILURE
-            if roots:
-                if self._failed:
-                    return SpanExportResult.FAILURE
-                result = self._send(roots)
-                if result != SpanExportResult.SUCCESS:
-                    self._failed = True
-                    return SpanExportResult.FAILURE
-            return SpanExportResult.SUCCESS
 
-    def _send(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        try:
-            return self._delegate.export(spans)
-        except Exception:
-            return SpanExportResult.FAILURE
-
-    def force_flush(self, timeout_millis: int = 30_000) -> bool:
-        with self._serial:
-            return self._delegate.force_flush(timeout_millis) is not False
-
-    def shutdown(self) -> None:
-        with self._serial:
-            self._delegate.shutdown()
+# The framework-free steps, under the names this module has always used.
+_setting = otlp.setting
+_project_key = otlp.project_key
+_trace_endpoint = otlp.trace_endpoint
+_build_exporter = otlp.build_exporter
+_flushed = otlp.flushed
 
 
 def install(
@@ -185,86 +140,6 @@ def install(
 
         _register_shutdown_flush(ctx, _state.processor, verb)
         return _state.processor
-
-
-def flush_on(processor: BatchSpanProcessor, why: str) -> asyncio.Task[None]:
-    """Send whatever is buffered now, without holding the caller up.
-
-    A session closing is a moment worth flushing at and a synchronous
-    callback, so the wait goes on the loop rather than in the callback.
-    The task is handed back for the caller to hold, because a task nobody
-    holds may be collected before it runs.
-    """
-
-    return asyncio.get_running_loop().create_task(_flushed(processor, why))
-
-
-async def _flushed(processor: BatchSpanProcessor, why: str) -> None:
-    try:
-        flushed = await asyncio.to_thread(processor.force_flush)
-    except Exception:
-        logger.warning("Egma could not flush every buffered span at %s", why)
-        return
-    if not flushed:
-        logger.warning("Egma could not flush every buffered span at %s", why)
-
-
-def _setting(explicit: str | None, environment_name: str, verb: str) -> str:
-    value = (
-        explicit if explicit is not None else os.environ.get(environment_name)
-    )
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(
-            f"{verb} needs {environment_name}. Set it or pass the matching "
-            "argument."
-        )
-    return value.strip()
-
-
-def _project_key(value: str, verb: str) -> str:
-    if _PROJECT_KEY_PATTERN.fullmatch(value) is None:
-        raise ValueError(f"{verb} received an invalid EGMA_API_KEY.")
-    return value
-
-
-def _trace_endpoint(value: str, verb: str) -> str:
-    """Turn an Egma API base URL into the OTLP trace endpoint."""
-
-    try:
-        parsed = urlsplit(value)
-        # Reading ``port`` makes urllib reject a malformed numeric port now,
-        # before an exporter thread tries to use it later.
-        _ = parsed.port
-    except ValueError:
-        raise ValueError(
-            f"{verb} needs EGMA_URL to be a valid HTTP or HTTPS API URL."
-        ) from None
-
-    invalid = (
-        parsed.scheme not in {"http", "https"}
-        or not parsed.hostname
-        or parsed.username is not None
-        or parsed.password is not None
-        or bool(parsed.query)
-        or bool(parsed.fragment)
-        or any(character.isspace() for character in value)
-    )
-    if invalid:
-        raise ValueError(
-            f"{verb} needs EGMA_URL to be a valid HTTP or HTTPS API URL."
-        )
-
-    path = parsed.path.rstrip("/")
-    if not path.endswith(_TRACE_PATH):
-        path = f"{path}{_TRACE_PATH}"
-    endpoint = SplitResult(
-        scheme=parsed.scheme,
-        netloc=parsed.netloc,
-        path=path,
-        query="",
-        fragment="",
-    )
-    return urlunsplit(endpoint)
 
 
 def _livekit_provider() -> trace.TracerProvider:
@@ -342,21 +217,6 @@ def _register_provider(provider: TracerProvider, provider_reference: str) -> Non
         )
         return
     set_tracer_provider(provider)
-
-
-def _build_exporter(endpoint: str, api_key: str, verb: str) -> SpanExporter:
-    try:
-        return OTLPSpanExporter(
-            endpoint=endpoint,
-            headers={"Authorization": f"Bearer {api_key}"},
-        )
-    except Exception:
-        # Exporter libraries can include constructor arguments in exception
-        # text. Replace that text so a project key can never escape here.
-        raise ValueError(
-            f"{verb} could not create the Egma exporter. Check EGMA_URL and "
-            "EGMA_API_KEY."
-        ) from None
 
 
 def _configure_provider(

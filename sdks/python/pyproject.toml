@@ -15,15 +15,22 @@ classifiers = [
     "Topic :: Software Development :: Testing",
 ]
 
-# LiveKit 1.6.6 uses session-scoped mocks during tool execution. Validate its testing API
-# and private tracer provider access before adding another minor release.
+# The shared exporter only. Each framework comes with its own extra, so a
+# Pipecat bot never installs LiveKit and a LiveKit worker never installs Pipecat.
 dependencies = [
+    "opentelemetry-exporter-otlp-proto-http>=1.39,<2",
+    "opentelemetry-sdk>=1.39,<2",
+]
+
+[project.optional-dependencies]
+# LiveKit 1.6.6 uses session-scoped mocks during tool execution. Validate its testing API
+# and private tracer provider access before adding another minor release. Keep
+# egma.livekit.SUPPORTED_LIVEKIT_AGENTS equal to this range.
+livekit = [
     "livekit-agents>=1.6.6,<1.9",
     # LiveKit Agents 1.6 passes an httpx client into OpenAI. OpenAI 3 moved
     # to httpx2, so this range follows LiveKit's own compatibility bound.
     "openai>=2,<3",
-    "opentelemetry-exporter-otlp-proto-http>=1.39,<2",
-    "opentelemetry-sdk>=1.39,<2",
 ]
 
 [project.urls]
@@ -32,7 +39,10 @@ Repository = "https://github.com/egma-ai/egma"
 Documentation = "https://github.com/egma-ai/egma/tree/main/sdks/python#readme"
 
 [dependency-groups]
+# The compatibility checks install every entry here except this package itself,
+# which they install from the built wheel.
 dev = [
+    "egma[livekit]",
     "livekit-plugins-openai>=1.6.6,<1.9",
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
