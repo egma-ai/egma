@@ -12,6 +12,7 @@ import {
   getAgent as getAgentRequest,
   listAgents as listAgentsRequest,
   registerAgent as registerAgentRequest,
+  updateConnection as updateConnectionRequest,
   type AddConnectionData,
   type GetAgentResponse,
 } from "@egma/platform-api/client";
@@ -22,6 +23,7 @@ import {
   platformText,
   platformUnreachableMessage,
 } from "./client.ts";
+import { isAgentPlatform, type AgentPlatform } from "./agent-platforms.ts";
 import type { ConnectionCredentials } from "./connection-credentials.ts";
 import type { Fetch } from "./device-flow.ts";
 
@@ -49,7 +51,7 @@ export type RegisteredAgent = {
   readonly id: string;
   readonly name: string;
   readonly projectId: string;
-  readonly agentPlatform: "retell" | "livekit";
+  readonly agentPlatform: AgentPlatform;
   /** The provider's public agent id, when this agent is bound to one. */
   readonly platformAgentId: string | null;
   /** Whether the server can reuse the provider key already sealed on it. */
@@ -128,7 +130,7 @@ function cleanAgent(value: unknown): RegisteredAgent | null {
     id === "" ||
     name === "" ||
     projectId === "" ||
-    (agentPlatform !== "retell" && agentPlatform !== "livekit") ||
+    !isAgentPlatform(agentPlatform) ||
     (rawPlatformAgentId !== null && platformAgentId === "") ||
     (monitoringKeyPresent !== undefined &&
       typeof monitoringKeyPresent !== "boolean")
@@ -524,6 +526,73 @@ export async function addConnection(
   return { kind: "added", connection: receipt };
 }
 
+/** What a connection edit replaces. Omitted halves stay as they are. */
+export type ConnectionChanges = {
+  readonly config?: Readonly<Record<string, string>>;
+  /** Replaces the whole sealed credential. */
+  readonly credentials?: ConnectionCredentials;
+};
+
+export type UpdatedConnection =
+  | {
+      readonly kind: "updated";
+      readonly connection: RegisteredConnection;
+      /** Whether the edited connection is archived, which no edit undoes. */
+      readonly archived: boolean;
+    }
+  | { readonly kind: "not-found"; readonly reason: string }
+  | CommonFailure;
+
+/** Replace a connection's config, credentials, or both, in place. */
+export async function updateConnection(
+  agentId: string,
+  connectionId: string,
+  projectId: string,
+  changes: ConnectionChanges,
+  options: RegisterOptions,
+): Promise<UpdatedConnection> {
+  const answer = await updateConnectionRequest(
+    {
+      agentId,
+      connectionId,
+      projectId,
+      ...(changes.config === undefined ? {} : { config: { ...changes.config } }),
+      ...(changes.credentials === undefined
+        ? {}
+        : { credentials: changes.credentials.reveal() }),
+    },
+    requestOptions(options),
+  );
+  if (answer.response?.status === 404) {
+    return {
+      kind: "not-found",
+      reason: platformRefusalMessage(answer.error, answer.response.status),
+    };
+  }
+  const failed = commonFailure(answer, options);
+  if (failed !== null) return failed;
+  const raw: unknown = answer.data?.connection;
+  const receipt = connectionReceipt(raw);
+  const archived =
+    typeof raw === "object" &&
+    raw !== null &&
+    (raw as Readonly<Record<string, unknown>>)["archived"] === true;
+  if (
+    receipt === null ||
+    receipt.id !== connectionId ||
+    receipt.agentId !== agentId ||
+    receipt.projectId !== projectId ||
+    (changes.config !== undefined && !sameConfig(receipt.config, changes.config))
+  ) {
+    return {
+      kind: "refused",
+      reason:
+        "Egma answered without a complete matching Connection receipt. The Connection may still have been changed.",
+    };
+  }
+  return { kind: "updated", connection: receipt, archived };
+}
+
 /**
  * Write an agent's identity alone, bound to the platform that runs it.
  *
@@ -534,7 +603,7 @@ export async function addConnection(
 export async function registerAgentIdentity(
   registration: {
     readonly name: string;
-    readonly agentPlatform: "retell" | "livekit";
+    readonly agentPlatform: AgentPlatform;
     readonly project?: string | undefined;
   },
   options: RegisterOptions,
