@@ -1,0 +1,25 @@
+[project]
+name = "egma-pipecat-e2e"
+version = "0.1.0"
+description = "A Pipecat bot for Egma to simulate against, shaped like Pipecat's generated quickstart"
+requires-python = ">=3.11"
+# The same services as Pipecat's generated quickstart. `pipecatcloud` is what
+# Pipecat Cloud's base image imports to call `bot()`. Flows ships inside
+# `pipecat-ai` as `pipecat.flows`; the standalone `pipecat-ai-flows` package
+# stops at pipecat-ai 1.4.
+dependencies = [
+    "pipecat-ai[cartesia,daily,deepgram,openai,runner,silero]==1.11.0",
+    "pipecatcloud>=1.2,<2",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.5",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
