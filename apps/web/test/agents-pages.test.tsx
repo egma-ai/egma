@@ -3773,6 +3773,10 @@ describe("goal-first agent setup", () => {
     expect(name.getAttribute("aria-describedby")).toBeNull();
     expect(helpOf("Start URL*")).toBe("Public HTTPS URL of your bot starter.");
     expect(helpOf("Auth headers*")).toBe("Sent with every start request.");
+    // Headers are JSON, not prose: no spelling marks under header names.
+    expect(screen.getByLabelText("Auth headers*").getAttribute("spellcheck")).toBe(
+      "false",
+    );
     expect(
       screen.getByPlaceholderText("https://bots.example.com/start"),
     ).toBeDefined();

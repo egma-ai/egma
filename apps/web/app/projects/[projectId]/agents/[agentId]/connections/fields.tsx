@@ -59,6 +59,7 @@ function ConfigControl({
           disabled={disabled}
           placeholder={placeholder}
           aria-required={field.required ? true : undefined}
+          spellCheck={false}
           onChange={(event) => onChange(event.target.value)}
         />
       ) : (
@@ -110,6 +111,7 @@ function CredentialControl({
           disabled={disabled}
           placeholder={placeholder}
           aria-required={field.required ? true : undefined}
+          spellCheck={false}
           onChange={(event) => onChange(event.target.value)}
         />
       ) : (
