@@ -7,6 +7,7 @@ import {
   MONITORING_KEY_AGENT_SEPARATOR,
   MONITORING_KEY_NAMESPACE,
   NotPermittedError,
+  platformPushesTraces,
   ProjectOutsideOrganizationError,
   revokeApiKey,
   type ApiKey,
@@ -37,9 +38,6 @@ type Body = Record<string, unknown>;
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
-
-/** The platforms whose agents push their own production spans with a key. */
-const PUSHING_PLATFORMS: ReadonlySet<string> = new Set(["livekit", "pipecat"]);
 
 /** The name prefix of one agent's guarded monitoring key. */
 function monitoringKeyPrefix(agentId: string): string {
@@ -151,7 +149,7 @@ export async function apiKeyRoutes(
         if (
           target === undefined ||
           target.projectId !== projectId ||
-          !PUSHING_PLATFORMS.has(target.agentPlatform) ||
+          !platformPushesTraces(target.agentPlatform) ||
           target.archivedAt !== null
         ) {
           return sendRefusal(
