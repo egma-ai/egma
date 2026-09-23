@@ -113,3 +113,45 @@ async def test_an_unexpected_answer_is_transient(control_plane: Any):
 def test_an_unknown_state_is_not_read_as_waiting():
     with pytest.raises(ValueError):
         AgentReport.from_answer({"simulation_id": "sim_a", "state": "maybe"})
+
+
+async def test_the_hosted_agent_report_poll_goes_through_the_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """In a sandbox only the proxy turns the token placeholder into the token."""
+    seen: list[tuple[str, str | None]] = []
+
+    async def proxy(request: web.Request) -> web.Response:
+        seen.append((request.raw_path, request.headers.get("Authorization")))
+        return web.json_response(REPORT["accepted"]["response"])
+
+    app = web.Application()
+    app.router.add_route("*", "/{tail:.*}", proxy)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    proxy_url = f"http://127.0.0.1:{runner.addresses[0][1]}"
+    for name in ("HTTP_PROXY", "http_proxy"):
+        monkeypatch.setenv(name, proxy_url)
+    monkeypatch.setenv("NO_PROXY", "")
+    monkeypatch.setenv("no_proxy", "")
+    simulation_id = REPORT["accepted"]["response"]["simulation_id"]
+    try:
+        async with ControlPlaneClient(
+            "http://control-plane.invalid",
+            claim_wait_seconds=1,
+            service_token="dtn_secret_placeholder",
+            runtime="daytona",
+        ) as client:
+            body = await client.agent_report(simulation_id, "egma-voice-1")
+    finally:
+        await runner.cleanup()
+
+    assert AgentReport.from_answer(body).state == "accepted"
+    assert seen == [
+        (
+            f"http://control-plane.invalid/v1/simulations/{simulation_id}/agent-report",
+            "Bearer dtn_secret_placeholder",
+        )
+    ]
