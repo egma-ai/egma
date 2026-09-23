@@ -375,6 +375,7 @@ function accessVariantMetadata(
 const PLATFORM_LABELS: Readonly<Record<AgentPlatform, string>> = {
   retell: "Retell",
   livekit: "LiveKit",
+  pipecat: "Pipecat",
 };
 
 type ConnectionOption = {
@@ -436,6 +437,34 @@ const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
     accessVariant: "livekit_room.customer_token_endpoint",
     modality: "chat",
     productLabel: "LiveKit chat token endpoint",
+  },
+  {
+    agentPlatform: "pipecat",
+    connectionType: "daily_room",
+    accessVariant: "daily_room.pipecat_cloud",
+    modality: "voice",
+    productLabel: "Pipecat Cloud",
+  },
+  {
+    agentPlatform: "pipecat",
+    connectionType: "daily_room",
+    accessVariant: "daily_room.pipecat_cloud",
+    modality: "chat",
+    productLabel: "Pipecat Cloud chat",
+  },
+  {
+    agentPlatform: "pipecat",
+    connectionType: "daily_room",
+    accessVariant: "daily_room.self_hosted",
+    modality: "voice",
+    productLabel: "Pipecat self-hosted",
+  },
+  {
+    agentPlatform: "pipecat",
+    connectionType: "daily_room",
+    accessVariant: "daily_room.self_hosted",
+    modality: "chat",
+    productLabel: "Pipecat self-hosted chat",
   },
   {
     agentPlatform: "livekit",
@@ -687,6 +716,26 @@ export function tokenEndpointIdentity(endpoint: string): string {
   return `${origin}${parsed.pathname}${parsed.search}`;
 }
 
+/**
+ * Compare Pipecat start URLs by host, port, and path. The scheme is always
+ * https, and a query often carries a per-deployment token rather than a
+ * different starter. Return trimmed input if parsing fails.
+ */
+export function startUrlIdentity(startUrl: string): string {
+  const written = startUrl.trim();
+  let parsed: URL | undefined;
+  try {
+    parsed = new URL(written);
+  } catch {
+    parsed = undefined;
+  }
+  if (parsed === undefined) return written;
+
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  const origin = parsed.port === "" ? host : `${host}:${parsed.port}`;
+  return `${origin}${parsed.pathname}`;
+}
+
 /*
  * LiveKit dispatch metadata belongs to each test: env.job_dispatch_metadata.
  * Its size limit is LARGEST_JOB_DISPATCH_METADATA_BYTES in test validation.
@@ -742,6 +791,56 @@ function publicHttpsUrl(key: string, value: unknown, example: string): string {
     );
   }
   return candidate;
+}
+
+/**
+ * A Pipecat Cloud agent name, which Egma writes into one path segment of the
+ * start API's URL, so a character that could leave the segment is refused.
+ */
+const PIPECAT_AGENT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+function pipecatAgentName(key: string, value: unknown): string {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  if (!PIPECAT_AGENT_NAME.test(candidate)) {
+    throw new AgentWriteRefusedError(
+      "not_admitted",
+      `the config's ${key} must be a Pipecat Cloud agent name, like ` +
+        `my-voice-agent: letters, digits, dots, dashes and underscores`,
+    );
+  }
+  return candidate;
+}
+
+/** The public https address of a self-hosted Pipecat starter. */
+function pipecatStartUrl(key: string, value: unknown): string {
+  return publicHttpsUrl(key, value, "https://bots.example.com/start");
+}
+
+/**
+ * The Pipecat Cloud public API key. Its prefix is checked because the private
+ * key starts differently and can stop and manage agents, which Egma never needs.
+ */
+function pipecatPublicApiKey(what: string, field: string, value: unknown): string {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (trimmed.startsWith("sk_")) {
+    throw new AgentWriteRefusedError(
+      "not_admitted",
+      `${what}'s credentials need ${field} to be the public API key, which ` +
+        `starts with pk_; a private key (sk_) is never needed`,
+    );
+  }
+  if (
+    !trimmed.startsWith("pk_") ||
+    trimmed.length < SHORTEST_CREDENTIAL ||
+    /\s/u.test(trimmed)
+  ) {
+    throw new AgentWriteRefusedError(
+      "not_admitted",
+      `${what}'s credentials need ${field} to be a Pipecat Cloud public API ` +
+        `key, which starts with pk_`,
+    );
+  }
+  return trimmed;
 }
 
 /**
@@ -1110,6 +1209,109 @@ export const CONNECTION_REGISTRY: Readonly<
         const endpoint = config["tokenEndpoint"];
         if (endpoint === undefined) return undefined;
         return `${tokenEndpointIdentity(endpoint)}|${agentName}`;
+      },
+    },
+  },
+  daily_room: {
+    label: "Daily room",
+    agentPlatforms: ["pipecat"],
+    /**
+     * A Pipecat bot in a Daily room. A starter makes the room and starts the
+     * bot for each simulation: Pipecat Cloud's start API for the named agent,
+     * or the customer's own start URL. The persona joins the room it answers
+     * with, as an RTVI client, by voice or by text.
+     */
+    modalities: ["voice", "chat"],
+    // A starter brokers the room and hands Egma the way in, as Retell does for
+    // a web call. Egma never names or creates the room.
+    topology: "hosted-broker",
+    accessVariants: [
+      {
+        id: "daily_room.pipecat_cloud",
+        label: "Pipecat Cloud",
+        named: "a Pipecat Cloud connection",
+        config: { agentName: pipecatAgentName },
+        fields: [
+          {
+            key: "agentName",
+            label: "Pipecat Cloud agent name",
+            kind: "text",
+            help: "As in pcc-deploy.toml.",
+          },
+        ],
+        credentials: {
+          required: true,
+          fields: ["publicApiKey"],
+          gate: pipecatPublicApiKey,
+          // A public key is shown in Pipecat Cloud's own dashboard, so its tail
+          // is a safe way to tell two keys apart.
+          hint: lastFourOf("publicApiKey"),
+        },
+        credentialHelp: "",
+        credentialFields: [
+          {
+            field: "publicApiKey",
+            label: "Public API key",
+            kind: "secret",
+            help: "Starts with pk_.",
+          },
+        ],
+        mixedUp:
+          "a Pipecat Cloud connection starts your agent with its public API " +
+          "key, so its credentials are shaped { publicApiKey }. Send that, or " +
+          "use daily_room.self_hosted with a startUrl and { headers }.",
+      },
+      {
+        id: "daily_room.self_hosted",
+        label: "Self-hosted",
+        named: "a self-hosted Pipecat connection",
+        config: { startUrl: pipecatStartUrl },
+        fields: [
+          {
+            key: "startUrl",
+            label: "Start URL",
+            kind: "url",
+            help: "Public HTTPS URL of your bot starter.",
+          },
+        ],
+        credentials: {
+          required: true,
+          fields: ["headers"],
+          gate: authHeadersJson,
+          // The header names and never their values — see `namesIn`.
+          hint: namesIn("headers"),
+        },
+        credentialHelp: "",
+        credentialFields: [
+          {
+            field: "headers",
+            label: "Auth headers",
+            kind: "json",
+            help: "Sent with every start request.",
+          },
+        ],
+        mixedUp:
+          "a self-hosted Pipecat connection sends the start request to your " +
+          "startUrl with your auth headers, so its credentials are shaped " +
+          "{ headers }. Send those, or use daily_room.pipecat_cloud with an " +
+          "agentName and { publicApiKey }.",
+      },
+    ],
+    simulatorAdapter: true,
+    usesPlatformCarrier: false,
+    // The two variants hold different keys, so candidates are narrowed by type
+    // and project only and the identity decides: the Pipecat Cloud agent name,
+    // or the starter's host and path.
+    reuse: {
+      matchedKeys: [],
+      identityOf: (config) => {
+        const agentName = config["agentName"];
+        if (agentName !== undefined) return `pipecat-cloud|${agentName}`;
+        const startUrl = config["startUrl"];
+        if (startUrl !== undefined) {
+          return `self-hosted|${startUrlIdentity(startUrl)}`;
+        }
+        return undefined;
       },
     },
   },

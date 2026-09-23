@@ -889,11 +889,13 @@ describe("what the shipped simulator can conduct", () => {
     );
     expect(conductableConnectionTypes()).toEqual([
       // Text mode and the web call both joined the conductable list with
-      // the plugs that place them, in the registry's own order.
+      // the plugs that place them, in the registry's own order. The Daily
+      // room joined with the plug that starts a Pipecat bot.
       "retell_text_mode",
       "retell_web_call",
       "phone_number",
       "livekit_room",
+      "daily_room",
     ]);
   });
 

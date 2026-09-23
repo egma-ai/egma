@@ -29,6 +29,7 @@ const PERSONA_SPEECH_CATEGORIES = "0005_persona_speech_categories.sql";
 const GPT_LIVE_PERSONA_MODELS = "0006_gpt_live_persona_models.sql";
 const PERSONA_SETTINGS_SIMPLIFICATION = "0007_persona_settings_simplification.sql";
 const SIMULATION_RECORDING_WAVEFORM = "0008_simulation_recording_waveform.sql";
+const PIPECAT_DAILY_ROOM = "0009_pipecat_daily_room.sql";
 const SHIPPED_BASELINE_HASH =
   "ea57d012e674f136f4ef74930865a8ccfeafaebcf92d7f628ce53e8deddc084a";
 const CURRENT_MIGRATIONS = [
@@ -41,6 +42,7 @@ const CURRENT_MIGRATIONS = [
   GPT_LIVE_PERSONA_MODELS,
   PERSONA_SETTINGS_SIMPLIFICATION,
   SIMULATION_RECORDING_WAVEFORM,
+  PIPECAT_DAILY_ROOM,
 ];
 /** Everything the settings simplification was written to run after. */
 const BEFORE_SETTINGS_SIMPLIFICATION = CURRENT_MIGRATIONS.slice(
