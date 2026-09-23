@@ -92,6 +92,10 @@ const LANES: Readonly<
     accessVariant: "livekit_room.project_credentials",
     modality: "voice",
   },
+  daily_room: {
+    accessVariant: "daily_room.pipecat_cloud",
+    modality: "voice",
+  },
 };
 
 type Seeded = {

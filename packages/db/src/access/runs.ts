@@ -2222,9 +2222,11 @@ export async function resolveSimulationStanding(
   };
 }
 
-/** Register a LiveKit room before its agent can export evidence.
- * Only the service's current claim can write the first reference. The row and
- * frozen run supply tenancy and lane; a request cannot choose either.
+/** Register a LiveKit room, or a Pipecat simulation's own id, before its agent
+ * can export evidence or say hello. Only the service's current claim can write
+ * the first reference. The row and frozen run supply tenancy and lane; a
+ * request cannot choose either. A Daily room registration also forgets any
+ * hello an earlier attempt left, so readiness reads this attempt's agent only.
  */
 export async function registerSimulationProviderReference(auth: AuthContext, input: {
   readonly simulationId: string;
@@ -2234,22 +2236,29 @@ export async function registerSimulationProviderReference(auth: AuthContext, inp
   authorize(auth, "start_and_cancel_runs", here(auth));
   if (auth.via !== "simulator") return false;
   const reference = input.providerReference;
-  if (!/^egma-sim-(?:chat-)?[A-Za-z0-9_-]+$/.test(reference) || reference.length > 512) {
-    return false;
-  }
+  const livekitRoom =
+    /^egma-sim-(?:chat-)?[A-Za-z0-9_-]+$/.test(reference) && reference.length <= 512;
+  // A Pipecat starter names its own room, so the simulation id is the reference.
+  const dailyRoom = reference !== "" && reference === input.simulationId;
+  if (!livekitRoom && !dailyRoom) return false;
+  const lane = livekitRoom
+    ? sql`exists (select 1 from ${run} where ${run.id} = ${simulation.runId}
+        and ${run.organizationId} = ${simulation.organizationId}
+        and ${run.projectId} = ${simulation.projectId}
+        and ${run.connectionSnapshot}->>'connectionType' = 'livekit_room')`
+    : eq(simulation.connectionType, "daily_room");
   const [written] = await db()
     .update(simulation)
-    .set({ providerReference: reference })
+    .set(dailyRoom
+      ? { providerReference: reference, agentReport: null }
+      : { providerReference: reference })
     .where(within(auth, simulation, and(
       eq(simulation.id, input.simulationId),
       eq(simulation.claimedBy, validClaimant(input.claimant)),
       inArray(simulation.status, ["claimed", "running"]),
       isNull(simulation.cancelRequestedAt),
       or(isNull(simulation.providerReference), eq(simulation.providerReference, reference)),
-      sql`exists (select 1 from ${run} where ${run.id} = ${simulation.runId}
-        and ${run.organizationId} = ${simulation.organizationId}
-        and ${run.projectId} = ${simulation.projectId}
-        and ${run.connectionSnapshot}->>'connectionType' = 'livekit_room')`,
+      lane,
       inActingProject(auth, simulation),
     )))
     .returning({ id: simulation.id });

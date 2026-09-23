@@ -1,0 +1,119 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "pipecat"
+            }
+          },
+          {
+            "key": "egma.provider_reference",
+            "value": {
+              "stringValue": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP"
+            }
+          },
+          {
+            "key": "session.id",
+            "value": {
+              "stringValue": "3d9c2a47-pcc-session"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "egma.pipecat",
+            "version": "0.4.0"
+          },
+          "spans": [
+            {
+              "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+              "spanId": "bb1000000000000c",
+              "parentSpanId": "bb10000000000001",
+              "name": "user_turn",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1790146815500000000",
+              "endTimeUnixNano": "1790146816900000000",
+              "attributes": [
+                {
+                  "key": "egma.turn.text",
+                  "value": {
+                    "stringValue": "Thursday works, thank you."
+                  }
+                }
+              ]
+            },
+            {
+              "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+              "spanId": "bb1000000000000d",
+              "parentSpanId": "bb1000000000000c",
+              "name": "user_speaking",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1790146815500000000",
+              "endTimeUnixNano": "1790146816600000000"
+            },
+            {
+              "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+              "spanId": "bb1000000000000e",
+              "parentSpanId": "bb10000000000001",
+              "name": "agent_turn",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1790146817200000000",
+              "endTimeUnixNano": "1790146818900000000",
+              "attributes": [
+                {
+                  "key": "egma.turn.text",
+                  "value": {
+                    "stringValue": "You're booked for Thursday the 13th at 9 a.m."
+                  }
+                },
+                {
+                  "key": "egma.turn.interrupted",
+                  "value": {
+                    "boolValue": true
+                  }
+                }
+              ]
+            },
+            {
+              "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+              "spanId": "bb1000000000000f",
+              "parentSpanId": "bb1000000000000e",
+              "name": "agent_speaking",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1790146817500000000",
+              "endTimeUnixNano": "1790146818900000000"
+            },
+            {
+              "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+              "spanId": "bb10000000000001",
+              "parentSpanId": "",
+              "name": "pipecat_session",
+              "kind": "SPAN_KIND_INTERNAL",
+              "startTimeUnixNano": "1790146805000000000",
+              "endTimeUnixNano": "1790146820000000000",
+              "attributes": [
+                {
+                  "key": "egma.pipecat.version",
+                  "value": {
+                    "stringValue": "1.11.0"
+                  }
+                },
+                {
+                  "key": "egma.pipecat.transport",
+                  "value": {
+                    "stringValue": "daily"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

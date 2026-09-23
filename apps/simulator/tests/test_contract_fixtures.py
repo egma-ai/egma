@@ -138,6 +138,21 @@ EXPECTED_REJECTION: dict[str, tuple[str, str, str | None]] = {
         "required",
         "key",
     ),
+    # A Pipecat bot reads its start data at runner_args.body, where Egma's
+    # own `egma` key marks a simulation, so the test's data never holds it.
+    "spec/pipecat-body-params-holding-egma.json": (
+        "/pipecat_body_params",
+        "not",
+        None,
+    ),
+    # Pipecat start data belongs to a Daily room and to nothing else.
+    "spec/pipecat-body-params-off-daily-room.json": ("", "not", None),
+    # A Pipecat Cloud start request is authorised with the public key.
+    "spec/pipecat-cloud-without-public-key.json": (
+        "/connection/credentials",
+        "required",
+        "publicApiKey",
+    ),
     "report/completed-claiming-never-ran.json": (
         "/events/0/facts/ending",
         "enum",
@@ -174,13 +189,13 @@ def place_of(error: ValidationError) -> str:
 
 
 def test_each_schema_compiles_and_pins_its_contract_version():
-    assert spec_validator().schema["properties"]["contract_version"]["const"] == 7
+    assert spec_validator().schema["properties"]["contract_version"]["const"] == 8
     assert report_validator().schema["properties"]["contract_version"]["const"] == 1
-    assert spec_validator().schema["$id"] == "urn:egma:simulation-contract:spec:v7"
+    assert spec_validator().schema["$id"] == "urn:egma:simulation-contract:spec:v8"
     assert report_validator().schema["$id"] == "urn:egma:simulation-contract:report:v1"
 
 
-def test_this_simulator_advertises_v7_and_preserves_old_execution():
+def test_this_simulator_advertises_v8_and_preserves_old_execution():
     document = read_json(
         contract_dir()
         / "fixtures"
@@ -189,7 +204,7 @@ def test_this_simulator_advertises_v7_and_preserves_old_execution():
         / "chat-retell-text-mode-plain.json"
     )
     assert document["contract_version"] == 6
-    assert spec_contract_version() == 7
+    assert spec_contract_version() == 8
 
     legacy = {**document, "contract_version": 5}
     legacy["persona"] = {
