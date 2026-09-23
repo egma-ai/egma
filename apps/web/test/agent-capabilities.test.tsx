@@ -550,36 +550,82 @@ describe("Paper agent capability states", () => {
     );
   });
 
-  it("says a Pipecat agent reached both ways varies by connection", async () => {
+  /** One Pipecat agent's details sheet, and its two facts as read. */
+  async function pipecatFactsOf(
+    connections: readonly ReturnType<typeof pipecatConnection>[],
+  ): Promise<{ readonly agent: string; readonly startUrl: string; readonly urlMono: boolean }> {
     routed.search = "?sheet=agent&agent=agt_both";
     answerWith(
-      agent({
-        id: "agt_both",
-        name: "Front desk",
-        agentPlatform: "pipecat",
-        connections: [
-          pipecatConnection({
-            id: "con_cloud",
-            agentId: "agt_both",
-            config: { agentName: "front-desk" },
-          }),
-          pipecatConnection({
-            id: "con_dev",
-            agentId: "agt_both",
-            config: { startUrl: "https://quiet-river.trycloudflare.com/start" },
-          }),
-        ],
-      }),
+      agent({ id: "agt_both", name: "Front desk", agentPlatform: "pipecat", connections }),
     );
-
-    render(<AgentsPage />);
+    const { unmount } = render(<AgentsPage />);
     const detail = within(await screen.findByRole("dialog", { name: "Front desk" }));
-    expect(detail.getByText("Pipecat agent").parentElement?.textContent).toBe(
-      "Pipecat agentfront-desk",
-    );
-    expect(detail.getByText("Start URL").parentElement?.textContent).toBe(
-      "Start URLVaries by connection",
-    );
+    const agentFact = detail.getByText("Pipecat agent").parentElement;
+    const urlFact = detail.getByText("Start URL").parentElement;
+    const read = {
+      agent: agentFact?.querySelector("dd")?.textContent ?? "",
+      startUrl: urlFact?.querySelector("dd")?.textContent ?? "",
+      urlMono: urlFact?.querySelector("dd")?.className.includes("font-mono") ?? false,
+    };
+    unmount();
+    cleanup();
+    return read;
+  }
+
+  /**
+   * Only self-hosted connections have a start URL, so only they speak for the
+   * fact; Pipecat Cloud stands in when there is none, and the usual empty
+   * value when there is no Pipecat connection at all.
+   */
+  it("reads the Start URL fact from self-hosted connections alone", async () => {
+    const cloud = pipecatConnection({
+      id: "con_cloud",
+      agentId: "agt_both",
+      config: { agentName: "front-desk" },
+    });
+    const dev = pipecatConnection({
+      id: "con_dev",
+      agentId: "agt_both",
+      config: { startUrl: "https://quiet-river.trycloudflare.com/start" },
+    });
+    const server = pipecatConnection({
+      id: "con_server",
+      agentId: "agt_both",
+      config: { startUrl: "https://bots.lakeside.example/start" },
+    });
+
+    // Pipecat Cloud beside one start URL: the URL, and the cloud agent's name.
+    expect(await pipecatFactsOf([cloud, dev])).toEqual({
+      agent: "front-desk",
+      startUrl: "https://quiet-river.trycloudflare.com/start",
+      urlMono: true,
+    });
+    // Two start URLs vary by connection.
+    expect(await pipecatFactsOf([cloud, dev, server])).toEqual({
+      agent: "front-desk",
+      startUrl: "Varies by connection",
+      urlMono: false,
+    });
+    // Voice and chat on one starter share one URL.
+    expect(
+      await pipecatFactsOf([dev, { ...dev, id: "con_dev_chat", modality: "chat" }]),
+    ).toEqual({
+      agent: "Front desk",
+      startUrl: "https://quiet-river.trycloudflare.com/start",
+      urlMono: true,
+    });
+    // Pipecat Cloud alone.
+    expect(await pipecatFactsOf([cloud])).toEqual({
+      agent: "front-desk",
+      startUrl: "Pipecat Cloud",
+      urlMono: false,
+    });
+    // No Pipecat connection yet.
+    expect(await pipecatFactsOf([])).toEqual({
+      agent: "Front desk",
+      startUrl: "Not saved",
+      urlMono: false,
+    });
   });
 
   it("stops Retell monitoring from details and changes the durable state", async () => {

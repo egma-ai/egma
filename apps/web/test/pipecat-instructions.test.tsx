@@ -49,7 +49,7 @@ describe("Pipecat testing instructions", () => {
       "Give this to your coding agent",
       "Install the Egma SDK",
       "Add the testing hook to bot()",
-      "Keep one instance warm in pcc-deploy.toml",
+      "Recommended: keep one instance warm in pcc-deploy.toml",
       "Add the Egma values to your secret set and redeploy",
     ]);
     expect(screen.getAllByRole("button", { name: /^Copy / })).toHaveLength(5);
@@ -84,7 +84,10 @@ describe("Pipecat testing instructions", () => {
     expect(PIPECAT_CLOUD_TESTING_PROMPT).toContain(
       "await simulation(worker, runner_args)",
     );
-    expect(PIPECAT_CLOUD_TESTING_PROMPT).toContain("min_agents = 1");
+    // One warm instance is recommended, never imposed on the repository.
+    expect(PIPECAT_CLOUD_TESTING_PROMPT).toContain("recommend min_agents = 1");
+    expect(PIPECAT_CLOUD_TESTING_PROMPT).toContain("change it only if I agree");
+    expect(PIPECAT_CLOUD_TESTING_PROMPT).not.toMatch(/\bset min_agents/u);
     expect(PIPECAT_CLOUD_TESTING_PROMPT).toContain("egma[pipecat]");
     expect(PIPECAT_CLOUD_TESTING_PROMPT).toContain(
       "leave every environment file unread",

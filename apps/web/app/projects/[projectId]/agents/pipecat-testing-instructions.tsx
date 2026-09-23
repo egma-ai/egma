@@ -18,7 +18,7 @@ worker = PipelineWorker(pipeline, ...)
 await simulation(worker, runner_args)
 await runner.add_workers(worker)`;
 
-/** Pipecat Cloud keeps one instance warm, so a cold start never fails a run. */
+/** Recommended: one warm instance, so a cold start never fails a simulation. */
 export const PIPECAT_WARM_INSTANCE = `[scaling]
 min_agents = 1`;
 
@@ -40,7 +40,7 @@ Where bot() builds its PipelineWorker, import simulation from egma.pipecat. Afte
 
 This call is required for a Pipecat simulation and it fails closed: it raises egma.NotReported when the bot cannot report to Egma. Let that error stop the bot. Do not catch it, and do not start the worker without it.`;
 
-const PROMPT_CLOUD = `In pcc-deploy.toml, set min_agents = 1 under [scaling] so one instance stays warm, and tell me the agent_name it deploys.`;
+const PROMPT_CLOUD = `Tell me the agent_name that pcc-deploy.toml deploys. If pcc-deploy.toml does not keep one instance warm, recommend min_agents = 1 under [scaling], so a cold start cannot fail a simulation; change it only if I agree.`;
 
 const PROMPT_SELF_HOSTED = `Tell me the URL of the endpoint that starts the bot.`;
 
@@ -87,7 +87,7 @@ export function pipecatTestingSteps(
     return [
       ...shared,
       {
-        title: "Keep one instance warm in pcc-deploy.toml",
+        title: "Recommended: keep one instance warm in pcc-deploy.toml",
         value: PIPECAT_WARM_INSTANCE,
         copyLabel: "scaling settings",
       },

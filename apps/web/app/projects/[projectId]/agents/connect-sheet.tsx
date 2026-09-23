@@ -54,6 +54,7 @@ import {
   RETELL_LANE_QUESTION,
   stepAfterRetellLanes,
   type RetellLane,
+  firstSdkAccess,
   isSdkPlatform,
   SDK_ACCESS_CHOICES,
   SDK_CONNECTION_TYPES,
@@ -548,10 +549,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       .filter((one) => one.modality === next)
       .map((one) => one.accessVariant);
     if (!offered.includes(sdkAccess)) {
-      const first = SDK_ACCESS_CHOICES[sdkPlatform].find((choice) =>
-        offered.includes(choice.accessVariant),
-      );
-      setSdkAccess(first?.accessVariant ?? offered[0] ?? "");
+      setSdkAccess(firstSdkAccess(sdkPlatform, offered));
     }
     setSdkModality(next);
   }
