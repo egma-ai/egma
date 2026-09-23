@@ -64,6 +64,13 @@
       "when": 1789603200000,
       "tag": "0008_simulation_recording_waveform",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789689600000,
+      "tag": "0009_pipecat_daily_room",
+      "breakpoints": true
     }
   ]
 }

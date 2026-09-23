@@ -58,12 +58,14 @@ export type TestMockTool =
   | { tool: string; error: string };
 
 /**
- * Agent platform environment for this test: Retell dynamic variables and LiveKit
- * job dispatch metadata. Preserve the platform field names in the contract.
+ * Agent platform environment for this test: Retell dynamic variables, LiveKit
+ * job dispatch metadata, and the Pipecat start request's body params. Preserve
+ * the platform field names in the contract.
  */
 export type TestEnv = {
   retell_dynamic_variables?: Record<string, string>;
   job_dispatch_metadata?: Record<string, unknown>;
+  pipecat_body_params?: Record<string, unknown>;
 };
 
 /**
@@ -83,6 +85,21 @@ export const LARGEST_MOCK_TOOL_ANSWER_BYTES = 15 * 1024;
  * the dispatch then refuses, on a run that has already started.
  */
 export const LARGEST_JOB_DISPATCH_METADATA_BYTES = 512 * 1024;
+
+/**
+ * How large the Pipecat body params may be, in UTF-8 bytes of their JSON.
+ *
+ * Egma merges them into the start request's `body` beside its own `egma` key.
+ * Pipecat Cloud carries up to 1 MB there; half of it keeps a test well inside
+ * that limit whatever egma adds.
+ */
+export const LARGEST_PIPECAT_BODY_PARAMS_BYTES = 512 * 1024;
+
+/**
+ * The key egma writes into every start request's `body` to mark a simulation.
+ * A test that authored it would overwrite egma's marker, so it is refused.
+ */
+export const RESERVED_PIPECAT_BODY_KEY = "egma";
 
 /**
  * The prefix egma keeps for itself among the dynamic variables.
@@ -488,8 +505,16 @@ function tooLarge(tool: string, key: "answer" | "error", bytes: number): string 
   );
 }
 
-/** The two keys an env may carry, and nothing else. */
-const ENV_KEYS = ["retell_dynamic_variables", "job_dispatch_metadata"] as const;
+/** The three keys an env may carry, and nothing else. */
+const ENV_KEYS = [
+  "retell_dynamic_variables",
+  "job_dispatch_metadata",
+  "pipecat_body_params",
+] as const;
+
+/** The env keys as a sentence names them. */
+const ENV_KEYS_NAMED =
+  "retell_dynamic_variables, job_dispatch_metadata and pipecat_body_params";
 
 /**
  * Normalize empty environment settings to null and reject unknown top-level keys.
@@ -500,8 +525,7 @@ function validEnv(written: TestEnv | null | undefined): TestEnv | null {
   const value = written as unknown;
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new UnprocessableInputError(
-      "env is an object with at most retell_dynamic_variables and " +
-        "job_dispatch_metadata in it",
+      `env is an object with at most ${ENV_KEYS_NAMED} in it`,
     );
   }
   const held = value as Record<string, unknown>;
@@ -509,7 +533,7 @@ function validEnv(written: TestEnv | null | undefined): TestEnv | null {
     if (!(ENV_KEYS as readonly string[]).includes(key)) {
       throw new UnprocessableInputError(
         `env has no ${JSON.stringify(key)} in it. An env carries ` +
-          `${ENV_KEYS.join(" and ")}, and nothing else.`,
+          `${ENV_KEYS_NAMED}, and nothing else.`,
       );
     }
   }
@@ -524,6 +548,11 @@ function validEnv(written: TestEnv | null | undefined): TestEnv | null {
   if (dispatch !== undefined && dispatch !== null) {
     const checked = validJobDispatchMetadata(dispatch);
     if (Object.keys(checked).length > 0) env.job_dispatch_metadata = checked;
+  }
+  const body = held.pipecat_body_params;
+  if (body !== undefined && body !== null) {
+    const checked = validPipecatBodyParams(body);
+    if (Object.keys(checked).length > 0) env.pipecat_body_params = checked;
   }
 
   return Object.keys(env).length === 0 ? null : env;
@@ -619,6 +648,54 @@ function validJobDispatchMetadata(value: unknown): Record<string, unknown> {
     );
   }
   return metadata;
+}
+
+/**
+ * The Pipecat body params as they will be stored: an object without egma's own
+ * key, within the start request's budget, and encodable as UTF-8.
+ */
+function validPipecatBodyParams(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new UnprocessableInputError(
+      "env.pipecat_body_params is a JSON object merged into the body of the " +
+        "start request, which your Pipecat bot reads at runner_args.body, and " +
+        'looks like {"tenant": "acme"}',
+    );
+  }
+  const params = value as Record<string, unknown>;
+  if (Object.hasOwn(params, RESERVED_PIPECAT_BODY_KEY)) {
+    throw new UnprocessableInputError(
+      `env.pipecat_body_params holds the key "${RESERVED_PIPECAT_BODY_KEY}", ` +
+        "which Egma keeps for its own simulation marker in the start request. " +
+        "Name the key something else.",
+    );
+  }
+  for (const text of stringsIn(params)) {
+    if (LONE_SURROGATE.test(text)) {
+      throw new UnprocessableInputError(
+        "env.pipecat_body_params holds a lone surrogate, which is valid JSON " +
+          "but has no UTF-8 form, so the start request could not carry it. " +
+          "Send well-formed text.",
+      );
+    }
+  }
+  const written = JSON.stringify(params) as string | undefined;
+  if (written === undefined) {
+    throw new UnprocessableInputError(
+      "env.pipecat_body_params has to be something Egma can serialize and " +
+        "send in the start request, and this one is not.",
+    );
+  }
+  const bytes = Buffer.byteLength(written, "utf8");
+  if (bytes > LARGEST_PIPECAT_BODY_PARAMS_BYTES) {
+    throw new UnprocessableInputError(
+      `env.pipecat_body_params is ${bytes} bytes once serialized, and Egma ` +
+        `sends at most ${LARGEST_PIPECAT_BODY_PARAMS_BYTES} in the start ` +
+        `request; hold a large value in your own store and put its id here ` +
+        `instead.`,
+    );
+  }
+  return params;
 }
 
 /**
@@ -765,6 +842,14 @@ function envFromRow(value: unknown, malformed: () => Error): TestEnv | null {
       throw malformed();
     }
     env.job_dispatch_metadata = dispatch as Record<string, unknown>;
+  }
+
+  const body = held.pipecat_body_params;
+  if (body !== undefined && body !== null) {
+    if (typeof body !== "object" || Array.isArray(body)) {
+      throw malformed();
+    }
+    env.pipecat_body_params = body as Record<string, unknown>;
   }
 
   return Object.keys(env).length === 0 ? null : env;
