@@ -27,13 +27,15 @@ In a second terminal, from your agent repository, run:
 egma agent dev --agent "$EGMA_AGENT_ID" --port 7860
 ```
 
-Keep both running while simulations run. The first time, `egma agent dev` creates two self-hosted connections for this computer, named `dev-<computer name>-voice` and `dev-<computer name>-chat`. Run `egma pull` to see their IDs in `egma/config.yaml`, then start a run with one of them:
+Keep both running while simulations run. The first time, `egma agent dev` creates two self-hosted connections for this computer, named `dev-<computer name>-voice` and `dev-<computer name>-chat`. It prints their names and IDs every time it starts. Start a run with one of them:
 
 ```bash
 egma run create appointment-booking \
   --agent "$EGMA_AGENT_ID" \
   --connection "$EGMA_CONNECTION_ID"
 ```
+
+You can also run `egma pull` and read the IDs in `egma/config.yaml`.
 
 ## How it works
 

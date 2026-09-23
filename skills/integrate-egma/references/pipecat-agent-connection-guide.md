@@ -58,7 +58,7 @@ async def bot(runner_args: RunnerArguments):
 3. The line is inert in production: without an `egma` key in `runner_args.body` it makes no network request. It raises `NotReported` when it cannot report to egma, and the bot does not start. Do not catch it. Do not add code that reads or strips the `egma` key; the SDK owns it.
    - Pipecat Flows functions (from `pipecat.flows`) cannot be mocked yet. A simulation whose test mocks one fails when the flow first offers that function. Flows functions that are not mocked run for real and are recorded, so Flows bots still work; just never mock their functions.
 4. If monitoring is also requested, add `await monitor(worker, runner_args)` right after the `simulation` line. See the [monitoring setup guide](./setup-monitoring.md).
-5. The bot needs `EGMA_URL` and `EGMA_API_KEY` wherever it runs. Create a project key with `egma project api-key create --name "<bot name>"`; it is printed once. Use `EGMA_URL=https://api.egma.ai` unless the developer uses a self-hosted egma (then its API URL). For this machine, put both in the bot's gitignored `.env`. Never commit the key and never print it in your messages.
+5. The bot needs `EGMA_URL` and `EGMA_API_KEY` wherever it runs. Create a project key with `egma project api-key create --name "<bot name>"`; it is printed once. Use `EGMA_URL=https://app.egma.ai` unless the developer uses a self-hosted egma (then its public URL). For this machine, put both in the bot's gitignored `.env`. Never commit the key and never print it in your messages.
 6. If the bot reads startup data from `runner_args.body` (tenant, locale, caller data), note the keys. Tests pass them in `pipecat_body_params` (see the `/write-voice-agent-tests` skill).
 
 ## 3. Add the connections
@@ -88,7 +88,7 @@ Before any deploy, prove the setup against the bot on this machine:
 1. Check that `cloudflared` is installed (`brew install cloudflared` on macOS). Check that the bot's environment has `DAILY_API_KEY` (pipecat's development runner creates a Daily room per start request with it) and that `DAILY_ROOM_URL` is unset (otherwise every simulation shares one room). Ask the developer for a Daily key only if none is available.
 2. Start the bot with pipecat's development runner as a background process, for example `uv run bot.py -t daily`. It listens on port 7860 unless the bot sets another.
 3. Start `egma agent dev --agent "$EGMA_AGENT_ID" --port 7860` as a second background process. It is long-running; keep it running for the whole run. The first start creates the `dev-<computer name>-voice` and `dev-<computer name>-chat` connections.
-4. Run `egma pull` and read the two connection IDs from `egma/config.yaml`. Run the suite against the voice connection (see the simulation testing guide).
+4. Read the two connection IDs from `egma agent dev`'s output (it prints their names and IDs on start; `egma pull` then `egma/config.yaml` also has them). Run the suite against the voice connection (see the simulation testing guide).
 5. If a simulation fails, read its reason with `egma run get`. The messages name the cause and the fix; the full list is at https://docs.egma.ai/docs/integrations/pipecat/troubleshooting.
 6. After the suite finishes, stop `egma agent dev` and the bot. The connections stay and work again the next time `egma agent dev` runs.
 

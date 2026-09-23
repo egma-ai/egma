@@ -64,14 +64,14 @@ Copy the key when the CLI prints it; it is shown only once. Your bot needs these
 
 | Variable | Value |
 | --- | --- |
-| `EGMA_URL` | `https://api.egma.ai`, or the API URL of your self-hosted Egma instance. |
+| `EGMA_URL` | `https://app.egma.ai`, or the public URL of your self-hosted Egma instance. |
 | `EGMA_API_KEY` | The project API key you just created. |
 
 Add them to the secret set named by `secret_set` in your `pcc-deploy.toml`:
 
 ```bash
 pipecat cloud secrets set my-bot-secrets \
-  EGMA_URL=https://api.egma.ai \
+  EGMA_URL=https://app.egma.ai \
   EGMA_API_KEY="$EGMA_API_KEY"
 ```
 

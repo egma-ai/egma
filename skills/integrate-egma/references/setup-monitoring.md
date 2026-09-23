@@ -17,7 +17,7 @@ For LiveKit and Pipecat, monitoring is code in the agent. There is no switch in 
 
 1. Create a key: `egma project api-key create --name "<agent name> monitoring"`. It is printed once and the CLI does not save it. If simulation testing already created a key for this agent, reuse it.
 2. The agent needs two values wherever it runs in production:
-   - `EGMA_URL` - `https://api.egma.ai`, or the developer's self-hosted egma API URL. The deployed agent must be able to reach it.
+   - `EGMA_URL` - `https://app.egma.ai`, or the public URL of the developer's self-hosted egma. The deployed agent must be able to reach it.
    - `EGMA_API_KEY` - the project key.
 3. Put them where the repo already keeps the agent's deployed secrets: the LiveKit worker's secret store, the Pipecat Cloud secret set named `secret_set` in `pcc-deploy.toml` (`pipecat cloud secrets set <secret_set> EGMA_URL=... EGMA_API_KEY=...`), or the team's own server environment. Never commit the key and never print it in your messages. If you are not allowed to change deployed secrets, hand this step to the developer with the exact names.
 
