@@ -4,8 +4,8 @@ import {
   createApiKey,
   getAgent,
   listApiKeys,
+  MONITORING_KEY_AGENT_SEPARATOR,
   MONITORING_KEY_NAMESPACE,
-  monitoringKeyPrefix,
   NotPermittedError,
   ProjectOutsideOrganizationError,
   revokeApiKey,
@@ -40,6 +40,11 @@ function text(value: unknown): string {
 
 /** The platforms whose agents push their own production spans with a key. */
 const PUSHING_PLATFORMS: ReadonlySet<string> = new Set(["livekit", "pipecat"]);
+
+/** The name prefix of one agent's guarded monitoring key. */
+function monitoringKeyPrefix(agentId: string): string {
+  return `${MONITORING_KEY_NAMESPACE}${agentId}${MONITORING_KEY_AGENT_SEPARATOR}`;
+}
 
 /** A key as a list is allowed to describe it. Never the secret. */
 function described(key: ApiKey): Record<string, unknown> {

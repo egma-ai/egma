@@ -106,7 +106,7 @@ export {
   revokeApiKey,
   resolveApiKey,
   monitoredAgentOfApiKey,
-  monitoringKeyPrefix,
+  MONITORING_KEY_AGENT_SEPARATOR,
   MONITORING_KEY_NAMESPACE,
   type ApiKey,
   type ListedApiKey,

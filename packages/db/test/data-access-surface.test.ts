@@ -690,7 +690,7 @@ const READ_LIMITS = [
 const THE_AGENT_PLATFORMS = ["AGENT_PLATFORMS"];
 
 /** The reserved name of an agent's guarded monitoring key, shared by the key route and trace filing. */
-const THE_MONITORING_KEY_NAME = ["MONITORING_KEY_NAMESPACE", "monitoringKeyPrefix"];
+const THE_MONITORING_KEY_NAME = ["MONITORING_KEY_NAMESPACE", "MONITORING_KEY_AGENT_SEPARATOR"];
 
 /**
  * Pure POV helpers are shared by trace reads and grading so both use the

@@ -331,9 +331,11 @@ async function noteApiKeyUsed(apiKeyId: string): Promise<void> {
  */
 export const MONITORING_KEY_NAMESPACE = "Egma monitoring ";
 
-/** The name prefix of one agent's guarded monitoring key. */
-export function monitoringKeyPrefix(agentId: string): string {
-  return `${MONITORING_KEY_NAMESPACE}${agentId} — `;
+/** Between the agent's id and the rest of a guarded monitoring key's name. */
+export const MONITORING_KEY_AGENT_SEPARATOR = " — ";
+
+function monitoringKeyPrefix(agentId: string): string {
+  return `${MONITORING_KEY_NAMESPACE}${agentId}${MONITORING_KEY_AGENT_SEPARATOR}`;
 }
 
 /** The agent a guarded monitoring key was minted for. */
@@ -372,7 +374,8 @@ export async function monitoredAgentOfApiKey(
     .limit(1);
   const name = key?.name ?? "";
   if (!name.startsWith(MONITORING_KEY_NAMESPACE)) return undefined;
-  const agentId = name.slice(MONITORING_KEY_NAMESPACE.length).split(" — ")[0] ?? "";
+  const agentId =
+    name.slice(MONITORING_KEY_NAMESPACE.length).split(MONITORING_KEY_AGENT_SEPARATOR)[0] ?? "";
   if (agentId === "" || !name.startsWith(monitoringKeyPrefix(agentId))) {
     return undefined;
   }
