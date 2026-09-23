@@ -5,24 +5,8 @@ from __future__ import annotations
 import re
 from importlib.metadata import PackageNotFoundError, distribution, requires
 
-import pytest
+from installed_frameworks import needs_pipecat
 from packaging.requirements import Requirement
-
-
-def _installed(name: str) -> bool:
-    try:
-        distribution(name)
-    except PackageNotFoundError:
-        return False
-    return True
-
-
-needs_livekit = pytest.mark.skipif(
-    not _installed("livekit-agents"), reason="LiveKit is not installed"
-)
-needs_pipecat = pytest.mark.skipif(
-    not _installed("pipecat-ai"), reason="Pipecat is not installed"
-)
 
 
 def _declared() -> list[tuple[str, str, str]]:
@@ -36,47 +20,29 @@ def _declared() -> list[tuple[str, str, str]]:
     return found
 
 
-def test_the_base_install_carries_no_agent_framework():
-    base = {name for name, _, extra in _declared() if not extra}
+def test_the_base_install_carries_no_agent_framework_and_keeps_openai_2():
+    base = {name: spec for name, spec, extra in _declared() if not extra}
 
-    assert not any(name.startswith("livekit") for name in base)
-    assert not any(name.startswith("pipecat") for name in base)
-    assert "openai" not in base
+    assert not any(name.startswith(("livekit", "pipecat")) for name in base)
+    # LiveKit Agents 1.6 does not bound OpenAI itself and breaks on OpenAI 3,
+    # so the bound holds for a LiveKit worker that installs plain egma.
+    assert ">=2" in base["openai"]
+    assert "<3" in base["openai"]
 
 
-def test_livekit_and_its_openai_bound_come_with_the_livekit_extra():
+def test_livekit_comes_with_the_livekit_extra():
     livekit = {name: spec for name, spec, extra in _declared() if extra == "livekit"}
 
     assert ">=1.6.6" in livekit["livekit-agents"]
     assert "<1.9" in livekit["livekit-agents"]
-    assert ">=2" in livekit["openai"]
-    assert "<3" in livekit["openai"]
 
 
-@needs_livekit
-def test_the_runtime_range_check_matches_the_livekit_extra():
-    import egma.livekit
-
-    livekit = {name: spec for name, spec, extra in _declared() if extra == "livekit"}
-    declared = sorted(livekit["livekit-agents"].replace(" ", "").split(","))
-    checked = sorted(egma.livekit.SUPPORTED_LIVEKIT_AGENTS.split(","))
-    assert declared == checked
-
-
-def test_pipecat_comes_with_the_pipecat_extra_in_the_tested_range():
+def test_pipecat_comes_with_the_pipecat_extra_and_no_livekit():
     pipecat = {name: spec for name, spec, extra in _declared() if extra == "pipecat"}
 
-    assert pipecat["pipecat-ai"].replace(" ", "") in {">=1.9,<1.12", "<1.12,>=1.9"}
+    assert ">=1.9" in pipecat["pipecat-ai"]
+    assert "<1.12" in pipecat["pipecat-ai"]
     assert not any(name.startswith("livekit") for name in pipecat)
-
-
-@needs_pipecat
-def test_the_pipecat_runtime_range_check_matches_the_pipecat_extra():
-    import egma.pipecat
-
-    pipecat = {name: spec for name, spec, extra in _declared() if extra == "pipecat"}
-    declared = sorted(pipecat["pipecat-ai"].replace(" ", "").split(","))
-    assert declared == sorted(egma.pipecat.SUPPORTED_PIPECAT.split(","))
 
 
 def _canonical(name: str) -> str:

@@ -10,6 +10,10 @@ the test does not mock runs for real and is recorded.
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pipecat.frames.frames")
+
 import asyncio
 import json
 from typing import Any

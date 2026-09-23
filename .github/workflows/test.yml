@@ -286,18 +286,15 @@ jobs:
       - name: Verify the supported LiveKit versions in parallel
         run: python3 .github/livekit_compatibility.py python "${{ steps.pack.outputs.wheel }}"
 
-  pipecat-python-compatibility:
-    name: Pipecat Python compatibility (${{ matrix.pipecat }})
+  pipecat-python-package:
+    name: Pipecat Python package
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' }}
-    # Mock tools read a private part of Pipecat's LLM service, so every
-    # supported minor runs the Pipecat suite against the packaged wheel, in an
-    # environment that installs egma[pipecat] and proves no LiveKit came with it.
+    # Builds the wheel once for the matrix below and reads its minors from the
+    # pipecat extra's range in pyproject.toml, the one place the range is written.
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        pipecat: ["1.9", "1.10", "1.11"]
+    timeout-minutes: 10
+    outputs:
+      minors: ${{ steps.minors.outputs.minors }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -309,17 +306,53 @@ jobs:
         with:
           version: "0.11.33"
 
+      - name: Read the supported Pipecat minors
+        id: minors
+        run: echo "minors=$(python3 .github/pipecat_compatibility.py --list-minors)" >> "$GITHUB_OUTPUT"
+
       - name: Build the Python SDK once
-        id: pack
-        run: |
-          dir="$(mktemp -d)"
-          uv build sdks/python --wheel --out-dir "$dir"
-          wheel="$(find "$dir" -maxdepth 1 -name '*.whl' -print -quit)"
-          test -n "$wheel"
-          echo "wheel=$wheel" >> "$GITHUB_OUTPUT"
+        run: uv build sdks/python --wheel --out-dir dist
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: python-sdk-wheel-${{ github.sha }}
+          path: dist/*.whl
+          if-no-files-found: error
+          retention-days: 1
+
+  pipecat-python-compatibility:
+    name: Pipecat Python compatibility (${{ matrix.pipecat }})
+    needs: pipecat-python-package
+    # Mock tools read a private part of Pipecat's LLM service, so every
+    # supported minor runs the Pipecat suite against the packaged wheel, in an
+    # environment that installs egma[pipecat] and proves no LiveKit came with it.
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        pipecat: ${{ fromJSON(needs.pipecat-python-package.outputs.minors) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+        with:
+          version: "0.11.33"
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: python-sdk-wheel-${{ github.sha }}
+          path: dist
 
       - name: Verify Pipecat ${{ matrix.pipecat }}
-        run: python3 .github/pipecat_compatibility.py "${{ steps.pack.outputs.wheel }}" --minor "${{ matrix.pipecat }}"
+        run: |
+          wheel="$(find dist -maxdepth 1 -name '*.whl' -print -quit)"
+          test -n "$wheel"
+          python3 .github/pipecat_compatibility.py "$wheel" --minor "${{ matrix.pipecat }}"
 
   livekit-js-compatibility:
     name: LiveKit JS compatibility

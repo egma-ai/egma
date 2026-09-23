@@ -8,12 +8,15 @@ spans are read back from the export in the order they were sent.
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pipecat.frames.frames")
+
 import asyncio
 import gzip
 from importlib.metadata import version
 from typing import Any
 
-import pytest
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
     ExportTraceServiceRequest,
 )

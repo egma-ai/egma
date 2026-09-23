@@ -45,6 +45,7 @@ from livekit.agents.llm import (
 from livekit.rtc import ConnectionState, RpcError
 
 from . import export, seam
+from ._frameworks import installed_version
 from .errors import NotReported
 from .room import Simulation, simulation_in
 
@@ -679,12 +680,7 @@ async def _asked_until_egma_is_listening(
 
 def _this_sdk() -> str:
     """This package's own version, for a line that asks somebody to act."""
-    try:
-        from importlib.metadata import version
-
-        return version("egma")
-    except Exception:
-        return "unknown"
+    return installed_version("egma")
 
 
 def _why_the_hello_was_refused(refused: RpcError, identity: str) -> str:

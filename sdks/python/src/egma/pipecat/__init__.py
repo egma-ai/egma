@@ -18,71 +18,19 @@ nothing in a simulation Egma has confirmed.
 
 Both read ``EGMA_URL`` and ``EGMA_API_KEY``, or explicit arguments. This
 module needs ``pipecat-ai``: install ``egma[pipecat]``. It never imports
-LiveKit.
+LiveKit. Mock tools read a private part of Pipecat's LLM service, so the
+extra holds a range of tested minors; a Pipecat outside it is logged once,
+when this module loads.
 """
 
 from __future__ import annotations
 
-import logging
-import re
-from importlib.metadata import PackageNotFoundError, version
+from .._frameworks import require, warn_outside_range
 
-logger = logging.getLogger("egma")
-
-SUPPORTED_PIPECAT = ">=1.9,<1.12"
-"""The ``pipecat-ai`` range this SDK is tested against, minor by minor.
-
-The same range as the ``[pipecat]`` extra. Mock tools read a private part
-of Pipecat's LLM service, so a new minor joins the range once it passes.
-"""
-
-_FLOOR = (1, 9, 0)
-_CEILING = (1, 12, 0)
-
-
-def _require_pipecat() -> None:
-    """Import Pipecat, or say which extra installs it."""
-    try:
-        import pipecat  # noqa: F401
-    except ModuleNotFoundError as missing:
-        if (missing.name or "").split(".")[0] != "pipecat":
-            raise
-        raise ModuleNotFoundError(
-            "egma's Pipecat integration needs pipecat-ai, and it is not "
-            'installed here. Install the Pipecat extra: pip install "egma[pipecat]".',
-            name=missing.name,
-        ) from missing
-
-
-def _release(text: str) -> tuple[int, int, int] | None:
-    matched = re.match(r"(\d+)\.(\d+)(?:\.(\d+))?", text)
-    if matched is None:
-        return None
-    major, minor, patch = matched.groups()
-    return int(major), int(minor), int(patch or 0)
-
-
-def _warn_outside_supported_range() -> None:
-    """Log once when the installed pipecat-ai is outside the tested range."""
-    try:
-        installed = version("pipecat-ai")
-    except PackageNotFoundError:
-        return
-    release = _release(installed)
-    if release is None or _FLOOR <= release < _CEILING:
-        return
-    logger.warning(
-        "egma supports pipecat-ai %s, and this bot runs %s. Mock tools may "
-        'not work. Install a supported version with pip install "egma[pipecat]".',
-        SUPPORTED_PIPECAT,
-        installed,
-    )
-
-
-_require_pipecat()
-_warn_outside_supported_range()
+require("pipecat", label="Pipecat", distribution="pipecat-ai", extra="pipecat")
+warn_outside_range("pipecat-ai", "pipecat")
 
 from ..errors import NotReported  # noqa: E402
 from .verbs import monitor, simulation  # noqa: E402
 
-__all__ = ["NotReported", "SUPPORTED_PIPECAT", "monitor", "simulation"]
+__all__ = ["NotReported", "monitor", "simulation"]
