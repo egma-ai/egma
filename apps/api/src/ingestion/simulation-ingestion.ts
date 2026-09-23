@@ -152,8 +152,11 @@ export async function fileSimulationEvidence(
     );
   }
 
+  // An agent's root is the record's completion marker, so it is accepted after
+  // the spans it closes over.
   const completion = (span: NewSpan) =>
-    span.kind === "root" && span.name === "agent_session";
+    span.kind === "root" &&
+    (span.name === "agent_session" || span.name === "pipecat_session");
   const children = groups.map((group) => ({
     ...group,
     spans: group.spans.filter((span) => !completion(span)),

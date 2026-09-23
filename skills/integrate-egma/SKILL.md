@@ -14,6 +14,7 @@ Use `npx skills update integrate-egma` to update the project/global version of t
 2. Login to the egma platform using `egma login`. If it is already logged in, continue. If not, use your built-in browser skills or ask the developer to authorize the login.
 
 # Setting up testing and/or monitoring based on agent platform
+Egma supports voice agents built on livekit agents (python/ js), pipecat (python, on Pipecat Cloud, self-hosted, or on this machine) and retell.
 - To setup testing with egma platform - refer to [simulation testing setup guide](references/setup-simulation-testing.md)
 - To setup monitoring of voice agents on egma platform - refer to [monitoring setup guide](references/setup-monitoring.md)
 - If the developer wants to setup both testing and monitoring - first setup monitoring and then testing - but do it as one continuous chunk of work rather than exiting. Reuse credentials across testing and monitoring unless stated otherwise.

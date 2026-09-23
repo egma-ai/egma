@@ -158,6 +158,7 @@ describe("npx skills compatibility", () => {
       "SKILL.md",
       path.join("agents", "openai.yaml"),
       path.join("references", "livekit-agent-connection-guide.md"),
+      path.join("references", "pipecat-agent-connection-guide.md"),
       path.join("references", "retell-agent-connection-guide.md"),
       path.join("references", "setup-monitoring.md"),
       path.join("references", "setup-simulation-testing.md"),

@@ -18,6 +18,8 @@ Your options depend on the platform your agent runs on.
 | --- | --- | --- |
 | LiveKit | Project credentials | Uses your LiveKit project credentials to create a room and dispatch your agent. Supports voice and text simulations. |
 | LiveKit | Token endpoint | Requests room access from an endpoint you provide. Your server keeps the LiveKit project credentials and handles room setup and agent dispatch. Supports voice and text simulations. |
+| Pipecat | Pipecat Cloud | Starts your deployed agent through Pipecat Cloud with its agent name and a public API key. Pipecat Cloud creates the Daily room. Supports voice and text simulations. |
+| Pipecat | Self-hosted | Sends the same start request to your own starter's HTTPS URL with your auth headers. `egma agent dev` sets one up for a bot on your computer. Supports voice and text simulations. |
 | Retell | Text mode | Tests conversation logic through text, without sending audio through the speech stack. |
 | Retell | Web call | Runs a voice conversation over the internet without needing a phone number. |
 | Retell | Phone | Calls your agent through its deployed Retell phone number. |
@@ -48,11 +50,15 @@ The connection you choose affects which testing features are available.
 | --- | --- | --- | --- | --- |
 | LiveKit project credentials | Yes | Yes | Yes, with the Egma SDK | `job_dispatch_metadata` |
 | LiveKit token endpoint | Yes | Yes | Yes, with the Egma SDK | `job_dispatch_metadata` |
+| Pipecat Cloud | Yes | Yes | Yes, with the Egma SDK | `pipecat_body_params` |
+| Pipecat self-hosted | Yes | Yes | Yes, with the Egma SDK | `pipecat_body_params` |
 | Retell text mode | Yes | No | Yes | `retell_dynamic_variables` |
 | Retell web call | No | Yes | Yes | `retell_dynamic_variables` |
 | Retell phone | No | Yes | No | No test-supplied context |
 
 For LiveKit, the Egma simulation hook is required for every simulation. Text connections also need the worker's chat-mode setup. See the [LiveKit guide](/docs/integrations/livekit).
+
+For Pipecat, the Egma SDK's `simulation` line is required for every simulation. Chat connections need no other code. See the [Pipecat guide](/docs/integrations/pipecat).
 
 Retell text mode supports Retell-managed LLM and conversation-flow agents. Use a voice connection for Retell custom-LLM agents.
 

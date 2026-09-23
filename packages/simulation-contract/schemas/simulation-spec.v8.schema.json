@@ -28,6 +28,11 @@
     }
   },
   "allOf": [
+    {
+      "description": "Hosted per-claim authority belongs to a voice work order only.",
+      "if": { "type": "object", "properties": { "runtime": {} }, "required": ["runtime"] },
+      "then": { "type": "object", "properties": { "modality": { "const": "voice" } } }
+    },
     { "$ref": "urn:egma:simulation-contract:spec:v7#/allOf/0" },
     { "$ref": "urn:egma:simulation-contract:spec:v7#/allOf/1" },
     { "$ref": "urn:egma:simulation-contract:spec:v7#/allOf/2" },
@@ -43,7 +48,7 @@
       "else": { "not": { "type": "object", "properties": { "pipecat_body_params": {} }, "required": ["pipecat_body_params"] } }
     },
     {
-      "description": "A Daily room reaches a Pipecat bot through one of two access variants, each with its own config and credentials, and carries no other platform's start data.",
+      "description": "A Daily room reaches a Pipecat bot through one of two access variants, each with its own config and credentials, and carries no other platform's start data. A hosted voice claim may carry its runtime: the recording storage is used, the LiveKit media is not.",
       "if": {
         "type": "object",
         "properties": { "connection": { "type": "object", "properties": { "connection_type": { "const": "daily_room" } }, "required": ["connection_type"] } },
@@ -59,8 +64,7 @@
             { "type": "object", "properties": { "job_dispatch_metadata": {} }, "required": ["job_dispatch_metadata"] },
             { "type": "object", "properties": { "dynamic_variables": {} }, "required": ["dynamic_variables"] },
             { "type": "object", "properties": { "agent_version": {} }, "required": ["agent_version"] },
-            { "type": "object", "properties": { "platform": {} }, "required": ["platform"] },
-            { "type": "object", "properties": { "runtime": {} }, "required": ["runtime"] }
+            { "type": "object", "properties": { "platform": {} }, "required": ["platform"] }
           ]
         }
       }

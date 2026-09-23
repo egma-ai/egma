@@ -233,6 +233,13 @@ def _livekit_room(*, modality: str, **rest: object) -> ConnectionPlug | VoiceCon
     return speaking(modality=modality, **rest)
 
 
+def _daily_room(*, modality: str, **rest: object) -> ConnectionPlug | VoiceConnection:
+    """Select the Pipecat adapter by modality; Daily loads only when used."""
+    from .daily_room import daily_room
+
+    return daily_room(modality=modality, **rest)
+
+
 def plug_for(connection_type: str) -> PlugFactory | None:
     """The plug factory registered for one connection type, or ``None``.
 
@@ -246,6 +253,7 @@ def plug_for(connection_type: str) -> PlugFactory | None:
     from .scripted import ScriptedCounterpart
 
     return {
+        "daily_room": _daily_room,
         "livekit_room": _livekit_room,
         "loopback": LoopbackCounterpart,
         "phone_number": PhoneCall,

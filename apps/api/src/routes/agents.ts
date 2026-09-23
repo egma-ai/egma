@@ -319,9 +319,9 @@ const CONNECTION_KEYS = [
 function agentPlatformIn(value: unknown): AgentPlatform | Refusal {
   const named = textWhenGiven(value, "an agent platform");
   if (isRefusal(named)) return named;
-  if (named !== "retell" && named !== "livekit") {
+  if (named !== "retell" && named !== "livekit" && named !== "pipecat") {
     return invalid(
-      "an agent platform is required and must be retell or livekit",
+      "an agent platform is required and must be retell, livekit or pipecat",
     );
   }
   return named;

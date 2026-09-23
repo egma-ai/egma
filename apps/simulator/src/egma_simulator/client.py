@@ -61,6 +61,10 @@ class TransientDeliveryFailure(Exception):
     """A document did not get through this time; the same bytes may next time."""
 
 
+class SimulationNotHeld(Exception):
+    """The control plane says this claimant no longer holds the simulation."""
+
+
 @dataclass(frozen=True)
 class ClaimedSpec:
     """One spec and the control plane instant its lease began."""
@@ -193,6 +197,29 @@ class ControlPlaneClient:
                 if attempt == REGISTRATION_ATTEMPTS - 1:
                     raise
                 await asyncio.sleep(REGISTRATION_RETRY_SECONDS * 2**attempt)
+
+    async def agent_report(self, simulation_id: str, claimant: str) -> dict:
+        """Read whether the SDK's hello for a Pipecat simulation has arrived.
+
+        Answers the route's 200 body. A 409 raises ``SimulationNotHeld``; any
+        other failure raises ``TransientDeliveryFailure``.
+        """
+        url = f"{self._base_url}/v1/simulations/{simulation_id}/agent-report"
+        try:
+            async with self._live_session().post(
+                url,
+                data=json.dumps({"claimant": claimant}).encode(),
+                headers={"content-type": "application/json"},
+                timeout=self._brisk_timeout,
+            ) as response:
+                if response.status == 200:
+                    return await response.json()
+                text = await response.text()
+                if response.status == 409:
+                    raise SimulationNotHeld(text)
+                raise TransientDeliveryFailure(f"{response.status}: {text}")
+        except UNREACHABLE as error:
+            raise TransientDeliveryFailure(f"{error!r}") from error
 
     async def heartbeat(self, simulation_id: str, claimant: str) -> str | None:
         """One beat for one running simulation; the answer may carry a directive."""

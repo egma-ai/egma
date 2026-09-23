@@ -41,6 +41,13 @@
 - [Text connections and Env](https://docs.egma.ai/docs/integrations/livekit/text-and-env.md)
 - [Use a token endpoint](https://docs.egma.ai/docs/integrations/livekit/token-endpoint.md)
 - [Troubleshooting](https://docs.egma.ai/docs/integrations/livekit/troubleshooting.md)
+- [Pipecat](https://docs.egma.ai/docs/integrations/pipecat.md)
+- [Connect a Pipecat Cloud agent](https://docs.egma.ai/docs/integrations/pipecat/connect.md)
+- [Use a self-hosted starter](https://docs.egma.ai/docs/integrations/pipecat/self-hosted.md)
+- [Test a bot on this machine](https://docs.egma.ai/docs/integrations/pipecat/this-machine.md)
+- [Chat connections and Env](https://docs.egma.ai/docs/integrations/pipecat/text-and-env.md)
+- [Monitor a Pipecat agent](https://docs.egma.ai/docs/integrations/pipecat/monitor.md)
+- [Troubleshooting](https://docs.egma.ai/docs/integrations/pipecat/troubleshooting.md)
 - [Retell](https://docs.egma.ai/docs/integrations/retell.md)
 - [Connect a Retell agent](https://docs.egma.ai/docs/integrations/retell/connect.md)
 - [Monitor a Retell agent](https://docs.egma.ai/docs/integrations/retell/monitor.md)
@@ -54,6 +61,7 @@
 - [Skills and CLI](https://docs.egma.ai/skills-cli-sdks/skills-and-cli.md)
 - [LiveKit Python SDK](https://docs.egma.ai/skills-cli-sdks/sdks/livekit-python.md)
 - [LiveKit JavaScript SDK](https://docs.egma.ai/skills-cli-sdks/sdks/livekit-javascript.md)
+- [Pipecat Python SDK](https://docs.egma.ai/skills-cli-sdks/sdks/pipecat-python.md)
 
 ## Self-hosting
 

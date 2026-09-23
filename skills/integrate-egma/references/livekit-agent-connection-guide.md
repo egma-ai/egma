@@ -37,4 +37,4 @@ Now that you have the concepts clear - here's how to add the connection.
 
 ## 3. Setup the egma SDK in the worker
 
-For livekit, the egma SDK integration is required for simulations. This is so that egma can observe agent traces during simulations and inject mock tools. Follow the integration instructions on [PyPI](https://pypi.org/project/egma/) for Python or [npm](https://www.npmjs.com/package/@egma/livekit) for JS. Install the latest compatible release using the repo’s package manager and setup testing, monitoring, or both as requested.
+For livekit, the egma SDK integration is required for simulations. This is so that egma can observe agent traces during simulations and inject mock tools. Follow the integration instructions on [PyPI](https://pypi.org/project/egma/) for Python or [npm](https://www.npmjs.com/package/@egma/livekit) for JS. Install the latest compatible release using the repo’s package manager (for Python, the `egma[livekit]` extra) and setup testing, monitoring, or both as requested.

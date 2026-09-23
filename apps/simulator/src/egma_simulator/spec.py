@@ -407,6 +407,10 @@ class SimulationSpec:
     LiveKit dispatch or the token endpoint's room_config.
     """
 
+    pipecat_body_params: dict[str, Any] | None = None
+    """The test's JSON for a Pipecat start request's body, or None. Forward it
+    verbatim; egma's own ``egma`` key is added beside it."""
+
     mock_tools: tuple[MockTool, ...] = ()
     """What egma answers for while this simulation runs, already resolved.
 
@@ -447,6 +451,7 @@ class SimulationSpec:
             agent_version=document.get("agent_version"),
             dynamic_variables=dict(document.get("dynamic_variables") or {}),
             job_dispatch_metadata=document.get("job_dispatch_metadata"),
+            pipecat_body_params=document.get("pipecat_body_params"),
             mock_tools=_mock_tools(document.get("mock_tools") or []),
             platform=WorkOrderPlatform.from_document(document.get("platform")),
             runtime=ClaimRuntime.from_document(document.get("runtime")),

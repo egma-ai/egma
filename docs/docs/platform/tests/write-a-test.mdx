@@ -113,6 +113,8 @@ For LiveKit, the example's `job_dispatch_metadata` is available as
 `ctx.job.metadata`. Parse that value as JSON in your worker and use the same
 field names your worker expects.
 
+For Pipecat, replace `job_dispatch_metadata` with `pipecat_body_params`. Egma adds this JSON object to the start request's `body`, and your bot reads it at `runner_args.body`. The key `egma` is reserved, and the object can be at most 512 KiB. See [Pass data to a test](/docs/integrations/pipecat/text-and-env#pass-data-to-a-test).
+
 For Retell, replace `job_dispatch_metadata` with `retell_dynamic_variables`.
 Every value must be a string, and variable names must match those used by your
 agent. Names starting with `egma_` are reserved.
@@ -140,6 +142,7 @@ or the agent.
 <Note>
   Tools not named in a test's mock section run normally. Use a supported
   connection. Every LiveKit simulation requires the SDK's `simulation`
-  helper before the agent session starts, including tests without mocks. See
+  helper before the agent session starts, including tests without mocks.
+  Every Pipecat simulation requires it before the runner starts the worker. See
   [Mock tool responses](/docs/platform/tests/mock-tool-responses).
 </Note>

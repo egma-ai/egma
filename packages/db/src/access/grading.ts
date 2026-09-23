@@ -1205,6 +1205,12 @@ function supportedProductionEndModality(
   ) {
     return "voice";
   }
+  if (
+    span.agentPlatform === "pipecat" &&
+    (span.connectionType === "" || span.connectionType === "daily_room")
+  ) {
+    return "voice";
+  }
   return undefined;
 }
 
