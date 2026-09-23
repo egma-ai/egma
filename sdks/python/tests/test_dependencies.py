@@ -2,8 +2,19 @@
 
 from __future__ import annotations
 
+import importlib.util
 import re
-from importlib.metadata import requires
+from importlib.metadata import PackageNotFoundError, distribution, requires
+
+import pytest
+from packaging.requirements import Requirement
+
+needs_livekit = pytest.mark.skipif(
+    importlib.util.find_spec("livekit") is None, reason="LiveKit is not installed"
+)
+needs_pipecat = pytest.mark.skipif(
+    importlib.util.find_spec("pipecat") is None, reason="Pipecat is not installed"
+)
 
 
 def _declared() -> list[tuple[str, str, str]]:
@@ -34,6 +45,7 @@ def test_livekit_and_its_openai_bound_come_with_the_livekit_extra():
     assert "<3" in livekit["openai"]
 
 
+@needs_livekit
 def test_the_runtime_range_check_matches_the_livekit_extra():
     import egma.livekit
 
@@ -41,3 +53,65 @@ def test_the_runtime_range_check_matches_the_livekit_extra():
     declared = sorted(livekit["livekit-agents"].replace(" ", "").split(","))
     checked = sorted(egma.livekit.SUPPORTED_LIVEKIT_AGENTS.split(","))
     assert declared == checked
+
+
+def test_pipecat_comes_with_the_pipecat_extra_in_the_tested_range():
+    pipecat = {name: spec for name, spec, extra in _declared() if extra == "pipecat"}
+
+    assert pipecat["pipecat-ai"].replace(" ", "") in {">=1.9,<1.12", "<1.12,>=1.9"}
+    assert not any(name.startswith("livekit") for name in pipecat)
+
+
+@needs_pipecat
+def test_the_pipecat_runtime_range_check_matches_the_pipecat_extra():
+    import egma.pipecat
+
+    pipecat = {name: spec for name, spec, extra in _declared() if extra == "pipecat"}
+    declared = sorted(pipecat["pipecat-ai"].replace(" ", "").split(","))
+    assert declared == sorted(egma.pipecat.SUPPORTED_PIPECAT.split(","))
+
+
+def _canonical(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _installed_closure(name: str, extras: frozenset[str]) -> set[str]:
+    """Every distribution ``pip install name[extras]`` pulls in, read off the
+    installed metadata with each requirement's marker applied here."""
+    found: set[str] = set()
+    visited: set[tuple[str, frozenset[str]]] = set()
+    pending = [(_canonical(name), extras)]
+    while pending:
+        current, wanted = pending.pop()
+        if (current, wanted) in visited:
+            continue
+        visited.add((current, wanted))
+        found.add(current)
+        try:
+            declared = distribution(current).requires or []
+        except PackageNotFoundError:
+            continue
+        environments = [{"extra": extra} for extra in wanted] or [{"extra": ""}]
+        for raw in declared:
+            requirement = Requirement(raw)
+            if requirement.marker is None or any(
+                requirement.marker.evaluate(environment) for environment in environments
+            ):
+                pending.append(
+                    (_canonical(requirement.name), frozenset(requirement.extras))
+                )
+    return found
+
+
+@needs_pipecat
+def test_installing_the_pipecat_extra_installs_no_livekit():
+    pulled = _installed_closure("egma", frozenset({"pipecat"}))
+
+    assert "pipecat-ai" in pulled
+    assert sorted(name for name in pulled if name.startswith("livekit")) == []
+
+
+def test_installing_plain_egma_installs_no_agent_framework():
+    pulled = _installed_closure("egma", frozenset())
+
+    assert not any(name.startswith(("livekit", "pipecat")) for name in pulled)

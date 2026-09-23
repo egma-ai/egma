@@ -6,9 +6,16 @@ test process already holds whatever other tests imported.
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 import textwrap
+
+import pytest
+
+needs_livekit = pytest.mark.skipif(
+    importlib.util.find_spec("livekit") is None, reason="LiveKit is not installed"
+)
 
 BLOCK_LIVEKIT = textwrap.dedent(
     """
@@ -54,6 +61,7 @@ def test_importing_egma_loads_no_livekit():
     )
 
 
+@needs_livekit
 def test_the_top_level_livekit_names_still_import_for_a_livekit_worker():
     _passes(
         """
@@ -135,3 +143,51 @@ def test_an_unknown_top_level_name_is_an_attribute_error():
             raise SystemExit("an unknown name resolved")
         """
     )
+
+
+BLOCK_PIPECAT = (
+    BLOCK_LIVEKIT.replace('"livekit"', '"pipecat"')
+    .replace('"livekit."', '"pipecat."')
+    .replace("NoLiveKit", "NoPipecat")
+)
+
+needs_pipecat = pytest.mark.skipif(
+    importlib.util.find_spec("pipecat") is None, reason="Pipecat is not installed"
+)
+
+
+@needs_pipecat
+def test_the_pipecat_integration_imports_without_livekit():
+    ran = _run(
+        BLOCK_LIVEKIT
+        + """
+import sys
+import egma
+import egma.pipecat
+from egma.pipecat import NotReported, monitor, simulation
+
+assert NotReported is egma.NotReported
+assert not [name for name in sys.modules if name.split(".")[0] == "livekit"]
+print("ok")
+"""
+    )
+    assert ran.returncode == 0, ran.stderr
+    assert ran.stdout.strip().endswith("ok")
+
+
+def test_without_pipecat_the_pipecat_module_says_which_extra_to_install():
+    ran = _run(
+        BLOCK_PIPECAT
+        + """
+import egma
+
+try:
+    import egma.pipecat
+except ModuleNotFoundError as missing:
+    print(missing)
+else:
+    raise SystemExit("imported without pipecat")
+"""
+    )
+    assert ran.returncode == 0, ran.stderr
+    assert 'pip install "egma[pipecat]"' in ran.stdout
