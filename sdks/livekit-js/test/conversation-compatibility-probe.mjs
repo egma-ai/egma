@@ -21,6 +21,7 @@ const ctx = {
 const session = new voice.AgentSession({
   llm: new voice.testing.FakeLLM([
     { input: "Tomorrow.", content: "What time tomorrow?" },
+    { input: "Please continue.", content: "This reply will be interrupted.", duration: 500 },
   ]),
 });
 const options = {
@@ -33,6 +34,29 @@ monitor(ctx, options);
 await session.start({ agent: new voice.Agent({ instructions: "Book appointments." }) });
 await session.say("Hello, I can help you schedule an appointment!").waitForPlayout();
 await session.run({ userInput: "Tomorrow." }).wait();
+const speaking = new Promise((resolve) => {
+  session.on(voice.AgentSessionEventTypes.AgentStateChanged, (event) => {
+    if (event.newState === "speaking") resolve();
+  });
+});
+let interruptedText = "";
+let doneAtCommit = false;
+const committed = new Promise((resolve) => {
+  session.on(voice.AgentSessionEventTypes.ConversationItemAdded, ({ item }) => {
+    if (item.type === "message" && item.role === "assistant") {
+      interruptedText = item.textContent ?? "";
+      doneAtCommit = speech.done();
+      resolve();
+    }
+  });
+});
+const speech = session.generateReply({ userInput: "Please continue." });
+await speaking;
+session.interrupt({ force: true });
+await speech.waitForPlayout();
+await committed;
+assert.equal(doneAtCommit, true);
+assert.notEqual(interruptedText, "");
 await session.close();
 await Promise.all(shutdownCallbacks.map((callback) => callback()));
 await telemetry.tracer.getProvider().shutdown();
@@ -46,7 +70,7 @@ const texts = batches
   .map((span) => span.attributes["lk.pii.response.text"] ?? span.attributes["lk.response.text"])
   .filter((value) => typeof value === "string" && value !== "");
 assert.deepEqual(texts, privateContent ? [] : [
-  "Hello, I can help you schedule an appointment!", "What time tomorrow?",
+  "Hello, I can help you schedule an appointment!", "What time tomorrow?", interruptedText,
 ]);
 const root = batches.find((span) => span.name === "agent_session");
 assert.equal(greeting[0].spanContext().traceId, root.spanContext().traceId);

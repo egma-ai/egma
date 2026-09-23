@@ -11,6 +11,7 @@ import { type ReadableSpan } from "@opentelemetry/sdk-trace-node";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
+import { ConversationCollector } from "../src/conversation.ts";
 import { exportStateForTests, resetExportForTests } from "../src/export.ts";
 import { monitor } from "../src/monitoring.ts";
 
@@ -155,6 +156,45 @@ describe("LiveKit committed conversation export", () => {
     });
   });
 
+  it("does not duplicate a native reply committed after forced speech completion", async () => {
+    const text = "This is the generated reply before interruption.";
+    const session = newSession(new voice.testing.FakeLLM([
+      { input: "Hello.", content: text, duration: 500 },
+    ]));
+    exportConversation(session);
+    await session.start({ agent: new voice.Agent({ instructions: "Reply briefly." }) });
+    const speaking = new Promise<void>((resolve) => {
+      session.on(voice.AgentSessionEventTypes.AgentStateChanged, (event) => {
+        if (event.newState === "speaking") resolve();
+      });
+    });
+    let doneAtCommit = false;
+    let committedText = "";
+    const committed = new Promise<void>((resolve) => {
+      session.on(voice.AgentSessionEventTypes.ConversationItemAdded, ({ item }) => {
+        if (item.type === "message" && item.role === "assistant") {
+          doneAtCommit = speech.done();
+          committedText = item.textContent ?? "";
+          resolve();
+        }
+      });
+    });
+    const speech = session.generateReply({ userInput: "Hello." });
+    await speaking;
+    session.interrupt({ force: true });
+    await speech.waitForPlayout();
+    await committed;
+    await session.close();
+    await exportStateForTests()!.processor.forceFlush();
+
+    expect(doneAtCommit).toBe(true);
+    expect(committedText).not.toBe("");
+    expect(text.startsWith(committedText)).toBe(true);
+    expect(turns().map((span) => ({
+      name: span.name, text: span.attributes["lk.pii.response.text"],
+    }))).toEqual([{ name: "agent_turn", text: committedText }]);
+  });
+
   it("exports say when it inherits an active native turn and keeps repeated committed messages", async () => {
     const session = newSession();
     exportConversation(session);
@@ -211,5 +251,23 @@ describe("LiveKit committed conversation export", () => {
     const span = turns()[0]!;
     expect(span.startTime[0] * 1_000 + span.startTime[1] / 1e6).toBe(createdAt);
     expect(span.duration).toEqual([0, 0]);
+  });
+
+  it("detaches session listeners when the collector shuts down before session close", async () => {
+    const session = newSession();
+    const collector = new ConversationCollector(trace.getTracer("egma.livekit"));
+    const events = [
+      voice.AgentSessionEventTypes.SpeechCreated,
+      voice.AgentSessionEventTypes.ConversationItemAdded,
+      voice.AgentSessionEventTypes.Close,
+    ];
+    const before = events.map((event) => session.listenerCount(event));
+    collector.attach(session);
+    expect(events.map((event) => session.listenerCount(event))).toEqual(before.map((count) => count + 1));
+
+    await collector.shutdown();
+    await collector.shutdown();
+    expect(events.map((event) => session.listenerCount(event))).toEqual(before);
+    await session.close();
   });
 });

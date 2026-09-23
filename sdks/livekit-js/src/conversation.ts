@@ -11,7 +11,9 @@ const RESPONSE_TEXT = "lk.pii.response.text";
 /** Adds committed speech that LiveKit does not include in its native turn spans. */
 export class ConversationCollector implements SpanProcessor {
   private readonly roots = new Map<string, Context>();
-  private readonly nativeTurns = new WeakSet<object>();
+  private readonly nativeTurns = new Map<object, ReadableSpan>();
+  private readonly completedSpeeches = new Map<voice.SpeechHandle, () => void>();
+  private readonly detachSessions = new Set<() => void>();
   private readonly attached = new WeakSet<voice.AgentSession>();
   private readonly tracer: Tracer;
 
@@ -27,12 +29,19 @@ export class ConversationCollector implements SpanProcessor {
         trace.setSpan(parentContext, span),
       );
     } else if (span.name === "agent_turn") {
-      this.nativeTurns.add(span);
+      this.nativeTurns.set(span, span);
     }
   }
 
   onEnd(span: ReadableSpan): void {
-    this.nativeTurns.delete(span);
+    if (this.nativeTurns.delete(span)) {
+      for (const [speech, release] of this.completedSpeeches) {
+        if (!this.hasNativeTurn(speech)) {
+          release();
+          this.completedSpeeches.delete(speech);
+        }
+      }
+    }
     if (
       span.name === "agent_session" &&
       span.instrumentationScope.name === "livekit-agents"
@@ -42,6 +51,9 @@ export class ConversationCollector implements SpanProcessor {
   }
 
   async shutdown(): Promise<void> {
+    for (const detach of this.detachSessions) detach();
+    this.nativeTurns.clear();
+    this.completedSpeeches.clear();
     this.roots.clear();
   }
 
@@ -53,7 +65,14 @@ export class ConversationCollector implements SpanProcessor {
     const seen = new Set<string>();
     const speeches = new Set<voice.SpeechHandle>();
     const speechDone = (speech: voice.SpeechHandle): void => {
-      speeches.delete(speech);
+      speech.removeDoneCallback(speechDone);
+      if (!speeches.has(speech)) return;
+      // Forced interruption can mark speech done before its native turn commits text.
+      if (this.hasNativeTurn(speech)) {
+        this.completedSpeeches.set(speech, () => speeches.delete(speech));
+      } else {
+        speeches.delete(speech);
+      }
     };
     const speechCreated = ({ speechHandle }: voice.SpeechCreatedEvent): void => {
       speeches.add(speechHandle);
@@ -109,16 +128,29 @@ export class ConversationCollector implements SpanProcessor {
       voice.AgentSessionEventTypes.ConversationItemAdded,
       conversationItemAdded,
     );
-    session.once(voice.AgentSessionEventTypes.Close, () => {
+    const detach = (): void => {
+      this.detachSessions.delete(detach);
+      session.off(voice.AgentSessionEventTypes.Close, detach);
       session.off(voice.AgentSessionEventTypes.SpeechCreated, speechCreated);
       session.off(
         voice.AgentSessionEventTypes.ConversationItemAdded,
         conversationItemAdded,
       );
-      for (const speech of speeches) speech.removeDoneCallback(speechDone);
+      for (const speech of speeches) {
+        speech.removeDoneCallback(speechDone);
+        this.completedSpeeches.delete(speech);
+      }
       speeches.clear();
       seen.clear();
-    });
+    };
+    this.detachSessions.add(detach);
+    session.once(voice.AgentSessionEventTypes.Close, detach);
+  }
+
+  private hasNativeTurn(speech: voice.SpeechHandle): boolean {
+    return [...this.nativeTurns.values()].some((span) =>
+      span.attributes["lk.speech_id"] === speech.id,
+    );
   }
 }
 
