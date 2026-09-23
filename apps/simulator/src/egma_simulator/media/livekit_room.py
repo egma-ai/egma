@@ -49,6 +49,10 @@ from ..mock_tools import (
 from ..platform_logging import log_event
 from ..redaction import SecretRegistry
 from . import MediaBackendError, VoiceMedia
+from .guarded_http import UnsafeAddress as _UnsafeEndpointAddress
+from .guarded_http import guarded_connector, guarded_post, header_object
+from .guarded_http import refused_for_address as _unsafe_endpoint_failure
+from .guarded_http import require_public_address as _public_endpoint_address
 from .room import (
     PERSONA_IDENTITY,
     QUOTED_REFUSAL_CHARS,
@@ -193,10 +197,6 @@ wait for. Without this the goodbye an agent leaves on would be dropped and
 the record would show an agent that left saying nothing. Short, because
 what is being waited for has already been sent.
 """
-
-
-class _UnsafeEndpointAddress(OSError):
-    """The token endpoint resolved to an address Egma must not reach."""
 
 
 LIVEKIT_STARTUP_SECONDS = 60.0
@@ -459,83 +459,6 @@ class LiveKitStartup:
     @staticmethod
     def _server(room: Any) -> str:
         return getattr(room, "_url", "configured server")
-
-
-def _public_endpoint_address(raw: object) -> None:
-    """Refuse every address that is not globally routable."""
-    if not isinstance(raw, str):
-        raise _UnsafeEndpointAddress
-    try:
-        address = ipaddress.ip_address(raw)
-    except ValueError as invalid:
-        raise _UnsafeEndpointAddress from invalid
-    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
-        address = address.ipv4_mapped
-    if not address.is_global or address.is_multicast:
-        raise _UnsafeEndpointAddress
-
-
-def _unsafe_endpoint_failure(error: BaseException) -> bool:
-    """Whether an HTTP-client wrapper carries an address-policy refusal."""
-    pending: list[BaseException] = [error]
-    seen: set[int] = set()
-    while pending:
-        held = pending.pop()
-        if id(held) in seen:
-            continue
-        seen.add(id(held))
-        if isinstance(held, _UnsafeEndpointAddress):
-            return True
-        for nested in (
-            getattr(held, "os_error", None),
-            held.__cause__,
-            held.__context__,
-        ):
-            if isinstance(nested, BaseException):
-                pending.append(nested)
-    return False
-
-
-class _EndpointResolver:
-    """Check every DNS answer before aiohttp chooses one to connect to."""
-
-    def __init__(self, delegate: Any) -> None:
-        self._delegate = delegate
-
-    async def resolve(
-        self, host: str, port: int = 0, family: int = socket.AF_INET
-    ) -> list[dict[str, Any]]:
-        answers = await self._delegate.resolve(host, port, family)
-        for answer in answers:
-            _public_endpoint_address(answer.get("host"))
-        return answers
-
-    async def close(self) -> None:
-        await self._delegate.close()
-
-
-def _endpoint_socket(addr_info: tuple[Any, ...]) -> socket.socket:
-    """Open only the exact public address the HTTP client selected.
-
-    The check lives in the socket factory rather than in a separate DNS lookup.
-    That makes the checked address and the connected address the same value,
-    so changing DNS between two lookups cannot move the request onto a private
-    network. The resolver check above rejects a mixed answer before the
-    connector chooses one; this second check protects the final address too.
-    """
-    family, kind, protocol, _canonical_name, sockaddr = addr_info
-    _public_endpoint_address(sockaddr[0])
-    return socket.socket(family=family, type=kind, proto=protocol)
-
-
-async def _token_body(answer: Any) -> bytes:
-    """Read no more than one bounded token response plus one proof byte."""
-    held = bytearray()
-    async for chunk in answer.content.iter_chunked(16 * 1024):
-        held.extend(chunk)
-        if len(held) > TOKEN_RESPONSE_BYTES:
-            return bytes(held[: TOKEN_RESPONSE_BYTES + 1])
-    return bytes(held)
 
 
 def platform_refusal(what_failed: str, code: str, told: str) -> MediaBackendError:
@@ -867,30 +790,13 @@ def _endpoint_headers(credentials: Any) -> dict[str, str]:
             "nobody"
         )
 
-    written = credentials.get("headers")
-    held: Any = written
-    if isinstance(written, str):
-        try:
-            held = json.loads(written)
-        except ValueError:
-            held = None
-
-    if (
-        not isinstance(held, dict)
-        or not held
-        or any(
-            not isinstance(name, str)
-            or not name.strip()
-            or not isinstance(value, str)
-            or not value.strip()
-            for name, value in held.items()
-        )
-    ):
+    headers = header_object(credentials.get("headers"))
+    if headers is None:
         raise MediaBackendError(
             "livekit credentials: headers must be a JSON object of header "
             "name to header value"
         )
-    return {name.strip(): value.strip() for name, value in held.items()}
+    return headers
 
 
 @dataclass(frozen=True)
@@ -1200,13 +1106,7 @@ class RoomLifecycle:
         A caller can supply a resolver for a system-boundary test, but it
         still passes through the same policy before the connector can use it.
         """
-        guarded = _EndpointResolver(resolver)
-        connector = aiohttp.TCPConnector(
-            resolver=guarded,
-            socket_factory=_endpoint_socket,
-            use_dns_cache=False,
-        )
-        return guarded, connector
+        return guarded_connector(aiohttp, resolver)
 
     def _token_request(self) -> dict[str, Any]:
         """Build the token request with room and participant names plus one named
@@ -1236,29 +1136,20 @@ class RoomLifecycle:
         endpoint = self._settings.token_endpoint
         asked = self._token_request()
 
-        resolver = self._endpoint_resolver or aiohttp.resolver.DefaultResolver()
         try:
-            resolver, connector = self._endpoint_connector(aiohttp, resolver)
-            async with aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=TOKEN_SECONDS),
-                connector=connector,
-            ) as session, session.post(
+            # A token endpoint answers; it does not send egma somewhere else.
+            # A redirect is read as the answer it is, and only its status is
+            # reported.
+            answer = await guarded_post(
                 endpoint,
-                json=asked,
+                json_body=asked,
                 headers=self._settings.endpoint_headers,
-                # A token endpoint answers; it does not send egma somewhere
-                # else. Following a redirect would carry the customer's own
-                # auth headers to a host they never configured, chosen by
-                # whoever answered — so a redirect is read as the answer it
-                # is, and only its status is reported.
-                allow_redirects=False,
-            ) as answer:
-                status = answer.status
-                said = (
-                    await _token_body(answer)
-                    if 200 <= status < 300
-                    else b""
-                )
+                seconds=TOKEN_SECONDS,
+                limit=TOKEN_RESPONSE_BYTES,
+                resolver=self._endpoint_resolver,
+                connector_for=self._endpoint_connector,
+            )
+            status, said = answer.status, answer.body
         except Exception as unreachable:
             if _unsafe_endpoint_failure(unreachable):
                 reason = (
@@ -1278,9 +1169,6 @@ class RoomLifecycle:
             else:
                 raise
             raise MediaBackendError(reason, ending=ERROR) from unreachable
-        finally:
-            with contextlib.suppress(Exception):
-                await resolver.close()
 
         if status < 200 or status >= 300:
             raise MediaBackendError(

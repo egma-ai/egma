@@ -90,14 +90,14 @@ def assemble(
     # not a list kept here of the ones that can. A plug that cannot takes
     # it and drops it, and the seam then says there is nothing to claim.
     mock_tools = MockToolSeam(spec.mock_tools)
-    registration: dict[str, object] = (
-        {"on_provider_reference": on_provider_reference}
-        if spec.connection_type == "livekit_room"
-        else {}
-    )
-    if spec.connection_type == "daily_room":
-        # A Pipecat start request carries the test's body params, and its room
-        # expiry covers the simulation's duration limit.
+    # Values only one lane reads go to that lane's plug alone, so no other
+    # plug's constructor has to name them: the provider-reference callback
+    # (LiveKit and Pipecat), and a Pipecat start request's agent report, body
+    # params and room expiry, which covers the duration limit.
+    registration: dict[str, object] = {}
+    if spec.connection_type == "livekit_room":
+        registration = {"on_provider_reference": on_provider_reference}
+    elif spec.connection_type == "daily_room":
         registration = {
             "on_provider_reference": on_provider_reference,
             "agent_report": agent_report,
@@ -119,7 +119,7 @@ def assemble(
         # the same reason the mock-tool seam is: which of them reaches a
         # platform that keeps versions, renders variables or dispatches a
         # worker is the plug's own answer, not a list kept here of the ones
-        # that do.
+        # that do. Lane-only values ride ``registration`` above.
         agent_version=spec.agent_version,
         dynamic_variables=spec.dynamic_variables,
         job_dispatch_metadata=spec.job_dispatch_metadata,

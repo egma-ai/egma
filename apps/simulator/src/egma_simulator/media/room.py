@@ -22,6 +22,7 @@ from . import (
     RemoteParticipantLeftFrame,
     VoiceMedia,
     arrived_now,
+    first_of,
 )
 
 logger = logging.getLogger(__name__)
@@ -171,22 +172,6 @@ def answering(
         return response
 
     return answer
-
-
-async def first_of(*events: asyncio.Event, within: float) -> bool:
-    """Wait until one event occurs, or return false at the deadline."""
-    waiting = [asyncio.ensure_future(event.wait()) for event in events]
-    try:
-        done, _pending = await asyncio.wait(
-            waiting, return_when=asyncio.FIRST_COMPLETED, timeout=within
-        )
-    finally:
-        for unfinished in waiting:
-            if not unfinished.done():
-                unfinished.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await unfinished
-    return bool(done)
 
 
 class _JoinAfterPipecatConversion(asyncio.Queue[Any]):
