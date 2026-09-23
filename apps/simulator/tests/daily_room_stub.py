@@ -134,12 +134,19 @@ class FakeRoom:
         self.departures = 0
         self.ended = asyncio.Event()
         self.failed = asyncio.Event()
+        self.fault: str | None = None
         self._playing: set[asyncio.Task[None]] = set()
 
     # Voice.
     def create_transport(self, *, audio_out_mixer: object = None) -> VoiceMedia:
         del audio_out_mixer
-        return VoiceMedia(input=(), output=(), ended=self.ended, failed=self.failed)
+        return VoiceMedia(
+            input=(),
+            output=(),
+            ended=self.ended,
+            failed=self.failed,
+            fault=lambda: self.fault,
+        )
 
     async def wait_joined(self, within: float) -> None:
         del within

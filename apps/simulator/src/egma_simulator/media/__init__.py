@@ -274,6 +274,9 @@ class VoiceMedia:
     the audio it has written rather than the seconds that have passed,
     and a wall-clock instant read off it would be a made-up one.
     """
+    fault: Callable[[], str | None] = lambda: None
+    """The connection's own reason when it set ``failed`` itself, else None.
+    A conductor reports this reason instead of a lost transport."""
 
 
 class MediaBackend(Protocol):

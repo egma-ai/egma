@@ -82,10 +82,11 @@ JOIN_SECONDS = 30.0
 """Longest wait for the persona to enter the room."""
 
 AGENT_REPORT_POLL_SECONDS = 1.0
-"""Pause between reads of the agent report from Egma's server."""
+"""Pause between reads of the agent report from Egma's server during startup."""
 
-CLIENT_READY_RESEND_SECONDS = 5.0
-"""client-ready is sent once more when no bot-ready followed it by then."""
+AGENT_REPORT_WATCH_SECONDS = 2.0
+"""Pause between reads of the agent report after readiness. A later refused
+hello (a mocked Pipecat Flows function the flow offers) ends the simulation."""
 
 AUDIO_DRAIN_SECONDS = 2.0
 """Longest wait for a departing bot's buffered audio to pass the input."""
@@ -463,11 +464,13 @@ class PipecatStarter:
         body_params: Mapping[str, Any] | None,
         max_duration_seconds: float,
         secrets: SecretRegistry,
+        modality: str = "voice",
         endpoint_resolver: Any = None,
         wall_clock: Callable[[], float] = time.time,
     ) -> None:
         self._settings = settings
         self._simulation_id = simulation_id
+        self._modality = modality
         self._body_params = dict(body_params or {})
         self._max_duration_seconds = max_duration_seconds
         self._secrets = secrets
@@ -491,7 +494,10 @@ class PipecatStarter:
             )
         body = dict(self._body_params)
         body.pop("egma", None)
-        body["egma"] = {"simulation_id": self._simulation_id}
+        body["egma"] = {
+            "simulation_id": self._simulation_id,
+            "modality": self._modality,
+        }
         asked: dict[str, Any] = {
             "createDailyRoom": True,
             "dailyRoomProperties": {"exp": self._expiry, "eject_at_room_exp": True},
@@ -919,6 +925,8 @@ class DailyVoiceRoom:
         self._departure: asyncio.Task[None] | None = None
         self.ended = asyncio.Event()
         self.failed = asyncio.Event()
+        self.fault: str | None = None
+        """Set with ``failed`` when the lifecycle ends the simulation itself."""
 
     def create_transport(self, *, audio_out_mixer: object = None) -> VoiceMedia:
         """Build the stock Daily input and output processors."""
@@ -1017,6 +1025,7 @@ class DailyVoiceRoom:
             ended=self.ended,
             failed=self.failed,
             transport_name="Daily room",
+            fault=lambda: room.fault,
         )
 
     async def wait_joined(self, within: float) -> None:
@@ -1133,6 +1142,7 @@ class DailyTextRoom:
         self._left_tasks: set[asyncio.Task[None]] = set()
         self.ended = asyncio.Event()
         self.failed = asyncio.Event()
+        self.fault: str | None = None
 
     async def join(self, within: float) -> None:
         """Enter the room, publishing nothing."""
@@ -1299,32 +1309,28 @@ class RtviTurn:
     answer_began_at: float | None = None
 
 
-TURN_SETTLE_SECONDS = 1.0
-"""Quiet after the model stopped with no tool in flight before a turn ends."""
-
-TOOL_FOLLOWUP_SECONDS = 5.0
-"""Wait for the model run that follows a finished tool call. A tool result that
-starts no completion (run_llm=False, a Flows NO_RESPONSE) ends the turn then."""
+QUIET_SECONDS = 3.0
+"""Turn end when a finished tool call starts no new completion (run_llm=False,
+a Flows NO_RESPONSE), or when a turn has no text yet: this long without an RTVI
+event from the bot."""
 
 SPEECH_WAIT_SECONDS = 60.0
-"""Longest wait for bot-stopped-speaking after the last speech event."""
+"""Longest wait for bot-stopped-speaking after bot-started-speaking."""
 
 
 class RtviTurns:
     """Assembles the bot's chat answers from RTVI events.
 
-    A turn is over when every model run it started has stopped, no tool call is
-    in flight, a finished tool call's follow-up run has had its chance to start,
-    the bot is not speaking, and the room has been quiet for
-    TURN_SETTLE_SECONDS. Calls in flight are counted from
-    llm-function-call-started, which carries no id at Pipecat's default report
-    level and arrives before the bot-llm-stopped of the run that asked for them.
+    Calls in flight are counted from llm-function-call-started, whose data is
+    empty at Pipecat's default report level; a call leaves on its
+    llm-function-call-stopped. A turn is over when a bot-llm-stopped arrived
+    after the last llm-function-call-stopped, no call is in flight, and the turn
+    has text; otherwise it ends after QUIET_SECONDS without a bot event. The
+    reply is the turn's bot-llm-text tokens, sent whether or not it is spoken.
 
-    Text comes from bot-llm-text, which the bot sends whether or not its answer
-    is spoken. send-text's audio_response=false silences only the first
-    completion of an answer, so the text after a tool call is spoken; waiting
-    for bot-stopped-speaking keeps the next send-text from interrupting it,
-    which would leave the bot's context holding only what it said aloud.
+    A bot that speaks in chat (an SDK that did not turn speech off) is heard
+    out to bot-stopped-speaking before the turn ends, so the next send-text
+    does not interrupt it and cut the bot's own record of its answer.
     """
 
     def __init__(self) -> None:
@@ -1332,33 +1338,32 @@ class RtviTurns:
         self.turn = 0
         self._runs: list[_Run] = []
         self._open: _Run | None = None
-        self._announced = 0
-        self._finished_calls = 0
-        self._in_progress: set[str] = set()
+        self._calls_in_flight = 0
+        self._stopped_after_calls = True
+        self._last_stop_at = 0.0
         self._last_event_at = 0.0
-        self._tool_finished_at: float | None = None
         self._answer_began: dict[int, float] = {}
         self._sent_ids: set[str] = set()
         self._speaking = False
-        self._speech_event_at = 0.0
+        self._speech_began_at = 0.0
         self.refusal: str | None = None
 
     def begin_turn(self, message_id: str) -> int:
         self.turn += 1
         self._sent_ids.add(message_id)
-        self._tool_finished_at = None
+        self._stopped_after_calls = True
         return self.turn
 
     def feed(self, message: Any) -> None:
         kind = _rtvi_type(message)
-        if kind is None:
+        if kind is None or kind == "bot-interrupted":
             return
         now = asyncio.get_running_loop().time()
         data = _rtvi_data(message)
+        self._last_event_at = now
         if kind == "bot-llm-started":
             self._open = _Run(turn=self.turn)
             self._runs.append(self._open)
-            self._tool_finished_at = None
         elif kind == "bot-llm-text":
             text = data.get("text")
             run = self._open
@@ -1373,31 +1378,21 @@ class RtviTurns:
             if self._open is not None:
                 self._open.stopped = True
                 self._open = None
+            self._stopped_after_calls = True
+            self._last_stop_at = now
         elif kind == "llm-function-call-started":
-            self._announced += 1
-        elif kind == "llm-function-call-in-progress":
-            call_id = data.get("tool_call_id")
-            if isinstance(call_id, str):
-                self._in_progress.add(call_id)
+            self._calls_in_flight += 1
         elif kind == "llm-function-call-stopped":
-            self._finished_calls += 1
-            call_id = data.get("tool_call_id")
-            if isinstance(call_id, str):
-                self._in_progress.discard(call_id)
-            if not data.get("cancelled"):
-                self._tool_finished_at = now
-        elif kind in ("bot-started-speaking", "bot-tts-started"):
+            self._calls_in_flight = max(0, self._calls_in_flight - 1)
+            self._stopped_after_calls = False
+        elif kind == "bot-started-speaking":
             self._speaking = True
-            self._speech_event_at = now
-        elif kind in ("bot-stopped-speaking", "bot-interrupted"):
+            self._speech_began_at = now
+        elif kind == "bot-stopped-speaking":
             self._speaking = False
-            self._speech_event_at = now
         elif kind == "error-response" and message.get("id") in self._sent_ids:
             error = data.get("error")
             self.refusal = str(error) if error is not None else "no reason given"
-        else:
-            return
-        self._last_event_at = now
         self.changed.set()
 
     def runs_of(self, turn: int, since: int = 0) -> list[_Run]:
@@ -1407,22 +1402,19 @@ class RtviTurns:
     def started(self, turn: int, since: int = 0) -> bool:
         return bool(self.runs_of(turn, since))
 
-    def _tool_in_flight(self) -> bool:
-        return bool(self._in_progress) or self._announced > self._finished_calls
-
     def over_at(self, turn: int, since: int = 0) -> float | None:
         """When the turn ends if nothing else happens, or None while it cannot."""
         runs = self.runs_of(turn, since)
         if not runs or any(not run.stopped for run in runs):
             return None
-        if self._tool_in_flight():
+        if self._calls_in_flight:
             return None
-        ends = self._last_event_at + TURN_SETTLE_SECONDS
         if self._speaking:
-            ends = max(ends, self._speech_event_at + SPEECH_WAIT_SECONDS)
-        if self._tool_finished_at is not None:
-            ends = max(ends, self._tool_finished_at + TOOL_FOLLOWUP_SECONDS)
-        return ends
+            return self._speech_began_at + SPEECH_WAIT_SECONDS
+        said = any(run.text for run in runs)
+        if self._stopped_after_calls and said:
+            return self._last_stop_at
+        return self._last_event_at + QUIET_SECONDS
 
     def text_of(self, turn: int, since: int = 0) -> str | None:
         said = ["".join(run.text).strip() for run in self.runs_of(turn, since)]
@@ -1464,6 +1456,7 @@ class PipecatRoomLifecycle:
             body_params=body_params,
             max_duration_seconds=max_duration_seconds,
             secrets=self._secrets,
+            modality=self.MODALITY,
             endpoint_resolver=endpoint_resolver,
         )
         self._startup = PipecatStartup()
@@ -1472,6 +1465,8 @@ class PipecatRoomLifecycle:
         self._report_task: asyncio.Task[None] | None = None
         self._client_ready_task: asyncio.Task[None] | None = None
         self._reference: str | None = None
+        self._started = False
+        self._fault: MediaBackendError | None = None
 
     @property
     def starter(self) -> PipecatStarter:
@@ -1520,18 +1515,24 @@ class PipecatRoomLifecycle:
         return max(0.0, self._deadline - asyncio.get_running_loop().time())
 
     async def _read_agent_report(self) -> None:
-        """Poll Egma's server until the hello is accepted or refused."""
+        """Poll Egma's server for the agent report until the simulation ends.
+
+        Every second until the hello is accepted, then every two. A refused
+        report at any time ends the simulation with the server's reason.
+        """
         probe = self._agent_report
         if probe is None:
             return
+        startup = self._startup
         while True:
             try:
                 report = await probe()
             except asyncio.CancelledError:
                 raise
             except AgentReportLost:
-                self._startup.report_lost = True
-                self._startup.changed.set()
+                if not self._started:
+                    startup.report_lost = True
+                    startup.changed.set()
                 return
             except Exception as unread:
                 logger.info(
@@ -1539,10 +1540,29 @@ class PipecatRoomLifecycle:
                     self._quotable(repr(unread)),
                 )
             else:
-                if report.state != "waiting":
-                    self._startup.reported(report)
+                if report.state == "refused":
+                    startup.reported(report)
+                    if self._started:
+                        self._fail(
+                            hello_refused_failure(report.code, report.message or "")
+                        )
                     return
-            await asyncio.sleep(AGENT_REPORT_POLL_SECONDS)
+                if report.state == "accepted" and startup.report.state != "accepted":
+                    startup.reported(report)
+            await asyncio.sleep(
+                AGENT_REPORT_WATCH_SECONDS
+                if startup.report.state == "accepted"
+                else AGENT_REPORT_POLL_SECONDS
+            )
+
+    def _fail(self, failure: MediaBackendError) -> None:
+        """End a running simulation with the connection's own reason."""
+        if self._fault is None:
+            self._fault = failure
+        room = self._room
+        if room is not None:
+            room.fault = str(self._fault)
+            room.failed.set()
 
     # Room events.
 
@@ -1571,31 +1591,17 @@ class PipecatRoomLifecycle:
             )
 
     async def _send_client_ready(self) -> None:
-        """Send RTVI client-ready to the bot, and once more if bot-ready is late.
+        """Send RTVI client-ready exactly once, when the bot is in the room.
 
-        A room message reaches only participants already present, so it goes
-        when the bot is in the room: right after the join when the bot was
-        first, else when it arrives.
+        A room message reaches only participants already present, so it goes at
+        the join when the bot was first, else when the bot arrives. It is never
+        sent again: every client-ready runs the bot's on_client_ready handler.
         """
-        startup = self._startup
+        room = self._room
+        if room is None:
+            return
         try:
-            for attempt in range(2):
-                if attempt:
-                    log_event(
-                        logger,
-                        logging.INFO,
-                        "egma.pipecat.client_ready_resent",
-                        "no RTVI bot-ready yet; sending client-ready again",
-                    )
-                room = self._room
-                if room is None:
-                    return
-                await room.send(client_ready_message())
-                if await startup.until(
-                    lambda: startup.bot_ready or startup.bot_left,
-                    within=CLIENT_READY_RESEND_SECONDS,
-                ):
-                    return
+            await room.send(client_ready_message())
         except asyncio.CancelledError:
             raise
         except Exception as unsent:
@@ -1645,6 +1651,7 @@ class PipecatRoomLifecycle:
         except MediaBackendError:
             self._log_startup("failed")
             raise
+        self._started = True
         self._log_startup("ready")
         assert self._reference is not None
         return self._reference
@@ -1792,6 +1799,8 @@ class PipecatChatBackend(PipecatRoomLifecycle):
         return room is not None and self._startup.bot_left and not room.failed.is_set()
 
     def raise_if_failed(self) -> None:
+        if self._fault is not None:
+            raise self._fault
         room = self._room
         if room is not None and room.failed.is_set():
             raise MediaBackendError(

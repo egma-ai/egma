@@ -69,9 +69,8 @@ def quick(monkeypatch: pytest.MonkeyPatch) -> None:
     """Short windows, so a timed-out startup takes a fraction of a second."""
     monkeypatch.setattr(daily, "PIPECAT_STARTUP_SECONDS", 0.4)
     monkeypatch.setattr(daily, "AGENT_REPORT_POLL_SECONDS", 0.02)
-    monkeypatch.setattr(daily, "CLIENT_READY_RESEND_SECONDS", 0.1)
-    monkeypatch.setattr(daily, "TURN_SETTLE_SECONDS", 0.05)
-    monkeypatch.setattr(daily, "TOOL_FOLLOWUP_SECONDS", 0.3)
+    monkeypatch.setattr(daily, "AGENT_REPORT_WATCH_SECONDS", 0.02)
+    monkeypatch.setattr(daily, "QUIET_SECONDS", 0.3)
     monkeypatch.setattr(daily, "SPEECH_WAIT_SECONDS", 2.0)
     monkeypatch.setattr(daily_plug, "GREETING_SECONDS", 0.3)
     monkeypatch.setattr(daily_plug, "REPLY_SECONDS", 0.3)
@@ -179,14 +178,86 @@ async def test_client_ready_waits_for_the_bot_to_be_in_the_room(quick: None):
         await rig.backend.teardown()
 
 
-async def test_client_ready_is_sent_once_more_when_bot_ready_is_late(quick: None):
+async def test_client_ready_is_sent_exactly_once_even_without_bot_ready(
+    quick: None,
+):
     rig = rigged(PipecatVoiceBackend, settings=cloud(), bot=FakeBot(rtvi_on=False))
     try:
         await voice_ready(rig)
+        rig.room.bot_joins()
         await asyncio.sleep(0.3)
-        assert len(client_readies(rig)) == 2
+        assert len(client_readies(rig)) == 1
     finally:
         await rig.backend.teardown()
+
+
+@pytest.mark.parametrize(
+    ("kind", "modality"),
+    [(PipecatVoiceBackend, "voice"), (PipecatChatBackend, "chat")],
+)
+def test_the_start_body_tells_the_sdk_the_modality(kind: Any, modality: str):
+    rig = rigged(kind, settings=cloud())
+    body = rig.backend.starter.request_body()["body"]
+    assert body == {"egma": {"simulation_id": A_SIMULATION, "modality": modality}}
+
+
+@pytest.mark.parametrize("kind", [PipecatVoiceBackend, PipecatChatBackend])
+async def test_a_hello_refused_after_readiness_ends_the_simulation(
+    kind: Any, quick: None
+):
+    rig = rigged(
+        kind,
+        settings=cloud(),
+        reports=[
+            AgentReport(state="accepted"),
+            AgentReport(state="accepted"),
+            AgentReport(state="refused", code=905, message=FLOWS_REFUSAL),
+        ],
+    )
+    try:
+        if kind is PipecatVoiceBackend:
+            media = await rig.backend.create_transport()
+            await rig.backend.dial()
+            await rig.backend.wait_started()
+            await asyncio.wait_for(media.failed.wait(), 1)
+            assert media.fault() == FLOWS_REFUSAL
+        else:
+            await chat_ready(rig)
+            with pytest.raises(MediaBackendError) as refused:
+                await asyncio.wait_for(rig.backend.wait_failed(), 1)
+            assert str(refused.value) == FLOWS_REFUSAL
+            assert refused.value.ending == ERROR
+    finally:
+        await rig.backend.teardown()
+    assert rig.probes >= 3
+
+
+async def test_a_refused_hello_ends_a_chat_turn_in_progress(
+    quick: None, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(daily_plug, "REPLY_SECONDS", 5.0)
+    refuse = asyncio.Event()
+
+    async def report() -> AgentReport:
+        if refuse.is_set():
+            return AgentReport(state="refused", code=905, message=FLOWS_REFUSAL)
+        return AgentReport(state="accepted")
+
+    rig = rigged(PipecatChatBackend, settings=cloud(), bot=FakeBot(replies=[]))
+    rig.backend._agent_report = report
+    plug = chat_plug(rig)
+    try:
+        await plug.open()
+        delivering = asyncio.ensure_future(plug.deliver("Transfer me to billing."))
+        await asyncio.sleep(0.05)
+        assert not delivering.done()
+        refuse.set()
+        with pytest.raises(PlugError) as refused:
+            await asyncio.wait_for(delivering, 2)
+    finally:
+        await plug.close()
+    assert str(refused.value) == FLOWS_REFUSAL
+    assert refused.value.ending == ERROR
 
 
 @pytest.mark.parametrize(
@@ -480,7 +551,9 @@ async def test_an_answer_through_a_tool_call_is_one_turn(quick: None):
     assert reply.text == "Let me check that.\nOrder A100 has shipped."
 
 
-async def test_a_tool_result_without_a_follow_up_ends_the_turn(quick: None):
+async def test_a_tool_result_without_a_follow_up_ends_the_turn_when_quiet(
+    quick: None,
+):
     steps = [
         Step(rtvi("bot-llm-started")),
         Step(rtvi("llm-function-call-started")),
@@ -504,9 +577,10 @@ async def test_a_tool_result_without_a_follow_up_ends_the_turn(quick: None):
 
 async def test_the_turn_waits_for_the_bot_to_stop_speaking(quick: None):
     steps = [
-        *answer("Order A100 has shipped."),
-        Step(rtvi("bot-tts-started")),
+        Step(rtvi("bot-llm-started")),
+        Step(rtvi("bot-llm-text", text="Order A100 has shipped.")),
         Step(rtvi("bot-started-speaking")),
+        Step(rtvi("bot-llm-stopped")),
         Step(rtvi("bot-stopped-speaking"), after=0.4),
     ]
     rig = rigged(PipecatChatBackend, settings=cloud(), bot=FakeBot(replies=[steps]))
@@ -545,7 +619,9 @@ async def test_a_refused_send_text_is_named(quick: None):
             await plug.deliver("Hello?")
     finally:
         await plug.close()
-    assert str(refused.value) == "the bot refused Egma's RTVI send-text: Invalid message"
+    assert str(refused.value) == (
+        "the bot refused Egma's RTVI send-text: Invalid message"
+    )
 
 
 async def test_the_bot_leaving_ends_the_chat(quick: None):
@@ -610,14 +686,35 @@ async def test_a_late_run_of_an_earlier_turn_is_not_the_next_answer():
 async def test_calls_in_flight_are_counted_from_function_call_started():
     turns = RtviTurns()
     turn = turns.begin_turn("m1")
+    turns.feed(rtvi("bot-interrupted"))
     turns.feed(rtvi("bot-llm-started"))
+    turns.feed(rtvi("bot-llm-text", text="Let me check."))
     turns.feed(rtvi("llm-function-call-started"))
     turns.feed(rtvi("bot-llm-stopped"))
-    assert turns.over_at(turn) is None
+    assert turns.over_at(turn) is None, "a call started before the model stopped"
     turns.feed(rtvi("llm-function-call-in-progress", tool_call_id="c1"))
     assert turns.over_at(turn) is None
     turns.feed(rtvi("llm-function-call-stopped", tool_call_id="c1", cancelled=False))
-    assert turns.over_at(turn) is not None
+    quiet_end = turns.over_at(turn)
+    assert quiet_end is not None, "a finished call leaves the quiet fallback"
+    turns.feed(rtvi("bot-llm-started"))
+    assert turns.over_at(turn) is None
+    turns.feed(rtvi("bot-llm-text", text="It shipped."))
+    turns.feed(rtvi("bot-llm-stopped"))
+    ended_at = turns.over_at(turn)
+    assert ended_at is not None
+    assert ended_at <= asyncio.get_running_loop().time(), "over at once"
+    assert turns.text_of(turn) == "Let me check.\nIt shipped."
+
+
+async def test_a_turn_without_text_waits_for_the_quiet_fallback():
+    turns = RtviTurns()
+    turn = turns.begin_turn("m1")
+    turns.feed(rtvi("bot-llm-started"))
+    turns.feed(rtvi("bot-llm-stopped"))
+    ended_at = turns.over_at(turn)
+    assert ended_at is not None
+    assert ended_at > asyncio.get_running_loop().time()
 
 
 # -- The voice room's departure --------------------------------------------------------

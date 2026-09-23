@@ -122,7 +122,7 @@ async def test_a_pipecat_cloud_start_request_carries_the_room_expiry_and_merged_
         "body": {
             "tenant": "lakeside",
             "caller": {"plan": "gold"},
-            "egma": {"simulation_id": A_SIMULATION},
+            "egma": {"simulation_id": A_SIMULATION, "modality": "voice"},
         },
     }
     assert list(asked.body["body"])[-1] == "egma"
@@ -138,7 +138,9 @@ async def test_a_self_hosted_start_request_adds_the_daily_transport_and_headers(
     (asked,) = served.asked
     assert asked.header("Authorization") == A_HEADER_SECRET
     assert asked.body["transport"] == "daily"
-    assert asked.body["body"] == {"egma": {"simulation_id": A_SIMULATION}}
+    assert asked.body["body"] == {
+        "egma": {"simulation_id": A_SIMULATION, "modality": "voice"}
+    }
     assert asked.body["createDailyRoom"] is True
 
 
