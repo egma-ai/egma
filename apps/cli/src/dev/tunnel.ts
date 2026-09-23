@@ -89,8 +89,8 @@ export type RunningTunnel = {
   /** `https://<words>.trycloudflare.com`, fixed for this process's life. */
   readonly url: string;
   /**
-   * False when the hostname was not yet in public DNS when the wait ended;
-   * absent when nothing checked.
+   * False when the authoritative servers still did not answer for the hostname
+   * when the wait ended; absent when that could not be checked.
    */
   readonly inPublicDns?: boolean;
   /** Settles when the process ends, for any reason. */
@@ -137,10 +137,8 @@ export type CloudflaredOptions = {
    * and would send the tunnel somewhere other than the guard.
    */
   readonly configFile?: string;
-  readonly spawnImpl?: typeof spawn;
-  readonly fetchImpl?: typeof fetch;
   /** Waits until the hostname is in public DNS. Default: ask the authoritative servers. */
-  readonly waitForDns?: (hostname: string, signal: AbortSignal) => Promise<boolean>;
+  readonly waitForDns?: (hostname: string, signal: AbortSignal) => Promise<boolean | undefined>;
 };
 
 /** The config a quick tunnel runs with: no ingress rules, so `--url` decides. */
@@ -154,14 +152,70 @@ export async function writeQuickTunnelConfig(folder: string): Promise<string> {
   return file;
 }
 
-/** How long a new hostname may take to reach every authoritative server. */
-const DNS_WAIT_MS = 30_000;
-/** Extra time after the last authoritative answer, for other points of presence. */
-const DNS_SETTLE_MS = 2_000;
+/** What one DNS server said about a hostname. */
+export type DnsAnswer = "found" | "missing" | "unreachable";
+
+/** How the wait asks DNS; replaced in tests. */
+export type PublicDnsProbe = {
+  /** The zone's authoritative server addresses; empty when they cannot be found. */
+  nameServers(zone: string): Promise<readonly string[]>;
+  /** Ask one server, over UDP port 53, for the hostname's address. */
+  ask(server: string, hostname: string): Promise<DnsAnswer>;
+  /** Ask this machine's own resolver, once. */
+  lookup(hostname: string): Promise<boolean>;
+};
+
+export type DnsWaitTiming = {
+  /** How long the authoritative servers may take to answer for a new hostname. */
+  readonly waitMs: number;
+  /** Extra time after they all answer, for Cloudflare's other locations. */
+  readonly settleMs: number;
+  readonly everyMs: number;
+  /** When they cannot be asked: how long after the start to ask this machine's resolver. */
+  readonly fallbackMs: number;
+};
+
+/** A new hostname reached every authoritative server 3 to 6 seconds after cloudflared connected. */
+const DNS_TIMING: DnsWaitTiming = { waitMs: 15_000, settleMs: 2_000, everyMs: 250, fallbackMs: 8_000 };
+
+/** DNS error codes that mean the server answered: the name is not there (yet). */
+const ANSWERED_WITHOUT_ADDRESS = new Set(["ENOTFOUND", "ENODATA", "ENONAME", "EREFUSED", "ESERVFAIL", "EFORMERR"]);
+
+const SYSTEM_DNS: PublicDnsProbe = {
+  async nameServers(zone) {
+    try {
+      const servers: string[] = [];
+      for (const name of await dnsPromises.resolveNs(zone)) {
+        servers.push(...(await dnsPromises.resolve4(name)));
+      }
+      return servers;
+    } catch {
+      return [];
+    }
+  },
+  ask(server, hostname) {
+    return new Promise((resolve) => {
+      const resolver = new Resolver({ timeout: 1_500, tries: 1 });
+      resolver.setServers([server]);
+      resolver.resolve4(hostname, (error, addresses) => {
+        if (error === null) resolve(addresses.length > 0 ? "found" : "missing");
+        else resolve(ANSWERED_WITHOUT_ADDRESS.has(error.code ?? "") ? "missing" : "unreachable");
+      });
+    });
+  },
+  async lookup(hostname) {
+    try {
+      await dnsPromises.lookup(hostname);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+};
 
 function pause(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
-    if (signal.aborted) {
+    if (signal.aborted || ms <= 0) {
       resolve();
       return;
     }
@@ -177,42 +231,44 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-function answersFrom(server: string, hostname: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const resolver = new Resolver({ timeout: 1_500, tries: 1 });
-    resolver.setServers([server]);
-    resolver.resolve4(hostname, (error, addresses) => resolve(error === null && addresses.length > 0));
-  });
-}
-
 /**
  * Wait until every authoritative server of the hostname's zone answers for it.
  * Only authoritative servers are asked, so no caching resolver learns a miss.
- * Without them (no network to find them), wait a fixed time instead.
+ *
+ * true: every one answers. false: they answer, but not for this hostname,
+ * within the wait. undefined: they cannot be asked (UDP port 53 blocked); then
+ * this machine's resolver is asked once, after the usual delay, and a miss
+ * there stays unknown rather than alarming.
  */
-export async function waitUntilInPublicDns(hostname: string, signal: AbortSignal): Promise<boolean> {
+export async function waitUntilInPublicDns(
+  hostname: string,
+  signal: AbortSignal,
+  probe: PublicDnsProbe = SYSTEM_DNS,
+  timing: DnsWaitTiming = DNS_TIMING,
+): Promise<boolean | undefined> {
+  const started = Date.now();
+  const fallBack = async (): Promise<boolean | undefined> => {
+    await pause(started + timing.fallbackMs - Date.now(), signal);
+    if (signal.aborted) return undefined;
+    return (await probe.lookup(hostname)) ? true : undefined;
+  };
+
   const zone = hostname.split(".").slice(-2).join(".");
-  let servers: string[] = [];
-  try {
-    const names = await dnsPromises.resolveNs(zone);
-    for (const name of names) servers.push(...(await dnsPromises.resolve4(name)));
-  } catch {
-    servers = [];
-  }
-  if (servers.length === 0) {
-    await pause(10_000, signal);
-    return false;
-  }
-  const until = Date.now() + DNS_WAIT_MS;
-  while (!signal.aborted && Date.now() < until) {
-    const answers = await Promise.all(servers.map((server) => answersFrom(server, hostname)));
-    if (answers.every(Boolean)) {
-      await pause(DNS_SETTLE_MS, signal);
+  const servers = await probe.nameServers(zone);
+  if (servers.length === 0) return await fallBack();
+
+  let heardBack = false;
+  while (!signal.aborted && Date.now() - started < timing.waitMs) {
+    const answers = await Promise.all(servers.map((server) => probe.ask(server, hostname)));
+    if (answers.every((answer) => answer === "found")) {
+      await pause(timing.settleMs, signal);
       return true;
     }
-    await pause(250, signal);
+    heardBack ||= answers.some((answer) => answer !== "unreachable");
+    if (!heardBack) return await fallBack();
+    await pause(timing.everyMs, signal);
   }
-  return false;
+  return signal.aborted ? undefined : false;
 }
 
 /** Children still running, killed outright if this process exits first. */
@@ -251,8 +307,6 @@ export function cloudflaredLauncher(
   const addressTimeoutMs = options.addressTimeoutMs ?? 30_000;
   const connectTimeoutMs = options.connectTimeoutMs ?? 30_000;
   const stopTimeoutMs = options.stopTimeoutMs ?? 5_000;
-  const spawnImpl = options.spawnImpl ?? spawn;
-  const fetchImpl = options.fetchImpl ?? fetch;
   const waitForDns = options.waitForDns ?? waitUntilInPublicDns;
 
   return (start) =>
@@ -276,7 +330,7 @@ export function cloudflaredLauncher(
         "--url",
         start.target,
       ];
-      const child = spawnImpl(executable, args, {
+      const child = spawn(executable, args, {
         stdio: ["ignore", "pipe", "pipe"],
         env: process.env,
       });
@@ -331,13 +385,13 @@ export function cloudflaredLauncher(
         start.signal.removeEventListener("abort", onAbort);
         resolve({
           url,
-          inPublicDns,
+          ...(inPublicDns === undefined ? {} : { inPublicDns }),
           exited,
           stop,
           async connected() {
             if (metrics === null || exit !== null) return exit === null ? undefined : false;
             try {
-              const answer = await fetchImpl(`http://${metrics}/ready`, {
+              const answer = await fetch(`http://${metrics}/ready`, {
                 signal: AbortSignal.timeout(3_000),
               });
               if (answer.status === 503) return false;

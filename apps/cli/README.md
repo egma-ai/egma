@@ -369,7 +369,9 @@ Connections and prints their names and IDs. The first run creates them. Every
 later run updates the same two, so `egma run create --connection con_...` keeps
 working. The CLI remembers which Connections belong to this machine in
 `dev-connections.json` under `~/.egma/` (or `EGMA_HOME`), never in the
-repository, so each computer has its own.
+repository, so each computer has its own. `egma agent dev` does not write them
+to `egma/config.yaml`; `egma run create` on this computer accepts them anyway.
+Only one `egma agent dev` runs per Agent on a computer.
 
 The tunnel address stays the same while you restart the bot. Keep the command
 running while simulations run, and press Ctrl-C to close the tunnel. A
@@ -510,6 +512,21 @@ That handoff is not completed setup while the public monitoring guide is still
 being authored. Follow the Python or JavaScript SDK monitoring guide directly.
 The CLI does not claim that LiveKit monitoring is active or inactive before a
 trace arrives.
+
+For Pipecat, setup creates the Agent's own monitoring key:
+
+```bash
+egma agent monitoring setup \
+  --agent agt_... \
+  --platform pipecat
+```
+
+It prints the Egma address and the key once, as the two environment lines the
+Egma SDK reads, and the `monitor` line to add to the bot. Put them where the bot
+runs. Production traces sent with this key are filed under this Agent, and the
+same key serves simulations. Each Agent has one monitoring key; to replace it,
+revoke it in Egma and run setup again. `stop` prints the integration-skill
+handoff, as it does for LiveKit.
 
 ## Create a Project API key
 

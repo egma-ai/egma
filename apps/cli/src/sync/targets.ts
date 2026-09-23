@@ -15,7 +15,12 @@ import {
 } from "../platform/agents.ts";
 
 export type TargetSyncResult =
-  | { readonly kind: "synced"; readonly agents: readonly FolderAgent[] }
+  | {
+      readonly kind: "synced";
+      readonly agents: readonly FolderAgent[];
+      /** What was left out because a newer CLI knows it. */
+      readonly notes: readonly string[];
+    }
   | CommonFailure;
 
 function byId<T extends { readonly id: string }>(left: T, right: T): number {
@@ -44,7 +49,7 @@ export async function readProjectTargets(
     }))
     .sort(byId);
 
-  return { kind: "synced", agents };
+  return { kind: "synced", agents, notes: listed.notes };
 }
 
 /**

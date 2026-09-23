@@ -266,7 +266,7 @@ export function parseConfig(document: string, where: string): FolderConfig {
     const platform = textAt(entry, "platform");
     if (!isAgentPlatform(platform)) {
       throw new FolderProblem(where, 
-        `${where} agent ${String(index + 1)} must contain platform ${agentPlatformsSaid()}.`,
+        `${where} agent ${String(index + 1)} must contain platform ${agentPlatformsSaid()}. If Egma wrote another platform there, update egma-cli: npm install --global egma-cli@latest`,
       );
     }
     if (agentIds.has(agent.id)) {

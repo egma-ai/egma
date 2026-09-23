@@ -17,6 +17,11 @@ import {
 import type { PlatformAccess } from "../platform/credentials.ts";
 import type { Fetch } from "../platform/device-flow.ts";
 import {
+  listActiveProjectKeys,
+  mintProjectKey,
+  revokeProjectKey,
+} from "../platform/api-keys.ts";
+import {
   readAgentMonitoring,
   startMonitoring,
   stopMonitoring,
@@ -169,7 +174,7 @@ function wasInterrupted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
 }
 
-async function retellAccess(
+async function signedInOrSay(
   options: AgentMonitoringCommandOptions,
 ): Promise<Awaited<ReturnType<typeof signedInAt>>> {
   const signedIn = await signedInAt(options.access, options.env);
@@ -221,7 +226,98 @@ async function oneTimeRetellKey(
   };
 }
 
-/** Start Retell monitoring, or hand LiveKit work to the integration skill. */
+/** The prefix Egma reserves for one agent's guarded monitoring key. */
+function monitoringKeyPrefix(agentId: string): string {
+  return `Egma monitoring ${agentId} — `;
+}
+
+/**
+ * Mint a Pipecat agent's guarded monitoring key and print, once, what the bot
+ * needs where it runs. Production traces exported with this key are filed
+ * under this agent; the same key serves simulation().
+ */
+async function setUpPipecatMonitoring(
+  options: AgentMonitoringSetupCommandOptions,
+  target: LocalTarget,
+): Promise<number> {
+  const signedIn = await signedInOrSay(options);
+  if (wasInterrupted(options.signal)) return interrupted(options);
+  if (signedIn === null) return AGENT_MONITORING_EXIT.failed;
+  const platformOptions = {
+    ...signedIn,
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.fetchImpl === undefined ? {} : { fetchImpl: options.fetchImpl }),
+  };
+  const agentId = target.agent.id;
+  const shownId = oneLineFactText(agentId, "with an unknown ID");
+  const read = await readAgentMonitoring(agentId, platformOptions, target.config.project.id);
+  if (wasInterrupted(options.signal)) return interrupted(options);
+  if (read.kind === "not-found") {
+    options.fail(read.reason);
+    options.fail(`Egma has no Agent ${shownId} in this Project. Run egma pull, then try again.`);
+    return AGENT_MONITORING_EXIT.failed;
+  }
+  if (read.kind !== "monitoring") return stoppedForFailure(options, read);
+  const remote = read.monitoring;
+  if (remote.projectId !== target.config.project.id || remote.archived || remote.agentPlatform !== "pipecat") {
+    options.fail(
+      `Agent ${shownId} is not a living Pipecat Agent in this Project on Egma. Run egma pull, then try again. Nothing was changed.`,
+    );
+    return AGENT_MONITORING_EXIT.failed;
+  }
+
+  const prefix = monitoringKeyPrefix(agentId);
+  const label = oneLineFactText(remote.agentName, "") || oneLineFactText(target.agent.name, "Pipecat agent");
+  const minted = await mintProjectKey(
+    { name: `${prefix}${label}`, projectId: target.config.project.id, monitoringAgentId: agentId },
+    platformOptions,
+  );
+  switch (minted.kind) {
+    case "minted": {
+      options.out(`Created monitoring key ${JSON.stringify(oneLineFactText(minted.key.name ?? `${prefix}${label}`, "unnamed"))} for Pipecat Agent ${shownId}.`);
+      options.out("Set these where your bot runs (its .env, your Pipecat Cloud secret set, or your server). The key is shown once; Egma CLI does not save it.");
+      // The Egma SDK in the bot reads these two names.
+      options.out(`  EGMA_URL=${signedIn.url}`);
+      options.out(`  EGMA_API_KEY=${minted.key.secret.reveal()}`);
+      options.out("Then call monitor where your bot builds its worker:");
+      options.out("  from egma.pipecat import monitor");
+      options.out("  await monitor(worker, runner_args)");
+      options.out("Production sessions then appear under Monitoring. The same key serves simulation().");
+      if (wasInterrupted(options.signal)) {
+        options.fail("The command was interrupted after Egma created this key. Copy it now; Egma CLI did not save it.");
+        return AGENT_MONITORING_EXIT.interrupted;
+      }
+      return AGENT_MONITORING_EXIT.done;
+    }
+    case "active-name-conflict": {
+      const listed = await listActiveProjectKeys(
+        { projectId: target.config.project.id, namePrefix: prefix },
+        platformOptions,
+      );
+      const held = listed.kind === "listed" ? listed.keys[0] : undefined;
+      options.fail(
+        `Agent ${shownId} already has a monitoring key${held === undefined ? "" : ` ${JSON.stringify(oneLineFactText(held.name, "unnamed"))} (${oneLineFactText(held.looksLike, "hidden")})`}. Egma showed it once, when it was made. Use that key where your bot runs, or revoke it in Egma's API keys and run this again.`,
+      );
+      return AGENT_MONITORING_EXIT.failed;
+    }
+    case "minted-without-secret": {
+      options.fail(minted.reason);
+      const revoked = await revokeProjectKey(minted.keyId, platformOptions);
+      if (revoked.kind !== "revoked") {
+        options.fail(`Revoke key ${oneLineFactText(minted.keyId, "unknown")} in Egma, then run this again.`);
+      }
+      return AGENT_MONITORING_EXIT.failed;
+    }
+    case "uncertain":
+      options.fail(minted.reason);
+      options.fail(`Look for a key named ${JSON.stringify(prefix.trimEnd())}… in Egma's API keys before you run this again.`);
+      return wasInterrupted(options.signal) ? AGENT_MONITORING_EXIT.interrupted : AGENT_MONITORING_EXIT.failed;
+    default:
+      return stoppedForFailure(options, minted);
+  }
+}
+
+/** Start Retell monitoring, mint Pipecat's key, or hand LiveKit work to the integration skill. */
 export async function runAgentMonitoringSetupCommand(
   options: AgentMonitoringSetupCommandOptions,
 ): Promise<number> {
@@ -243,11 +339,12 @@ export async function runAgentMonitoringSetupCommand(
     );
     return AGENT_MONITORING_EXIT.failed;
   }
+  if (wantedPlatform === "pipecat") return await setUpPipecatMonitoring(options, target);
   if (wantedPlatform !== "retell") {
     return handOffCodeMonitoring(options, target.agent, "setup");
   }
 
-  const signedIn = await retellAccess(options);
+  const signedIn = await signedInOrSay(options);
   if (wasInterrupted(options.signal)) return interrupted(options);
   if (signedIn === null) return AGENT_MONITORING_EXIT.failed;
   const platformOptions = {
@@ -409,7 +506,7 @@ export async function runAgentMonitoringStopCommand(
     return handOffCodeMonitoring(options, target.agent, "removal");
   }
 
-  const signedIn = await retellAccess(options);
+  const signedIn = await signedInOrSay(options);
   if (wasInterrupted(options.signal)) return interrupted(options);
   if (signedIn === null) return AGENT_MONITORING_EXIT.failed;
   const stopped = await stopMonitoring(

@@ -5,7 +5,9 @@
  * opens a Cloudflare quick tunnel to the guard, and writes the tunnel's start
  * URL and a new secret header into this machine's two self-hosted connections
  * (voice and chat). The first session on a machine creates them; every later
- * session updates the same two. The command runs until Ctrl-C.
+ * session updates the same two. Which connections are this machine's is kept
+ * on this machine only; the repository's egma/config.yaml is never written.
+ * The command runs until Ctrl-C.
  *
  * While it runs, a tunnel that ends or loses Cloudflare for several minutes is
  * replaced, and the new start URL is written into the same connections, so a
@@ -48,7 +50,6 @@ import { ConnectionCredentials } from "../platform/connection-credentials.ts";
 import { egmaFolderIn, type PlatformAccess } from "../platform/credentials.ts";
 import type { Fetch } from "../platform/device-flow.ts";
 import { normalizePlatformOrigin } from "../platform/url.ts";
-import { refreshProjectTargets } from "../sync/targets.ts";
 import { oneLineFactText } from "../ui/fact-value.ts";
 import { prepare, type Ready } from "./agent.ts";
 
@@ -342,25 +343,6 @@ function sayWritten(session: Session, written: readonly WrittenConnection[]): vo
   }
 }
 
-/** Best effort: list new connections in egma/config.yaml, as connection add does. */
-async function refreshConfig(session: Session, written: readonly WrittenConnection[]): Promise<void> {
-  if (!written.some((one) => one.action === "created")) return;
-  try {
-    const refreshed = await refreshProjectTargets(
-      { paths: session.ready.paths, project: session.ready.project },
-      session.ready.request,
-    );
-    if (refreshed.kind === "synced") {
-      session.options.out("Updated egma/config.yaml.");
-      return;
-    }
-  } catch {
-    // Said below.
-  }
-  if (session.options.signal.aborted) return;
-  session.options.fail("The Connections exist, but egma/config.yaml was not refreshed. Run egma pull.");
-}
-
 function sayGuardEvent(port: number, out: (line: string) => void): (event: GuardEvent) => void {
   return (event) => {
     const request = `${event.method} ${oneLineFactText(event.path, "/")}`;
@@ -469,7 +451,6 @@ async function supervise(
       if (options.signal.aborted) return AGENT_DEV_EXIT.done;
       if (written.kind === "written") {
         sayWritten(session, written.connections);
-        await refreshConfig(session, written.connections);
         options.out(`Start URL: ${startUrl}`);
         options.out("Ready again.");
         break;
@@ -550,7 +531,7 @@ export async function runAgentDevCommand(options: AgentDevCommandOptions): Promi
   }
   if (held.kind === "busy") {
     options.fail(
-      `egma agent dev is already running for Agent ${agentId} on this machine${held.pid === null ? "" : ` (process ${String(held.pid)})`}. Use that session, or stop it with Ctrl-C first.`,
+      `egma agent dev is already running for Agent ${agentId} on this machine${held.pid === null ? "" : ` (process ${String(held.pid)})`}. Use that session, or stop it with Ctrl-C first. If none is running, delete ${held.file} and try again.`,
     );
     return AGENT_DEV_EXIT.failed;
   }
@@ -644,7 +625,6 @@ async function runSession(
       return AGENT_DEV_EXIT.failed;
     }
     sayWritten(session, written.connections);
-    await refreshConfig(session, written.connections);
     options.out(`Start URL: ${startUrl}`);
     options.out(`Forwarding to your bot's starter on http://127.0.0.1:${String(port)}.`);
     options.out("Ready. Run a suite on this machine with:");
