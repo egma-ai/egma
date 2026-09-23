@@ -185,6 +185,10 @@ describe("the platform API operation registry", () => {
               type: "object",
               additionalProperties: true,
             },
+            pipecat_body_params: {
+              type: "object",
+              additionalProperties: true,
+            },
           },
           additionalProperties: false,
         },
@@ -415,14 +419,16 @@ describe("the platform API operation registry", () => {
     });
 
     /*
-     * The two env keys are the platforms' own words — Retell calls them
-     * `retell_dynamic_variables` and LiveKit calls its blob
-     * `job_dispatch_metadata` — so a reader who knows either platform reads a
-     * test's env without a translation table. They are the only underscored
-     * names on the wire.
+     * The env keys are the platforms' own words — Retell calls them
+     * `retell_dynamic_variables`, LiveKit calls its blob
+     * `job_dispatch_metadata`, and a Pipecat bot reads `runner_args.body`,
+     * filled from `pipecat_body_params` — so a reader who knows a platform
+     * reads a test's env without a translation table. They are the only
+     * underscored names on the wire.
      */
     expect([...underscored].sort()).toEqual([
       "job_dispatch_metadata",
+      "pipecat_body_params",
       "retell_dynamic_variables",
     ]);
   });

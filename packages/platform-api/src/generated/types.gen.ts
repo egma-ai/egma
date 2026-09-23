@@ -323,10 +323,10 @@ export type ListConnectionOptionsResponses = {
      */
     200: {
         items: Array<{
-            agentPlatform: 'retell' | 'livekit' | null;
+            agentPlatform: 'retell' | 'livekit' | 'pipecat' | null;
             agentPlatformLabel: string;
-            connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room' | 'daily_room';
+            accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint' | 'daily_room.pipecat_cloud' | 'daily_room.self_hosted';
             accessVariantLabel: string;
             modality: 'voice' | 'chat';
             productLabel: string;
@@ -423,7 +423,7 @@ export type ListAgentsResponses = {
             id: string;
             projectId: string;
             name: string;
-            agentPlatform: 'retell' | 'livekit';
+            agentPlatform: 'retell' | 'livekit' | 'pipecat';
             platformAgentId: string | null;
             retellModality: 'voice' | 'chat' | null;
             monitoringKeyPresent: boolean;
@@ -440,9 +440,9 @@ export type ListAgentsResponses = {
                 agentId: string;
                 projectId: string;
                 name: string;
-                agentPlatform: 'retell' | 'livekit';
-                connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
-                accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+                agentPlatform: 'retell' | 'livekit' | 'pipecat';
+                connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room' | 'daily_room';
+                accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint' | 'daily_room.pipecat_cloud' | 'daily_room.self_hosted';
                 modality: 'voice' | 'chat';
                 productLabel: string;
                 topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
@@ -473,7 +473,7 @@ export type RegisterAgentData = {
         /**
          * The product or framework that runs your agent.
          */
-        agentPlatform: 'retell' | 'livekit';
+        agentPlatform: 'retell' | 'livekit' | 'pipecat';
         /**
          * Choose one supported agentPlatform, connectionType, accessVariant, and modality from List supported connection options. Its fields describe config and its credentialFields describe credentials. Egma validates the complete combination before saving it.
          */
@@ -482,15 +482,15 @@ export type RegisterAgentData = {
              * Optional connection display name. If omitted, Egma chooses the next available numbered name.
              */
             name?: string;
-            agentPlatform: 'retell' | 'livekit' | null;
+            agentPlatform: 'retell' | 'livekit' | 'pipecat' | null;
             /**
-             * Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room connections can use voice or chat.
+             * Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room and Pipecat Daily room connections can use voice or chat.
              */
-            connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+            connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room' | 'daily_room';
             /**
              * Credential method for the connection type, copied from the same catalog entry.
              */
-            accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint' | 'daily_room.pipecat_cloud' | 'daily_room.self_hosted';
             /**
              * How simulations communicate with the agent. Use a modality offered by the selected catalog entry.
              */
@@ -500,13 +500,13 @@ export type RegisterAgentData = {
              */
             environment?: string;
             /**
-             * Non-secret settings for the selected access variant. Use only its catalog fields. Retell API variants use retellAgentId; a Retell phone connection uses phoneNumber. LiveKit project credentials use url and agentName. LiveKit token endpoints use tokenEndpoint and agentName; tokenEndpoint must be a public HTTPS URL. agentName must match the name registered by your LiveKit worker. When platformAgentId is supplied for a Retell API variant, Egma derives and confirms retellAgentId from that selection.
+             * Non-secret settings for the selected access variant. Use only its catalog fields. Retell API variants use retellAgentId; a Retell phone connection uses phoneNumber. LiveKit project credentials use url and agentName. LiveKit token endpoints use tokenEndpoint and agentName; tokenEndpoint must be a public HTTPS URL. agentName must match the name registered by your LiveKit worker. Pipecat Cloud uses agentName, the agent name in pcc-deploy.toml. A self-hosted Pipecat starter uses startUrl, a public HTTPS URL. When platformAgentId is supplied for a Retell API variant, Egma derives and confirms retellAgentId from that selection.
              */
             config?: {
                 [key: string]: unknown;
             };
             /**
-             * Secret fields for the selected access variant. Retell uses apiKey. LiveKit project credentials use apiKey and apiSecret. A LiveKit token endpoint requires headers: a JSON-encoded string containing a non-empty object of header names to string values. For an additional Retell connection, platformAgentId can reuse the agent's saved Retell key when credentials are omitted. For a Retell phone connection, the key confirms provider identity and is held on the agent; the phone connection itself stores no key. Responses return credential presence and hints, never the secret values.
+             * Secret fields for the selected access variant. Retell uses apiKey. LiveKit project credentials use apiKey and apiSecret. A LiveKit token endpoint requires headers: a JSON-encoded string containing a non-empty object of header names to string values. Pipecat Cloud uses publicApiKey, the public key that starts with pk_. A self-hosted Pipecat starter requires headers in the same JSON-encoded form. For an additional Retell connection, platformAgentId can reuse the agent's saved Retell key when credentials are omitted. For a Retell phone connection, the key confirms provider identity and is held on the agent; the phone connection itself stores no key. Responses return credential presence and hints, never the secret values.
              */
             credentials?: {
                 [key: string]: unknown;
@@ -587,7 +587,7 @@ export type RegisterAgentResponses = {
             id: string;
             projectId: string;
             name: string;
-            agentPlatform: 'retell' | 'livekit';
+            agentPlatform: 'retell' | 'livekit' | 'pipecat';
             platformAgentId: string | null;
             retellModality: 'voice' | 'chat' | null;
             monitoringKeyPresent: boolean;
@@ -605,9 +605,9 @@ export type RegisterAgentResponses = {
             agentId: string;
             projectId: string;
             name: string;
-            agentPlatform: 'retell' | 'livekit';
-            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            agentPlatform: 'retell' | 'livekit' | 'pipecat';
+            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room' | 'daily_room';
+            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint' | 'daily_room.pipecat_cloud' | 'daily_room.self_hosted';
             modality: 'voice' | 'chat';
             productLabel: string;
             topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
@@ -632,7 +632,7 @@ export type RegisterAgentResponses = {
             id: string;
             projectId: string;
             name: string;
-            agentPlatform: 'retell' | 'livekit';
+            agentPlatform: 'retell' | 'livekit' | 'pipecat';
             platformAgentId: string | null;
             retellModality: 'voice' | 'chat' | null;
             monitoringKeyPresent: boolean;
@@ -650,9 +650,9 @@ export type RegisterAgentResponses = {
             agentId: string;
             projectId: string;
             name: string;
-            agentPlatform: 'retell' | 'livekit';
-            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            agentPlatform: 'retell' | 'livekit' | 'pipecat';
+            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room' | 'daily_room';
+            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint' | 'daily_room.pipecat_cloud' | 'daily_room.self_hosted';
             modality: 'voice' | 'chat';
             productLabel: string;
             topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
@@ -721,7 +721,7 @@ export type GetAgentResponses = {
             id: string;
             projectId: string;
             name: string;
-            agentPlatform: 'retell' | 'livekit';
+            agentPlatform: 'retell' | 'livekit' | 'pipecat';
             platformAgentId: string | null;
             retellModality: 'voice' | 'chat' | null;
             monitoringKeyPresent: boolean;
@@ -739,9 +739,9 @@ export type GetAgentResponses = {
             agentId: string;
             projectId: string;
             name: string;
-            agentPlatform: 'retell' | 'livekit';
-            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            agentPlatform: 'retell' | 'livekit' | 'pipecat';
+            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room' | 'daily_room';
+            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint' | 'daily_room.pipecat_cloud' | 'daily_room.self_hosted';
             modality: 'voice' | 'chat';
             productLabel: string;
             topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
@@ -826,7 +826,7 @@ export type UpdateAgentResponses = {
             id: string;
             projectId: string;
             name: string;
-            agentPlatform: 'retell' | 'livekit';
+            agentPlatform: 'retell' | 'livekit' | 'pipecat';
             platformAgentId: string | null;
             retellModality: 'voice' | 'chat' | null;
             monitoringKeyPresent: boolean;
@@ -853,15 +853,15 @@ export type AddConnectionData = {
          * Optional connection display name. If omitted, Egma chooses the next available numbered name.
          */
         name?: string;
-        agentPlatform: 'retell' | 'livekit' | null;
+        agentPlatform: 'retell' | 'livekit' | 'pipecat' | null;
         /**
-         * Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room connections can use voice or chat.
+         * Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room and Pipecat Daily room connections can use voice or chat.
          */
-        connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
+        connectionType: 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room' | 'daily_room';
         /**
          * Credential method for the connection type, copied from the same catalog entry.
          */
-        accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+        accessVariant: 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint' | 'daily_room.pipecat_cloud' | 'daily_room.self_hosted';
         /**
          * How simulations communicate with the agent. Use a modality offered by the selected catalog entry.
          */
@@ -871,13 +871,13 @@ export type AddConnectionData = {
          */
         environment?: string;
         /**
-         * Non-secret settings for the selected access variant. Use only its catalog fields. Retell API variants use retellAgentId; a Retell phone connection uses phoneNumber. LiveKit project credentials use url and agentName. LiveKit token endpoints use tokenEndpoint and agentName; tokenEndpoint must be a public HTTPS URL. agentName must match the name registered by your LiveKit worker. When platformAgentId is supplied for a Retell API variant, Egma derives and confirms retellAgentId from that selection.
+         * Non-secret settings for the selected access variant. Use only its catalog fields. Retell API variants use retellAgentId; a Retell phone connection uses phoneNumber. LiveKit project credentials use url and agentName. LiveKit token endpoints use tokenEndpoint and agentName; tokenEndpoint must be a public HTTPS URL. agentName must match the name registered by your LiveKit worker. Pipecat Cloud uses agentName, the agent name in pcc-deploy.toml. A self-hosted Pipecat starter uses startUrl, a public HTTPS URL. When platformAgentId is supplied for a Retell API variant, Egma derives and confirms retellAgentId from that selection.
          */
         config?: {
             [key: string]: unknown;
         };
         /**
-         * Secret fields for the selected access variant. Retell uses apiKey. LiveKit project credentials use apiKey and apiSecret. A LiveKit token endpoint requires headers: a JSON-encoded string containing a non-empty object of header names to string values. For an additional Retell connection, platformAgentId can reuse the agent's saved Retell key when credentials are omitted. For a Retell phone connection, the key confirms provider identity and is held on the agent; the phone connection itself stores no key. Responses return credential presence and hints, never the secret values.
+         * Secret fields for the selected access variant. Retell uses apiKey. LiveKit project credentials use apiKey and apiSecret. A LiveKit token endpoint requires headers: a JSON-encoded string containing a non-empty object of header names to string values. Pipecat Cloud uses publicApiKey, the public key that starts with pk_. A self-hosted Pipecat starter requires headers in the same JSON-encoded form. For an additional Retell connection, platformAgentId can reuse the agent's saved Retell key when credentials are omitted. For a Retell phone connection, the key confirms provider identity and is held on the agent; the phone connection itself stores no key. Responses return credential presence and hints, never the secret values.
          */
         credentials?: {
             [key: string]: unknown;
@@ -962,9 +962,9 @@ export type AddConnectionResponses = {
             agentId: string;
             projectId: string;
             name: string;
-            agentPlatform: 'retell' | 'livekit';
-            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            agentPlatform: 'retell' | 'livekit' | 'pipecat';
+            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room' | 'daily_room';
+            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint' | 'daily_room.pipecat_cloud' | 'daily_room.self_hosted';
             modality: 'voice' | 'chat';
             productLabel: string;
             topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
@@ -1049,7 +1049,7 @@ export type ArchiveAgentResponses = {
             id: string;
             projectId: string;
             name: string;
-            agentPlatform: 'retell' | 'livekit';
+            agentPlatform: 'retell' | 'livekit' | 'pipecat';
             platformAgentId: string | null;
             retellModality: 'voice' | 'chat' | null;
             monitoringKeyPresent: boolean;
@@ -1134,7 +1134,7 @@ export type RestoreAgentResponses = {
             id: string;
             projectId: string;
             name: string;
-            agentPlatform: 'retell' | 'livekit';
+            agentPlatform: 'retell' | 'livekit' | 'pipecat';
             platformAgentId: string | null;
             retellModality: 'voice' | 'chat' | null;
             monitoringKeyPresent: boolean;
@@ -1202,9 +1202,9 @@ export type GetConnectionResponses = {
             agentId: string;
             projectId: string;
             name: string;
-            agentPlatform: 'retell' | 'livekit';
-            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            agentPlatform: 'retell' | 'livekit' | 'pipecat';
+            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room' | 'daily_room';
+            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint' | 'daily_room.pipecat_cloud' | 'daily_room.self_hosted';
             modality: 'voice' | 'chat';
             productLabel: string;
             topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
@@ -1295,9 +1295,9 @@ export type UpdateConnectionResponses = {
             agentId: string;
             projectId: string;
             name: string;
-            agentPlatform: 'retell' | 'livekit';
-            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            agentPlatform: 'retell' | 'livekit' | 'pipecat';
+            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room' | 'daily_room';
+            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint' | 'daily_room.pipecat_cloud' | 'daily_room.self_hosted';
             modality: 'voice' | 'chat';
             productLabel: string;
             topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
@@ -1381,9 +1381,9 @@ export type ArchiveConnectionResponses = {
             agentId: string;
             projectId: string;
             name: string;
-            agentPlatform: 'retell' | 'livekit';
-            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            agentPlatform: 'retell' | 'livekit' | 'pipecat';
+            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room' | 'daily_room';
+            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint' | 'daily_room.pipecat_cloud' | 'daily_room.self_hosted';
             modality: 'voice' | 'chat';
             productLabel: string;
             topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
@@ -1476,9 +1476,9 @@ export type RestoreConnectionResponses = {
             agentId: string;
             projectId: string;
             name: string;
-            agentPlatform: 'retell' | 'livekit';
-            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room';
-            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint';
+            agentPlatform: 'retell' | 'livekit' | 'pipecat';
+            connectionType: 'retell_chat_api' | 'retell_text_mode' | 'retell_web_call' | 'phone_number' | 'livekit_room' | 'daily_room';
+            accessVariant: 'retell_chat_api.api_key' | 'retell_text_mode.api_key' | 'retell_web_call.api_key' | 'phone_number.public_e164' | 'livekit_room.project_credentials' | 'livekit_room.customer_token_endpoint' | 'daily_room.pipecat_cloud' | 'daily_room.self_hosted';
             modality: 'voice' | 'chat';
             productLabel: string;
             topology: 'agent-dials-out' | 'hosted-broker' | 'egma-dials-in';
@@ -3019,7 +3019,7 @@ export type StopMonitoringResponses = {
         monitoring: {
             agentId: string;
             pullProductionCalls: boolean;
-            agentPlatform: 'retell' | 'livekit';
+            agentPlatform: 'retell' | 'livekit' | 'pipecat';
             platformAgentId: string | null;
             monitoringApiKeyHint: string | null;
             lastReceivedAt: string | null;
@@ -4647,6 +4647,12 @@ export type ApplyRepositoryChangeSetData = {
                 job_dispatch_metadata?: {
                     [key: string]: unknown;
                 };
+                /**
+                 * JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.
+                 */
+                pipecat_body_params?: {
+                    [key: string]: unknown;
+                };
             } | null;
             expectedVersionId?: string;
             expectedRevision?: string;
@@ -4733,6 +4739,12 @@ export type ApplyRepositoryChangeSetResponses = {
                      * Context delivered to the LiveKit worker in ctx.job.metadata.
                      */
                     job_dispatch_metadata?: {
+                        [key: string]: unknown;
+                    };
+                    /**
+                     * JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.
+                     */
+                    pipecat_body_params?: {
                         [key: string]: unknown;
                     };
                 } | null;
@@ -6164,6 +6176,12 @@ export type ListTestsResponses = {
                 job_dispatch_metadata?: {
                     [key: string]: unknown;
                 };
+                /**
+                 * JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.
+                 */
+                pipecat_body_params?: {
+                    [key: string]: unknown;
+                };
             } | null;
             revision: string;
             createdAt: string;
@@ -6221,6 +6239,12 @@ export type CreateTestData = {
              * Context delivered to the LiveKit worker in ctx.job.metadata.
              */
             job_dispatch_metadata?: {
+                [key: string]: unknown;
+            };
+            /**
+             * JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.
+             */
+            pipecat_body_params?: {
                 [key: string]: unknown;
             };
         } | null;
@@ -6307,6 +6331,12 @@ export type CreateTestResponses = {
              * Context delivered to the LiveKit worker in ctx.job.metadata.
              */
             job_dispatch_metadata?: {
+                [key: string]: unknown;
+            };
+            /**
+             * JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.
+             */
+            pipecat_body_params?: {
                 [key: string]: unknown;
             };
         } | null;
@@ -6399,6 +6429,12 @@ export type GetTestVersionResponses = {
              * Context delivered to the LiveKit worker in ctx.job.metadata.
              */
             job_dispatch_metadata?: {
+                [key: string]: unknown;
+            };
+            /**
+             * JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.
+             */
+            pipecat_body_params?: {
                 [key: string]: unknown;
             };
         } | null;
@@ -6556,6 +6592,12 @@ export type GetTestResponses = {
             job_dispatch_metadata?: {
                 [key: string]: unknown;
             };
+            /**
+             * JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.
+             */
+            pipecat_body_params?: {
+                [key: string]: unknown;
+            };
         } | null;
         revision: string;
         createdAt: string;
@@ -6607,6 +6649,12 @@ export type UpdateTestData = {
              * Context delivered to the LiveKit worker in ctx.job.metadata.
              */
             job_dispatch_metadata?: {
+                [key: string]: unknown;
+            };
+            /**
+             * JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.
+             */
+            pipecat_body_params?: {
                 [key: string]: unknown;
             };
         } | null;
@@ -6714,6 +6762,12 @@ export type UpdateTestResponses = {
             job_dispatch_metadata?: {
                 [key: string]: unknown;
             };
+            /**
+             * JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.
+             */
+            pipecat_body_params?: {
+                [key: string]: unknown;
+            };
         } | null;
         revision: string;
         createdAt: string;
@@ -6807,6 +6861,12 @@ export type ListTestVersionsResponses = {
                  * Context delivered to the LiveKit worker in ctx.job.metadata.
                  */
                 job_dispatch_metadata?: {
+                    [key: string]: unknown;
+                };
+                /**
+                 * JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.
+                 */
+                pipecat_body_params?: {
                     [key: string]: unknown;
                 };
             } | null;
