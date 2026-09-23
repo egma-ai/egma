@@ -369,7 +369,9 @@ Connections and prints their names and IDs. The first run creates them. Every
 later run updates the same two, so `egma run create --connection con_...` keeps
 working. The CLI remembers which Connections belong to this machine in
 `dev-connections.json` under `~/.egma/` (or `EGMA_HOME`), never in the
-repository, so each computer has its own.
+repository, so each computer has its own. `egma agent dev` does not write them
+to `egma/config.yaml`; `egma run create` on this computer accepts them anyway.
+Only one `egma agent dev` runs per Agent on a computer.
 
 The tunnel address stays the same while you restart the bot. Keep the command
 running while simulations run, and press Ctrl-C to close the tunnel. A

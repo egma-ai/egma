@@ -7,6 +7,8 @@ import {
   runAgentConnectionOptionsCommand,
   runAgentRegisterCommand,
 } from "../src/commands/agent.ts";
+import { readProjectTargets } from "../src/sync/targets.ts";
+import { UNKNOWN_MODALITY_NOTE, UNKNOWN_PLATFORM_NOTE } from "../src/platform/agents.ts";
 import {
   CONFIG_FORMAT,
   createEgmaFolder,
@@ -391,5 +393,78 @@ describe("skills-first Agent commands", () => {
     expect(wrote).toBe(false);
     expect(io.fail.join("\n")).toContain("unsupported fields");
     expect(`${io.out.join("\n")}${io.fail.join("\n")}`).not.toContain("must-not-print");
+  });
+});
+
+describe("agents on platforms a newer CLI knows", () => {
+  const known = { ...agent("livekit"), connections: [] };
+  const later = {
+    id: "agt_later",
+    name: "Tomorrow's agent",
+    projectId: PROJECT_ID,
+    agentPlatform: "vapi",
+    platformAgentId: null,
+    monitoringKeyPresent: false,
+    connections: [],
+  };
+  const videoConnection = {
+    id: "con_video",
+    agentId: AGENT_ID,
+    projectId: PROJECT_ID,
+    name: "Video",
+    agentPlatform: "livekit",
+    connectionType: "livekit_room",
+    accessVariant: "livekit_room.project_credentials",
+    modality: "video",
+    productLabel: "LiveKit video",
+    credentialsHint: null,
+    config: {},
+  };
+
+  it("leaves them out of the listing with one note instead of refusing it", async () => {
+    const listed = await readProjectTargets(PROJECT_ID, {
+      url: URL,
+      key: CONTROL_KEY,
+      fetchImpl: async () =>
+        new JsonResponse({
+          agents: [later, { ...known, connections: [videoConnection] }, { ...later, id: "agt_later_two" }],
+          nextPageToken: null,
+        }),
+    });
+
+    expect(listed).toEqual({
+      kind: "synced",
+      agents: [{ id: AGENT_ID, name: "Receptionist", platform: "livekit", connections: [] }],
+      notes: [UNKNOWN_PLATFORM_NOTE, UNKNOWN_MODALITY_NOTE],
+    });
+    expect(UNKNOWN_PLATFORM_NOTE).toContain("Update egma-cli");
+  });
+
+  it("still refuses an agent row that is incomplete", async () => {
+    const listed = await readProjectTargets(PROJECT_ID, {
+      url: URL,
+      key: CONTROL_KEY,
+      fetchImpl: async () =>
+        new JsonResponse({ agents: [{ ...later, agentPlatform: 7 }], nextPageToken: null }),
+    });
+
+    expect(listed.kind).toBe("refused");
+  });
+
+  it("prints the note after a write refreshes config.yaml", async () => {
+    const io = output();
+    const code = await runAgentRegisterCommand({
+      ...base(io),
+      platform: "livekit",
+      name: "Receptionist",
+      fetchImpl: async (_input, init) =>
+        init?.method === "POST"
+          ? new JsonResponse({ result: "created", agent: agent("livekit") }, 201)
+          : new JsonResponse({ agents: [known, later], nextPageToken: null }),
+    });
+
+    expect(code).toBe(0);
+    expect(io.fail).toEqual([UNKNOWN_PLATFORM_NOTE]);
+    expect((await readConfig(folderPathsIn(workspace.dir).config)).agents.map((one) => one.id)).toEqual([AGENT_ID]);
   });
 });

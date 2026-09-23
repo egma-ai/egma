@@ -164,6 +164,7 @@ export async function runInitCommand(options: InitCommandOptions): Promise<numbe
     `Project: ${oneLineFactText(project.name, "Unnamed Project")} (${oneLineFactText(project.id, "unknown Project ID")})`,
   );
   options.out(`Agents: ${targets.agents.length}`);
+  for (const note of targets.notes) options.fail(note);
   options.out(`Suites: ${pulled.suites.length}`);
   options.out(`Tests: ${pulled.tests.length}`);
   return FOLDER_EXIT.done;

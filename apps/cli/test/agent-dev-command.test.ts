@@ -5,10 +5,10 @@
  * the secret written into them, and the session survives a tunnel that ends.
  */
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,7 +17,9 @@ import { runAgentDevCommand, machineNameOf, type AgentDevCommandOptions } from "
 import { DEV_SECRET_HEADER } from "../src/dev/guard.ts";
 import { sessionLockFile } from "../src/dev/session-lock.ts";
 import { TunnelStartFailure, type RunningTunnel, type TunnelExit, type TunnelLauncher } from "../src/dev/tunnel.ts";
-import { createEgmaFolder, EMPTY_CONFIG, folderPathsIn, readConfig } from "../src/folder/egma-folder.ts";
+import { withThisMachineConnections } from "../src/dev/machine-connections.ts";
+import { createEgmaFolder, EMPTY_CONFIG, folderPathsIn, readConfig, writeConfig } from "../src/folder/egma-folder.ts";
+import { selectTarget } from "../src/folder/target-selection.ts";
 import { startPlatform, type Platform } from "./support/fixture-platform/index.ts";
 import { makeWorkspace, type Workspace } from "./support/workspace.ts";
 
@@ -256,6 +258,13 @@ describe("egma agent dev", () => {
 
   it("creates this machine's voice and chat connections on the first start", async () => {
     const agentId = await register();
+    // The repository lists the agent, as after egma agent register or egma pull.
+    const configFile = folderPathsIn(workspace.dir).config;
+    await writeConfig(configFile, {
+      ...(await readConfig(configFile)),
+      agents: [{ id: agentId, name: "Front desk", platform: "pipecat", connections: [] }],
+    });
+    const committed = await readFile(configFile, "utf8");
     const tunnels = fakeTunnels();
     const session = start(agentId, tunnels.launch);
     await session.said("Press Ctrl-C to stop.");
@@ -282,10 +291,23 @@ describe("egma agent dev", () => {
         { platformUrl: platform.url, agentId, modality: "chat", connectionId: made[1]!.id },
       ],
     });
-    expect(await readFile(folderPathsIn(workspace.dir).config, "utf8")).not.toContain(sealedSecret(made[0]!.id));
-    expect((await readConfig(folderPathsIn(workspace.dir).config)).agents[0]?.connections.map((one) => one.id).sort()).toEqual(
-      made.map((one) => one.id).sort(),
-    );
+    // This machine's connections stay out of the repository...
+    expect(await readFile(configFile, "utf8")).toBe(committed);
+    expect(session.out.join("\n")).not.toContain("egma/config.yaml");
+    // ...and a run on this machine can still name them.
+    const env = { EGMA_HOME: workspace.egmaFolder };
+    for (const connection of made) {
+      const target = selectTarget(await withThisMachineConnections(await readConfig(configFile), env), {
+        agent: agentId,
+        connection: connection.id,
+      });
+      expect(target).toMatchObject({ kind: "selected", connection: { id: connection.id } });
+    }
+    const elsewhere = selectTarget(await withThisMachineConnections(await readConfig(configFile), { EGMA_HOME: path.join(workspace.dir, "another-machine") }), {
+      agent: agentId,
+      connection: made[0]!.id,
+    });
+    expect(elsewhere.kind).toBe("refused");
 
     const said = session.out.join("\n");
     expect(said).toContain("Tunnel: https://fake-tunnel-1.trycloudflare.com");
@@ -603,8 +625,9 @@ describe("egma agent dev", () => {
 
     const second = start(agentId, tunnels.launch);
     expect(await second.code).toBe(1);
+    const lock = sessionLockFile(workspace.egmaFolder, platform.url, agentId);
     expect(second.fail).toEqual([
-      `egma agent dev is already running for Agent ${agentId} on this machine (process ${String(process.pid)}). Use that session, or stop it with Ctrl-C first.`,
+      `egma agent dev is already running for Agent ${agentId} on this machine (process ${String(process.pid)}). Use that session, or stop it with Ctrl-C first. If none is running, delete ${lock} and try again.`,
     ]);
     expect(tunnels.opened).toHaveLength(1);
     expect(devConnections(agentId)[0]?.config).toEqual({ startUrl: "https://fake-tunnel-1.trycloudflare.com/start" });
@@ -628,6 +651,29 @@ describe("egma agent dev", () => {
     expect(await readFile(lock, "utf8")).toBe(`${String(process.pid)}\n`);
     await session.stop();
     await expect(readFile(lock, "utf8")).rejects.toThrow();
+  });
+
+  it.each([
+    ["was written before this machine started", "boot"],
+    ["names a process that is not Node", "not-node"],
+    ["names this process's id without this process holding it", "reused"],
+  ] as const)("takes over a session lock that %s", async (_name, why) => {
+    const agentId = await register();
+    const lock = sessionLockFile(workspace.egmaFolder, platform.url, agentId);
+    await mkdir(path.dirname(lock), { recursive: true });
+    const sleeper = why === "not-node" ? spawn("sleep", ["30"]) : null;
+    try {
+      await writeFile(lock, `${String(sleeper?.pid ?? process.pid)}\n`, "utf8");
+      if (why === "boot") await utimes(lock, new Date(1_000), new Date(1_000));
+      const tunnels = fakeTunnels();
+      const session = start(agentId, tunnels.launch);
+      await session.said("Press Ctrl-C to stop.");
+
+      expect(await readFile(lock, "utf8")).toBe(`${String(process.pid)}\n`);
+      await session.stop();
+    } finally {
+      sleeper?.kill();
+    }
   });
 
   it("says nothing about Egma not answering when Ctrl-C stops a connection write", async () => {

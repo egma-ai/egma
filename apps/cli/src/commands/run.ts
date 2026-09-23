@@ -1,5 +1,7 @@
 /** `egma run create | get | cancel`: explicit Run resource commands. */
 
+import process from "node:process";
+
 import {
   RepositoryValidationError,
   folderPathsIn,
@@ -7,6 +9,7 @@ import {
   type FolderConfig,
 } from "../folder/egma-folder.ts";
 import { selectTarget, type RefusedTarget } from "../folder/target-selection.ts";
+import { withThisMachineConnections } from "../dev/machine-connections.ts";
 import { PlatformUnreachableError } from "../platform/device-flow.ts";
 import { PlatformRefusedError } from "../platform/refused.ts";
 import { cancelRun, fetchRunDetails, startRun } from "../platform/runs.ts";
@@ -38,6 +41,8 @@ export type RunCreateCommandOptions = FolderCommandOptions & {
   readonly concurrency?: number;
   readonly name?: string;
   readonly signal: AbortSignal;
+  /** Where this machine's Egma folder is found. Default: the process's environment. */
+  readonly env?: NodeJS.ProcessEnv;
 };
 
 /** Inputs to `egma run cancel`. */
@@ -228,7 +233,8 @@ export async function runCreateCommand(
     return RUN_EXIT.notSignedIn;
   }
 
-  const target = selectTarget(config, {
+  // egma agent dev keeps this machine's connections out of the repository.
+  const target = selectTarget(await withThisMachineConnections(config, options.env ?? process.env), {
     agent: options.agent,
     connection: options.connection,
   });
