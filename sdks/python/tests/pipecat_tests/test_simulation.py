@@ -512,8 +512,14 @@ async def test_a_chat_simulation_through_rtvi_is_text_only_and_on_the_record(
     ]
     assert user.end_time <= agents[0].start_time
     [call] = sink.named("function_call")
-    assert call.parent.span_id == agents[0].context.span_id
-    assert sink.spans[-1].name == "pipecat_session"
+    [root] = sink.named("pipecat_session")
+    # The call sits in the turn that asked for it only while that turn is
+    # still answering; a chat answer is not spoken, so usually at the root.
+    assert call.parent.span_id in {
+        root.context.span_id,
+        agents[0].context.span_id,
+    }
+    assert sink.spans[-1] is root
 
 
 async def test_a_user_message_the_bot_appends_itself_is_not_a_user_turn(egma, exports):
@@ -524,3 +530,20 @@ async def test_a_user_message_the_bot_appends_itself_is_not_a_user_turn(egma, ex
 
     assert exports.only.named("user_turn") == []
     assert len(exports.only.named("agent_turn")) == 1
+
+
+async def test_a_response_that_only_asks_for_a_tool_is_no_turn(egma, exports):
+    bot = Reception(
+        [Step(calls=[("check_calendar", {"day": "Tuesday"})]), Step(text="Open.")]
+    )
+
+    await simulation(bot.worker, a_simulation(modality="chat"))
+    await run_pipeline(bot.worker, lambda: bot.say("Is Tuesday free?"))
+
+    sink = exports.only
+    [turn] = sink.named("agent_turn")
+    assert turn.attributes["egma.turn.text"] == "Open."
+    [call] = sink.named("function_call")
+    [root] = sink.named("pipecat_session")
+    assert call.parent.span_id == root.context.span_id
+    assert call.end_time <= turn.start_time

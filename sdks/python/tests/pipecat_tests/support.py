@@ -415,8 +415,13 @@ async def run_pipeline(
         started.set()
 
     async def driven() -> None:
-        await asyncio.wait_for(started.wait(), seconds)
-        await drive()
+        try:
+            await asyncio.wait_for(started.wait(), seconds)
+            await drive()
+        except BaseException:
+            # A failed drive must not leave the worker running forever.
+            await worker.cancel()
+            raise
         await worker.queue_frame(EndFrame())
 
     runner = WorkerRunner(handle_sigint=False)

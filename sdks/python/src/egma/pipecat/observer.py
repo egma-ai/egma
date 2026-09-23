@@ -9,15 +9,17 @@ turns them into the ``egma.pipecat`` spans egma reads as the agent's POV:
   text is the message the user sent with RTVI ``send-text``.
 - ``agent_turn``: one LLM response, from its start to its last output,
   with the text the LLM wrote and ``egma.turn.interrupted`` when it was cut.
+  A response with no text, one that only asks for tools, is no turn.
 - ``function_call``: one tool call, from the moment it runs to its result,
-  with its name, arguments, and result or error.
+  with its name, arguments, and result or error. Its parent is the turn that
+  asked for it while that turn is in progress, otherwise the root.
 - ``user_speaking`` / ``agent_speaking``: when each side's audio ran.
 
 Each span is created with the times the frames were pushed, read off the
 pipeline clock, so the record is exact even though observers run behind the
 pipeline. A user turn is written once it is committed and holds text; a
 voice activity burst that never became a turn leaves no span. An agent turn
-is ended when the next turn begins or the session ends.
+is written when the next turn begins or the session ends.
 
 Nothing here raises into Pipecat: an observer that raises stops receiving
 frames, so every failure is logged and swallowed.
@@ -102,7 +104,8 @@ def _pipecat_version() -> str:
 
 
 def _json(value: Any) -> str:
-    return json.dumps(value, default=str, ensure_ascii=False)
+    """Compact JSON, as the model and the seam write it."""
+    return json.dumps(value, separators=(",", ":"), default=str, ensure_ascii=False)
 
 
 def _message_text(content: Any) -> str:
@@ -150,16 +153,29 @@ class _HumanTurn:
 
 @dataclass
 class _AgentTurn:
-    span: Span
+    started_at: int
     ended_at: int
+    span: Span | None = None
+    """Created once the turn has text: when it closes, or earlier when a tool
+    call made while it is in progress needs it as a parent."""
     text: _Text = field(default_factory=_Text)
     spoken_text: _Text = field(default_factory=_Text)
+    speech: list[tuple[int, int]] = field(default_factory=list)
     responding: bool = True
     speaking_since: int | None = None
     awaiting_speech: bool = False
     superseded: bool = False
     interrupted: bool = False
     closed: bool = False
+
+    def said(self) -> str:
+        return self.text.value() or self.spoken_text.value()
+
+    def in_progress(self) -> bool:
+        """The model is still answering, or its answer is still to be spoken."""
+        return not self.closed and (
+            self.responding or self.speaking_since is not None or self.awaiting_speech
+        )
 
 
 class Recorder:
@@ -292,9 +308,17 @@ class Recorder:
     def _open_agent(self, at: int) -> _AgentTurn:
         self._write_human()
         self._supersede_agents()
-        turn = _AgentTurn(span=self._span(AGENT_TURN, at, self.start(at)), ended_at=at)
+        self.start(at)
+        turn = _AgentTurn(started_at=at, ended_at=at)
         self._agents.append(turn)
         return turn
+
+    def _span_of(self, turn: _AgentTurn) -> Span:
+        if turn.span is None:
+            turn.span = self._span(
+                AGENT_TURN, turn.started_at, self.start(turn.started_at)
+            )
+        return turn.span
 
     def _responding(self) -> _AgentTurn | None:
         for turn in reversed(self._agents):
@@ -352,8 +376,7 @@ class Recorder:
         turn = self._speaker()
         if turn is None or turn.speaking_since is None:
             return
-        spoke = self._span(AGENT_SPEAKING, turn.speaking_since, turn.span)
-        spoke.end(end_time=max(at, turn.speaking_since))
+        turn.speech.append((turn.speaking_since, max(at, turn.speaking_since)))
         turn.speaking_since = None
         turn.ended_at = max(turn.ended_at, at)
         self._close_if_done(turn)
@@ -372,17 +395,22 @@ class Recorder:
             return
         if turn.speaking_since is not None:
             end = max(now or turn.ended_at, turn.speaking_since)
-            spoke = self._span(AGENT_SPEAKING, turn.speaking_since, turn.span)
-            spoke.end(end_time=end)
+            turn.speech.append((turn.speaking_since, end))
             turn.ended_at = max(turn.ended_at, end)
             turn.speaking_since = None
         turn.closed = True
-        turn.span.set_attribute(
-            TURN_TEXT, turn.text.value() or turn.spoken_text.value()
-        )
+        said = turn.said()
+        if not said:
+            # A response that only asked for tools says nothing: no turn.
+            return
+        span = self._span_of(turn)
+        span.set_attribute(TURN_TEXT, said)
         if turn.interrupted:
-            turn.span.set_attribute(TURN_INTERRUPTED, True)
-        turn.span.end(end_time=turn.ended_at)
+            span.set_attribute(TURN_INTERRUPTED, True)
+        for started_at, stopped_at in turn.speech:
+            spoke = self._span(AGENT_SPEAKING, started_at, span)
+            spoke.end(end_time=stopped_at)
+        span.end(end_time=turn.ended_at)
 
     # --- tools ---------------------------------------------------------
 
@@ -400,10 +428,14 @@ class Recorder:
     ) -> None:
         if tool_call_id in self._calls:
             return
-        turn = self._requested_by.pop(tool_call_id, None) or next(
-            (t for t in reversed(self._agents) if not t.closed), None
+        # The turn that asked for the call is its parent while that turn is in
+        # progress and says something; otherwise the call sits at the root.
+        turn = self._requested_by.pop(tool_call_id, None) or self._responding()
+        parent = (
+            self._span_of(turn)
+            if turn is not None and turn.in_progress() and turn.said()
+            else self.start(at)
         )
-        parent = turn.span if turn is not None else self.start(at)
         self._calls[tool_call_id] = self._span(
             FUNCTION_CALL,
             at,
