@@ -113,7 +113,7 @@ const pullState = {
     pullProductionCalls: { type: "boolean" },
     agentPlatform: {
       type: "string",
-      enum: ["retell", "livekit"],
+      enum: ["retell", "livekit", "pipecat"],
     },
     platformAgentId: nullable({ type: "string" }),
     monitoringApiKeyHint: nullable({ type: "string" }),

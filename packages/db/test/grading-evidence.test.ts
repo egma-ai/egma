@@ -54,7 +54,7 @@ const auth: AuthContext = {
   via: "session",
 };
 const SIMULATOR = "final-evidence-simulator";
-type Platform = "livekit" | "retell";
+type Platform = "livekit" | "retell" | "pipecat";
 
 type CompletedConversation = {
   readonly claim: SimulationClaim;
@@ -71,7 +71,16 @@ async function completedConversation(
   const created = await createAgent(auth, {
     agentPlatform: platform,
     name,
-    connection: platform === "livekit"
+    connection: platform === "pipecat"
+      ? {
+          agentPlatform: "pipecat",
+          connectionType: "daily_room",
+          accessVariant: "daily_room.pipecat_cloud",
+          modality: "voice",
+          config: { agentName: name },
+          credentials: { publicApiKey: "pk_evidence_A1B2C3D4" },
+        }
+      : platform === "livekit"
       ? {
           agentPlatform: "livekit",
           connectionType: "livekit_room",
@@ -131,7 +140,9 @@ async function completedConversation(
     platformAgentId: name,
     platformAgentName: name,
     platformAgentVersion: "1",
-    connectionType: platform === "livekit" ? "livekit_room" : "retell_web_call",
+    connectionType: platform === "livekit"
+      ? "livekit_room"
+      : platform === "pipecat" ? "daily_room" : "retell_web_call",
     runId: claim.runId,
     agentId: claim.agentId,
     agentVersionId: "",
@@ -157,8 +168,10 @@ function finalEvidence(conversation: CompletedConversation): NewSpan {
     ...conversation.span,
     spanId: "2222222222222222",
     emitter: "agent",
-    kind: conversation.span.agentPlatform === "livekit" ? "root" : "conversation",
-    name: conversation.span.agentPlatform === "livekit" ? "agent_session" : "retell_call",
+    kind: conversation.span.agentPlatform === "retell" ? "conversation" : "root",
+    name: conversation.span.agentPlatform === "livekit"
+      ? "agent_session"
+      : conversation.span.agentPlatform === "pipecat" ? "pipecat_session" : "retell_call",
     payload: JSON.stringify({
       call_status: "ended",
       end_timestamp: conversation.completedAt.getTime(),
@@ -214,7 +227,7 @@ afterAll(async () => {
   await database.drop();
 });
 
-describe.each<Platform>(["livekit", "retell"])("%s final evidence", (platform) => {
+describe.each<Platform>(["livekit", "retell", "pipecat"])("%s final evidence", (platform) => {
   it("keeps grading pending past thirty seconds and queues when the final record arrives", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const conversation = await completedConversation(platform);
@@ -222,8 +235,8 @@ describe.each<Platform>(["livekit", "retell"])("%s final evidence", (platform) =
     const partial: NewSpan = {
       ...finalEvidence(conversation),
       spanId: "3333333333333333",
-      name: platform === "livekit" ? "agent_turn" : "retell_call",
-      kind: platform === "livekit" ? "turn:agent" : "conversation",
+      name: platform === "retell" ? "retell_call" : "agent_turn",
+      kind: platform === "retell" ? "conversation" : "turn:agent",
       payload: JSON.stringify({ call_status: "ongoing", egma_normalised: { degraded: true } }),
     };
     await appendSpans(auth, [partial]);
