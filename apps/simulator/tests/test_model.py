@@ -277,8 +277,68 @@ async def test_end_call_without_provider_words_keeps_the_end_action_textless(
     assert reply.requests_end_call is True
 
 
+@pytest.mark.parametrize("content", [None, "", " "])
+async def test_an_empty_answer_is_the_persona_staying_silent(model_stub, content):
+    """No words and no end_call is a turn the persona chose not to speak."""
+    model_stub.answers.append(
+        web.json_response(
+            {
+                "id": "response-silent",
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "role": "assistant",
+                            "content": content,
+                            "refusal": None,
+                        },
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 961,
+                    "completion_tokens": 3,
+                    "total_tokens": 964,
+                },
+            }
+        )
+    )
+    client = OpenAICompatibleModel(
+        base_url=model_stub.base_url, api_key="k", model_name="selected"
+    )
+    try:
+        reply = await client.reply(system_and_history())
+    finally:
+        await client.close()
+
+    assert reply.text == ""
+    assert reply.concluded is False
+    assert reply.tool_calls == ()
+    assert reply.requests_end_call is False
+    assert reply.usage is not None
+
+
+async def test_an_empty_answer_cut_short_is_still_a_model_failure(model_stub):
+    model_stub.answers.append(
+        web.json_response(
+            {"choices": [{"finish_reason": "length", "message": {"content": ""}}]}
+        )
+    )
+    client = OpenAICompatibleModel(
+        base_url=model_stub.base_url, api_key="k", model_name="selected"
+    )
+    try:
+        with pytest.raises(ModelFailure, match="finish reason: length") as caught:
+            await client.reply(system_and_history())
+    finally:
+        await client.close()
+    assert caught.value.diagnostic_attributes == {
+        "gen_ai.response.finish_reason": "length",
+        "gen_ai.response.refusal_present": False,
+    }
+
+
 @pytest.mark.parametrize("content", [None, " "])
-async def test_blank_completion_failure_keeps_only_safe_provider_metadata(
+async def test_a_refused_blank_completion_keeps_only_safe_provider_metadata(
     model_stub, content
 ):
     model_stub.answers.append(
@@ -309,7 +369,7 @@ async def test_blank_completion_failure_keeps_only_safe_provider_metadata(
         base_url=model_stub.base_url, api_key="secret-key", model_name="selected"
     )
     try:
-        with pytest.raises(ModelFailure) as caught:
+        with pytest.raises(ModelFailure, match="refused to answer") as caught:
             await client.reply(system_and_history())
     finally:
         await client.close()

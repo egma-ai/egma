@@ -4,6 +4,8 @@ duration limits share ConversationControls; the first ending cause wins.
 
 Agent silence is an observed outcome, not an execution fault. The voice persona
 can follow up twice before concluding; graders assess the resulting evidence.
+A persona reply with no words and no end_call is silence: the loop sends nothing
+and waits for the agent to go on.
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
 
-from .persona import Persona, Turn
+from .persona import SILENCE_WAIT_SECONDS, Persona, Turn
 from .plugs import AgentReply, ConnectionPlug
 from .usage import ProviderUsage
 
@@ -288,6 +290,15 @@ async def conduct(
     def agent_has_ended() -> bool:
         return bool(getattr(plug, "has_ended", False))
 
+    async def listen_to_agent() -> AgentReply | None:
+        """What the agent says without a persona turn, or None if it stays quiet.
+        A plug that can only answer a sent turn hears nothing.
+        """
+        listen = getattr(plug, "listen", None)
+        if not callable(listen):
+            return None
+        return await controls.guard(listen(SILENCE_WAIT_SECONDS))
+
     watchdog = asyncio.create_task(
         _duration_watchdog(max_duration_seconds, controls),
         name=f"{name}:watchdog",
@@ -345,6 +356,17 @@ async def conduct(
                         if final_answer.ended:
                             return ended(AGENT_ENDED)
                 return ended(PERSONA_CONCLUDED)
+            if not reply.text:
+                # The persona stays silent. The exchange goes on only if the
+                # agent speaks again without being asked.
+                heard = await listen_to_agent()
+                if heard is None:
+                    return ended(PERSONA_CONCLUDED)
+                await record_answer(heard)
+                if heard.ended:
+                    return ended(AGENT_ENDED)
+                await answered()
+                continue
             await record("human", reply.text)
 
             # The agent's move — not asked for when its answer could not

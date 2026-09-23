@@ -16,7 +16,7 @@ import pytest
 
 from egma_simulator.conversation import Conducted, ConversationControls, conduct
 from egma_simulator.model import GOODBYE, ModelFailure, PersonaReply, ScriptedModel
-from egma_simulator.persona import Persona
+from egma_simulator.persona import SILENCE_WAIT_SECONDS, Persona
 from egma_simulator.plugs import AgentReply, PlugError
 from egma_simulator.plugs.scripted import ScriptedCounterpart
 from egma_simulator.spec import AuthoredPersona
@@ -366,6 +366,164 @@ async def test_a_textless_end_action_makes_no_turn_or_delivery():
     assert plug.sent == []
     assert turns == []
     assert conducted.ending == "persona_concluded"
+
+
+SILENT = PersonaReply(text="", concluded=False)
+"""A persona reply with no words and no end_call: the persona stays silent."""
+
+
+class SequenceModel:
+    """Persona replies in order, then a textless end_call."""
+
+    model_name = "sequence"
+
+    def __init__(self, replies: list[PersonaReply]) -> None:
+        self._replies = replies
+
+    async def reply(self, _context) -> PersonaReply:
+        if self._replies:
+            return self._replies.pop(0)
+        return PersonaReply(text="", concluded=True)
+
+    async def close(self) -> None:
+        return None
+
+
+class ListeningPlug:
+    """A chat plug that can also hear the agent without a persona turn."""
+
+    provider_reference = None
+
+    def __init__(
+        self, *, answers: list[AgentReply], heard: list[AgentReply | None]
+    ) -> None:
+        self.sent: list[str] = []
+        self.listened: list[float] = []
+        self._answers = answers
+        self._heard = heard
+
+    async def open(self) -> None:
+        return None
+
+    async def deliver(self, text: str) -> AgentReply:
+        self.sent.append(text)
+        return self._answers.pop(0)
+
+    async def listen(self, seconds: float) -> AgentReply | None:
+        self.listened.append(seconds)
+        return self._heard.pop(0)
+
+    async def finish(self, text: str) -> None:
+        self.sent.append(text)
+
+    async def close(self) -> None:
+        return None
+
+
+async def conducted_in_order(
+    plug, *replies: PersonaReply, on_timing=None
+) -> tuple[Conducted, list[tuple[str, str]]]:
+    turns, recorder = collect()
+    conducted = await conduct(
+        persona=Persona(
+            authored=AUTHORED,
+            scenario_instructions="One point.",
+            model=SequenceModel(list(replies)),
+        ),
+        plug=plug,
+        max_turns=10,
+        max_duration_seconds=30,
+        on_turn=recorder,
+        on_timing=on_timing,
+        controls=ConversationControls(),
+        name="sim:silent-persona",
+    )
+    return conducted, turns
+
+
+async def test_a_silent_persona_turn_waits_for_the_agent_to_go_on():
+    """The persona may say nothing, as a caller does while the agent looks
+    something up. Nothing is sent, and the agent's next words continue the
+    exchange. They take no latency sample: nobody asked for them."""
+    measures: list[str] = []
+
+    async def on_timing(measure: str, _milliseconds: float) -> None:
+        measures.append(measure)
+
+    plug = ListeningPlug(
+        answers=[AgentReply(text="Give me a moment to pull up your policy.")],
+        heard=[AgentReply(text="Found it. You are covered in Mexico.")],
+    )
+    conducted, turns = await conducted_in_order(
+        plug,
+        PersonaReply(text="Am I covered in Mexico?", concluded=False),
+        SILENT,
+        PersonaReply(text="Great, thank you. Goodbye.", concluded=True),
+        on_timing=on_timing,
+    )
+
+    assert turns == [
+        ("human", "Am I covered in Mexico?"),
+        ("agent", "Give me a moment to pull up your policy."),
+        ("agent", "Found it. You are covered in Mexico."),
+        ("human", "Great, thank you. Goodbye."),
+    ]
+    assert plug.sent == ["Am I covered in Mexico?", "Great, thank you. Goodbye."]
+    assert plug.listened == [SILENCE_WAIT_SECONDS]
+    assert measures == ["turn_response_latency"]
+    assert conducted.ending == "persona_concluded"
+
+
+async def test_a_silent_persona_turn_ends_the_exchange_when_the_agent_stays_quiet():
+    """Silence on both sides ends the conversation, as the persona's end_call
+    would have after the goodbyes."""
+    plug = ListeningPlug(
+        answers=[AgentReply(text="You're welcome. Goodbye.")], heard=[None]
+    )
+    conducted, turns = await conducted_in_order(
+        plug, PersonaReply(text="Thank you. Goodbye.", concluded=False), SILENT
+    )
+
+    assert turns == [
+        ("human", "Thank you. Goodbye."),
+        ("agent", "You're welcome. Goodbye."),
+    ]
+    assert plug.sent == ["Thank you. Goodbye."]
+    assert plug.listened == [SILENCE_WAIT_SECONDS]
+    assert conducted == Conducted(
+        status="completed",
+        ending="persona_concluded",
+        reason="the persona concluded the scenario",
+        provider_reference=None,
+    )
+
+
+async def test_a_silent_persona_turn_ends_the_exchange_where_nothing_can_listen():
+    """A platform that answers only a sent turn will say nothing more."""
+    plug = TerminalPlug()
+    conducted, turns = await conducted_in_order(
+        plug, PersonaReply(text="Thank you. Goodbye.", concluded=False), SILENT
+    )
+
+    assert plug.sent == ["Thank you. Goodbye."]
+    assert turns == [("human", "Thank you. Goodbye."), ("agent", "continue")]
+    assert conducted.ending == "persona_concluded"
+
+
+async def test_the_agent_leaving_while_the_persona_is_silent_ends_the_exchange():
+    plug = ListeningPlug(
+        answers=[AgentReply(text="You're welcome. Goodbye.")],
+        heard=[AgentReply(text=None, ended=True)],
+    )
+    conducted, turns = await conducted_in_order(
+        plug, PersonaReply(text="Thank you. Goodbye.", concluded=False), SILENT
+    )
+
+    assert turns == [
+        ("human", "Thank you. Goodbye."),
+        ("agent", "You're welcome. Goodbye."),
+    ]
+    assert conducted.ending == "agent_ended"
 
 
 async def test_customer_end_cancels_pending_persona_work_without_a_late_turn():

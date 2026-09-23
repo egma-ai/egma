@@ -44,7 +44,7 @@ from egma_simulator.media.livekit_room import (
 )
 from egma_simulator.media.room import PERSONA_IDENTITY, ROOM_PREFIX
 from egma_simulator.mock_tools import PROTOCOL_VERSION, TOOL_METHOD, MockToolSeam
-from egma_simulator.model import GOODBYE, ScriptedModel
+from egma_simulator.model import GOODBYE, PersonaReply, ScriptedModel
 from egma_simulator.persona import Persona
 from egma_simulator.pipeline import assemble
 from egma_simulator.plugs import PlugError, failed_ending, plug_for
@@ -1385,6 +1385,136 @@ async def test_the_agent_leaving_mid_exchange_is_the_agent_ending_it(
         ("agent", "I am afraid I have to go. Goodbye."),
     ]
     assert stub.deleted == [stub.rooms[0].name]
+
+
+async def test_listening_hears_the_agent_go_on_without_a_persona_turn(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """After a silent persona turn, the agent's next words are read without
+    typing anything into the room."""
+    hurry(monkeypatch)
+    stub = ChatStub(greeting=None, replies=["Give me a moment."])
+    plug = chat_room(stub)
+    await plug.open()
+    await plug.deliver("Am I covered in Mexico?")
+
+    stub.room._agent_says("Found it. You are covered.")
+    heard = await plug.listen(A_LONG_QUIET)
+
+    assert heard is not None
+    assert (heard.text, heard.ended) == ("Found it. You are covered.", False)
+    assert [typed.text for typed in stub.typed] == ["Am I covered in Mexico?"]
+    await plug.close()
+
+
+async def test_listening_keeps_words_the_agent_began_before_the_listen(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The persona's model call runs between the last answer and the listen.
+    Words the agent wrote in that gap continue its answer, so they are kept
+    rather than dropped as an earlier turn's."""
+    hurry(monkeypatch)
+    stub = ChatStub(greeting=None, replies=["Give me a moment."])
+    plug = chat_room(stub)
+    await plug.open()
+    await plug.deliver("Am I covered in Mexico?")
+
+    stub.room._agent_says("Found it. You are covered.")
+    await asyncio.sleep(A_PAUSE)
+    assert not stub.room.utterances.empty(), "the words landed before the listen"
+    heard = await plug.listen(QUIET_SECONDS)
+
+    assert heard is not None
+    assert heard.text == "Found it. You are covered."
+    await plug.close()
+
+
+async def test_an_agent_that_stays_quiet_while_the_persona_listens_is_no_fault(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    hurry(monkeypatch)
+    stub = ChatStub(greeting=None, replies=["You're welcome. Goodbye."])
+    plug = chat_room(stub)
+    await plug.open()
+    await plug.deliver("Thank you. Goodbye.")
+
+    assert await plug.listen(QUIET_SECONDS) is None
+    assert [typed.text for typed in stub.typed] == ["Thank you. Goodbye."]
+    await plug.close()
+
+
+async def test_the_agent_leaving_while_the_persona_listens_is_its_ending(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    hurry(monkeypatch)
+    stub = ChatStub(greeting=None, replies=["You're welcome. Goodbye."])
+    plug = chat_room(stub)
+    await plug.open()
+    await plug.deliver("Thank you. Goodbye.")
+
+    stub.room.ended.set()
+    heard = await plug.listen(A_LONG_QUIET)
+
+    assert heard is not None
+    assert (heard.text, heard.ended) == (None, True)
+    await plug.close()
+
+
+async def test_a_silent_persona_turn_in_a_room_hears_the_agent_go_on(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The conversation loop and the room together: a persona that waits in
+    silence while the agent looks something up, then hangs up."""
+    hurry(monkeypatch)
+    stub = ChatStub(greeting="Front desk.", replies=["Give me a moment."])
+
+    class WaitsInSilence:
+        model_name = "waits-in-silence"
+        asked = 0
+
+        async def reply(self, _context) -> PersonaReply:
+            self.asked += 1
+            if self.asked == 1:
+                return PersonaReply(text="Am I covered in Mexico?", concluded=False)
+            if self.asked == 2:
+                stub.room._agent_says("Found it. You are covered.")
+                return PersonaReply(text="", concluded=False)
+            return PersonaReply(text="", concluded=True)
+
+        async def close(self) -> None:
+            return None
+
+    turns: list[tuple[str, str]] = []
+
+    async def on_turn(
+        speaker: str, text: str, notes: tuple[str, ...] = ()
+    ) -> None:
+        del notes
+        turns.append((speaker, text))
+
+    conducted = await conduct(
+        persona=Persona(
+            authored=SimulationSpec.from_document(chat_spec()).persona,
+            scenario_instructions="Wait in silence while the agent checks.",
+            model=WaitsInSilence(),
+        ),
+        plug=chat_room(stub),
+        max_turns=10,
+        max_duration_seconds=30,
+        on_turn=on_turn,
+        on_timing=None,
+        controls=ConversationControls(),
+        name="sim:room-chat-silent",
+    )
+
+    assert turns == [
+        ("agent", "Front desk."),
+        ("human", "Am I covered in Mexico?"),
+        ("agent", "Give me a moment."),
+        ("agent", "Found it. You are covered."),
+    ]
+    assert [typed.text for typed in stub.typed] == ["Am I covered in Mexico?"]
+    assert conducted.ending == "persona_concluded"
 
 
 def test_turn_waits_are_bounded():

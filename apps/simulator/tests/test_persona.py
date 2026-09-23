@@ -65,6 +65,7 @@ Your name is {AUTHORED.name}. Give that name when the agent asks who is calling,
 - You are allowed to make up details in order to fulfill the scenario unless explicitly stated otherwise. Examples include appointment details, or other details that someone in your situation might have handy. Your name is not one of them: it is given above, and you never answer to another.
 - Pursue what you came for until it is concluded to your satisfaction, and let your personality decide how patiently.
 - When your goal is concluded and nothing further is needed, say a brief goodbye and end your reply with the `end_call` tool
+- A goodbye alone does not end the call. Once the conversation is over, always use the `end_call` tool, even if you have nothing more to say.
 """
 
 
@@ -203,6 +204,8 @@ def test_silence_follow_up_explains_the_pause_without_changing_history(follow_up
     assert messages[-1]["role"] == "user"
     assert "10 seconds" in messages[-1]["content"]
     assert f"{follow_up} of 2" in messages[-1]["content"]
+    # A quiet line after the goodbyes is a call to end, not one to check on.
+    assert "already over, use the `end_call` tool" in messages[-1]["content"]
     assert persona.messages(history) == ordinary
     assert history[-1] == Turn("human", "Can I book a tour?")
 

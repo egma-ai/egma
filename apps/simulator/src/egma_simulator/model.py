@@ -76,7 +76,10 @@ class PersonaToolCall:
 @dataclass(frozen=True)
 class PersonaReply:
     """One answer from the model: the persona's next words, and whether
-    the persona has decided the exchange is concluded."""
+    the persona has decided the exchange is concluded.
+
+    Empty text with no tool call means the persona chose to stay silent.
+    """
 
     text: str
     concluded: bool
@@ -306,18 +309,21 @@ class OpenAICompatibleModel:
 
         content = self._without_api_key(content)
         text = content.strip()
-        if not text:
-            if tool_calls:
-                return PersonaReply(
-                    text="",
-                    concluded=False,
-                    tool_calls=tool_calls,
-                    usage=llm_usage(body, selection_model=self._model_name),
+        if not text and not tool_calls:
+            # No words and no end_call is the persona staying silent. A refusal
+            # or an answer cut short is a failure, not that choice.
+            if message.get("refusal"):
+                raise ModelFailure(
+                    "the model refused to answer",
+                    diagnostic_attributes=diagnostics,
                 )
-            raise ModelFailure(
-                "the model's answer had no words to speak",
-                diagnostic_attributes=diagnostics,
-            )
+            finish_reason = body["choices"][0].get("finish_reason")
+            if finish_reason not in (None, "stop"):
+                raise ModelFailure(
+                    "the model's answer had no words to speak (finish reason: "
+                    f"{self._provider_detail(finish_reason)})",
+                    diagnostic_attributes=diagnostics,
+                )
         return PersonaReply(
             text=text,
             concluded=False,
@@ -347,9 +353,10 @@ class OpenAICompatibleModel:
         try:
             async with asyncio.timeout(self._timeout.total):
                 text = ""
+                refusal = ""
                 calls: dict[int, dict[str, Any]] = {}
                 body: dict[str, Any] = {}
-                finished = False
+                finish_reason: str | None = None
                 async with await self._stream_client.chat.completions.create(
                     **self._request(context),
                     stream=True,
@@ -368,8 +375,10 @@ class OpenAICompatibleModel:
                                 raise ModelFailure(
                                     "the model's streamed reply was incomplete"
                                 )
-                            finished = True
+                            finish_reason = choice.finish_reason
                         delta = choice.delta
+                        if delta.refusal:
+                            refusal += delta.refusal
                         if delta.content:
                             text += delta.content
                             safe = self._stream_prefix(text)
@@ -395,16 +404,18 @@ class OpenAICompatibleModel:
                                 call["function"]["arguments"] += (
                                     part.function.arguments or ""
                                 )
-                if not finished:
+                if finish_reason is None:
                     raise ModelFailure(
                         "the model's stream ended before its reply completed"
                     )
                 body["choices"] = [
                     {
+                        "finish_reason": finish_reason,
                         "message": {
                             "content": text,
+                            "refusal": refusal or None,
                             "tool_calls": list(calls.values()),
-                        }
+                        },
                     }
                 ]
             reply = self._decode_reply(body)

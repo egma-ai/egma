@@ -1890,7 +1890,7 @@ async def test_model_failure_survives_an_error_before_the_reply_end(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     failure = ModelFailure(
-        "the model's answer had no words to speak",
+        "the model refused to answer",
         diagnostic_attributes={"gen_ai.response.finish_reasons": "stop"},
     )
 
@@ -1917,7 +1917,7 @@ async def test_model_failure_survives_an_error_before_the_reply_end(
         conductor_module._PersonaLLMService, "push_frame", hold_reply_end
     )
 
-    with pytest.raises(ModelFailure, match="no words to speak") as caught:
+    with pytest.raises(ModelFailure, match="refused to answer") as caught:
         await voice_simulation(tmp_path, scenario="One point.", replies=["Noted."])
 
     assert caught.value is failure
