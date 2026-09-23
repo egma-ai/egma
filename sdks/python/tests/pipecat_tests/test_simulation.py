@@ -18,6 +18,7 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
     FunctionCallResultFrame,
+    InputTransportMessageFrame,
     LLMConfigureOutputFrame,
     LLMMessagesAppendFrame,
     LLMTextFrame,
@@ -52,7 +53,7 @@ CALENDAR = "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP"
 class Reception:
     """The bot: its pipeline, and what each real tool was asked."""
 
-    def __init__(self, script: list[Step], **llm: Any) -> None:
+    def __init__(self, script: list[Step], *, rtvi: bool = False, **llm: Any) -> None:
         self.ran: dict[str, list[dict[str, Any]]] = {
             "check_calendar": [],
             "charge_card": [],
@@ -106,7 +107,15 @@ class Reception:
         self.top = Recording(LLMConfigureOutputFrame)
         self.text = Recording(LLMTextFrame)
         self.worker = worker_for(
-            [self.top, pair.user(), self.llm, self.results, self.text, pair.assistant()]
+            [
+                self.top,
+                pair.user(),
+                self.llm,
+                self.results,
+                self.text,
+                pair.assistant(),
+            ],
+            enable_rtvi=rtvi,
         )
 
     async def say(self, text: str) -> None:
@@ -455,3 +464,63 @@ async def test_a_voice_simulation_leaves_speech_alone(egma, exports):
     await run_pipeline(bot.worker, lambda: bot.say("Hi"))
 
     assert bot.top.frames == []
+
+
+async def test_a_chat_simulation_through_rtvi_is_text_only_and_on_the_record(
+    egma, exports
+):
+    bot = Reception(
+        [
+            Step(text="Let me check.", calls=[("check_calendar", {"day": "Tuesday"})]),
+            Step(text="Tuesday is open."),
+        ],
+        rtvi=True,
+    )
+    await simulation(bot.worker, a_simulation(modality="chat"))
+
+    async def chat() -> None:
+        await bot.worker.queue_frame(
+            InputTransportMessageFrame(
+                message={
+                    "label": "rtvi-ai",
+                    "type": "send-text",
+                    "id": "turn-1",
+                    "data": {
+                        "content": "Is Tuesday free?",
+                        "options": {"run_immediately": True, "audio_response": False},
+                    },
+                }
+            )
+        )
+        await asyncio.wait_for(bot.llm.done.wait(), 15)
+        await asyncio.sleep(0.2)
+
+    await run_pipeline(bot.worker, chat, seconds=30)
+
+    assert bot.ran["check_calendar"] == []
+    assert bot.result_of("check_calendar") == [{"slots": []}]
+    assert bot.text.frames and all(frame.skip_tts for frame in bot.text.frames)
+
+    sink = exports.only
+    [user] = sink.named("user_turn")
+    assert user.attributes["egma.turn.text"] == "Is Tuesday free?"
+    assert user.start_time == user.end_time
+    agents = sorted(sink.named("agent_turn"), key=lambda span: span.start_time)
+    assert [a.attributes["egma.turn.text"] for a in agents] == [
+        "Let me check.",
+        "Tuesday is open.",
+    ]
+    assert user.end_time <= agents[0].start_time
+    [call] = sink.named("function_call")
+    assert call.parent.span_id == agents[0].context.span_id
+    assert sink.spans[-1].name == "pipecat_session"
+
+
+async def test_a_user_message_the_bot_appends_itself_is_not_a_user_turn(egma, exports):
+    bot = Reception([Step(text="Hello.")])
+    await simulation(bot.worker, a_simulation())
+
+    await run_pipeline(bot.worker, lambda: bot.say("Remember the caller is VIP."))
+
+    assert exports.only.named("user_turn") == []
+    assert len(exports.only.named("agent_turn")) == 1

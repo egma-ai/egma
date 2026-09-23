@@ -6,7 +6,7 @@ turns them into the ``egma.pipecat`` spans egma reads as the agent's POV:
 - ``pipecat_session``: the root, the whole bot run.
 - ``user_turn``: what the user said, from the first speech or text to the
   moment the turn is committed. Voice text is the final transcripts; chat
-  text is the user message the bot was sent.
+  text is the message the user sent with RTVI ``send-text``.
 - ``agent_turn``: one LLM response, from its start to its last output,
   with the text the LLM wrote and ``egma.turn.interrupted`` when it was cut.
 - ``function_call``: one tool call, from the moment it runs to its result,
@@ -65,6 +65,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 
 from .export import ROOT_SPAN
 
@@ -572,7 +573,11 @@ class EgmaObserver(BaseObserver):
         elif isinstance(frame, InterimTranscriptionFrame):
             recorder.transcript(at, frame.text, final=False)
         elif isinstance(frame, LLMMessagesAppendFrame):
-            if data.direction == FrameDirection.DOWNSTREAM:
+            # Text the user sent: RTVI send-text. User messages the bot's own
+            # code or Pipecat Flows appends are instructions, not turns.
+            if data.direction == FrameDirection.DOWNSTREAM and isinstance(
+                data.source, RTVIProcessor
+            ):
                 for message in frame.messages:
                     if isinstance(message, Mapping) and message.get("role") == "user":
                         text = _message_text(message.get("content"))
