@@ -5664,3 +5664,69 @@ describe("run advanced settings", () => {
     }
   }, SETTLE * 2);
 });
+
+describe("the connect forms, one short help line per field", () => {
+  it("offers Pipecat beside LiveKit and Retell, and draws each form's labels and lines", async () => {
+    await anotherCustomer("connect-copy@browser.example", "Connect copy");
+    const walk = await signedInBrowser("connect-copy@browser.example");
+    /** The one faint line tied to a control, as a screen reader hears it. */
+    async function helpOf(label: string): Promise<string> {
+      const said = await walk.getByLabel(label, { exact: true }).getAttribute("aria-describedby");
+      return said === null ? "" : (await walk.locator(`[id="${said}"]`).innerText()).trim();
+    }
+    try {
+      await walk.goto(`${origin}/projects/${projectIn(walk)}/agents?sheet=connect`);
+      await reactHasTakenOver(walk, "form");
+      await walk.getByRole("radio", { name: /^Run simulations/u }).click();
+      await walk.getByRole("button", { name: "Continue" }).click();
+      const platforms = walk.getByRole("radiogroup", { name: "Agent platform" });
+      await platforms.waitFor();
+      expect(await platforms.getByRole("radio").allInnerTexts()).toEqual([
+        "LiveKit",
+        "Retell",
+        "Pipecat",
+      ]);
+
+      await walk.getByRole("radio", { name: "Pipecat" }).click();
+      await walk.getByRole("button", { name: "Continue" }).click();
+      await walk.getByRole("radio", { name: /^Voice/u }).click();
+      await walk.getByRole("button", { name: "Continue" }).click();
+      await walk
+        .getByRole("heading", { name: "Connect Pipecat Voice for simulations" })
+        .waitFor();
+      const connectionType = walk.getByRole("combobox", { name: "Connection type*" });
+      expect(await connectionType.locator("option").allInnerTexts()).toEqual([
+        "Pipecat Cloud",
+        "Self-hosted",
+      ]);
+      expect(await helpOf("Pipecat Cloud agent name*")).toBe("As in pcc-deploy.toml.");
+      expect(await helpOf("Public API key*")).toBe("Starts with pk_.");
+      await connectionType.selectOption("daily_room.self_hosted");
+      await walk.getByLabel("Agent name*", { exact: true }).waitFor();
+      expect(await helpOf("Start URL*")).toBe("Public HTTPS URL of your bot starter.");
+      expect(await helpOf("Auth headers*")).toBe("Sent with every start request.");
+
+      // LiveKit's token endpoint, cut to the same rule.
+      await walk.getByRole("button", { name: "Back" }).click();
+      await walk.getByRole("button", { name: "Back" }).click();
+      await walk.getByRole("radio", { name: "LiveKit" }).click();
+      await walk.getByRole("button", { name: "Continue" }).click();
+      await walk.getByRole("radio", { name: /^Voice/u }).click();
+      await walk.getByRole("button", { name: "Continue" }).click();
+      await walk
+        .getByRole("combobox", { name: "Connection type*" })
+        .selectOption("livekit_room.customer_token_endpoint");
+      await walk.getByLabel("Token endpoint*", { exact: true }).waitFor();
+      expect(await helpOf("LiveKit agent name*")).toBe("As shown in LiveKit Cloud.");
+      expect(await helpOf("Token endpoint*")).toBe(
+        "Public HTTPS URL that returns a room token.",
+      );
+      expect(await helpOf("Auth headers*")).toBe("Sent with every token request.");
+      // No paragraph under the title or a field.
+      const sheet = walk.getByRole("dialog", { name: "Set up an agent" });
+      expect(await sheet.innerText()).not.toContain("short-lived room token");
+    } finally {
+      await walk.context().close();
+    }
+  }, SETTLE * 2);
+});
