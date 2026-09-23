@@ -1,0 +1,54 @@
+---
+title: "Test a bot on this machine"
+---
+
+Run simulations against the Pipecat bot on your own computer, with no deploy and no public server. `egma agent dev` opens a Cloudflare quick tunnel to Pipecat's development runner and keeps this computer's Egma connections pointed at it. Edit your bot, restart it, and run the suite again.
+
+## Before you start
+
+- Install `cloudflared`, for example with `brew install cloudflared`. A quick tunnel needs no Cloudflare account.
+- Run your bot with Pipecat's development runner, which Pipecat's quickstart already uses (`from pipecat.runner.run import main`).
+- Put a `DAILY_API_KEY` in your bot's environment. The development runner uses your Daily key to create a room for each start request.
+- Leave `DAILY_ROOM_URL` unset. When it is set, the development runner puts every simulation in that one room.
+- [Register a Pipecat agent](/docs/integrations/pipecat/connect#2-register-the-agent-in-egma) and set `EGMA_AGENT_ID`.
+- [Prepare the bot](/docs/integrations/pipecat/connect#1-prepare-the-bot): add the SDK line, and put `EGMA_URL` and `EGMA_API_KEY` in the bot's `.env`.
+
+## Run a suite on this machine
+
+Start your bot's development runner. It listens on port 7860:
+
+```bash
+uv run bot.py -t daily
+```
+
+In a second terminal, from your agent repository, run:
+
+```bash
+egma agent dev --agent "$EGMA_AGENT_ID" --port 7860
+```
+
+Keep both running while simulations run. The first time, `egma agent dev` creates two self-hosted connections for this computer, named `dev-<computer name>-voice` and `dev-<computer name>-chat`. It prints their names and IDs every time it starts. Start a run with one of them:
+
+```bash
+egma run create appointment-booking \
+  --agent "$EGMA_AGENT_ID" \
+  --connection "$EGMA_CONNECTION_ID"
+```
+
+You can also run `egma pull` and read the IDs in `egma/config.yaml`.
+
+## How it works
+
+- `egma agent dev` puts a small guard in front of your port and opens a tunnel to the guard. The guard refuses any request without a secret header, then forwards the rest to your development runner. A stranger who finds the tunnel address cannot start your bot.
+- Each start creates a new tunnel address and a new secret, and writes both into the same two connections. The connection IDs never change, so your run commands stay the same.
+- The address stays the same for the whole `egma agent dev` session, including restarts of your bot. Egma reads the connection when each simulation starts, so queued simulations use the newest address.
+- This computer's connections are remembered in `dev-connections.json` in the CLI's machine-local folder (`~/.egma`, or `EGMA_HOME` when you set it), never in your repository. A teammate's computer gets its own connections.
+- In the web app, these are ordinary self-hosted connections that show their start URL.
+
+At start, `egma agent dev` stops if `cloudflared` is missing, and warns if nothing listens on the port yet.
+
+Press Ctrl-C to close the tunnel. The connections stay. A simulation that starts while `egma agent dev` is stopped fails with `Egma could not reach your start URL`. Run `egma agent dev` again on the machine that runs your bot. If simulations stop reaching your computer after it sleeps or changes network, restart `egma agent dev`.
+
+## Deploy when the suite passes
+
+A passing run on this machine does not change your deployed bot. Deploy the SDK line and the `EGMA_URL` and `EGMA_API_KEY` settings with your bot, then run the suite against a [Pipecat Cloud](/docs/integrations/pipecat/connect) or [self-hosted](/docs/integrations/pipecat/self-hosted) connection.

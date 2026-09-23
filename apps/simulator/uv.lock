@@ -401,6 +401,17 @@ wheels = [
 ]
 
 [[package]]
+name = "daily-python"
+version = "0.32.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/bf/009f4edbc04281d802055796740e5fc7519cfa8be9e7f0b63f13db5528d3/daily_python-0.32.0-cp38-abi3-macosx_10_15_x86_64.whl", hash = "sha256:7f5598806733f08697bb19c39c0f54d99703d51d1d5f24e5f0312e0847df50cd", size = 13211711, upload-time = "2026-08-19T00:33:10.912Z" },
+    { url = "https://files.pythonhosted.org/packages/22/ea/33c5edbcb6645e623e68cfe29ef56cb94be9258286535cada4357c6c1590/daily_python-0.32.0-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:aee19106e3b65cedc5b00710a4c6f708bf5f7a0be5ec3add73e14675e6ec5ae1", size = 11780338, upload-time = "2026-08-19T00:33:12.961Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/ac/09e93e20e16a50675ee7791eaa9e255637c0b13a84e372a569fa8aae5a43/daily_python-0.32.0-cp38-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:321b1065ba3a80d52758aea685378b4e7b71b6cd74f5f1aaac77cf938541c315", size = 14088601, upload-time = "2026-08-19T00:33:14.76Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/ce/3112daba20223b27ead97f4a10bd364bfd4e83c64590cb5d6c3214b6896b/daily_python-0.32.0-cp38-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:7b50f80bda0e249dd189195993fd79453677276f91d683ba9d0e8a134feaba74", size = 14380324, upload-time = "2026-08-19T00:33:16.688Z" },
+]
+
+[[package]]
 name = "deepgram-sdk"
 version = "7.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -464,7 +475,7 @@ dependencies = [
     { name = "openai" },
     { name = "opentelemetry-exporter-otlp-proto-common" },
     { name = "opentelemetry-sdk" },
-    { name = "pipecat-ai", extra = ["deepgram", "livekit", "tracing"] },
+    { name = "pipecat-ai", extra = ["daily", "deepgram", "livekit", "tracing"] },
     { name = "referencing" },
     { name = "rfc3339-validator" },
     { name = "structlog" },
@@ -490,7 +501,7 @@ requires-dist = [
     { name = "openai", specifier = ">=2.53.0" },
     { name = "opentelemetry-exporter-otlp-proto-common", specifier = "==1.44.0" },
     { name = "opentelemetry-sdk", specifier = "==1.44.0" },
-    { name = "pipecat-ai", extras = ["deepgram", "livekit", "openai", "soundfile", "tracing"], specifier = "==1.9.0" },
+    { name = "pipecat-ai", extras = ["daily", "deepgram", "livekit", "openai", "soundfile", "tracing"], specifier = "==1.9.0" },
     { name = "referencing", specifier = ">=0.37.0" },
     { name = "rfc3339-validator", specifier = ">=0.1.4" },
     { name = "structlog", specifier = ">=26.1.0" },
@@ -1466,6 +1477,9 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+daily = [
+    { name = "daily-python" },
+]
 deepgram = [
     { name = "deepgram-sdk" },
 ]

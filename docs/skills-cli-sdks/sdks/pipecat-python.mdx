@@ -1,0 +1,134 @@
+---
+title: "Pipecat Python SDK"
+---
+
+This SDK connects your Pipecat bot to Egma for simulation testing and production monitoring. It records your bot's own view of each conversation and lets Egma answer the tools a test mocks.
+
+Set it up in four steps.
+
+## 1. Install the SDK
+
+Install the SDK with its `pipecat` extra in the project where your bot runs. Use the package manager the project already uses.
+
+```bash
+pip install --upgrade "egma[pipecat]"
+```
+
+For a project using uv:
+
+```bash
+uv add --upgrade "egma[pipecat]"
+```
+
+The SDK supports Python 3.11 or newer and `pipecat-ai>=1.9,<1.12`, which is Pipecat 1.9, 1.10, and 1.11. The `pipecat` extra installs no LiveKit package. Keep the resolved versions in your lockfile.
+
+## 2. Set up the bot's environment
+
+Use an Egma API key scoped to the project you want to send data to.
+
+- **CLI:** from a repository with a logged-in Egma CLI and the right project in `egma/config.yaml`, run:
+
+  ```bash
+  egma project api-key create --name pipecat-bot
+  ```
+
+- **UI:** open your project in [Egma](https://app.egma.ai), go to **Settings → API keys**, enter a name, select your project under **Scope**, and select **Create key**.
+
+Copy the key when it is shown. It is shown once, and the CLI does not save it.
+
+Set these values where the bot runs:
+
+```bash
+EGMA_URL=https://app.egma.ai
+EGMA_API_KEY=<your project API key>
+```
+
+For self-hosted Egma, use the public URL of your instance. The bot must be able to reach it. On Pipecat Cloud, add both values to the agent's secret set and redeploy. On your computer, put them in the bot's `.env`. To pass them in code instead, give `endpoint=` and `api_key=` to either function; these arguments win over the environment.
+
+## 3. Add the integration
+
+Both functions take the `PipelineWorker` and the `runner_args` that your `bot()` receives. Call them after you create the worker and before `runner.add_workers(worker)`.
+
+### A. Simulation testing
+
+```python
+from egma.pipecat import simulation
+from pipecat.runner.types import RunnerArguments
+
+
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
+    ...
+    worker = PipelineWorker(pipeline, params=PipelineParams(...))
+
+    await simulation(worker, runner_args)
+
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker)
+    await runner.run()
+
+
+async def bot(runner_args: RunnerArguments):
+    ...  # build the transport as before
+    await run_bot(transport, runner_args)
+```
+
+This line is required for every voice and chat simulation, even when the test has no mock tools.
+
+- **Production is untouched.** Egma marks each simulation with an `egma` key in the start request's body, which your bot receives at `runner_args.body`. The key holds the simulation's ID and modality. Without that key, `simulation` returns at once and makes no network request.
+- **Egma confirms every simulation.** With the key, the SDK reports your bot's tools to Egma. Egma answers only for a live simulation in your API key's project. For anything else, the SDK does nothing, so a forged key in production has no effect.
+- **Mock tools.** Egma answers with the tools the test mocks, and the SDK wraps exactly those. A mocked call returns the test's answer or error as the function's result, and your handler does not run. Every other tool runs its real handler and is recorded too. The wrapping works for functions registered with `llm.register_function`, tools given in the LLM context, and realtime models.
+- **The record.** The SDK adds a pipeline observer that records turns with their text, each tool call with its arguments and result or error, and speaking times. It sends them to Egma every second, and sends the session's end last. You do not need to turn on Pipecat's own tracing.
+- **Failures.** If the SDK cannot complete its report to Egma, `simulation` raises `NotReported` and the bot does not start. If a mocked tool cannot reach Egma during a simulation, that call returns an error instead of calling the real backend.
+
+`NotReported` can be imported from `egma.pipecat`.
+
+#### Pipecat Flows
+
+Egma cannot mock a Pipecat Flows function (from `pipecat.flows`) yet. When a test mocks one, the simulation fails as soon as the flow first offers that function, which is usually at the first node, right after the conversation starts. The message names the function, and its Flows handler does not run. Flows functions that are not mocked run normally and are recorded.
+
+#### Chat simulations
+
+Chat simulations need no extra code. In a chat simulation, the SDK turns your bot's speech output off after Egma confirms the simulation, so the greeting and every answer stay text only. Chat needs RTVI, which `PipelineWorker` turns on by default, so do not pass `enable_rtvi=False`. If you pass your own `rtvi_observer_params`, keep `bot_llm_enabled` on.
+
+### B. Production monitoring
+
+```python
+from egma.pipecat import monitor
+
+
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
+    ...
+    worker = PipelineWorker(pipeline, params=PipelineParams(...))
+
+    await monitor(worker, runner_args)
+
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker)
+    await runner.run()
+```
+
+`monitor` sends each production conversation to Egma Monitoring with the same observer. It adds its own exporter and leaves your own tracing as it is.
+
+For testing and monitoring in one bot, call `simulation` first, then `monitor`:
+
+```python
+worker = PipelineWorker(pipeline, params=PipelineParams(...))
+
+await simulation(worker, runner_args)
+await monitor(worker, runner_args)
+```
+
+A simulation does not also appear as a production conversation. With no `egma` key, `monitor` exports without asking Egma anything. With one, it stays silent only when Egma confirms a live simulation in your project; otherwise the conversation is production traffic and is exported.
+
+## 4. Run the updated bot and verify
+
+For simulations, [register the agent and a connection](/docs/integrations/pipecat/connect) in Egma if you have not already done so. To test on your computer first, run [`egma agent dev`](/docs/integrations/pipecat/this-machine). To use Pipecat Cloud or your own servers, deploy the SDK changes and environment settings there first. A local run does not deploy them.
+
+- **Testing:** run a simulation, wait for it to finish, and check that it completed with your bot's own transcript. If the bot calls a mocked tool, check its recorded arguments and answer.
+- **Monitoring:** make a production conversation and check that it appears under **Traces**.
+
+If a simulation fails, see [Pipecat troubleshooting](/docs/integrations/pipecat/troubleshooting). If traces are missing, check the project key, `EGMA_URL`, and the bot's logs.
+
+## License
+
+MIT. See [LICENSE](https://github.com/egma-ai/egma/blob/main/sdks/python/LICENSE).

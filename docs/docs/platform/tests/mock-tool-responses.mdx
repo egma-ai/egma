@@ -96,16 +96,21 @@ delay, status, or matching rules to the envelope.
 | Retell text mode | Egma sends the test's mock answers with the conversation. |
 | Retell web call | Egma prepares a temporary agent version for the run. Your Egma instance must be reachable by Retell. |
 | LiveKit | Call `await simulation(agent, ctx, session)` from the [Python SDK](/skills-cli-sdks/sdks/livekit-python) or [JavaScript SDK](/skills-cli-sdks/sdks/livekit-javascript) before `session.start`. |
+| Pipecat | Call `await simulation(worker, runner_args)` from the [Pipecat Python SDK](/skills-cli-sdks/sdks/pipecat-python) before `runner.add_workers(worker)`. |
 
 Retell phone calls do not apply these mock answers. Use text mode or a web call
 when your Retell test depends on mocks.
 
-For LiveKit, the `simulation` helper is required even when a test has no mocks.
-It sends the agent's spans, reports its tools, and applies the running test's
-mock answers. Set `EGMA_URL` and `EGMA_API_KEY` in the worker environment.
-If the setup exchange fails, the helper raises `NotReported` and the agent
-session does not start. The `monitor` helper is for production conversations;
+For LiveKit and Pipecat, the `simulation` helper is required even when a test
+has no mocks. It sends the agent's spans, reports its tools, and applies the
+running test's mock answers. Set `EGMA_URL` and `EGMA_API_KEY` in the agent's
+environment. If the setup exchange fails, the helper raises `NotReported` and
+the agent does not start. The `monitor` helper is for production conversations;
 it does not enable simulations.
+
+Egma cannot mock a Pipecat Flows function yet. A Pipecat simulation whose test
+mocks one fails when the flow first offers that function, with a message that
+names it.
 
 <Warning>
   Only the tools named in the test are mocked. Every other tool runs normally.
@@ -125,5 +130,5 @@ A misspelled mock name does not match a tool. It creates no tool call or warning
 and the correctly named tool can still run its real implementation.
 
 If a real backend was called, check the exact tool name, connection type, and
-LiveKit setup. If the agent reacts incorrectly to the answer, compare
+LiveKit or Pipecat SDK setup. If the agent reacts incorrectly to the answer, compare
 the mock's response shape with the tool's actual contract.

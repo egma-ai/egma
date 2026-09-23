@@ -122,6 +122,18 @@
                 ]
               },
               {
+                "group": "Pipecat",
+                "pages": [
+                  "docs/integrations/pipecat",
+                  "docs/integrations/pipecat/connect",
+                  "docs/integrations/pipecat/self-hosted",
+                  "docs/integrations/pipecat/this-machine",
+                  "docs/integrations/pipecat/text-and-env",
+                  "docs/integrations/pipecat/monitor",
+                  "docs/integrations/pipecat/troubleshooting"
+                ]
+              },
+              {
                 "group": "Retell",
                 "pages": [
                   "docs/integrations/retell",
@@ -155,7 +167,8 @@
             "group": "SDKs",
             "pages": [
               "skills-cli-sdks/sdks/livekit-python",
-              "skills-cli-sdks/sdks/livekit-javascript"
+              "skills-cli-sdks/sdks/livekit-javascript",
+              "skills-cli-sdks/sdks/pipecat-python"
             ]
           }
         ]

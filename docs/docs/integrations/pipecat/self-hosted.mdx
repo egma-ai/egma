@@ -1,0 +1,117 @@
+---
+title: "Use a self-hosted starter"
+---
+
+Choose **Self-hosted** when your Pipecat bot runs on your own servers. Egma sends the start request to a public HTTPS URL that you give it, with the auth headers you choose. Your starter creates a Daily room, starts the bot in it, and answers with the room's address.
+
+The bot still needs the Egma SDK line and the `EGMA_URL` and `EGMA_API_KEY` settings. See [Prepare the bot](/docs/integrations/pipecat/connect#1-prepare-the-bot).
+
+## The start request
+
+Egma sends one `POST` to your start URL for each simulation. It carries every stored auth header and `Content-Type: application/json`:
+
+```json
+{
+  "createDailyRoom": true,
+  "dailyRoomProperties": { "exp": 1790000000, "eject_at_room_exp": true },
+  "body": {
+    "tenant": "oak-street",
+    "egma": { "simulation_id": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP", "modality": "voice" }
+  },
+  "transport": "daily"
+}
+```
+
+This is Pipecat's own start request, so Pipecat's development runner answers it as it is. Your starter must:
+
+1. Check the auth headers.
+2. Create a Daily room with `dailyRoomProperties`. The expiry ends the room two minutes after the simulation's duration limit.
+3. Start your bot in that room with `body` as `runner_args.body`.
+4. Answer with a 2xx JSON object that holds `dailyRoom`, the room's `https://…daily.co/…` URL. Add `dailyToken` when the room needs a token to join. Egma ignores every other field.
+
+## Example starter
+
+This FastAPI starter checks a bearer secret, creates a private Daily room with your Daily API key, and runs `bot()` from your `bot.py` in the same process. A production starter usually starts each bot on its own worker instead.
+
+```python
+import asyncio
+import os
+import secrets
+
+import aiohttp
+from fastapi import FastAPI, Header, HTTPException, Request
+from pipecat.runner.types import DailyRunnerArguments
+from pipecat.transports.daily.utils import (
+    DailyRESTHelper,
+    DailyRoomParams,
+    DailyRoomProperties,
+)
+
+from bot import bot
+
+app = FastAPI()
+start_secret = os.environ["EGMA_START_SECRET"]
+running: set[asyncio.Task] = set()
+
+
+@app.post("/start")
+async def start(request: Request, authorization: str = Header(default="")):
+    expected = f"Bearer {start_secret}".encode()
+    if not secrets.compare_digest(authorization.encode(), expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    data = await request.json()
+    properties = DailyRoomProperties(**data.get("dailyRoomProperties", {}))
+    async with aiohttp.ClientSession() as session:
+        daily = DailyRESTHelper(
+            daily_api_key=os.environ["DAILY_API_KEY"], aiohttp_session=session
+        )
+        room = await daily.create_room(
+            DailyRoomParams(privacy="private", properties=properties)
+        )
+        bot_token = await daily.get_token(room.url)
+        caller_token = await daily.get_token(room.url, owner=False)
+
+    runner_args = DailyRunnerArguments(
+        room_url=room.url, token=bot_token, body=data.get("body", {})
+    )
+    task = asyncio.create_task(bot(runner_args))
+    running.add(task)
+    task.add_done_callback(running.discard)
+    return {"dailyRoom": room.url, "dailyToken": caller_token}
+```
+
+Save it as `starter.py` beside `bot.py`, then run it behind your HTTPS reverse proxy:
+
+```bash
+uv add fastapi uvicorn
+uv run uvicorn starter:app --host 0.0.0.0 --port 8080
+```
+
+## Rules for the start URL
+
+- The URL must use HTTPS and a public host name. Egma refuses IP addresses, `localhost`, and addresses that resolve to private networks. These rules also apply to self-hosted Egma.
+- Egma does not follow redirects. A 3xx answer fails the simulation.
+- Each attempt has 30 seconds, and Egma reads at most 64 KiB of the answer.
+- HTTP 429 is retried within Egma's 120-second wait, honoring `Retry-After`. Every other failure ends the simulation at once with its cause. See [Troubleshooting](/docs/integrations/pipecat/troubleshooting).
+
+## Connect Egma to the starter
+
+In the UI, choose **Self-hosted** as the connection type. Enter the **Start URL** and the **Auth headers** as a JSON object, such as `{"Authorization": "Bearer …"}`.
+
+From the CLI, set `PIPECAT_START_URL` to the full start URL and load `EGMA_START_SECRET` from your secret store. This command passes the headers through standard input:
+
+```bash
+python3 -c 'import json, os; print(json.dumps({"headers": {"Authorization": "Bearer " + os.environ["EGMA_START_SECRET"]}}))' |
+  egma agent connection add \
+    --agent "$EGMA_AGENT_ID" \
+    --access pipecat-self-hosted \
+    --modality voice \
+    --pipecat-start-url "$PIPECAT_START_URL" \
+    --name "Pipecat self-hosted voice" \
+    --credentials-stdin
+```
+
+You can also put the header object in `EGMA_PIPECAT_START_HEADERS` as JSON text instead of using standard input. Run the command again with `--modality chat` for a [chat connection](/docs/integrations/pipecat/text-and-env). Egma stores the headers sealed and shows only their names.
+
+Use the returned connection ID to [start a run](/docs/platform/runs/start-and-follow-a-run).
