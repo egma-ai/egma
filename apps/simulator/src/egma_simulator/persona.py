@@ -53,6 +53,7 @@ Your name is {name}. Give that name when the agent asks who is calling, and use 
 - You are allowed to make up details in order to fulfill the scenario unless explicitly stated otherwise. Examples include appointment details, or other details that someone in your situation might have handy. Your name is not one of them: it is given above, and you never answer to another.
 - Pursue what you came for until it is concluded to your satisfaction, and let your personality decide how patiently.
 - When your goal is concluded and nothing further is needed, say a brief goodbye and end your reply with the `end_call` tool
+- A goodbye alone does not end the call. Once the conversation is over, always use the `end_call` tool, even if you have nothing more to say.
 """
 
 _LIVE_PROMPT_FRAME = """\
@@ -186,7 +187,9 @@ class Persona:
                         f"{SILENCE_FOLLOW_UP_LIMIT}. Stay in character and say a "
                         "brief follow-up to check whether the agent is still "
                         "there. Do not repeat your full request or invent an "
-                        "agent response. Then wait for the agent to reply.)"
+                        "agent response. Then wait for the agent to reply. If "
+                        "the conversation is already over, use the `end_call` "
+                        "tool instead.)"
                     ),
                 }
             )

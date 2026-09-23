@@ -1696,6 +1696,11 @@ class TextRoom:
     def joined(self) -> bool:
         return self._room is not None
 
+    @property
+    def current_turn(self) -> int:
+        """The persona turn that streams opening now belong to."""
+        return self._turn
+
     def watch_startup(self, startup: LiveKitStartup) -> None:
         """Attach the startup latch before room event handlers are registered."""
         self._startup = startup
@@ -2223,6 +2228,24 @@ class LiveKitChatRoomBackend(RoomLifecycle):
             drain=drain_seconds,
             turn=turn,
             silence_ends_it=True,
+        )
+
+    async def listen(
+        self, seconds: float, *, quiet_seconds: float, drain_seconds: float
+    ) -> AgentTurn:
+        """Collect what the agent writes next without sending a persona turn.
+        No new turn begins: the words continue the answer to the last persona
+        turn, including a stream that opened after that answer was collected.
+        Nothing within seconds is not a fault.
+        """
+        room = self._room
+        if room is None:
+            raise MediaBackendError("the agent was listened to before a room")
+        return await self._assembled(
+            first_within=seconds,
+            quiet=quiet_seconds,
+            drain=drain_seconds,
+            turn=room.current_turn,
         )
 
     async def send(self, text: str) -> None:

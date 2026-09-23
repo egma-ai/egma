@@ -23,7 +23,7 @@ from egma_simulator.conversation import Conducted, ConversationControls
 from egma_simulator.media import VoiceMedia
 from egma_simulator.media.scripted_transport import ScriptedTransport
 from egma_simulator.model import PersonaReply
-from egma_simulator.persona import Persona
+from egma_simulator.persona import OPENING_NUDGE, Persona
 from egma_simulator.spec import SimulationSpec
 from egma_simulator.speech import (
     SCRIPTED_PAIR,
@@ -94,6 +94,7 @@ class Asked:
     messages: list[dict]
     transcript: list[tuple[str, str, int, int]]
     silence_on_media_clock: Fraction | None
+    waited_on_media_clock: Fraction | None = None
 
 
 @dataclass
@@ -102,6 +103,7 @@ class Walk:
     requests: list[Asked] = field(default_factory=list)
     result: Conducted | None = None
     canceled_requests: list[int] = field(default_factory=list)
+    measured: list[str] = field(default_factory=list)
     recording_started: int = 0
     recording_ended: int = 0
 
@@ -119,11 +121,15 @@ class PersonaModel:
         conclude_at: int | None,
         silence_on_media_clock: Callable[[], Fraction | None],
         before_reply: Callable[[int], Awaitable[None]],
+        waited_on_media_clock: Callable[[], Fraction | None] = lambda: None,
+        silent_at: frozenset[int] = frozenset(),
     ):
         self.walk = walk
         self.conclude_at = conclude_at
         self.silence_on_media_clock = silence_on_media_clock
         self.before_reply = before_reply
+        self.waited_on_media_clock = waited_on_media_clock
+        self.silent_at = silent_at
 
     async def reply(self, context: LLMContext) -> PersonaReply:
         self.walk.requests.append(
@@ -131,6 +137,7 @@ class PersonaModel:
                 copy.deepcopy(context.get_messages()),
                 list(self.walk.turns),
                 self.silence_on_media_clock(),
+                self.waited_on_media_clock(),
             )
         )
         number = len(self.walk.requests)
@@ -139,6 +146,8 @@ class PersonaModel:
         except asyncio.CancelledError:
             self.walk.canceled_requests.append(number)
             raise
+        if number in self.silent_at:
+            return PersonaReply("", concluded=False)
         return PersonaReply(
             f"Persona reply {number}.", concluded=number == self.conclude_at
         )
@@ -158,7 +167,10 @@ async def walk_silence(
     stop_at_persona_turn: int = 1,
     parameters: ConductParameters | None = None,
     interrupt_second_request: bool = False,
+    silent_replies: dict[int, tuple[float, str | None]] | None = None,
 ) -> Walk:
+    """``silent_replies`` maps a request number to a silent persona reply and to
+    what the agent does next: speak after a delay, or stay quiet."""
     spec = SimulationSpec.from_document(loopback_spec("sim-persona-silence"))
     transport = AgentScript(greeting, answers or [])
     conductor = VoiceConductor(
@@ -190,8 +202,8 @@ async def walk_silence(
             elif stop == "duration":
                 controls.trip_duration_limit()
 
-    async def measured(*_args):
-        return None
+    async def measured(name: str, *_args):
+        walk.measured.append(name)
 
     def silence_on_media_clock() -> Fraction | None:
         # Observe the actual timer clock, without replacing the timer or its
@@ -199,17 +211,36 @@ async def walk_silence(
         stopped = conductor._record.persona_last_stopped_at
         return None if stopped is None else conductor._position - stopped
 
+    def waited_on_media_clock() -> Fraction | None:
+        waiting_since = conductor._persona_waiting_since()
+        return None if waiting_since is None else conductor._position - waiting_since
+
     async def before_reply(number: int) -> None:
         if interrupt_second_request and number == 2:
             transport.resume_after_wordless_boundary = True
             transport._queue_words(WORDLESS_AUDIO)
             await asyncio.Event().wait()  # Real VAD interrupts this model request.
+        if silent_replies and number in silent_replies:
+            # The persona says nothing, so the agent's script moves on its own.
+            delay, words = silent_replies[number]
+            transport._queue_audio(silence(delay, transport._input_rate))
+            if words is None:
+                transport._queue_audio(silence(13, transport._input_rate))
+            else:
+                transport._queue_words(words)
 
     walk.result = await conductor.conduct(
         persona=Persona(
             authored=spec.persona,
             scenario_instructions="Ask the agent one question.",
-            model=PersonaModel(walk, conclude_at, silence_on_media_clock, before_reply),
+            model=PersonaModel(
+                walk,
+                conclude_at,
+                silence_on_media_clock,
+                before_reply,
+                waited_on_media_clock,
+                frozenset(silent_replies or ()),
+            ),
         ),
         max_turns=max_turns,
         max_duration_seconds=20,
@@ -491,3 +522,84 @@ async def test_silence_request_canceled_before_audio_does_not_spend_followup(
     retry = walk.requests[2].messages[-1]
     assert retry == first_attempt  # The same first follow-up is still available.
     assert walk.requests[3].messages[-1] != retry
+
+
+async def test_a_silent_reply_keeps_listening_until_the_agent_goes_on(tmp_path):
+    """The persona may wait in silence while the agent looks something up.
+
+    Nothing is spoken, no follow-up is asked for, and the agent's next words
+    get an ordinary reply. They take no latency sample: nobody asked for them.
+    """
+    walk = await walk_silence(
+        tmp_path,
+        answers=[(0, "Give me a moment while I check.")],
+        silent_replies={2: (3, "Thanks for waiting. You are all set.")},
+        conclude_at=3,
+    )
+
+    assert walk.result is not None
+    assert walk.result.ending == "persona_concluded"
+    assert walk.result.reason == "the persona concluded the scenario"
+    assert len(walk.requests) == 3
+    assert [(speaker, text) for speaker, text, *_ in walk.turns] == [
+        ("agent", GREETING),
+        ("human", "Persona reply 1."),
+        ("agent", "Give me a moment while I check."),
+        ("agent", "Thanks for waiting. You are all set."),
+        ("human", "Persona reply 3."),
+    ]
+    assert walk.requests[2].messages[-1] == {
+        "role": "user",
+        "content": "Thanks for waiting. You are all set.",
+    }
+    assert walk.measured.count("turn_response_latency") == 1
+
+
+async def test_silent_replies_spend_the_two_followups_then_the_persona_hangs_up(
+    tmp_path,
+):
+    walk = await walk_silence(
+        tmp_path,
+        answers=[(0, "Give me a moment while I check.")],
+        silent_replies={2: (0, None), 3: (0, None), 4: (0, None)},
+    )
+
+    assert walk.result is not None
+    assert walk.result.ending == "persona_concluded"
+    assert (
+        walk.result.reason == "the agent did not respond after two persona follow-ups"
+    )
+    # A normal reply, a silent answer to the agent, then two silent follow-ups.
+    assert len(walk.requests) == 4
+    assert [turn[1] for turn in walk.persona_turns] == ["Persona reply 1."]
+    assert walk.requests[1].messages[-1] == {
+        "role": "user",
+        "content": "Give me a moment while I check.",
+    }
+    for number, request in enumerate(walk.requests[2:], start=1):
+        assert f"follow-up {number} of 2" in request.messages[-1]["content"]
+        assert request.waited_on_media_clock is not None
+        assert Fraction(10) <= request.waited_on_media_clock < Fraction(41, 4)
+
+
+async def test_a_silent_opening_waits_instead_of_asking_again(tmp_path):
+    """A persona asked to open that stays silent is not asked to open again
+    at once: the silence timer runs and the follow-ups take over."""
+    walk = await walk_silence(
+        tmp_path, greeting=None, silent_replies={1: (0, None)}
+    )
+
+    assert walk.result is not None
+    assert (
+        walk.result.reason == "the agent did not respond after two persona follow-ups"
+    )
+    assert len(walk.requests) == 3
+    assert walk.requests[0].messages[-1] == {"role": "user", "content": OPENING_NUDGE}
+    assert "follow-up 1 of 2" in walk.requests[1].messages[-1]["content"]
+    assert walk.requests[1].waited_on_media_clock is not None
+    assert Fraction(10) <= walk.requests[1].waited_on_media_clock < Fraction(41, 4)
+    assert "follow-up 2 of 2" in walk.requests[2].messages[-1]["content"]
+    assert [turn[1] for turn in walk.persona_turns] == [
+        "Persona reply 2.",
+        "Persona reply 3.",
+    ]

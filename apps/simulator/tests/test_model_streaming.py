@@ -161,3 +161,73 @@ async def test_stream_disconnect_is_not_a_completed_reply():
         assert stream.closed
     finally:
         await model.close()
+
+
+async def test_an_empty_stream_is_the_persona_staying_silent():
+    usage = {"prompt_tokens": 961, "completion_tokens": 3, "total_tokens": 964}
+    stream = HeldStream(
+        event({"role": "assistant", "content": ""}),
+        event(finish="stop") + event(usage=usage) + b"data: [DONE]\n\n",
+    )
+    stream.release.set()
+    model, _ = model_with_stream(stream)
+    heard = []
+
+    async def emit(text):
+        heard.append(text)
+
+    try:
+        reply = await model.reply_streamed(LLMContext(messages=[]), emit)
+    finally:
+        await model.close()
+
+    assert heard == []
+    assert reply.text == ""
+    assert reply.tool_calls == ()
+    assert reply.usage is not None
+
+
+async def test_a_streamed_refusal_is_a_model_failure():
+    stream = HeldStream(
+        event({"role": "assistant", "refusal": "I can't help with that."}),
+        event(finish="stop") + b"data: [DONE]\n\n",
+    )
+    stream.release.set()
+    model, _ = model_with_stream(stream)
+
+    async def emit(_text):
+        pass
+
+    try:
+        with pytest.raises(ModelFailure, match="refused to answer") as caught:
+            await model.reply_streamed(LLMContext(messages=[]), emit)
+    finally:
+        await model.close()
+    diagnostics = caught.value.diagnostic_attributes
+    assert diagnostics["gen_ai.response.refusal_present"] is True
+    assert diagnostics["gen_ai.response.finish_reason"] == "stop"
+    assert "help with that" not in repr(diagnostics)
+
+
+async def test_no_streamed_text_is_released_after_a_refusal_starts():
+    stream = HeldStream(
+        event({"role": "assistant", "content": "Sure. "}),
+        event({"refusal": "I can't help with that.", "content": "Here it is."})
+        + event({"content": " More words."})
+        + event(finish="stop")
+        + b"data: [DONE]\n\n",
+    )
+    stream.release.set()
+    model, _ = model_with_stream(stream)
+    heard = []
+
+    async def emit(text):
+        heard.append(text)
+
+    try:
+        with pytest.raises(ModelFailure, match="refused to answer"):
+            await model.reply_streamed(LLMContext(messages=[]), emit)
+    finally:
+        await model.close()
+
+    assert heard == ["Sure. "]

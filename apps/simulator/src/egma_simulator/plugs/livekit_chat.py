@@ -160,6 +160,24 @@ class LiveKitChat:
             answered_at=answer.answer_began_at,
         )
 
+    async def listen(self, seconds: float) -> AgentReply | None:
+        """Read what the agent writes next without typing a persona turn.
+        Return None when the agent writes nothing within seconds and stays.
+        """
+        try:
+            answer = await self._backend.listen(
+                seconds,
+                quiet_seconds=TURN_QUIET_SECONDS,
+                drain_seconds=TURN_DRAIN_SECONDS,
+            )
+        except MediaBackendError as refused:
+            raise PlugError(str(refused), ending=refused.ending) from refused
+        _typing_or_nothing(answer)
+        if answer.text is None and not answer.ended:
+            return None
+        # No persona turn was sent, so this answer has no latency sample.
+        return AgentReply(text=answer.text, ended=answer.ended, tool_calls=())
+
     async def finish(self, text: str) -> None:
         """Send final persona words without asking the room for another turn."""
         try:

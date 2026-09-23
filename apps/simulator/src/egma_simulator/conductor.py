@@ -1074,6 +1074,10 @@ class _PersonaReplyGate(FrameProcessor):
                 self._conductor.interruption_canceled("empty_reply", drain=False)
             elif reply.concluded and not reply.text:
                 self._conductor.persona_concluded_without_speech()
+            elif not reply.text:
+                self._conductor.persona_stayed_silent(
+                    silence_follow_up=self._silence_follow_up
+                )
             elif not self._conductor.is_ending:
                 await self._conductor.wait_until(due)
                 if not self._conductor.is_ending:
@@ -1522,6 +1526,8 @@ class _Record:
     first_answer_measured: bool = False
     silence_follow_ups: int = 0
     persona_response_pending: bool = False
+    persona_silent_at: MediaPosition | None = None
+    """Where the persona last chose to say nothing, until it speaks or hears words."""
 
 
 class PipelineGone(RuntimeError):
@@ -2307,15 +2313,16 @@ class VoiceConductor:
         if self._heard_so_far < len(ear.utterances):
             return
 
-        if self._record.persona_last_stopped_at is None and not any(
+        waiting_since = self._persona_waiting_since()
+        if waiting_since is None and not any(
             turn.speaker == "human" for turn in self._record.history
         ):
             if self._position >= _seconds(self._parameters.agent_opening_seconds):
                 await self._ask_the_persona(heard_a_turn=False)
             return
-        if self._record.persona_last_stopped_at is None:
+        if waiting_since is None:
             return
-        if self._position - self._record.quiet_since >= _seconds(
+        if self._position - waiting_since >= _seconds(
             self._parameters.agent_quiet_seconds
         ):
             if self._record.silence_follow_ups >= SILENCE_FOLLOW_UP_LIMIT:
@@ -2323,13 +2330,22 @@ class VoiceConductor:
             else:
                 await self._ask_the_persona(heard_a_turn=False)
 
+    def _persona_waiting_since(self) -> MediaPosition | None:
+        """Start of the silence timer after the persona's last spoken or silent turn."""
+        record = self._record
+        if record.persona_silent_at is not None:
+            return max(record.quiet_since, record.persona_silent_at)
+        if record.persona_last_stopped_at is not None:
+            return record.quiet_since
+        return None
+
     async def _ask_the_persona(self, *, heard_a_turn: bool) -> None:
         if self._worker is None:
             raise PipelineGone("the persona was asked before the pipeline started")
         self._owes_a_turn = True
         follow_up = (
             self._record.silence_follow_ups + 1
-            if not heard_a_turn and self._record.persona_last_stopped_at is not None
+            if not heard_a_turn and self._persona_waiting_since() is not None
             else 0
         )
         await self._worker.queue_frame(
@@ -2380,6 +2396,7 @@ class VoiceConductor:
                 self._record.silence_follow_ups = 0
                 self._record.persona_response_pending = True
                 self._record.persona_last_stopped_at = None
+                self._record.persona_silent_at = None
                 self._record.quiet_since = max(self._record.quiet_since, ended)
         if self._on_answered is not None:
             await self._on_answered()
@@ -2483,6 +2500,7 @@ class VoiceConductor:
             if began is not None and ended < began:
                 ended = began
             self._record.persona_last_stopped_at = ended
+            self._record.persona_silent_at = None
             self._record.quiet_since = max(self._record.quiet_since, ended)
         self._pending_persona_text = None
         self._pending_persona_concludes = False
@@ -2558,6 +2576,7 @@ class VoiceConductor:
             if self._segment_waiting_for_interruption_owner:
                 self._arm_interruption_for_active_segment()
         self._record.persona_last_stopped_at = ended
+        self._record.persona_silent_at = None
         self._record.persona_response_pending = False
         self._record.quiet_since = max(self._record.quiet_since, ended)
         if concludes and not self.is_ending:
@@ -2569,6 +2588,20 @@ class VoiceConductor:
         """End on a valid end action that requested no speech."""
         if not self.is_ending:
             self._ending = PERSONA_CONCLUDED
+        self._owes_a_turn = False
+        self.media_advanced()
+
+    def persona_stayed_silent(self, *, silence_follow_up: int = 0) -> None:
+        """Keep listening after a reply with no words and no end action.
+
+        The silence timer restarts here, and a silent follow-up spends one of
+        the persona's follow-ups. Answer latency still runs from the persona's
+        last audible speech.
+        """
+        if silence_follow_up:
+            self._record.silence_follow_ups += 1
+        self._record.persona_silent_at = self._position
+        self._record.persona_response_pending = False
         self._owes_a_turn = False
         self.media_advanced()
 

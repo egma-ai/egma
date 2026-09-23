@@ -14,6 +14,9 @@ Chat uses ConnectionPlug: open() returns a greeting or None, deliver() returns
 one AgentReply per persona turn, and close() tears down from any state.
 Deliveries are sequential. An ended reply records final words and stops delivery.
 Keep platform_notes separate from speech and from the persona's transcript.
+A plug that can hear the agent without sending a persona turn also has
+listen(seconds): it returns the agent's next AgentReply, or None if the agent
+says nothing in that time. The loop uses it after a silent persona turn.
 
 Voice uses VoiceConnection: prepare() builds transport processors, open()
 connects, and close() tears down. The Pipecat pipeline owns audio processing,

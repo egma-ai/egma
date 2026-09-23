@@ -60,7 +60,7 @@ async def test_execution_end_precedes_cleanup_and_evidence_delivery(
                 raise RuntimeError("model execution failed")
             if outcome == "metadata_failure":
                 raise ModelFailure(
-                    "the model's answer had no words to speak",
+                    "the model refused to answer",
                     diagnostic_attributes={
                         "gen_ai.response.id": "response-123",
                         "gen_ai.response.refusal_present": True,
@@ -205,4 +205,4 @@ async def test_execution_end_precedes_cleanup_and_evidence_delivery(
         )
         assert finished["gen_ai.response.id"] == "response-123"
         assert finished["gen_ai.response.refusal_present"] is True
-        assert terminal["reason"].endswith("the model's answer had no words to speak")
+        assert terminal["reason"].endswith("the model refused to answer")
