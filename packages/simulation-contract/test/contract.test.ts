@@ -1441,7 +1441,7 @@ describe("a Daily room work order, which is version 8", () => {
     const livekit = await readJson("fixtures", "spec", "valid", "voice-pipecat-cloud.json");
     const chat = await readJson("fixtures", "spec", "valid", "chat-livekit.json");
     const connection = chat.connection;
-    const asLivekit = { ...structuredClone(livekit), connection };
+    const asLivekit: Record<string, unknown> = { ...structuredClone(livekit), connection };
     delete asLivekit.pipecat_body_params;
     expect(specComplaints(asLivekit)).toEqual([]);
   });
