@@ -22,7 +22,7 @@ B. Detect how the bot is deployed
 
 C. Modalities
   1. Voice - runs a full voice simulation through the bot's STT, LLM and TTS.
-  2. Chat - the persona sends text through RTVI. It needs no code beyond the SDK line: in a chat simulation the SDK turns the bot's speech output off by itself. It needs RTVI, which `PipelineWorker` turns on by default. If the bot passes `enable_rtvi=False`, chat simulations fail; tell the developer.
+  2. Chat - the persona sends text through RTVI. It needs no code beyond the SDK line: in a chat simulation the SDK turns the bot's speech output off by itself. It needs RTVI, which `PipelineWorker` turns on by default. If the bot passes `enable_rtvi=False`, or `rtvi_observer_params` with `bot_llm_enabled=False`, chat simulations fail; tell the developer.
   Create both a voice and a chat connection by default.
 
 ## 1. Register the agent if it is not already available

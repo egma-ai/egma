@@ -88,7 +88,7 @@ Egma cannot mock a Pipecat Flows function (from `pipecat.flows`) yet. When a tes
 
 #### Chat simulations
 
-Chat simulations need no extra code. In a chat simulation, the SDK turns your bot's speech output off after Egma confirms the simulation, so the greeting and every answer stay text only. Chat needs RTVI, which `PipelineWorker` turns on by default, so do not pass `enable_rtvi=False`.
+Chat simulations need no extra code. In a chat simulation, the SDK turns your bot's speech output off after Egma confirms the simulation, so the greeting and every answer stay text only. Chat needs RTVI, which `PipelineWorker` turns on by default, so do not pass `enable_rtvi=False`. If you pass your own `rtvi_observer_params`, keep `bot_llm_enabled` on.
 
 ### B. Production monitoring
 
