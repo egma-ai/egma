@@ -9,6 +9,7 @@ import {
   runAgentConnectionOptionsCommand,
   runAgentRegisterCommand,
 } from "./commands/agent.ts";
+import { runAgentDevCommand, withDevSessionSignal } from "./commands/agent-dev.ts";
 import {
   runAgentMonitoringSetupCommand,
   runAgentMonitoringStopCommand,
@@ -66,6 +67,7 @@ export const COMMANDS = [
   "agent connection add",
   "agent monitoring setup",
   "agent monitoring stop",
+  "agent dev",
   "project api-key create",
   "persona list",
   "persona settings",
@@ -174,6 +176,10 @@ const SCHEMAS: Readonly<Record<Command, OptionSchema>> = {
   },
   "agent monitoring stop": {
     values: ["--agent", "--platform", REPOSITORY_OPTION],
+    positionals: 0,
+  },
+  "agent dev": {
+    values: ["--agent", "--port", REPOSITORY_OPTION],
     positionals: 0,
   },
   "project api-key create": {
@@ -377,11 +383,13 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
     "  egma agent register [options]",
     "  egma agent connection <command>",
     "  egma agent monitoring <command>",
+    "  egma agent dev --agent <Egma Agent ID> --port <port>",
     "",
     "Commands:",
     "  register      Register an Egma Agent identity.",
     "  connection    List provider choices or add one Connection.",
     "  monitoring    Set up or stop production monitoring for one Agent.",
+    "  dev           Reach a Pipecat bot on this computer through a tunnel.",
   ],
   "agent connection": [
     "Usage:",
@@ -550,6 +558,23 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
     "",
     "The explicit platform must match the selected Agent.",
   ],
+  "agent dev": [
+    "Usage:",
+    "  egma agent dev --agent <Egma Agent ID> --port <port> [--cwd <path>]",
+    "",
+    "Opens a Cloudflare quick tunnel to your Pipecat bot's development runner on",
+    "this computer and writes its start URL and a new secret header into this",
+    "machine's voice and chat Connections. It runs until Ctrl-C.",
+    "",
+    "Options:",
+    "  --agent <Egma Agent ID>  A Pipecat Agent.",
+    "  --port <port>            Port of your bot's development runner, such as 7860.",
+    "  --cwd <path>             Repository root. Default: current directory.",
+    "",
+    "Needs cloudflared on PATH. The first run creates this machine's Connections;",
+    "later runs update the same ones. They are remembered in dev-connections.json",
+    "in EGMA_HOME (default ~/.egma), never in the repository.",
+  ],
   "project api-key create": [
     "Usage:",
     "  egma project api-key create --name <name> [--cwd <path>]",
@@ -643,6 +668,8 @@ function requiredArguments(
       return required(invocation, ["--agent", "--platform"]);
     case "agent monitoring stop":
       return required(invocation, ["--agent", "--platform"]);
+    case "agent dev":
+      return required(invocation, ["--agent", "--port"]);
     case "project api-key create":
     case "suite create":
       return required(invocation, ["--name"]);
@@ -882,6 +909,16 @@ async function dispatch(
           agent: value(args, "--agent") as string,
           platform: value(args, "--platform") as string,
           signal,
+        }),
+      );
+    case "agent dev":
+      return withDevSessionSignal(async (signal) =>
+        runAgentDevCommand({
+          ...options,
+          env: process.env,
+          signal,
+          agentId: value(args, "--agent"),
+          port: value(args, "--port"),
         }),
       );
     case "project api-key create":

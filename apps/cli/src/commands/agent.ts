@@ -123,7 +123,8 @@ export type AgentConnectionAddCommandOptions = CommandIO &
     readonly agentId: string | null;
   };
 
-type Ready = {
+/** A repository bound to a project, and a login that can act in it. */
+export type Ready = {
   readonly paths: FolderPaths;
   readonly config: FolderConfig;
   readonly project: IdentifiedThing;
@@ -131,7 +132,8 @@ type Ready = {
   readonly request: RegisterOptions;
 };
 
-type Stop = { readonly code: number };
+/** The command already said why it stops; this is its exit code. */
+export type Stop = { readonly code: number };
 
 function stopped(code: number): Stop {
   return { code };
@@ -178,7 +180,16 @@ function modalityWord(
   return word === "chat" || word === "voice" ? word : { said: word };
 }
 
-async function prepare(options: CommandIO): Promise<Ready | Stop> {
+/** Read egma/config.yaml and the saved login, or say why the command cannot go on. */
+export async function prepare(options: {
+  readonly access: PlatformAccess;
+  readonly cwd: string;
+  readonly env: NodeJS.ProcessEnv;
+  readonly signal: AbortSignal;
+  readonly out: (line: string) => void;
+  readonly fail: (line: string) => void;
+  readonly fetchImpl?: Fetch | undefined;
+}): Promise<Ready | Stop> {
   const paths = folderPathsIn(options.cwd);
   let config: FolderConfig;
   try {

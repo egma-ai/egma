@@ -1350,7 +1350,7 @@ export function agentRoutes(options: {
   ): string => {
     const taken = new Set(
       connections
-        .filter((held) => held.agentId === agentId)
+        .filter((held) => held.agentId === agentId && held.archivedAt === null)
         .map((held) => held.name),
     );
     const stem =
@@ -1500,9 +1500,13 @@ export function agentRoutes(options: {
     const { connectionType, modality, config, credentials } = input;
     const name =
       input.name ?? freeConnectionName(agent.id, connectionType, modality);
+    // Names are unique among living connections only, as the real index.
     if (
       connections.some(
-        (held) => held.agentId === agent.id && held.name === name,
+        (held) =>
+          held.agentId === agent.id &&
+          held.name === name &&
+          held.archivedAt === null,
       )
     ) {
       throw new Refusal(
@@ -2084,7 +2088,8 @@ export function agentRoutes(options: {
                 (other) =>
                   other !== held &&
                   other.agentId === agent.id &&
-                  other.name === name,
+                  other.name === name &&
+                  other.archivedAt === null,
               )
             ) {
               throw new Refusal(
