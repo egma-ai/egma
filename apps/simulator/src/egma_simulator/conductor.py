@@ -2732,6 +2732,9 @@ class VoiceConductor:
 
     def _transport_lost(self) -> PlugError:
         self.interruption_canceled("transport_failed", force=True)
+        fault = self._media.fault() if self._media is not None else None
+        if fault is not None:
+            return PlugError(fault)
         transport = (
             self._media.transport_name if self._media is not None else "voice transport"
         )

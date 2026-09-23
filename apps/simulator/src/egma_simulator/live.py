@@ -361,6 +361,9 @@ class LiveConductor:
             media = await controls.guard(self._connection.prepare())
 
             def transport_lost() -> PlugError:
+                fault = media.fault()
+                if fault is not None:
+                    return PlugError(fault)
                 return PlugError(
                     f"the {media.transport_name} disconnected before the "
                     "simulation ended"
