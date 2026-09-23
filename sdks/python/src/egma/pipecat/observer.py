@@ -28,13 +28,11 @@ frames, so every failure is logged and swallowed.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 from collections import OrderedDict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from opentelemetry import trace
@@ -69,6 +67,8 @@ from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
 
+from .. import seam
+from .._frameworks import installed_version
 from .export import ROOT_SPAN
 
 logger = logging.getLogger("egma")
@@ -94,18 +94,6 @@ UNFINISHED = "the bot session ended before the call returned a result"
 
 _REMEMBERED_FRAMES = 20_000
 """How many frame ids are kept to tell a frame's first push from its later hops."""
-
-
-def _pipecat_version() -> str:
-    try:
-        return version("pipecat-ai")
-    except PackageNotFoundError:
-        return "unknown"
-
-
-def _json(value: Any) -> str:
-    """Compact JSON, as the model and the seam write it."""
-    return json.dumps(value, separators=(",", ":"), default=str, ensure_ascii=False)
 
 
 def _message_text(content: Any) -> str:
@@ -221,7 +209,7 @@ class Recorder:
 
     def start(self, at: int) -> Span:
         if self._root is None:
-            attributes = {PIPECAT_VERSION: _pipecat_version()}
+            attributes = {PIPECAT_VERSION: installed_version("pipecat-ai")}
             if self._transport:
                 attributes[PIPECAT_TRANSPORT] = self._transport
             # The root has no parent, even inside a customer's own span.
@@ -443,7 +431,7 @@ class Recorder:
             {
                 TOOL_NAME: name,
                 TOOL_CALL_ID: tool_call_id,
-                TOOL_ARGUMENTS: _json(arguments),
+                TOOL_ARGUMENTS: seam.serialized(arguments),
             },
         )
 
@@ -465,7 +453,10 @@ class Recorder:
             span.set_attribute(TOOL_ERROR, failure)
             span.set_status(Status(StatusCode.ERROR, failure))
         else:
-            span.set_attribute(TOOL_RESULT, _json(result))
+            span.set_attribute(TOOL_RESULT, seam.serialized(result))
+            # A returned call is marked succeeded, as LiveKit's tool spans
+            # are; turns and the root leave their status unset, as LiveKit's do.
+            span.set_status(Status(StatusCode.OK))
         span.end(end_time=at)
 
     def call_cancelled(self, at: int, tool_call_id: str, why: str = CANCELLED) -> None:
@@ -583,84 +574,10 @@ class EgmaObserver(BaseObserver):
                 self._last_tools = tools
                 self._on_tools(tools)
             return
-        if not isinstance(frame, _RECORDED):
+        record = _recording_of(type(frame))
+        if record is None or not self._first_sighting(data):
             return
-        if not self._first_sighting(data):
-            return
-        at = self._wall(data)
-        recorder = self._recorder
-
-        if isinstance(frame, StartFrame):
-            recorder.start(at)
-        elif isinstance(frame, VADUserStartedSpeakingFrame):
-            recorder.user_speech_started(at)
-        elif isinstance(frame, VADUserStoppedSpeakingFrame):
-            recorder.user_speech_stopped(at)
-        elif isinstance(frame, UserStartedSpeakingFrame):
-            recorder.user_turn_started(at)
-        elif isinstance(frame, UserStoppedSpeakingFrame):
-            recorder.user_turn_stopped(at)
-        elif isinstance(frame, TranscriptionFrame):
-            recorder.transcript(at, frame.text, final=True)
-        elif isinstance(frame, InterimTranscriptionFrame):
-            recorder.transcript(at, frame.text, final=False)
-        elif isinstance(frame, LLMMessagesAppendFrame):
-            # Text the user sent: RTVI send-text. User messages the bot's own
-            # code or Pipecat Flows appends are instructions, not turns.
-            if data.direction == FrameDirection.DOWNSTREAM and isinstance(
-                data.source, RTVIProcessor
-            ):
-                for message in frame.messages:
-                    if isinstance(message, Mapping) and message.get("role") == "user":
-                        text = _message_text(message.get("content"))
-                        if text:
-                            recorder.user_text(at, text)
-        elif isinstance(frame, LLMFullResponseStartFrame):
-            recorder.response_started(at)
-        elif isinstance(frame, LLMFullResponseEndFrame):
-            recorder.response_ended(at)
-        elif isinstance(frame, LLMTextFrame):
-            recorder.response_text(
-                at,
-                frame.text,
-                spaced=bool(getattr(frame, "includes_inter_frame_spaces", False)),
-                spoken=not getattr(frame, "skip_tts", False),
-            )
-        elif isinstance(frame, TTSTextFrame):
-            recorder.spoken_text(
-                at,
-                frame.text,
-                spaced=bool(getattr(frame, "includes_inter_frame_spaces", False)),
-            )
-        elif isinstance(frame, BotStartedSpeakingFrame):
-            recorder.bot_speech_started(at)
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            recorder.bot_speech_stopped(at)
-        elif isinstance(frame, InterruptionFrame):
-            recorder.interrupted(at)
-        elif isinstance(frame, FunctionCallsStartedFrame):
-            recorder.calls_started([call.tool_call_id for call in frame.function_calls])
-        elif isinstance(frame, FunctionCallInProgressFrame):
-            recorder.call_in_progress(
-                at, frame.tool_call_id, frame.function_name, frame.arguments
-            )
-        elif isinstance(frame, FunctionCallResultFrame):
-            properties = getattr(frame, "properties", None)
-            if (
-                properties is not None
-                and getattr(properties, "is_final", True) is False
-            ):
-                return
-            recorder.call_result(
-                at,
-                frame.tool_call_id,
-                frame.function_name,
-                frame.arguments,
-                frame.result,
-                getattr(frame, "error", None),
-            )
-        elif isinstance(frame, FunctionCallCancelFrame):
-            recorder.call_cancelled(at, frame.tool_call_id)
+        record(self._recorder, frame, data, self._wall(data))
 
     async def cleanup(self) -> None:
         await super().cleanup()
@@ -671,24 +588,81 @@ class EgmaObserver(BaseObserver):
                 logger.exception("Egma could not finish this bot session's record")
 
 
-_RECORDED = (
-    StartFrame,
-    VADUserStartedSpeakingFrame,
-    VADUserStoppedSpeakingFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
-    TranscriptionFrame,
-    InterimTranscriptionFrame,
-    LLMMessagesAppendFrame,
-    LLMFullResponseStartFrame,
-    LLMFullResponseEndFrame,
-    LLMTextFrame,
-    TTSTextFrame,
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
-    InterruptionFrame,
-    FunctionCallsStartedFrame,
-    FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
-    FunctionCallCancelFrame,
-)
+# --- what each recorded frame means -------------------------------------------
+
+_Record = Callable[[Recorder, Any, FramePushed, int], None]
+
+
+def _spaced(frame: Any) -> bool:
+    return bool(getattr(frame, "includes_inter_frame_spaces", False))
+
+
+def _user_text(recorder: Recorder, frame: Any, data: FramePushed, at: int) -> None:
+    # Text the user sent: RTVI send-text. User messages the bot's own code or
+    # Pipecat Flows appends are instructions, not turns.
+    if data.direction != FrameDirection.DOWNSTREAM or not isinstance(
+        data.source, RTVIProcessor
+    ):
+        return
+    for message in frame.messages:
+        if isinstance(message, Mapping) and message.get("role") == "user":
+            text = _message_text(message.get("content"))
+            if text:
+                recorder.user_text(at, text)
+
+
+def _call_result(recorder: Recorder, frame: Any, data: FramePushed, at: int) -> None:
+    properties = getattr(frame, "properties", None)
+    if properties is not None and getattr(properties, "is_final", True) is False:
+        return
+    recorder.call_result(
+        at,
+        frame.tool_call_id,
+        frame.function_name,
+        frame.arguments,
+        frame.result,
+        getattr(frame, "error", None),
+    )
+
+
+_RECORDS: dict[type, _Record] = {
+    StartFrame: lambda r, f, d, at: r.start(at),
+    VADUserStartedSpeakingFrame: lambda r, f, d, at: r.user_speech_started(at),
+    VADUserStoppedSpeakingFrame: lambda r, f, d, at: r.user_speech_stopped(at),
+    UserStartedSpeakingFrame: lambda r, f, d, at: r.user_turn_started(at),
+    UserStoppedSpeakingFrame: lambda r, f, d, at: r.user_turn_stopped(at),
+    TranscriptionFrame: lambda r, f, d, at: r.transcript(at, f.text, final=True),
+    InterimTranscriptionFrame: lambda r, f, d, at: r.transcript(
+        at, f.text, final=False
+    ),
+    LLMMessagesAppendFrame: _user_text,
+    LLMFullResponseStartFrame: lambda r, f, d, at: r.response_started(at),
+    LLMFullResponseEndFrame: lambda r, f, d, at: r.response_ended(at),
+    LLMTextFrame: lambda r, f, d, at: r.response_text(
+        at, f.text, spaced=_spaced(f), spoken=not getattr(f, "skip_tts", False)
+    ),
+    TTSTextFrame: lambda r, f, d, at: r.spoken_text(at, f.text, spaced=_spaced(f)),
+    BotStartedSpeakingFrame: lambda r, f, d, at: r.bot_speech_started(at),
+    BotStoppedSpeakingFrame: lambda r, f, d, at: r.bot_speech_stopped(at),
+    InterruptionFrame: lambda r, f, d, at: r.interrupted(at),
+    FunctionCallsStartedFrame: lambda r, f, d, at: r.calls_started(
+        [call.tool_call_id for call in f.function_calls]
+    ),
+    FunctionCallInProgressFrame: lambda r, f, d, at: r.call_in_progress(
+        at, f.tool_call_id, f.function_name, f.arguments
+    ),
+    FunctionCallResultFrame: _call_result,
+    FunctionCallCancelFrame: lambda r, f, d, at: r.call_cancelled(at, f.tool_call_id),
+}
+"""What each recorded frame kind means for the record. A subclass, such as
+Pipecat's vision response frames, is recorded as the kind it extends."""
+
+_RESOLVED: dict[type, _Record | None] = {}
+
+
+def _recording_of(kind: type) -> _Record | None:
+    if kind not in _RESOLVED:
+        _RESOLVED[kind] = next(
+            (_RECORDS[base] for base in kind.__mro__ if base in _RECORDS), None
+        )
+    return _RESOLVED[kind]

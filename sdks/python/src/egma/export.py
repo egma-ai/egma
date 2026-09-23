@@ -65,7 +65,8 @@ class _SimulationEvidenceExporter(otlp.RootLastExporter):
         super().__init__(delegate, root_span_name=_ROOT_SPAN)
 
 
-# The framework-free steps, under the names this module has always used.
+# Module-level names for the framework-free steps in egma.otlp: the LiveKit
+# tests monkeypatch them here, and _configure_provider reads them from here.
 _setting = otlp.setting
 _project_key = otlp.project_key
 _trace_endpoint = otlp.trace_endpoint

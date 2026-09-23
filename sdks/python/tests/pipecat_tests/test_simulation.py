@@ -9,11 +9,16 @@ and ``cancel_booking`` (failed); ``charge_card`` is never mocked.
 
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pipecat.frames.frames")
+
 import asyncio
+import gc
 import json
+import weakref
 from typing import Any
 
-import pytest
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
@@ -154,6 +159,10 @@ def a_simulation(**extra: Any) -> DailyRunnerArguments:
         pytest.param(
             {"egma": {"simulation_id": 7}}, id="a simulation id that is not text"
         ),
+        pytest.param(
+            {"egma": {"simulation_id": "s" * 513}},
+            id="a simulation id longer than egma reads",
+        ),
     ],
 )
 async def test_without_egmas_key_nothing_happens_and_nothing_is_asked(
@@ -243,6 +252,14 @@ async def test_a_simulation_reports_its_tools_and_egma_answers_the_mocked_one(
     assert json.loads(calls["check_calendar"].attributes["egma.tool.arguments"]) == {
         "day": "Tuesday"
     }
+
+    # A call that returned is marked succeeded, on the mocked and the real
+    # tool alike; turns and the root leave their status unset, as LiveKit's do.
+    assert {call.status.status_code.name for call in calls.values()} == {"OK"}
+    for name in ("pipecat_session", "user_turn", "agent_turn"):
+        assert all(
+            span.status.status_code.name == "UNSET" for span in exports.only.named(name)
+        )
 
 
 async def test_the_real_registration_is_back_after_a_mocked_call(egma, exports):
@@ -547,3 +564,53 @@ async def test_a_response_that_only_asks_for_a_tool_is_no_turn(egma, exports):
     [root] = sink.named("pipecat_session")
     assert call.parent.span_id == root.context.span_id
     assert call.end_time <= turn.start_time
+
+
+async def test_a_bot_that_fails_after_the_sdk_line_releases_what_it_held(egma, exports):
+    bot = Reception([Step(text="never")])
+
+    async def bot_start() -> None:
+        await simulation(bot.worker, a_simulation())
+        raise RuntimeError("the bot could not reach its transport")
+
+    with pytest.raises(RuntimeError):
+        await asyncio.create_task(bot_start())
+    session = bot.worker._egma_pipecat_session
+    for _ in range(5):
+        await asyncio.sleep(0)
+    await session._release
+
+    assert "_run_function_call" not in vars(bot.llm)
+    assert session.seam._client is None
+    assert exports.only.stopped
+    assert exports.only.spans == [], "no record for a pipeline that never ran"
+
+
+async def test_a_bot_whose_task_ends_normally_keeps_its_session_for_the_runner(
+    egma, exports
+):
+    bot = Reception([Step(calls=[("check_calendar", {"day": "Friday"})]), Step()])
+
+    await asyncio.create_task(simulation(bot.worker, a_simulation()))
+    await run_pipeline(bot.worker, lambda: bot.say("Friday?"))
+
+    assert bot.ran["check_calendar"] == []
+    assert bot.result_of("check_calendar") == [{"slots": []}]
+
+
+async def test_a_worker_dropped_before_it_ran_releases_its_export(egma, exports):
+    async def build() -> weakref.ref:
+        bot = Reception([])
+        await simulation(bot.worker, a_simulation())
+        return weakref.ref(bot.worker)
+
+    worker = await asyncio.create_task(build())
+    # The finished task's callbacks run on the next loop turns.
+    for _ in range(5):
+        await asyncio.sleep(0)
+    gc.collect()
+    await asyncio.sleep(0.05)
+
+    assert worker() is None
+    assert exports.only.stopped
+    assert exports.only.spans == []

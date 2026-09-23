@@ -27,11 +27,10 @@ import json
 import logging
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import SplitResult, urlunsplit
 
 import aiohttp
 
-from .. import otlp, seam
+from .. import seam
 
 logger = logging.getLogger("egma")
 
@@ -68,11 +67,6 @@ LARGEST_REPLY_BYTES = 64 * 1024
 
 NOT_A_SIMULATION = "not_a_simulation"
 """The one ``error`` word that makes the SDK inert."""
-
-FLOWS_FUNCTION_MOCKED = 905
-"""egma's refusal code for a mocked Pipecat Flows function."""
-
-_TRACE_SUFFIX = "/v1/traces"
 
 
 class NotASimulation(Exception):
@@ -125,32 +119,23 @@ class _Reply:
         return said
 
 
-def sdk_base(value: str, verb: str) -> str:
-    """``EGMA_URL`` as the base the SDK routes hang off.
+def _payload(value: object) -> bytes:
+    """Compact JSON in UTF-8, exactly as the in-room seam writes it."""
+    return seam.serialized(value).encode("utf-8")
 
-    The same URL rules as the trace exporter. A trailing ``/`` and a
-    trailing ``/v1/traces`` are removed, so either form of the setting works.
+
+def unanswered(name: str, cause: str) -> seam.Served:
+    """The failed result of a mocked call egma did not answer.
+
+    The sentence reaches the model, so it says the real tool did not run.
     """
-    parsed = otlp.api_base(value, verb)
-    path = parsed.path.rstrip("/")
-    if path.endswith(_TRACE_SUFFIX):
-        path = path[: -len(_TRACE_SUFFIX)].rstrip("/")
-    return urlunsplit(
-        SplitResult(
-            scheme=parsed.scheme,
-            netloc=parsed.netloc,
-            path=path,
-            query="",
-            fragment="",
-        )
+    return seam.Served(
+        failed=True,
+        message=(
+            f'Egma could not answer the mocked tool "{name}": '
+            f"{cause.strip().rstrip('.')}. The real tool did not run."
+        ),
     )
-
-
-def _serialized(value: object) -> bytes:
-    """Compact JSON in UTF-8, as the in-room seam writes it."""
-    return json.dumps(
-        value, separators=(",", ":"), default=str, ensure_ascii=False
-    ).encode("utf-8")
 
 
 def _transport_failure(broke: BaseException, seconds: float) -> str:
@@ -210,19 +195,19 @@ class Seam:
         """Report the census; return the names egma answers for.
 
         Raises ``NotASimulation`` for egma's "not a simulation" answer and
-        ``HelloFailed`` for every other answer that is not ``200``.
+        ``HelloFailed`` for every other answer that is not ``200``. Only a
+        connection error, a timeout, and 429, 502, 503 or 504 are asked again.
         """
-        payload = _serialized(
+        payload = _payload(
             {
                 "provider_reference": self.provider_reference,
-                "protocol_version": seam.PROTOCOL_VERSION,
-                "tools": census,
+                **seam.hello_message(census),
             }
         )
         if len(payload) > LARGEST_HELLO_REQUEST_BYTES:
             raise HelloFailed(
                 f"this bot's tools are {len(payload)} bytes as a report, and "
-                f"egma accepts at most {LARGEST_HELLO_REQUEST_BYTES}"
+                f"Egma accepts at most {LARGEST_HELLO_REQUEST_BYTES}"
             )
 
         loop = asyncio.get_running_loop()
@@ -232,15 +217,20 @@ class Seam:
             seconds = min(HELLO_ATTEMPT_SECONDS, max(deadline - loop.time(), 0.001))
             try:
                 reply = await self._post(HELLO_ROUTE, payload, seconds)
-            except (TimeoutError, aiohttp.ClientError, OSError) as broke:
+            except (TimeoutError, aiohttp.ClientConnectionError, OSError) as broke:
                 cause = _transport_failure(broke, seconds)
+            except aiohttp.ClientError as broke:
+                raise HelloFailed(
+                    f"Egma's answer could not be read "
+                    f"({_transport_failure(broke, seconds)})"
+                ) from broke
             else:
                 if reply.status == 200:
                     try:
                         return seam.mocked_tools_in(reply.text())
                     except seam.SeamError as unreadable:
                         raise HelloFailed(
-                            f"egma answered in a shape this SDK cannot read "
+                            f"Egma answered in a shape this SDK cannot read "
                             f"({unreadable})"
                         ) from unreadable
                 if reply.status == 404 and reply.error_word() == NOT_A_SIMULATION:
@@ -248,12 +238,12 @@ class Seam:
                 answered = reply.json_object() or {}
                 if (
                     reply.status == 422
-                    and answered.get("code") == FLOWS_FUNCTION_MOCKED
+                    and answered.get("code") == seam.FLOWS_FUNCTION_MOCKED
                     and isinstance(answered.get("message"), str)
                 ):
                     raise HelloFailed(answered["message"], verbatim=True)
                 if reply.status not in RETRYABLE_HELLO_STATUSES:
-                    raise HelloFailed(f"egma refused the report ({reply.refusal()})")
+                    raise HelloFailed(f"Egma refused the report ({reply.refusal()})")
                 cause = reply.refusal()
 
             if attempt == HELLO_ATTEMPTS:
@@ -263,9 +253,9 @@ class Seam:
             ]
             if loop.time() + pause >= deadline:
                 break
-            logger.debug("egma did not answer the hello (%s); asking again", cause)
+            logger.debug("Egma did not answer the hello (%s); asking again", cause)
             await asyncio.sleep(pause)
-        raise HelloFailed(f"egma did not answer the report ({cause})")
+        raise HelloFailed(f"Egma did not answer the report ({cause})")
 
     async def tool(
         self, name: str, arguments: dict[str, Any] | None, *, flows: bool
@@ -277,18 +267,16 @@ class Seam:
         """
         asking: dict[str, Any] = {
             "provider_reference": self.provider_reference,
-            "name": name,
+            **seam.tool_message(name, arguments),
         }
-        if arguments is not None:
-            asking["arguments"] = arguments
         if flows:
             asking["flows"] = True
-        payload = _serialized(asking)
+        payload = _payload(asking)
 
         cause = ""
         if len(payload) > LARGEST_TOOL_REQUEST_BYTES:
             cause = (
-                f"the call is {len(payload)} bytes, and egma accepts at most "
+                f"the call is {len(payload)} bytes, and Egma accepts at most "
                 f"{LARGEST_TOOL_REQUEST_BYTES}"
             )
         else:
@@ -310,7 +298,7 @@ class Seam:
                     try:
                         return seam.served_in(reply.text())
                     except seam.SeamError as unreadable:
-                        cause = f"egma's answer could not be read ({unreadable})"
+                        cause = f"Egma's answer could not be read ({unreadable})"
                         break
                 answered = reply.json_object() or {}
                 message = answered.get("message")
@@ -320,14 +308,8 @@ class Seam:
                     else f"HTTP {reply.status}"
                 )
                 break
-        logger.warning("egma could not answer the mocked tool %r: %s", name, cause)
-        return seam.Served(
-            failed=True,
-            message=(
-                f'Egma could not answer the mocked tool "{name}": {cause}. '
-                "The real tool did not run."
-            ),
-        )
+        logger.warning("Egma could not answer the mocked tool %r: %s", name, cause)
+        return unanswered(name, cause)
 
     async def confirm(self) -> bool:
         """Whether egma confirms the provider reference names a live simulation.
@@ -335,12 +317,12 @@ class Seam:
         One attempt. Anything but ``200 {"simulation": true}`` is "not
         confirmed", which the caller treats as production.
         """
-        payload = _serialized({"provider_reference": self.provider_reference})
+        payload = _payload({"provider_reference": self.provider_reference})
         try:
             reply = await self._post(CONFIRM_ROUTE, payload, CONFIRM_ATTEMPT_SECONDS)
         except (TimeoutError, aiohttp.ClientError, OSError) as broke:
             logger.info(
-                "egma could not confirm simulation %s (%s)",
+                "Egma could not confirm simulation %s (%s)",
                 self.provider_reference,
                 _transport_failure(broke, CONFIRM_ATTEMPT_SECONDS),
             )

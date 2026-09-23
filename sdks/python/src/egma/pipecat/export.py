@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from importlib.metadata import PackageNotFoundError, version
 
 from opentelemetry import trace
 from opentelemetry.sdk.resources import SERVICE_NAME, Resource
@@ -23,6 +22,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
 
 from .. import otlp
+from .._frameworks import installed_version
 
 logger = logging.getLogger("egma")
 
@@ -41,14 +41,8 @@ FLUSH_TIMEOUT_MILLIS = 10_000
 """The longest the final flush of a session may take."""
 
 
-def egma_version() -> str:
-    try:
-        return version("egma")
-    except PackageNotFoundError:
-        return "unknown"
-
-
 def _build_exporter(endpoint: str, api_key: str, verb: str) -> SpanExporter:
+    """The OTLP exporter. A module-level name, so tests can send spans to memory."""
     return otlp.build_exporter(endpoint, api_key, verb)
 
 
@@ -90,7 +84,9 @@ class SessionExport:
             except Exception:
                 pass
             raise ValueError(f"{verb} could not configure the Egma exporter.") from None
-        self.tracer: trace.Tracer = self.provider.get_tracer(SCOPE, egma_version())
+        self.tracer: trace.Tracer = self.provider.get_tracer(
+            SCOPE, installed_version("egma")
+        )
         self._closed = False
 
     async def close(self) -> None:
@@ -112,7 +108,7 @@ class SessionExport:
             logger.warning("Egma could not stop this bot session's exporter")
 
     def discard(self) -> None:
-        """Stop an export that has recorded nothing, without waiting."""
+        """Stop the export without awaiting. Spans already ended still go out."""
         if self._closed:
             return
         self._closed = True

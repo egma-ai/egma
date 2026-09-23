@@ -34,6 +34,7 @@ from typing import Any
 from pipecat.services.llm_service import FunctionCallRegistryItem, LLMService
 
 from .. import seam
+from . import https_seam
 from .census import is_flows_handler
 
 logger = logging.getLogger("egma")
@@ -138,13 +139,7 @@ class _Hook:
         try:
             served = await self.ask(name, asked, flows)
         except Exception as broke:
-            served = seam.Served(
-                failed=True,
-                message=(
-                    f'Egma could not answer the mocked tool "{name}": '
-                    f"{type(broke).__name__}: {broke}. The real tool did not run."
-                ),
-            )
+            served = https_seam.unanswered(name, f"{type(broke).__name__}: {broke}")
         if served.failed:
             self.failed(params.tool_call_id, served.message)
             await params.result_callback({"error": served.message})
