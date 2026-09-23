@@ -28,6 +28,7 @@ import contextlib
 import json
 import logging
 import math
+import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
@@ -35,6 +36,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote, urlsplit
 
+from ..client import AgentReport
 from ..contract import AGENT_NEVER_JOINED, ERROR, NOT_ANSWERED
 from ..platform_logging import log_event
 from ..redaction import SecretRegistry
@@ -45,14 +47,13 @@ from . import (
     RemoteParticipantLeftFrame,
     VoiceMedia,
     arrived_now,
+    first_of,
 )
-from .livekit_room import (
-    TOKEN_RESPONSE_BYTES,
-    _endpoint_headers,
-    _endpoint_socket,
-    _EndpointResolver,
-    _token_body,
-    _unsafe_endpoint_failure,
+from .guarded_http import (
+    guarded_connector,
+    guarded_post,
+    header_object,
+    refused_for_address,
 )
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,9 @@ PIPECAT_STARTUP_SECONDS = 120.0
 
 START_REQUEST_SECONDS = 30.0
 """Longest wait for one start request's answer."""
+
+START_RESPONSE_BYTES = 64 * 1024
+"""The most start-request answer data read into the simulator."""
 
 START_RETRY_SECONDS = (1.0, 2.0, 4.0, 5.0)
 """Pauses between retried start requests without Retry-After; the last repeats."""
@@ -106,24 +110,9 @@ DAILY_ROOM_HOST_SUFFIX = ".daily.co"
 RTVI_LABEL = "rtvi-ai"
 
 
-async def first_of_events(*events: asyncio.Event, within: float | None) -> bool:
-    """Wait until one event is set; False when ``within`` seconds pass first."""
-    waiting = [asyncio.ensure_future(event.wait()) for event in events]
-    try:
-        done, _pending = await asyncio.wait(
-            waiting, return_when=asyncio.FIRST_COMPLETED, timeout=within
-        )
-    finally:
-        for unfinished in waiting:
-            if not unfinished.done():
-                unfinished.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await unfinished
-    return bool(done)
-
-
 # -- What each failure says ------------------------------------------------------
-# The sentences are the build contract's (section 7), word for word.
+# Each sentence names the cause and the next step. Public docs quote them, so
+# tests pin them word for word.
 
 
 def _seconds(seconds: float) -> str:
@@ -374,29 +363,60 @@ class StartSettings:
                 "a self-hosted Pipecat connection needs config startUrl, an https "
                 "URL with a hostname, like https://bots.example.com/start"
             )
-        try:
-            headers = _endpoint_headers(credentials)
-        except MediaBackendError as refused:
+        headers = (
+            header_object(credentials.get("headers"))
+            if isinstance(credentials, dict) and set(credentials) == {"headers"}
+            else None
+        )
+        if headers is None:
             raise MediaBackendError(
                 "a self-hosted Pipecat connection's credentials need headers, a "
                 "JSON object of header name to header value"
-            ) from refused
+            )
         return cls(start_url=start_url.strip(), headers=headers)
 
 
-def _https_with_host(url: str) -> bool:
+_HOST_NAME = re.compile(
+    r"^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*"
+    r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+)
+"""A DNS host name: dot-separated labels of letters, digits and inner hyphens."""
+
+
+def _https_host(url: str) -> str | None:
+    """The lowercase host name of an https URL, or None for anything else.
+
+    Backslashes, whitespace and control characters are refused outright: URL
+    parsers disagree about them (a WHATWG parser reads a backslash as a slash),
+    so the host checked here could differ from the host a client connects to.
+    """
+    if any(
+        character == "\\"
+        or character.isspace()
+        or ord(character) < 0x20
+        or ord(character) == 0x7F
+        for character in url
+    ):
+        return None
     try:
         parsed = urlsplit(url)
         _ = parsed.port
     except ValueError:
-        return False
-    return (
-        url.lower().startswith("https://")
-        and parsed.scheme == "https"
-        and bool(parsed.hostname)
-        and parsed.username is None
-        and parsed.password is None
-    )
+        return None
+    host = (parsed.hostname or "").lower()
+    if (
+        not url.lower().startswith("https://")
+        or parsed.scheme != "https"
+        or parsed.username is not None
+        or parsed.password is not None
+        or not _HOST_NAME.match(host)
+    ):
+        return None
+    return host
+
+
+def _https_with_host(url: str) -> bool:
+    return _https_host(url) is not None
 
 
 def _is_tunnel(url: str) -> bool:
@@ -419,11 +439,9 @@ def _start_named(url: str) -> str:
 
 
 def _daily_room_url(url: str) -> bool:
-    """Whether an answered room is an https URL on a daily.co host."""
-    if not _https_with_host(url):
-        return False
-    host = (urlsplit(url).hostname or "").lower()
-    return host.endswith(DAILY_ROOM_HOST_SUFFIX)
+    """Whether an answered room is an https URL on a subdomain of daily.co."""
+    host = _https_host(url)
+    return host is not None and host.endswith(DAILY_ROOM_HOST_SUFFIX)
 
 
 @dataclass(frozen=True)
@@ -589,9 +607,9 @@ class PipecatStarter:
         raise start_refused_failure(settings.start_url, status)
 
     def _room_in(self, said: bytes) -> DailyWayIn:
-        if len(said) > TOKEN_RESPONSE_BYTES:
+        if len(said) > START_RESPONSE_BYTES:
             raise unusable_room_failure(
-                f"the answer is larger than {TOKEN_RESPONSE_BYTES} bytes"
+                f"the answer is larger than {START_RESPONSE_BYTES} bytes"
             )
         try:
             held = json.loads(said)
@@ -615,54 +633,41 @@ class PipecatStarter:
 
     def _endpoint_connector(self, aiohttp: Any, resolver: Any) -> tuple[Any, Any]:
         """Build the guarded connector used for every start request."""
-        guarded = _EndpointResolver(resolver)
-        connector = aiohttp.TCPConnector(
-            resolver=guarded,
-            socket_factory=_endpoint_socket,
-            use_dns_cache=False,
-        )
-        return guarded, connector
+        return guarded_connector(aiohttp, resolver)
 
     async def _post_once(self, seconds: float) -> tuple[int, bytes, float | None]:
-        """One start request: its status, its bounded 2xx body, its Retry-After."""
-        import aiohttp
+        """One start request: its status, its bounded 2xx body, its Retry-After.
 
-        resolver = self._endpoint_resolver or aiohttp.resolver.DefaultResolver()
+        Sent direct, never through a proxy: its credentials are the spec's own
+        values, and the address guard must see the real destination.
+        """
         try:
-            resolver, connector = self._endpoint_connector(aiohttp, resolver)
-            async with (
-                aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(total=seconds),
-                    connector=connector,
-                ) as session,
-                session.post(
-                    self._settings.start_url,
-                    json=self.request_body(),
-                    headers=self._settings.headers,
-                    # A redirect would carry the stored headers to a host chosen by
-                    # whoever answered; a 3xx is read as a refusal.
-                    allow_redirects=False,
-                ) as answer,
-            ):
-                status = answer.status
-                retry_after = _retry_after(answer.headers.get("Retry-After"))
-                said = await _token_body(answer) if 200 <= status < 300 else b""
+            answer = await guarded_post(
+                self._settings.start_url,
+                json_body=self.request_body(),
+                headers=self._settings.headers,
+                seconds=seconds,
+                limit=START_RESPONSE_BYTES,
+                resolver=self._endpoint_resolver,
+                connector_for=self._endpoint_connector,
+            )
         except Exception as failed:
             cause = _network_cause(failed, seconds)
             if cause is None:
                 raise
             raise _Unreachable(cause) from failed
-        finally:
-            with contextlib.suppress(Exception):
-                await resolver.close()
-        return status, said, retry_after
+        return (
+            answer.status,
+            answer.body,
+            _retry_after(answer.headers.get("retry-after")),
+        )
 
 
 def _network_cause(failed: BaseException, seconds: float) -> str | None:
     """Name a known network failure; None for anything else, which propagates."""
     import aiohttp
 
-    if _unsafe_endpoint_failure(failed):
+    if refused_for_address(failed):
         return "it resolved to a non-public network address"
     if isinstance(failed, asyncio.TimeoutError):
         return f"no answer within {seconds:.0f} seconds"
@@ -692,36 +697,6 @@ def _retry_after(written: str | None) -> float | None:
 
 
 # -- The agent report, read from Egma's server -----------------------------------------
-
-
-@dataclass(frozen=True)
-class AgentReport:
-    """What Egma's server knows about this simulation's SDK hello."""
-
-    state: str = "waiting"
-    """``waiting``, ``accepted`` or ``refused``."""
-    code: int | None = None
-    message: str | None = None
-
-    @classmethod
-    def from_answer(cls, answer: Any) -> AgentReport:
-        """Read one 200 answer of the agent-report route."""
-        if not isinstance(answer, dict):
-            raise ValueError("the agent report is not a JSON object")
-        state = answer.get("state")
-        if state == "accepted":
-            return cls(state="accepted")
-        if state == "refused":
-            code = answer.get("code")
-            message = answer.get("message")
-            return cls(
-                state="refused",
-                code=code if isinstance(code, int) else None,
-                message=message if isinstance(message, str) else "no reason given",
-            )
-        if state == "waiting":
-            return cls()
-        raise ValueError("the agent report names no known state")
 
 
 AgentReportProbe = Callable[[], Awaitable[AgentReport]]
@@ -789,6 +764,8 @@ class PipecatStartup:
     def __init__(self) -> None:
         self.changed = asyncio.Event()
         self.local_id: str | None = None
+        self.self_joined = False
+        """Whether the persona's own join has completed."""
         self.bot_id: str | None = None
         self.bot_audio = False
         self.bot_ready = False
@@ -810,16 +787,18 @@ class PipecatStartup:
             if left is not None and left <= 0:
                 return False
             self.changed.clear()
-            await first_of_events(self.changed, within=left)
+            await first_of(self.changed, within=left)
         return True
 
     def joined(self, data: Mapping[str, Any]) -> None:
-        """Remember the persona's own participant id from the join answer."""
+        """Note the persona's completed join and its own participant id."""
         participants = data.get("participants")
         local = participants.get("local") if isinstance(participants, dict) else None
         local_id = local.get("id") if isinstance(local, dict) else None
         if isinstance(local_id, str) and local_id:
             self.local_id = local_id
+        self.self_joined = True
+        self._touch()
 
     def participant_seen(self, participant: Mapping[str, Any]) -> bool:
         """Note one remote participant; True the first time the bot is seen.
@@ -871,7 +850,8 @@ class PipecatStartup:
         self._touch()
 
     def pending_condition(self, *, voice: bool) -> str:
-        """The first missing fact, in the order the contract names failures."""
+        """The first missing fact: a refused report, then the bot, then its hello,
+        then bot-ready (chat) or its audio track (voice)."""
         if self.report.state == "refused":
             return "hello_refused"
         if self.bot_id is None:
@@ -1031,7 +1011,7 @@ class DailyVoiceRoom:
 
     async def wait_joined(self, within: float) -> None:
         """Wait for the running transport to enter the room."""
-        if not await first_of_events(
+        if not await first_of(
             self._connected, self.failed, self.ended, within=max(0.0, within)
         ):
             raise MediaBackendError(
@@ -1078,17 +1058,23 @@ class DailyVoiceRoom:
                     getattr(client, "_audio_queue", None),
                     getattr(self._input, "_audio_in_queue", None),
                 ):
-                    if isinstance(pending, asyncio.Queue):
-                        await pending.join()
+                    if not isinstance(pending, asyncio.Queue):
+                        raise RuntimeError(
+                            "pipecat no longer exposes its daily audio queues"
+                        )
+                    await pending.join()
                 acknowledged = asyncio.Event()
                 await self._input.push_frame(
                     RemoteParticipantLeftFrame(completed=acknowledged)
                 )
                 await acknowledged.wait()
             self.ended.set()
-        except Exception:
+        except Exception as undrained:
             if not self._leaving:
-                logger.warning("the bot's departure did not drain its audio in time")
+                logger.warning(
+                    "the bot's departure could not be ordered after its audio: %r",
+                    undrained,
+                )
                 self.failed.set()
 
     async def leave(self) -> None:
@@ -1490,7 +1476,7 @@ class PipecatRoomLifecycle:
 
     def _room_events(self) -> RoomEvents:
         return RoomEvents(
-            joined=self._startup.joined,
+            joined=self._joined,
             participant=self._participant,
             left=self._left,
             message=self._message,
@@ -1567,9 +1553,13 @@ class PipecatRoomLifecycle:
 
     # Room events.
 
+    def _joined(self, data: Mapping[str, Any]) -> None:
+        self._startup.joined(data)
+        self._greet_the_bot()
+
     def _participant(self, participant: Mapping[str, Any]) -> None:
-        if self._startup.participant_seen(participant):
-            self._greet_the_bot()
+        self._startup.participant_seen(participant)
+        self._greet_the_bot()
 
     def _message(self, message: Any, sender: str | None) -> bool:
         """Take one app message; True when it came from the bot."""
@@ -1586,18 +1576,26 @@ class PipecatRoomLifecycle:
         self._startup.participant_left(participant_id)
 
     def _greet_the_bot(self) -> None:
-        if self._client_ready_task is None:
+        """Send client-ready once the persona has joined and the bot is present.
+
+        A room message reaches only participants already present, and a message
+        sent before the persona's own join completes is refused. Whichever of
+        the two facts comes last sends it. It is never sent again: every
+        client-ready runs the bot's on_client_ready handler.
+        """
+        startup = self._startup
+        if (
+            self._client_ready_task is None
+            and startup.self_joined
+            and startup.bot_id is not None
+            and not startup.bot_left
+        ):
             self._client_ready_task = asyncio.create_task(
                 self._send_client_ready(), name="pipecat-client-ready"
             )
 
     async def _send_client_ready(self) -> None:
-        """Send RTVI client-ready exactly once, when the bot is in the room.
-
-        A room message reaches only participants already present, so it goes at
-        the join when the bot was first, else when the bot arrives. It is never
-        sent again: every client-ready runs the bot's on_client_ready handler.
-        """
+        """Send RTVI client-ready to the room."""
         room = self._room
         if room is None:
             return
@@ -1648,7 +1646,7 @@ class PipecatRoomLifecycle:
                 if left <= 0:
                     raise self._missing(pending, PIPECAT_STARTUP_SECONDS)
                 startup.changed.clear()
-                await first_of_events(startup.changed, room.failed, within=left)
+                await first_of(startup.changed, room.failed, within=left)
         except MediaBackendError:
             self._log_startup("failed")
             raise
@@ -1891,7 +1889,7 @@ class PipecatChatBackend(PipecatRoomLifecycle):
                     break
                 wake = None if over_at is None else over_at - now
             turns.changed.clear()
-            await first_of_events(
+            await first_of(
                 turns.changed,
                 room.failed,
                 within=None if wake is None else max(0.0, wake),

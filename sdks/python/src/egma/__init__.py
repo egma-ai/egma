@@ -1,16 +1,46 @@
-"""Egma reporting and mock tools inside a LiveKit agent.
+"""Egma simulation testing and production monitoring for voice agents.
 
-Await ``simulation(agent, ctx, session)`` before ``AgentSession.start``
-in simulation rooms. It reports tools, installs the test's mock tools,
-and exports agent-POV spans. Failure to report raises ``NotReported``.
+LiveKit Agents workers::
 
-Call ``monitor(ctx)`` before startup to export production spans. Both
-helpers select their role from the room name and do nothing in the other
-room type. Both read ``EGMA_URL`` and ``EGMA_API_KEY`` or explicit arguments.
-See README.md for integration examples.
+    from egma.livekit import monitor, simulation
+
+``from egma import monitor, simulation`` names the same LiveKit functions.
+
+Pipecat bots::
+
+    from egma.pipecat import monitor, simulation
+
+Each integration loads only its own framework. Importing ``egma`` or
+``egma.pipecat`` never imports LiveKit; the top-level LiveKit names load
+LiveKit code on first use. See README.md for integration examples.
 """
 
-from .monitoring import monitor
-from .simulation_room import NotReported, simulation
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+from .errors import NotReported
 
 __all__ = ["NotReported", "monitor", "simulation"]
+
+_LIVEKIT_NAMES = frozenset({"monitor", "simulation"})
+"""Top-level names that belong to the LiveKit integration."""
+
+if TYPE_CHECKING:
+    from .monitoring import monitor
+    from .simulation_room import simulation
+
+
+def __getattr__(name: str) -> Any:
+    """Load a LiveKit name from ``egma.livekit`` when it is first used."""
+    if name in _LIVEKIT_NAMES:
+        from . import livekit
+
+        value = getattr(livekit, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *_LIVEKIT_NAMES})

@@ -146,7 +146,7 @@ This reverses the earlier rule that Egma observed tool facts at the seam
 
 ## The agent's POV: the `egma.pipecat` scope
 
-A Pipecat bot runs the egma SDK in its own process, and the SDK writes the
+A Pipecat bot runs the Egma SDK in its own process, and the SDK writes the
 agent's record of the conversation from what it observes in the pipeline —
 not from Pipecat's own tracing, which is off by default and records no tool
 calls for ordinary LLMs. These spans are the agent's POV (ADR-0024): the same
@@ -163,7 +163,7 @@ SDK's own. The resource carries:
 
 | Resource attribute | Value |
 | --- | --- |
-| `egma.provider_reference` | The simulation id, from the start request's `egma` key — **only** on a simulation's export, after egma accepted the SDK's hello. Absent on production traffic: a resource without it is production, one with it is filed under that simulation's trace id (the SDK's own trace id is kept in the payload). |
+| `egma.provider_reference` | The simulation id, from the start request's `egma` key — **only** on a simulation's export, after Egma accepted the SDK's hello. Absent on production traffic: a resource without it is production, one with it is filed under that simulation's trace id (the SDK's own trace id is kept in the payload). |
 | `session.id` | The Pipecat runner's session id, when the runner gives one. It becomes the row's provider call id. |
 | `service.name` | `pipecat`. It decides nothing. |
 
@@ -188,7 +188,7 @@ SDK's own. The resource carries:
 | `egma.tool.call_id` | `function_call` | The model's own id for the call. |
 | `egma.tool.arguments` | `function_call` | The arguments, JSON-encoded, as the model emitted them. |
 | `egma.tool.result` | `function_call` | What the call returned, JSON-encoded — egma's authored answer on a mocked call, the real handler's return otherwise. |
-| `egma.tool.error` | `function_call` | Why the call failed, when it failed: the handler's error, the mock tool's authored failure, or the SDK's own sentence when egma could not answer a mocked call. The span's status is then ERROR. |
+| `egma.tool.error` | `function_call` | Why the call failed, when it failed: the handler's error, the mock tool's authored failure, or the SDK's own sentence when Egma could not answer a mocked call. The span's status is then ERROR. |
 
 No attribute says whether a mock answered a call. That is read by name from the
 pinned test version's mock tools, as it is for every agent POV.

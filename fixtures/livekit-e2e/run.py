@@ -325,7 +325,7 @@ def python_worker_environment(directory: Path) -> tuple[Path, SDKArtifact]:
             "install",
             "--python",
             str(venv / "bin/python"),
-            str(wheels[0]),
+            f"egma[livekit] @ {wheels[0].resolve().as_uri()}",
             f"livekit-agents[openai,silero]=={agents_version}",
         ],
         cwd=ROOT,

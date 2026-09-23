@@ -56,7 +56,7 @@ class WorkbenchState:
         self._claimed: dict[str, dict] = {}
         self._claimants: dict[str, str] = {}
         self._references: dict[str, str] = {}
-        self._agent_reports: dict[str, sdk_seam.AgentReport] = {}
+        self._agent_reports: dict[str, sdk_seam.StoredHello] = {}
         self._cancel_flags: set[str] = set()
         self._arrival = asyncio.Condition()
         self.records: list[dict] = []
@@ -239,7 +239,7 @@ class WorkbenchState:
             and simulation_id not in self._cancel_flags
         }
 
-    def record_agent_report(self, report: sdk_seam.AgentReport, reference: str) -> None:
+    def record_agent_report(self, report: sdk_seam.StoredHello, reference: str) -> None:
         self._agent_reports[reference] = report
         self._record(
             "agent_report",
@@ -250,7 +250,7 @@ class WorkbenchState:
 
     def agent_report(
         self, simulation_id: str, claimant: str
-    ) -> sdk_seam.AgentReport | None:
+    ) -> sdk_seam.StoredHello | None:
         """The latest hello for a simulation this claimant holds."""
         if self._claimants.get(simulation_id) != claimant:
             raise KeyError(simulation_id)
