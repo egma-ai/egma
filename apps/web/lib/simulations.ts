@@ -14,6 +14,23 @@ import type {
   TraceSpan,
 } from "@egma/platform-api/client";
 
+/**
+ * The connection types whose simulations carry the agent's own record.
+ *
+ * The registry's `LANES_WITH_AN_AGENT_POV` in `@egma/db`, which the browser
+ * cannot import; a web test holds this copy to it.
+ */
+export const LANES_WITH_AN_AGENT_POV = [
+  "retell_web_call",
+  "livekit_room",
+  "daily_room",
+] as const;
+
+/** Whether a simulation over this connection type has the agent's own record. */
+export function laneHasAnAgentPov(connectionType: string): boolean {
+  return (LANES_WITH_AN_AGENT_POV as readonly string[]).includes(connectionType);
+}
+
 /** One timed thing inside the simulation, with whatever happened under it. */
 export type EvidenceStep = TraceSpan;
 

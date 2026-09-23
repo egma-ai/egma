@@ -15,14 +15,16 @@ export type AgentSetupPlatform = "retell" | "livekit" | "pipecat";
  * instructions — because Egma reaches both the same way: it starts the agent
  * for a simulation, and the agent reports to Egma through the SDK. Only the
  * fields and the words differ, and those come from the tables below and the
- * connection catalog.
+ * connection catalog. Monitoring for them lives in the agent's code too.
+ *
+ * The registry's `PLATFORMS_PUSHING_TRACES` in `@egma/db`, which the browser
+ * cannot import; a web test holds this copy to it.
  */
-export type SdkPlatform = Exclude<AgentSetupPlatform, "retell">;
+export const SDK_PLATFORMS = ["livekit", "pipecat"] as const;
+export type SdkPlatform = (typeof SDK_PLATFORMS)[number];
 
-export function isSdkPlatform(
-  platform: AgentSetupPlatform | "",
-): platform is SdkPlatform {
-  return platform === "livekit" || platform === "pipecat";
+export function isSdkPlatform(platform: string): platform is SdkPlatform {
+  return (SDK_PLATFORMS as readonly string[]).includes(platform);
 }
 
 /** The language of the customer-owned LiveKit worker. */
@@ -448,9 +450,18 @@ export const SDK_ACCESS_CHOICES: Readonly<
   ],
 };
 
-/** The access variant a fresh connection form starts on. */
-export function firstSdkAccess(platform: SdkPlatform): string {
-  return SDK_ACCESS_CHOICES[platform][0]?.accessVariant ?? "";
+/**
+ * The access variant a connection form starts on: the first of the select's
+ * entries the modality offers, else whichever it offers first.
+ */
+export function firstSdkAccess(
+  platform: SdkPlatform,
+  offered: readonly string[],
+): string {
+  const first = SDK_ACCESS_CHOICES[platform].find((choice) =>
+    offered.includes(choice.accessVariant),
+  );
+  return first?.accessVariant ?? offered[0] ?? "";
 }
 
 /** The connection form's title: `Connect Pipecat Voice for simulations`. */

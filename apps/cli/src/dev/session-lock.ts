@@ -4,46 +4,17 @@
  * Two sessions for one agent would each write their own start URL and secret
  * into the same two connections, and simulations would reach whichever wrote
  * last. A lock file under the machine-local Egma folder, holding the session's
- * process id, refuses the second one. A lock whose process is gone is taken over.
+ * process id, refuses the second one. A left-over lock (see `lockIsStale`) is
+ * taken over.
  */
 
 import { createHash } from "node:crypto";
 import { rmSync } from "node:fs";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 
-/** How long an empty lock file is taken for one being written right now. */
-const FRESH_EMPTY_LOCK_MS = 5_000;
-
-/** Whether a process with this id is running (on this machine, as any user). */
-export function processIsAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (cause) {
-    return (cause as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
-/** The process id a lock file holds, or null when it holds none. */
-export async function lockHolder(file: string): Promise<number | null> {
-  const text = await readFile(file, "utf8").catch(() => "");
-  const pid = Number.parseInt(text.trim(), 10);
-  return Number.isInteger(pid) && pid > 0 ? pid : null;
-}
-
-/**
- * Whether a lock file is left over: its process is gone, or it names none and
- * is older than a write takes.
- */
-export async function lockIsStale(file: string, emptyAfterMs = FRESH_EMPTY_LOCK_MS): Promise<boolean> {
-  const pid = await lockHolder(file);
-  if (pid !== null) return !processIsAlive(pid);
-  const held = await stat(file).catch(() => undefined);
-  return held === undefined || Date.now() - held.mtimeMs > emptyAfterMs;
-}
+import { lockHolder, lockIsStale } from "../platform/file-lock.ts";
 
 export type SessionLock = {
   readonly file: string;
@@ -53,7 +24,10 @@ export type SessionLock = {
 
 export type HeldSession =
   | { readonly kind: "held"; readonly lock: SessionLock }
-  | { readonly kind: "busy"; readonly pid: number | null };
+  | { readonly kind: "busy"; readonly pid: number | null; readonly file: string };
+
+/** Session locks this process holds now. */
+const heldHere = new Set<string>();
 
 /** Where the session lock for one platform and agent lives. */
 export function sessionLockFile(folder: string, platformUrl: string, agentId: string): string {
@@ -76,10 +50,14 @@ export async function holdSessionLock(
       await writeFile(file, mine, { encoding: "utf8", mode: 0o600, flag: "wx" });
     } catch (cause) {
       if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
-      if (!(await lockIsStale(file))) return { kind: "busy", pid: await lockHolder(file) };
+      const holder = await lockHolder(file);
+      // This process's id on a lock it does not hold: an earlier process had the id.
+      const reused = holder === process.pid && !heldHere.has(file);
+      if (!reused && !(await lockIsStale(file))) return { kind: "busy", pid: holder, file };
       await rm(file, { force: true });
       continue;
     }
+    heldHere.add(file);
 
     const onExit = (): void => {
       try {
@@ -95,10 +73,11 @@ export async function holdSessionLock(
         file,
         async release() {
           process.off("exit", onExit);
+          heldHere.delete(file);
           if ((await lockHolder(file)) === process.pid) await rm(file, { force: true });
         },
       },
     };
   }
-  return { kind: "busy", pid: await lockHolder(file) };
+  return { kind: "busy", pid: await lockHolder(file), file };
 }

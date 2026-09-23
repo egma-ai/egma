@@ -32,9 +32,8 @@ const ENV_KEYS = [
   "pipecat_body_params",
 ] as const;
 
-/** The env keys as a sentence names them. */
-const ENV_KEYS_NAMED =
-  "retell_dynamic_variables, job_dispatch_metadata and pipecat_body_params";
+/** The env keys as a sentence names them: `a, b and c`. */
+const ENV_KEYS_NAMED = `${ENV_KEYS.slice(0, -1).join(", ")} and ${ENV_KEYS.at(-1) ?? ""}`;
 
 /** The key Egma keeps for its own simulation marker in a Pipecat start request. */
 const RESERVED_PIPECAT_BODY_KEY = "egma";

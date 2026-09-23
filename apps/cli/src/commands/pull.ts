@@ -70,6 +70,7 @@ export async function runPullCommand(options: FolderCommandOptions): Promise<num
       options.out(`  File: ${draft.shown}`);
       options.out(`  ${oneLineFactText(draft.reason, "No reason was returned.")}`);
     }
+    for (const note of targets.notes) options.fail(note);
     options.out(
       `Pull complete: ${report.suites.length} suites, ${report.tests.length} tests, and ${targets.agents.length} Agents.`,
     );

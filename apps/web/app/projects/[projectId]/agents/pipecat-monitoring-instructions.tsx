@@ -1,12 +1,16 @@
 "use client";
 
 import {
-  ENVIRONMENT_VALUES,
+  EgmaUrlNote,
+  environmentValues,
   InstructionSteps,
-  ProjectKeyNote,
   type InstructionStep,
 } from "./copy-block.tsx";
-import { PIPECAT_INSTALL } from "./pipecat-testing-instructions.tsx";
+import {
+  MONITORING_KEY_PLACEHOLDER,
+  monitoringKeyStep,
+  PIPECAT_INSTALL,
+} from "./pipecat-steps.ts";
 
 export const PIPECAT_MONITORING_SNIPPET = `from egma.pipecat import monitor
 
@@ -14,23 +18,30 @@ worker = PipelineWorker(pipeline, ...)
 await monitor(worker, runner_args)
 await runner.add_workers(worker)`;
 
-const STEPS = [
-  {
-    title: "Install the Egma SDK",
-    value: PIPECAT_INSTALL,
-    copyLabel: "install command",
-  },
-  {
-    title: "Add the monitoring hook to bot()",
-    value: PIPECAT_MONITORING_SNIPPET,
-    copyLabel: "Python monitoring code",
-  },
-  {
-    title: "Set the environment values where your bot runs",
-    value: ENVIRONMENT_VALUES,
-    copyLabel: "environment values",
-  },
-] satisfies readonly InstructionStep[];
+/** The numbered steps, in the order they are done. */
+export function pipecatMonitoringSteps(
+  agentId: string | null,
+  registers: boolean,
+): readonly InstructionStep[] {
+  return [
+    {
+      title: "Install the Egma SDK",
+      value: PIPECAT_INSTALL,
+      copyLabel: "install command",
+    },
+    {
+      title: "Add the monitoring hook to bot()",
+      value: PIPECAT_MONITORING_SNIPPET,
+      copyLabel: "Python monitoring code",
+    },
+    monitoringKeyStep(agentId, registers),
+    {
+      title: "Set the environment values where your bot runs",
+      value: environmentValues(MONITORING_KEY_PLACEHOLDER),
+      copyLabel: "environment values",
+    },
+  ];
+}
 
 /**
  * The Pipecat monitoring work the web can explain but cannot perform.
@@ -41,9 +52,13 @@ const STEPS = [
  * language choice.
  */
 export function PipecatMonitoringInstructions({
-  projectId,
+  agentId,
+  registers,
 }: {
-  readonly projectId: string;
+  /** The agent being set up, or null when the sheet has none yet. */
+  readonly agentId: string | null;
+  /** Whether the key step registers the agent too: a new, monitoring-only setup. */
+  readonly registers: boolean;
 }) {
   return (
     <section
@@ -58,12 +73,12 @@ export function PipecatMonitoringInstructions({
       >
         Add monitoring to your Pipecat agent
       </h3>
-      <InstructionSteps steps={STEPS} />
+      <InstructionSteps steps={pipecatMonitoringSteps(agentId, registers)} />
       <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
         This line sends production conversations. In an Egma simulation it does
         nothing, because the simulation line sends that conversation instead.
       </p>
-      <ProjectKeyNote projectId={projectId} reachedBy="your deployed bot" />
+      <EgmaUrlNote reachedBy="your deployed bot" />
     </section>
   );
 }

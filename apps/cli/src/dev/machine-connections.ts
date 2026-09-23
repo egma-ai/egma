@@ -11,8 +11,10 @@ import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import path from "node:path";
 import process from "node:process";
 
+import type { FolderConfig } from "../folder/egma-folder.ts";
 import { egmaFolderIn } from "../platform/credentials.ts";
-import { lockIsStale } from "./session-lock.ts";
+import { whileFileLocked } from "../platform/file-lock.ts";
+import { normalizePlatformOrigin } from "../platform/url.ts";
 
 export const MACHINE_CONNECTIONS_FORMAT = 1;
 
@@ -28,7 +30,6 @@ export type MachineConnection = {
 
 const FILE_MODE = 0o600;
 const FOLDER_MODE = 0o700;
-const LOCK_WAIT_MS = 5_000;
 
 /** The file on this machine, beside the saved login. */
 export function machineConnectionsFileIn(env: NodeJS.ProcessEnv): string {
@@ -124,36 +125,17 @@ export function machineConnectionFor(
   );
 }
 
-/**
- * One process at a time reads, merges and replaces the file. A lock whose
- * process is gone is removed; a living holder is waited for.
- */
+/** One process at a time reads, merges and replaces the file. */
 async function whileLocked<T>(file: string, work: () => Promise<T>): Promise<T> {
   const lock = `${file}.lock`;
-  const until = Date.now() + LOCK_WAIT_MS;
-  for (;;) {
-    try {
-      await writeFile(lock, `${String(process.pid)}\n`, { encoding: "utf8", mode: FILE_MODE, flag: "wx" });
-      break;
-    } catch (cause) {
-      if ((cause as NodeJS.ErrnoException).code !== "EEXIST") throw cause;
-      if (await lockIsStale(lock)) {
-        await rm(lock, { force: true });
-        continue;
-      }
-      if (Date.now() > until) {
-        throw new Error(
-          `another Egma process held ${lock} for too long. If nothing else is running, delete it and try again.`,
-        );
-      }
-      await new Promise((resume) => setTimeout(resume, 50));
-    }
-  }
-  try {
-    return await work();
-  } finally {
-    await rm(lock, { force: true });
-  }
+  return await whileFileLocked(
+    lock,
+    work,
+    () =>
+      new Error(
+        `another Egma process held ${lock} for too long. If nothing else is running, delete it and try again.`,
+      ),
+  );
 }
 
 /**
@@ -185,4 +167,55 @@ export async function rememberMachineConnections(
       throw cause;
     }
   });
+}
+
+function originOf(url: string): string | null {
+  try {
+    return normalizePlatformOrigin(url);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The repository's agents with this machine's `egma agent dev` connections
+ * added under them, so a run can name one that egma/config.yaml does not list.
+ * An unreadable memory file adds nothing.
+ */
+export async function withThisMachineConnections(
+  config: FolderConfig,
+  env: NodeJS.ProcessEnv,
+): Promise<FolderConfig> {
+  const origin = config.platform === null ? null : originOf(config.platform.origin);
+  if (origin === null) return config;
+  let entries: readonly MachineConnection[];
+  try {
+    entries = await readMachineConnections(machineConnectionsFileIn(env));
+  } catch {
+    return config;
+  }
+  const here = entries.filter((entry) => originOf(entry.platformUrl) === origin);
+  if (here.length === 0) return config;
+  return {
+    ...config,
+    agents: config.agents.map((agent) => {
+      const mine = here.filter(
+        (entry) =>
+          entry.agentId === agent.id &&
+          !agent.connections.some((connection) => connection.id === entry.connectionId),
+      );
+      return mine.length === 0
+        ? agent
+        : {
+            ...agent,
+            connections: [
+              ...agent.connections,
+              ...mine.map((entry) => ({
+                id: entry.connectionId,
+                name: `this machine's ${entry.modality} connection`,
+              })),
+            ],
+          };
+    }),
+  };
 }

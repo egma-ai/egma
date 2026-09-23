@@ -100,7 +100,7 @@ describe("folder config format 4", () => {
     ].join("\n");
 
     expect(() => parseConfig(document, "config.yaml")).toThrow(
-      /must contain platform retell, livekit or pipecat\./i,
+      /must contain platform retell, livekit or pipecat\. If Egma wrote another platform there, update egma-cli/i,
     );
   });
 
