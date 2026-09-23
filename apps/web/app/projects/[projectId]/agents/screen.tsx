@@ -748,7 +748,9 @@ function openSheet(
 
 /** Only providers implemented by this setup flow can become sheet state. */
 function connectPlatform(value: string | null): ConnectAgentPlatform | undefined {
-  return value === "retell" || value === "livekit" ? value : undefined;
+  return value === "retell" || value === "livekit" || value === "pipecat"
+    ? value
+    : undefined;
 }
 
 /** Only the three public setup goals can become sheet state. */

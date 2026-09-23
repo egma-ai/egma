@@ -1307,7 +1307,7 @@ describe("goal-first agent setup", () => {
     });
   }
 
-  it("asks for the goal first, then offers LiveKit before Retell", async () => {
+  it("asks for the goal first, then offers LiveKit, Retell and Pipecat", async () => {
     sheetAnswers();
     render(<RegisterAgentPage />);
 
@@ -1347,6 +1347,7 @@ describe("goal-first agent setup", () => {
     expect(screen.getAllByRole("radio").map((one) => one.textContent)).toEqual([
       "LiveKit",
       "Retell",
+      "Pipecat",
     ]);
     for (const provider of screen.getAllByRole("radio")) {
       expect(provider.className).toContain("min-h-(--control-lg)");
