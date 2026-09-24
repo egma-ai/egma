@@ -13,6 +13,7 @@ import {
   BUCKET,
   INGEST_BUCKET,
   INGEST_POLICY,
+  MINIO_IMAGE,
   READ_ONLY_POLICY,
 } from "./support/object-storage.ts";
 
@@ -235,6 +236,18 @@ describe("the API's deployment story", () => {
         "to loopback by default — the store's root credential can overwrite " +
         "every recording, and its default is public in this repository",
     ).toBe(true);
+  });
+
+  it("tests the recording store against the image the deployment runs", () => {
+    // The store and the job that creates its buckets both run this image. Count
+    // both entries, so one cannot move while the other still matches.
+    const compose = readFileSync(path.join(ROOT, "docker-compose.yml"), "utf8");
+    const named = compose.split(`image: ${MINIO_IMAGE}`).length - 1;
+    expect(
+      named,
+      `docker-compose.yml names ${MINIO_IMAGE} ${String(named)} time(s); the ` +
+        "storage tests here prove recordings and permissions against that release",
+    ).toBe(2);
   });
 
   it("gives the API a recording credential that can only read, and never the simulator's", () => {
