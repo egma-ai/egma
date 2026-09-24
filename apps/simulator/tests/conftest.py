@@ -296,7 +296,10 @@ def start_simulator(
 # Real MinIO fixture for bucket, signature, addressing, and upload checks.
 # Skip with a reason if Docker cannot provide the store.
 
-MINIO_IMAGE = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
+MINIO_IMAGE = (
+    "pgsty/minio@sha256:"
+    "b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372"
+)
 """The release `docker-compose.yml` runs, named again here.
 
 The same release rather than a moving tag, and checked against the compose
