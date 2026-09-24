@@ -564,16 +564,19 @@ def test_an_unusable_connection_is_refused_before_anything_is_reached(
         (
             lambda: daily.never_joined_failure(120, pipecat_cloud=True),
             "your bot did not join within 120 seconds. The start request was "
-            "accepted, but no bot joined the Daily room. A Pipecat Cloud cold start "
-            "can take this long: keep one instance warm with min_agents = 1 in "
-            "pcc-deploy.toml. Also check your bot's logs for a crash at start.",
+            "accepted, but no bot joined the Daily room. Check your bot's logs: "
+            "NotReported means the bot could not reach Egma, so check EGMA_URL and "
+            "EGMA_API_KEY in the agent's secret set on Pipecat Cloud, then "
+            "redeploy. A crash at start has the same effect.",
             AGENT_NEVER_JOINED,
         ),
         (
             lambda: daily.never_joined_failure(120, pipecat_cloud=False),
             "your bot did not join within 120 seconds. The start request was "
             "accepted, but no bot joined the Daily room. Check your starter's and "
-            "your bot's logs for a crash at start.",
+            "your bot's logs: NotReported means the bot could not reach Egma, so "
+            "check EGMA_URL and EGMA_API_KEY where the bot runs. A crash at start "
+            "has the same effect.",
             AGENT_NEVER_JOINED,
         ),
         (

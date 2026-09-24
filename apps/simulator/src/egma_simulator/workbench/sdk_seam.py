@@ -190,13 +190,6 @@ def tool(body: Any, live: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
     return dict(answers[name])
 
 
-def confirm(body: Any, live: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
-    reference = _provider_reference(body)
-    if reference is None or reference not in live:
-        raise SeamAnswer(404, NOT_A_SIMULATION)
-    return {"simulation": True}
-
-
 def agent_report_answer(
     simulation_id: str, report: StoredHello | None
 ) -> dict[str, Any]:

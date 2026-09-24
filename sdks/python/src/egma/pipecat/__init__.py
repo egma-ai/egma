@@ -13,8 +13,10 @@ answers the test's mock tools from Egma, runs every other tool for real,
 and exports the bot's own record of the conversation. If the bot cannot
 report to Egma it raises ``NotReported`` and the bot must not start.
 
-``monitor`` exports production conversations to Egma Monitoring and does
-nothing in a simulation Egma has confirmed.
+``monitor`` exports production conversations to Egma Monitoring, named by
+``EGMA_AGENT_NAME``, and does nothing in a simulation that ``simulation``
+reported. It never stops the bot: without usable settings it logs a warning
+and exports nothing.
 
 Both read ``EGMA_URL`` and ``EGMA_API_KEY``, or explicit arguments. This
 module needs ``pipecat-ai``: install ``egma[pipecat]``. It never imports

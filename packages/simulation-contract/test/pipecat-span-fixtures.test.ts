@@ -152,6 +152,15 @@ describe("the egma.pipecat agent POV fixtures", () => {
     }
   });
 
+  it("name the agent on production traffic only", () => {
+    for (const flush of production) {
+      expect(resourceAttribute(flush, "egma.agent_name")).toBe("Lakeside production bot");
+    }
+    for (const flush of simulation) {
+      expect(resourceAttribute(flush, "egma.agent_name")).toBeUndefined();
+    }
+  });
+
   it("carry a failed call's error with an error status, and a result only on success", () => {
     const calls = simulation.flatMap(spansOf).filter((span) => span.name === "function_call");
     expect(calls).toHaveLength(2);

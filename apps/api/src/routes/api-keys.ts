@@ -4,10 +4,7 @@ import {
   createApiKey,
   getAgent,
   listApiKeys,
-  MONITORING_KEY_AGENT_SEPARATOR,
-  MONITORING_KEY_NAMESPACE,
   NotPermittedError,
-  platformPushesTraces,
   ProjectOutsideOrganizationError,
   revokeApiKey,
   type ApiKey,
@@ -39,9 +36,11 @@ function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-/** The name prefix of one agent's guarded monitoring key. */
-function monitoringKeyPrefix(agentId: string): string {
-  return `${MONITORING_KEY_NAMESPACE}${agentId}${MONITORING_KEY_AGENT_SEPARATOR}`;
+/** The only reserved key namespace exposed by this route. */
+const LIVEKIT_MONITORING_KEY_NAMESPACE = "Egma monitoring ";
+
+function liveKitMonitoringKeyPrefix(agentId: string): string {
+  return `${LIVEKIT_MONITORING_KEY_NAMESPACE}${agentId} — `;
 }
 
 /** A key as a list is allowed to describe it. Never the secret. */
@@ -118,12 +117,12 @@ export async function apiKeyRoutes(
 
       if (
         monitoringAgentId === undefined &&
-        name?.startsWith(MONITORING_KEY_NAMESPACE)
+        name?.startsWith(LIVEKIT_MONITORING_KEY_NAMESPACE)
       ) {
         return sendRefusal(
           reply,
           "invalid_request",
-          "this key name is reserved for Egma's guarded monitoring setup",
+          "this key name is reserved for Egma's guarded LiveKit monitoring setup",
         );
       }
 
@@ -149,17 +148,17 @@ export async function apiKeyRoutes(
         if (
           target === undefined ||
           target.projectId !== projectId ||
-          !platformPushesTraces(target.agentPlatform) ||
+          target.agentPlatform !== "livekit" ||
           target.archivedAt !== null
         ) {
           return sendRefusal(
             reply,
             "unprocessable",
-            "monitoringAgentId must name a living LiveKit or Pipecat agent in the key's project",
+            "monitoringAgentId must name a living LiveKit agent in the key's project",
           );
         }
 
-        activeNamePrefix = monitoringKeyPrefix(target.id);
+        activeNamePrefix = liveKitMonitoringKeyPrefix(target.id);
         if (!(name as string).startsWith(activeNamePrefix)) {
           return sendRefusal(
             reply,

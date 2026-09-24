@@ -41,7 +41,13 @@ EGMA_URL=https://app.egma.ai
 EGMA_API_KEY=<your project API key>
 ```
 
-For self-hosted egma, use your egma URL. The agent must be able to reach it. Put the key in the agent's secret store or a gitignored environment file. For a cloud deployment, set it in the deployed environment as well. On Pipecat Cloud, add both values to the agent's secret set and redeploy.
+For a Pipecat bot that uses `monitor`, also set its agent's name in egma, so Monitoring shows which agent took each call:
+
+```bash
+EGMA_AGENT_NAME=<the agent's name in egma>
+```
+
+For self-hosted egma, use your egma URL. The agent must be able to reach it. Put the key in the agent's secret store or a gitignored environment file. For a cloud deployment, set it in the deployed environment as well. On Pipecat Cloud, add the values to the agent's secret set and redeploy.
 
 ## 3. Add the integration
 
@@ -152,11 +158,13 @@ A test cannot mock a Pipecat Flows function yet. If a test mocks one, the simula
 
 Keep the body key `egma` for egma. Do not use it in your own start requests.
 
-On Pipecat Cloud, a cold start can take longer than a simulation waits. Keep one instance warm with `min_agents = 1` in `pcc-deploy.toml` for the agent egma tests.
-
 #### B. Production monitoring
 
-`monitor` sends each conversation of the bot to egma Monitoring. It does nothing in a simulation that egma has confirmed live: one that `simulation` reported in the same process, or, when `simulation` is not called, one egma confirms on request. A start request with an `egma` key that egma does not confirm is treated as production.
+`monitor` sends each conversation of the bot to egma Monitoring, with the agent's name from `EGMA_AGENT_NAME` (or its `agent_name` argument). A Pipecat bot has no name of its own, so without it the conversation arrives with no agent name.
+
+It does nothing in a simulation that `simulation` reported in the same process. An `egma` key in a start request does not stop it on its own, so a bot that calls only `monitor` sends every conversation as production.
+
+`monitor` never stops the bot. If `EGMA_URL` or `EGMA_API_KEY` is missing or invalid, it logs a warning once and sends nothing.
 
 ## 4. Run the updated agent and verify
 

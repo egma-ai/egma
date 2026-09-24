@@ -7,8 +7,10 @@ several bots in one process each keep their own record.
 
 A simulation's resource carries ``egma.provider_reference`` and exports
 every second; a production resource carries none and uses the default
-batch interval. Both send the ``pipecat_session`` root after every other
-span, because its arrival tells egma the record is complete.
+batch interval. A production resource carries ``egma.agent_name`` when the
+bot names its agent, because a Pipecat bot has no name of its own. Both send
+the ``pipecat_session`` root after every other span, because its arrival
+tells egma the record is complete.
 """
 
 from __future__ import annotations
@@ -37,6 +39,9 @@ SERVICE = "pipecat"
 SESSION_ID = "session.id"
 """The runner's session id, which egma keeps as the provider call id."""
 
+AGENT_NAME = "egma.agent_name"
+"""The agent's name in Egma, which Monitoring shows for a production trace."""
+
 FLUSH_TIMEOUT_MILLIS = 10_000
 """The longest the final flush of a session may take."""
 
@@ -57,6 +62,7 @@ class SessionExport:
         verb: str,
         provider_reference: str,
         session_id: str,
+        agent_name: str = "",
     ) -> None:
         self.provider_reference = provider_reference
         attributes: dict[str, str] = {SERVICE_NAME: SERVICE}
@@ -64,6 +70,8 @@ class SessionExport:
             attributes[otlp.PROVIDER_REFERENCE] = provider_reference
         if session_id:
             attributes[SESSION_ID] = session_id
+        if agent_name:
+            attributes[AGENT_NAME] = agent_name
         self.provider = TracerProvider(resource=Resource.create(attributes))
         exporter = otlp.RootLastExporter(
             _build_exporter(endpoint, api_key, verb), root_span_name=ROOT_SPAN

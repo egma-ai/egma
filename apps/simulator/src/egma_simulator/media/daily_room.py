@@ -209,16 +209,17 @@ def unusable_room_failure(detail: str) -> MediaBackendError:
 
 
 def never_joined_failure(seconds: float, *, pipecat_cloud: bool) -> MediaBackendError:
-    advice = (
-        "A Pipecat Cloud cold start can take this long: keep one instance warm "
-        "with min_agents = 1 in pcc-deploy.toml. Also check your bot's logs for "
-        "a crash at start."
+    logs = "your bot's logs" if pipecat_cloud else "your starter's and your bot's logs"
+    settings = (
+        "in the agent's secret set on Pipecat Cloud, then redeploy"
         if pipecat_cloud
-        else "Check your starter's and your bot's logs for a crash at start."
+        else "where the bot runs"
     )
     return MediaBackendError(
         f"your bot did not join within {_seconds(seconds)}. The start request "
-        f"was accepted, but no bot joined the Daily room. {advice}",
+        f"was accepted, but no bot joined the Daily room. Check {logs}: "
+        "NotReported means the bot could not reach Egma, so check EGMA_URL and "
+        f"EGMA_API_KEY {settings}. A crash at start has the same effect.",
         ending=AGENT_NEVER_JOINED,
     )
 

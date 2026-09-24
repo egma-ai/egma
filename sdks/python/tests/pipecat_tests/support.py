@@ -111,7 +111,6 @@ class EgmaDouble:
         routes = self.fixture["routes"]
         app.router.add_post(routes["hello"], self._hello)
         app.router.add_post(routes["tool"], self._tool)
-        app.router.add_post(routes["confirm"], self._confirm)
         app.router.add_post("/v1/traces", self._traces)
         return app
 
@@ -255,14 +254,6 @@ class EgmaDouble:
             f"this simulation has no mock tool for '{name}', so Egma has nothing "
             f"to answer with. It answers for: {', '.join(mocked) or 'no tools at all'}",
         )
-
-    async def _confirm(self, request: web.Request) -> web.Response:
-        body, authorized = await self._read("confirm", request)
-        if not authorized:
-            return self._unauthenticated()
-        if isinstance(body, dict) and body.get("provider_reference") in self.live:
-            return self._answer(200, {"simulation": True})
-        return self._not_a_simulation()
 
     async def _traces(self, request: web.Request) -> web.Response:
         self.traces.append((dict(request.headers), await request.read()))

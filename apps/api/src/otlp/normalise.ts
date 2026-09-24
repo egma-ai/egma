@@ -66,15 +66,6 @@ const INGESTED_AT_THIS_DOOR: SpanAttribution = {
   personaVersionId: "",
 };
 
-/**
- * A customer key's production traffic from the process of one known agent: the
- * agent whose guarded monitoring key carried it. Still production, still the
- * agent's own account, and still no run.
- */
-export function productionOfAgent(agentId: string): SpanAttribution {
-  return { ...INGESTED_AT_THIS_DOOR, agentId };
-}
-
 /** The sentinel the schema declares for telemetry that named no environment. */
 const DEFAULT_ENVIRONMENT = "default";
 
@@ -369,6 +360,9 @@ const PLATFORM_AGENT_ID_ATTRIBUTES = ["lk.cloud_agent_id", "lk.agent_id"];
 // `lk.agent_label` is preserved in the provider payload. Its product meaning
 // is not settled, so it must not be relabelled as platform-agent identity.
 const PLATFORM_AGENT_NAME_ATTRIBUTES = ["lk.agent_name"];
+// A Pipecat bot has no name of its own. The egma SDK's `monitor` writes the
+// agent's name in Egma here, from EGMA_AGENT_NAME, and only on production.
+const PIPECAT_AGENT_NAME_ATTRIBUTES = ["egma.agent_name"];
 const PLATFORM_AGENT_VERSION_ATTRIBUTES = [
   "lk.deployment_id",
   "lk.agent_version",
@@ -779,7 +773,9 @@ export function normaliseOtlpExport(
           ),
           platformAgentName: firstAttribute(
             [attributes, resourceSpans.resource?.attributes],
-            PLATFORM_AGENT_NAME_ATTRIBUTES,
+            scope?.name === EGMA_PIPECAT_SCOPE
+              ? PIPECAT_AGENT_NAME_ATTRIBUTES
+              : PLATFORM_AGENT_NAME_ATTRIBUTES,
           ),
           platformAgentVersion: firstAttribute(
             [attributes, resourceSpans.resource?.attributes],

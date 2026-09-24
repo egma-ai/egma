@@ -274,8 +274,8 @@ async def test_a_refused_hello_ends_a_chat_turn_in_progress(
 @pytest.mark.parametrize(
     ("settings", "advice"),
     [
-        (cloud, "keep one instance warm with min_agents = 1 in pcc-deploy.toml"),
-        (self_hosted, "Check your starter's and your bot's logs for a crash"),
+        (cloud, "EGMA_API_KEY in the agent's secret set on Pipecat Cloud"),
+        (self_hosted, "Check your starter's and your bot's logs: NotReported"),
     ],
 )
 async def test_a_bot_that_never_joins_is_named(settings: Any, advice: str, quick: None):

@@ -7,12 +7,11 @@ protocol version, census, reply, tagged tool answer, refusal codes and
 answer cap. HTTPS adds the route, the project API key, and the provider
 reference that names the simulation.
 
-Three routes, all ``POST`` with a JSON body and ``Authorization: Bearer
+Two routes, both ``POST`` with a JSON body and ``Authorization: Bearer
 <project API key>``:
 
 - ``/sdk/v1/hello``: the census; answers the names egma mocks.
 - ``/sdk/v1/tool``: one call to a mocked tool; answers the tagged result.
-- ``/sdk/v1/confirm``: whether a provider reference names a live simulation.
 
 Only ``404`` with ``"error": "not_a_simulation"`` means "not a simulation".
 Any other failure is a failure. The constants here are restated from, and
@@ -36,7 +35,6 @@ logger = logging.getLogger("egma")
 
 HELLO_ROUTE = "/sdk/v1/hello"
 TOOL_ROUTE = "/sdk/v1/tool"
-CONFIRM_ROUTE = "/sdk/v1/confirm"
 
 HELLO_ATTEMPT_SECONDS = 10.0
 """The longest one hello attempt may take."""
@@ -56,9 +54,6 @@ RETRYABLE_HELLO_STATUSES = frozenset({429, 502, 503, 504})
 TOOL_ATTEMPT_SECONDS = 10.0
 """The longest one mocked tool call to egma may take. A connection error
 is asked once more; a timeout is not."""
-
-CONFIRM_ATTEMPT_SECONDS = 5.0
-"""The longest the one confirmation request may take."""
 
 LARGEST_HELLO_REQUEST_BYTES = 256 * 1024
 LARGEST_TOOL_REQUEST_BYTES = 64 * 1024
@@ -310,22 +305,3 @@ class Seam:
                 break
         logger.warning("Egma could not answer the mocked tool %r: %s", name, cause)
         return unanswered(name, cause)
-
-    async def confirm(self) -> bool:
-        """Whether egma confirms the provider reference names a live simulation.
-
-        One attempt. Anything but ``200 {"simulation": true}`` is "not
-        confirmed", which the caller treats as production.
-        """
-        payload = _payload({"provider_reference": self.provider_reference})
-        try:
-            reply = await self._post(CONFIRM_ROUTE, payload, CONFIRM_ATTEMPT_SECONDS)
-        except (TimeoutError, aiohttp.ClientError, OSError) as broke:
-            logger.info(
-                "Egma could not confirm simulation %s (%s)",
-                self.provider_reference,
-                _transport_failure(broke, CONFIRM_ATTEMPT_SECONDS),
-            )
-            return False
-        answered = reply.json_object() or {}
-        return reply.status == 200 and answered.get("simulation") is True

@@ -4,7 +4,6 @@
   "routes": {
     "hello": "/sdk/v1/hello",
     "tool": "/sdk/v1/tool",
-    "confirm": "/sdk/v1/confirm",
     "agent_report": "/v1/simulations/{simulation_id}/agent-report"
   },
   "auth": {
@@ -15,7 +14,6 @@
     "largest_answer_bytes": 15360,
     "largest_hello_request_bytes": 262144,
     "largest_tool_request_bytes": 65536,
-    "largest_confirm_request_bytes": 4096,
     "largest_provider_reference_characters": 512
   },
   "timeouts_seconds": {
@@ -23,7 +21,6 @@
     "hello_attempts": 3,
     "hello_all_attempts": 30,
     "tool_attempt": 10,
-    "confirm_attempt": 5,
     "agent_report_poll_interval": 1,
     "readiness_window": 120
   },
@@ -199,19 +196,6 @@
     "tool_not_a_simulation": {
       "route": "tool",
       "request": { "provider_reference": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZZ", "name": "check_calendar" },
-      "status": 404,
-      "response_is": "not_a_simulation.body"
-    },
-    "confirm_live": {
-      "world": "calendar",
-      "route": "confirm",
-      "request": { "provider_reference": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZP" },
-      "status": 200,
-      "response": { "simulation": true }
-    },
-    "confirm_not_a_simulation": {
-      "route": "confirm",
-      "request": { "provider_reference": "sim_01K5TB2H8Y4P7QCWF9XKMD6RZZ" },
       "status": 404,
       "response_is": "not_a_simulation.body"
     },

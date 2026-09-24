@@ -336,9 +336,6 @@ const CONTEXT_REQUIRING = [
   "resolveLiveDailyRoomSimulation",
   "recordAgentReport",
   "readAgentReport",
-  // Which living agent a guarded monitoring key was minted for, so a Pipecat
-  // bot's production traces file under that agent. Takes the key's context.
-  "monitoredAgentOfApiKey",
   // The same door one moment later, for the platform that exports nothing of
   // its own: a Retell simulation's record is pulled by egma when the
   // conversation ends, so this unseals the same key to collect the record of
@@ -663,8 +660,8 @@ const VALUES = [
   "credentialRuleOf",
   "productLabelOf",
   "accessVariantById",
-  // Which platforms' agents push their own traces through the Egma SDK, read
-  // by the web's monitoring copy and the monitoring-key route alike.
+  // Which platforms' agents push their own traces through the Egma SDK, which
+  // the web's setup flow mirrors.
   "PLATFORMS_PUSHING_TRACES",
   "platformPushesTraces",
   // A run's four machinery words, exported so the door that filters a history
@@ -692,9 +689,6 @@ const READ_LIMITS = [
 ];
 
 const THE_AGENT_PLATFORMS = ["AGENT_PLATFORMS"];
-
-/** The reserved name of an agent's guarded monitoring key, shared by the key route and trace filing. */
-const THE_MONITORING_KEY_NAME = ["MONITORING_KEY_NAMESPACE", "MONITORING_KEY_AGENT_SEPARATOR"];
 
 /**
  * Pure POV helpers are shared by trace reads and grading so both use the
@@ -785,7 +779,6 @@ describe("the data-access module's surface", () => {
         ...VALUES,
         ...READ_LIMITS,
         ...THE_AGENT_PLATFORMS,
-        ...THE_MONITORING_KEY_NAME,
         ...THE_POV_WORDS,
         ...THE_GRADING_BUDGET,
         ...THE_AGENT_POV_BOUND,

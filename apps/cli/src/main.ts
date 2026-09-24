@@ -406,8 +406,7 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
     "  egma agent monitoring stop --agent <Egma Agent ID> --platform <retell|livekit|pipecat>",
     "",
     "Retell setup uses the provider key already sealed on the Egma Agent.",
-    "Pipecat setup creates the Agent's monitoring key and prints it once for your bot.",
-    "LiveKit prints the integrate-egma skill handoff; the CLI does not edit monitoring code.",
+    "LiveKit and Pipecat print the integrate-egma skill handoff; the CLI does not edit monitoring code.",
   ],
   project: [
     "Usage:",
@@ -546,9 +545,7 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
     "",
     "Retell uses the provider key stored on the Agent. For monitoring-only setup,",
     "pass --retell-agent and supply credentials through EGMA_RETELL_API_KEY or --credentials-stdin.",
-    "Pipecat creates the Agent's monitoring key and prints it once, with the Egma address",
-    "and the monitor line your bot needs. The key also serves simulations.",
-    "LiveKit prints the integrate-egma skill command and exits incomplete.",
+    "LiveKit and Pipecat print the integrate-egma skill command and exit incomplete.",
   ],
   "agent monitoring stop": [
     "Usage:",

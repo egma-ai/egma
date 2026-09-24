@@ -598,7 +598,7 @@ export const createApiKey = <ThrowOnError extends boolean = false>(parameters?: 
         name: string;
         projectId: string;
         /**
-         * The living LiveKit or Pipecat agent this monitoring key serves. Egma derives and reserves its key-name prefix on the server, and files a Pipecat agent's production traces sent with this key under that agent.
+         * The living LiveKit agent this worker key serves. Egma derives and reserves its key-name prefix on the server.
          */
         monitoringAgentId: string;
     };

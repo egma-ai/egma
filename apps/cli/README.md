@@ -513,20 +513,10 @@ being authored. Follow the Python or JavaScript SDK monitoring guide directly.
 The CLI does not claim that LiveKit monitoring is active or inactive before a
 trace arrives.
 
-For Pipecat, setup creates the Agent's own monitoring key:
-
-```bash
-egma agent monitoring setup \
-  --agent agt_... \
-  --platform pipecat
-```
-
-It prints the Egma address and the key once, as the two environment lines the
-Egma SDK reads, and the `monitor` line to add to the bot. Put them where the bot
-runs. Production traces sent with this key are filed under this Agent, and the
-same key serves simulations. Each Agent has one monitoring key; to replace it,
-revoke it in Egma and run setup again. `stop` prints the integration-skill
-handoff, as it does for LiveKit.
+Pipecat works the same way: setup and stop print the integration-skill handoff.
+A Pipecat bot's monitoring needs a Project API key (`egma project api-key create`)
+and the Agent's name in `EGMA_AGENT_NAME`, which the Egma SDK sends with each
+production conversation so Monitoring shows the Agent.
 
 ## Create a Project API key
 

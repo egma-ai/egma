@@ -184,11 +184,12 @@ async def test_a_simulations_spans_use_only_the_examples_vocabulary(
     assert calls["charge_card"].status.status_code.name == "ERROR"
 
 
-async def test_a_production_export_names_no_simulation(
+async def test_a_production_export_names_no_simulation_and_names_its_agent(
     exports, vocabulary, monkeypatch
 ):
     monkeypatch.setenv("EGMA_URL", "https://app.egma.ai")
     monkeypatch.setenv("EGMA_API_KEY", PROJECT_KEY)
+    monkeypatch.setenv("EGMA_AGENT_NAME", "Lakeside production bot")
     llm, worker = _bot()
 
     await monitor(worker, DailyRunnerArguments(body={}))
@@ -197,3 +198,6 @@ async def test_a_production_export_names_no_simulation(
     spans = exports.only.spans
     _check(spans, vocabulary)
     assert all("egma.provider_reference" not in s.resource.attributes for s in spans)
+    assert {s.resource.attributes["egma.agent_name"] for s in spans} == {
+        "Lakeside production bot"
+    }

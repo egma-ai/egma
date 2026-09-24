@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import time
 import weakref
 from typing import Any
@@ -47,6 +48,12 @@ FINISH_WAIT_SECONDS = 2.0
 
 REPORT_WAIT_SECONDS = 5.0
 """How long the end of the session waits for a repeated hello still in flight."""
+
+AGENT_NAME_VARIABLE = "EGMA_AGENT_NAME"
+"""Where ``monitor`` reads the agent's name when no ``agent_name`` is passed."""
+
+_warned: set[str] = set()
+"""The warnings this process has logged, so each is logged once."""
 
 _SESSION = "_egma_pipecat_session"
 
@@ -85,7 +92,7 @@ class _Session:
         self.simulation: str | None = None
         """None, ``"accepted"``, or ``"not_a_simulation"``."""
         self.monitor: str | None = None
-        """None, ``"production"``, or ``"suppressed"``."""
+        """None, ``"production"``, ``"suppressed"``, or ``"off"``."""
         self.held = _Held()
         self.llms: list[Any] = []
         self.failures: dict[str, str] = {}
@@ -311,6 +318,20 @@ def _settings(
     return otlp.api_root(url, verb), key, otlp.trace_endpoint(url, verb)
 
 
+def _warn_once(key: str, message: str, *args: object) -> None:
+    """Log ``message`` once per process for each ``key``."""
+    if key in _warned:
+        return
+    _warned.add(key)
+    logger.warning(message, *args)
+
+
+def _agent_name(explicit: str | None) -> str:
+    """The agent's name from ``agent_name``, else ``EGMA_AGENT_NAME``, or ``""``."""
+    value = explicit if explicit is not None else os.environ.get(AGENT_NAME_VARIABLE)
+    return value.strip() if isinstance(value, str) else ""
+
+
 def _not_reported(reference: str, reason: str) -> NotReported:
     return NotReported(
         f"simulation {reference}: this bot did not report to Egma "
@@ -454,18 +475,24 @@ async def monitor(
     *,
     endpoint: str | None = None,
     api_key: str | None = None,
+    agent_name: str | None = None,
 ) -> None:
     """Export this bot's production conversations to Egma Monitoring.
 
     Await once, after building the ``PipelineWorker`` and before the runner
-    starts it. It does nothing for a simulation Egma has confirmed live:
-    one that ``simulation`` reported in this process, or, when
-    ``simulation`` has not run, one Egma confirms on request. A body
-    without an ``egma`` key is production and costs no confirmation
-    request; a key Egma does not confirm is production too.
+    starts it. It exports every conversation except one that ``simulation``
+    reported to a live Egma simulation in this process: that conversation
+    keeps its simulation's record. An ``egma`` key in the start request does
+    not stop it on its own.
+
+    Each exported conversation carries the agent's name, which Monitoring
+    shows: ``agent_name``, else ``EGMA_AGENT_NAME``. Use the agent's name in
+    Egma. Without a name the conversation arrives with no agent name.
+
+    It never stops the bot. When ``EGMA_URL`` or ``EGMA_API_KEY`` is missing
+    or invalid, it logs a warning once and exports nothing.
 
     Raises:
-        ValueError: ``EGMA_URL`` or ``EGMA_API_KEY`` is missing or invalid.
         TypeError: ``worker`` is not a Pipecat ``PipelineWorker``.
 
     ``endpoint`` and ``api_key`` default to ``EGMA_URL`` and ``EGMA_API_KEY``.
@@ -482,38 +509,46 @@ async def monitor(
         )
         return
 
-    base, key, trace_endpoint = _settings(endpoint, api_key, MONITOR_VERB)
-    reference = detect.provider_reference_in(runner_args)
-    if reference is not None and session.simulation is None:
-        confirming = https_seam.Seam(base, key, reference)
-        try:
-            confirmed = await confirming.confirm()
-        finally:
-            await confirming.close()
-        if confirmed:
-            session.monitor = "suppressed"
-            logger.info(
-                "Egma confirmed simulation %s is live, so %s exports nothing "
-                "to Monitoring",
-                reference,
-                MONITOR_VERB,
-            )
-            return
-        logger.warning(
-            "this start request named Egma simulation %s, and Egma did not "
-            "confirm it, so the conversation is exported to Monitoring as "
-            "production",
-            reference,
-        )
-
-    session.monitor = "production"
-    session.use_export(
-        SessionExport(
+    name = _agent_name(agent_name)
+    try:
+        _, key, trace_endpoint = _settings(endpoint, api_key, MONITOR_VERB)
+        export = SessionExport(
             endpoint=trace_endpoint,
             api_key=key,
             verb=MONITOR_VERB,
             provider_reference="",
             session_id=session.session_id,
+            agent_name=name,
         )
-    )
+    except ValueError as unusable:
+        session.monitor = "off"
+        _warn_once(
+            "settings",
+            "Egma Monitoring is off for this bot, and the bot runs as usual: %s",
+            unusable,
+        )
+        return
+    if not name:
+        _warn_once(
+            "agent_name",
+            "%s sends this bot's conversations with no agent name: set %s to "
+            "the agent's name in Egma, so Monitoring shows which agent took "
+            "each call",
+            MONITOR_VERB,
+            AGENT_NAME_VARIABLE,
+        )
+    reference = detect.provider_reference_in(runner_args)
+    if reference is not None and session.simulation is None:
+        logger.info(
+            "this start request names Egma simulation %s, and %s has not "
+            "reported it, so %s exports the conversation to Monitoring as "
+            "production unless %s reports it before the pipeline starts",
+            reference,
+            SIMULATION_VERB,
+            MONITOR_VERB,
+            SIMULATION_VERB,
+        )
+
+    session.monitor = "production"
+    session.use_export(export)
     session.watch_caller()

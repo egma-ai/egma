@@ -3,11 +3,7 @@ import { readFile } from "node:fs/promises";
 import { cancelRun, claimSimulations, createPersona } from "@egma/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import {
-  SDK_CONFIRM_PATH,
-  SDK_HELLO_PATH,
-  SDK_TOOL_PATH,
-} from "../src/routes/sdk-seam.ts";
+import { SDK_HELLO_PATH, SDK_TOOL_PATH } from "../src/routes/sdk-seam.ts";
 import { createApi, type TestApi } from "./support/api.ts";
 import {
   colleagueOf,
@@ -65,7 +61,7 @@ const SEAM = JSON.parse(
 
 type Exchange = {
   readonly world?: string;
-  readonly route: "hello" | "tool" | "confirm";
+  readonly route: "hello" | "tool";
   readonly request?: Json;
   readonly request_is?: string;
   readonly without_authorization?: boolean;
@@ -274,8 +270,8 @@ describe("the shared seam fixture", () => {
     expect(SEAM.routes).toMatchObject({
       hello: SDK_HELLO_PATH,
       tool: SDK_TOOL_PATH,
-      confirm: SDK_CONFIRM_PATH,
     });
+    expect(SEAM.routes).not.toHaveProperty("confirm");
   });
 
   it("answers the simulator's poll with waiting before any hello", async () => {
@@ -322,8 +318,8 @@ describe("the shared seam fixture", () => {
         Date.parse(String(before?.at)),
       );
     }
-    if (exchange.route === "tool" || exchange.route === "confirm") {
-      // A tool call or a confirmation records nothing.
+    if (exchange.route === "tool") {
+      // A tool call records nothing.
       expect(stored).toEqual(before);
     }
 
@@ -505,44 +501,11 @@ describe("the project key at the door", () => {
     for (const [path, body] of [
       [SDK_HELLO_PATH, at("exchanges.hello.request")],
       [SDK_TOOL_PATH, at("exchanges.tool_answer.request")],
-      [SDK_CONFIRM_PATH, at("exchanges.confirm_live.request")],
     ] as const) {
       const answered = await sdk(path, withRealIds(body), outboundKey);
       expect(answered.statusCode, path).toBe(404);
       expect(answered.json).toEqual(SEAM.not_a_simulation.body);
     }
-  });
-
-  it("opens to an agent's guarded monitoring key, which is a project key that may send traces", async () => {
-    const world = await aClaimedSimulation("monitoring key", [
-      { tool: "check_calendar", answer: { slots: [] } },
-    ]);
-    const minted = await api.app.inject({
-      method: "POST",
-      url: "/v1/keys",
-      headers: { cookie: ada.cookie },
-      payload: {
-        monitoringAgentId: world.agentId,
-        projectId: ada.projectId,
-        name: `Egma monitoring ${world.agentId} — front desk bot`,
-      },
-    });
-    expect(minted.statusCode, minted.body).toBe(201);
-    const monitoringKey = (minted.json() as { secret: string }).secret;
-
-    const confirmed = await sdk(
-      SDK_CONFIRM_PATH,
-      { provider_reference: world.simulationId },
-      monitoringKey,
-    );
-    expect(confirmed.statusCode, confirmed.raw).toBe(200);
-    expect(confirmed.json).toEqual({ simulation: true });
-    const hello = await sdk(
-      SDK_HELLO_PATH,
-      { provider_reference: world.simulationId, protocol_version: 1, tools: [] },
-      monitoringKey,
-    );
-    expect(hello.raw).toBe('{"protocol_version":1,"mocked_tools":["check_calendar"]}');
   });
 
   it("answers another project's key as if the simulation were not there", async () => {
@@ -551,7 +514,6 @@ describe("the project key at the door", () => {
     for (const [path, body] of [
       [SDK_HELLO_PATH, at("exchanges.hello.request")],
       [SDK_TOOL_PATH, at("exchanges.tool_answer.request")],
-      [SDK_CONFIRM_PATH, at("exchanges.confirm_live.request")],
     ] as const) {
       const answered = await sdk(path, withRealIds(body), graceKey);
       expect(answered.statusCode).toBe(404);
@@ -605,14 +567,10 @@ describe("what makes a simulation live for the SDK", () => {
     ]);
     const call = { provider_reference: world.simulationId, name: "check_calendar" };
     expect((await sdk(SDK_TOOL_PATH, call)).statusCode).toBe(200);
-    expect((await sdk(SDK_CONFIRM_PATH, { provider_reference: world.simulationId })).json).toEqual({
-      simulation: true,
-    });
 
     await cancelRun(contextFor(ada, "member"), world.runId);
     for (const [path, body] of [
       [SDK_TOOL_PATH, call],
-      [SDK_CONFIRM_PATH, { provider_reference: world.simulationId }],
       [SDK_HELLO_PATH, { provider_reference: world.simulationId, protocol_version: 1, tools: [] }],
     ] as const) {
       const answered = await sdk(path, body);

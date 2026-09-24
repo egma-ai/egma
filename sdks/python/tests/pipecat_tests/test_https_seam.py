@@ -42,7 +42,7 @@ def _response(fixture: dict[str, Any], name: str) -> Any:
 def test_routes_limits_and_timeouts_are_the_fixtures(fixture):
     assert https_seam.HELLO_ROUTE == fixture["routes"]["hello"]
     assert https_seam.TOOL_ROUTE == fixture["routes"]["tool"]
-    assert https_seam.CONFIRM_ROUTE == fixture["routes"]["confirm"]
+    assert set(fixture["routes"]) == {"hello", "tool", "agent_report"}
     assert fixture["protocol_version"] == seam.PROTOCOL_VERSION
 
     limits = fixture["limits"]
@@ -58,7 +58,6 @@ def test_routes_limits_and_timeouts_are_the_fixtures(fixture):
     assert seconds["hello_attempts"] == https_seam.HELLO_ATTEMPTS
     assert seconds["hello_all_attempts"] == https_seam.HELLO_ALL_ATTEMPTS_SECONDS
     assert seconds["tool_attempt"] == https_seam.TOOL_ATTEMPT_SECONDS
-    assert seconds["confirm_attempt"] == https_seam.CONFIRM_ATTEMPT_SECONDS
     assert (
         sum(https_seam.HELLO_RETRY_PAUSES_SECONDS)
         + seconds["hello_attempt"] * seconds["hello_attempts"]
@@ -92,8 +91,6 @@ def test_the_refusal_words_and_codes_are_the_fixtures(fixture):
         "tool_unknown",
         "tool_flows_mocked",
         "tool_not_a_simulation",
-        "confirm_live",
-        "confirm_not_a_simulation",
         "unauthenticated",
     ],
 )
@@ -266,20 +263,6 @@ async def test_a_refused_tool_call_is_an_error_that_names_egmas_sentence(
         f"{sentence.rstrip('.')}. The real tool did not run."
     )
     assert ".." not in served.message
-
-
-async def test_confirm_reads_only_a_live_simulation_as_confirmed(fixture, egma):
-    live = _request(fixture, "confirm_live")
-    gone = _request(fixture, "confirm_not_a_simulation")
-    confirming = _client(egma, fixture, reference=live["provider_reference"])
-    refusing = _client(egma, fixture, reference=gone["provider_reference"])
-    try:
-        assert await confirming.confirm() is True
-        assert await refusing.confirm() is False
-    finally:
-        await confirming.close()
-        await refusing.close()
-    assert egma.bodies("confirm") == [live, gone]
 
 
 @pytest.mark.parametrize(

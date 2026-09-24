@@ -155,25 +155,16 @@ async function mint(
   };
 }
 
-/** A living agent whose id may reserve one worker-key namespace. */
-async function pushingAgent(
-  person: Person,
-  name: string,
-  agentPlatform: "livekit" | "pipecat" | "retell",
-): Promise<string> {
+/** A living LiveKit agent whose id may reserve one worker-key namespace. */
+async function liveKitAgent(person: Person, name: string): Promise<string> {
   const response = await api.app.inject({
     method: "POST",
     url: "/v1/agents",
     headers: { cookie: person.cookie },
-    payload: { name, agentPlatform },
+    payload: { name, agentPlatform: "livekit" },
   });
   expect(response.statusCode, response.body).toBe(201);
   return (response.json() as { agent: { id: string } }).agent.id;
-}
-
-/** A living LiveKit agent whose id may reserve one worker-key namespace. */
-async function liveKitAgent(person: Person, name: string): Promise<string> {
-  return pushingAgent(person, name, "livekit");
 }
 
 describe("minting a key", () => {
@@ -254,7 +245,7 @@ describe("minting a key", () => {
     expect(another.statusCode).toBe(201);
   });
 
-  it("accepts only a living agent of this project for a reserved monitoring key", async () => {
+  it("accepts only a living LiveKit agent for a reserved worker key", async () => {
     api = await createApi("keys_monitoring_agent_validation");
     const ada = await signUp("ada@acme.example", "Acme");
     const agentId = await liveKitAgent(ada, "appointment agent");
@@ -301,55 +292,6 @@ describe("minting a key", () => {
     });
     expect(missing.statusCode).toBe(422);
     expect(missing.json()).toMatchObject({ error: "unprocessable" });
-  });
-
-  it("mints a Pipecat agent's monitoring key as it mints a LiveKit agent's", async () => {
-    api = await createApi("keys_monitoring_pipecat_agent");
-    const ada = await signUp("ada@acme.example", "Acme");
-    const agentId = await pushingAgent(ada, "front desk bot", "pipecat");
-    const prefix = `Egma monitoring ${agentId} — `;
-
-    const minted = await mint(ada, {
-      monitoringAgentId: agentId,
-      projectId: ada.projectId,
-      name: `${prefix}front desk bot`,
-    });
-
-    expect(minted.status, JSON.stringify(minted.body)).toBe(201);
-    expect(minted.secret).toMatch(/^egma_sk_/);
-    expect(minted.body).toMatchObject({
-      scope: "project",
-      projectId: ada.projectId,
-      name: `${prefix}front desk bot`,
-    });
-
-    // The same reserved namespace: a second active key for this agent waits
-    // for the first to be revoked.
-    const second = await mint(ada, {
-      monitoringAgentId: agentId,
-      projectId: ada.projectId,
-      name: `${prefix}second machine`,
-    });
-    expect(second.status).toBe(409);
-  });
-
-  it("refuses a Retell agent a monitoring key, because Egma pulls Retell", async () => {
-    api = await createApi("keys_monitoring_retell_refused");
-    const ada = await signUp("ada@acme.example", "Acme");
-    const agentId = await pushingAgent(ada, "retell desk", "retell");
-
-    const refused = await mint(ada, {
-      monitoringAgentId: agentId,
-      projectId: ada.projectId,
-      name: `Egma monitoring ${agentId} — retell desk`,
-    });
-
-    expect(refused.status).toBe(422);
-    expect(refused.body).toEqual({
-      error: "unprocessable",
-      message:
-        "monitoringAgentId must name a living LiveKit or Pipecat agent in the key's project",
-    });
   });
 
   it("keeps guarded monitoring keys out of a viewer's read-only role", async () => {

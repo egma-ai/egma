@@ -14,6 +14,12 @@
             "value": {
               "stringValue": "8a1f0c33-pcc-session"
             }
+          },
+          {
+            "key": "egma.agent_name",
+            "value": {
+              "stringValue": "Lakeside production bot"
+            }
           }
         ]
       },

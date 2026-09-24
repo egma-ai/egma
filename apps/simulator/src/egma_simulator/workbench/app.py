@@ -397,14 +397,6 @@ def build_app(state: WorkbenchState) -> web.Application:
         )
         return web.json_response(answer)
 
-    async def sdk_confirm(request: web.Request) -> web.Response:
-        body = await _json_or_none(request)
-        try:
-            answer = sdk_seam.confirm(body, state.live_by_reference())
-        except sdk_seam.SeamAnswer as refused:
-            return web.json_response(refused.body, status=refused.status)
-        return web.json_response(answer)
-
     async def records(_request: web.Request) -> web.Response:
         return web.json_response({"records": state.records})
 
@@ -437,7 +429,6 @@ def build_app(state: WorkbenchState) -> web.Application:
     app.router.add_post("/v1/simulations/{simulation_id}/agent-report", agent_report)
     app.router.add_post("/sdk/v1/hello", sdk_hello)
     app.router.add_post("/sdk/v1/tool", sdk_tool)
-    app.router.add_post("/sdk/v1/confirm", sdk_confirm)
     app.router.add_post("/v1/traces", traces)
     app.router.add_get("/workbench/records", records)
     app.router.add_post("/workbench/specs", offer)

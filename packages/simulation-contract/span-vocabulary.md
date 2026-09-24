@@ -165,6 +165,7 @@ SDK's own. The resource carries:
 | --- | --- |
 | `egma.provider_reference` | The simulation id, from the start request's `egma` key — **only** on a simulation's export, after Egma accepted the SDK's hello. Absent on production traffic: a resource without it is production, one with it is filed under that simulation's trace id (the SDK's own trace id is kept in the payload). |
 | `session.id` | The Pipecat runner's session id, when the runner gives one. It becomes the row's provider call id. |
+| `egma.agent_name` | The agent's name in Egma, from `monitor`'s `agent_name` or `EGMA_AGENT_NAME` — **only** on production traffic, and only when the bot names its agent. It becomes the row's platform agent name, the name Monitoring shows, as `lk.agent_name` does for LiveKit. A Pipecat bot has no name of its own. |
 | `service.name` | `pipecat`. It decides nothing. |
 
 | Span name | Kind it lands as | Parent | Duration | Attributes |

@@ -40,7 +40,6 @@ export type SdkSeamRoutesOptions = {
 
 export const SDK_HELLO_PATH = "/sdk/v1/hello";
 export const SDK_TOOL_PATH = "/sdk/v1/tool";
-export const SDK_CONFIRM_PATH = "/sdk/v1/confirm";
 
 /** The one version of the exchange egma speaks. */
 const PROTOCOL_VERSION = 1;
@@ -48,7 +47,6 @@ const PROTOCOL_VERSION = 1;
 /** Request body caps, per route. */
 const LARGEST_HELLO_BYTES = 256 * 1024;
 const LARGEST_TOOL_BYTES = 64 * 1024;
-const LARGEST_CONFIRM_BYTES = 4 * 1024;
 
 /** A provider reference longer than this names no simulation egma minted. */
 const LONGEST_PROVIDER_REFERENCE = 512;
@@ -88,9 +86,6 @@ const MALFORMED_HELLO =
 
 const MALFORMED_TOOL =
   "egma.tool names the tool being called and carries its arguments as a JSON object or not at all; this one does not.";
-
-const MALFORMED_CONFIRM =
-  "egma.confirm names the simulation in provider_reference; this one does not.";
 
 type SeamRefusal = {
   readonly error: "seam_refused" | "flows_function_mocked";
@@ -415,19 +410,5 @@ export async function sdkSeamRoutes(
       );
     }
     return sendJson(reply, answer);
-  });
-
-  /** Whether a provider reference names a live simulation; records nothing. */
-  app.post(SDK_CONFIRM_PATH, { bodyLimit: LARGEST_CONFIRM_BYTES }, async (request, reply) => {
-    const auth = sdkAuthOf(request);
-    const body = parsed(request.body);
-    const providerReference = isObject(body) ? providerReferenceIn(body) : undefined;
-    if (providerReference === undefined) {
-      return refused(reply, seamRefused(MALFORMED_REQUEST, MALFORMED_CONFIRM));
-    }
-
-    const simulation = await resolveLiveDailyRoomSimulation(auth, providerReference);
-    if (simulation === undefined) return notASimulation(reply);
-    return reply.code(200).send({ simulation: true });
   });
 }

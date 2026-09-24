@@ -415,43 +415,21 @@ describe("a Pipecat agent from the CLI", () => {
     expect(listed.stdout).not.toContain("Pipecat");
   });
 
-  it("mints the agent's monitoring key and prints it once with the bot's lines", async () => {
+  it("hands Pipecat monitoring setup to the integrate-egma skill, as LiveKit's, and mints no key", async () => {
     const agentId = await registered();
 
     const setup = await egma(["agent", "monitoring", "setup", "--agent", agentId, "--platform", "pipecat"]);
 
-    expect(setup.code, setup.stderr).toBe(0);
-    const mint = platform.records.find((record) => record.method === "POST" && record.path === "/v1/keys");
-    expect(mint?.body).toEqual({
-      name: `Egma monitoring ${agentId} — Front desk`,
-      projectId: platform.projectId,
-      monitoringAgentId: agentId,
-    });
-    const key = platform.keys.minted[0]!;
-    expect(key.name).toBe(`Egma monitoring ${agentId} — Front desk`);
+    expect(setup.code).toBe(1);
     expect(setup.stdout.split("\n")).toEqual([
-      `Created monitoring key "Egma monitoring ${agentId} — Front desk" for Pipecat Agent ${agentId}.`,
-      "Set these where your bot runs (its .env, your Pipecat Cloud secret set, or your server). The key is shown once; Egma CLI does not save it.",
-      `  EGMA_URL=${platform.url}`,
-      `  EGMA_API_KEY=${key.secret}`,
-      "Then call monitor where your bot builds its worker:",
-      "  from egma.pipecat import monitor",
-      "  await monitor(worker, runner_args)",
-      "Production sessions then appear under Monitoring. The same key serves simulation().",
+      "Egma CLI does not perform Pipecat monitoring setup.",
+      "Install the public integrate-egma skill:",
+      "  npx --yes skills add egma-ai/egma --skill integrate-egma",
+      `Then ask the coding agent to use it for Pipecat monitoring setup on Agent ${agentId}.`,
       "",
     ]);
-    expect(setup.stdout.split(key.secret)).toHaveLength(2);
-    expect(await readFile(folderPathsIn(workspace.dir).config, "utf8")).not.toContain(key.secret);
-
-    // One monitoring key per agent: a second setup names the first and mints nothing.
-    const again = await egma(["agent", "monitoring", "setup", "--agent", agentId, "--platform", "pipecat"]);
-    expect(again.code).toBe(1);
-    expect(again.stdout).toBe("");
-    expect(again.stderr).toContain(
-      `Agent ${agentId} already has a monitoring key "Egma monitoring ${agentId} — Front desk" (egma_sk_…${key.secret.slice(-4)}).`,
-    );
-    expect(again.stderr).not.toContain(key.secret);
-    expect(platform.keys.minted).toHaveLength(1);
+    expect(platform.records.some((record) => record.path === "/v1/keys")).toBe(false);
+    expect(platform.keys.minted).toHaveLength(0);
   });
 
   it("refuses --platform pipecat for an agent on another platform, and mints nothing", async () => {

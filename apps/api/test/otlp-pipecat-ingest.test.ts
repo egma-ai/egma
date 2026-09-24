@@ -330,13 +330,13 @@ describe.skipIf(!storage.available)("a Pipecat bot's production traffic", () => 
     );
   });
 
-  /** A living agent of this project and its guarded monitoring key, minted as the product mints one. */
-  async function anAgentWithItsMonitoringKey(
-    agentPlatform: "pipecat" | "livekit",
-    name: string,
-  ): Promise<{ agentId: string; monitoringKey: string }> {
+  /** The agent's name the production fixture's bot sends in `egma.agent_name`. */
+  const FIXTURE_AGENT_NAME = "Lakeside production bot";
+
+  /** A living LiveKit agent of this project and its guarded monitoring key, as the product mints one. */
+  async function aLiveKitMonitoringKey(name: string): Promise<string> {
     const registered = await ask(api.app, "POST", "/v1/agents", lakesideKey, {
-      agentPlatform,
+      agentPlatform: "livekit",
       name,
     });
     expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
@@ -352,12 +352,25 @@ describe.skipIf(!storage.available)("a Pipecat bot's production traffic", () => 
       },
     });
     expect(minted.statusCode, minted.body).toBe(201);
-    return { agentId, monitoringKey: (minted.json() as { secret: string }).secret };
+    return (minted.json() as { secret: string }).secret;
   }
 
-  /** The production flush under another trace id, so one file can post it more than once. */
-  function productionFlushUnder(traceId: string): string {
-    return PRODUCTION_FLUSH.replaceAll(PRODUCTION_WIRE_TRACE, traceId);
+  /**
+   * The production flush under another trace id, so one file can post it more
+   * than once, with the bot's `egma.agent_name` kept or taken away.
+   */
+  function productionFlushUnder(traceId: string, named: boolean): string {
+    const flush = JSON.parse(PRODUCTION_FLUSH.replaceAll(PRODUCTION_WIRE_TRACE, traceId)) as {
+      resourceSpans: { resource: { attributes: { key: string }[] } }[];
+    };
+    if (!named) {
+      for (const resourceSpans of flush.resourceSpans) {
+        resourceSpans.resource.attributes = resourceSpans.resource.attributes.filter(
+          (attribute) => attribute.key !== "egma.agent_name",
+        );
+      }
+    }
+    return JSON.stringify(flush);
   }
 
   type ListedRow = {
@@ -386,13 +399,8 @@ describe.skipIf(!storage.available)("a Pipecat bot's production traffic", () => 
     );
   }
 
-  it("files under the agent whose monitoring key carried it, ends on the root, and is graded", async () => {
-    const { agentId, monitoringKey } = await anAgentWithItsMonitoringKey(
-      "pipecat",
-      "Lakeside production bot",
-    );
-
-    const posted = await post(PRODUCTION_FLUSH, monitoringKey);
+  it("shows the name the bot sends in egma.agent_name, ends on the root, and is graded", async () => {
+    const posted = await post(PRODUCTION_FLUSH, lakesideKey);
     expect(posted.statusCode, posted.body).toBe(200);
     expect(posted.json()).toEqual({});
     await api.drainEvidence();
@@ -421,16 +429,17 @@ describe.skipIf(!storage.available)("a Pipecat bot's production traffic", () => 
     expect(new Set(rows.map((row) => row.agent_platform))).toEqual(new Set(["pipecat"]));
     expect(new Set(rows.map((row) => row.source))).toEqual(new Set(["production"]));
     expect(new Set(rows.map((row) => row.provider_call_id))).toEqual(new Set(["8a1f0c33-pcc-session"]));
-    expect(new Set(rows.map((row) => row.agent_id))).toEqual(new Set([agentId]));
+    // A name, as LiveKit's lk.agent_name is: it labels the trace and binds no agent id.
+    expect(new Set(rows.map((row) => row.agent_id))).toEqual(new Set([""]));
     expect(new Set(rows.map((row) => row.platform_agent_name))).toEqual(
-      new Set(["Lakeside production bot"]),
+      new Set([FIXTURE_AGENT_NAME]),
     );
 
-    // Monitoring → Transcripts lists it with the agent in its Agent column.
+    // Monitoring → Transcripts lists it with the name in its Agent column.
     expect(await listedProduction(PRODUCTION_WIRE_TRACE)).toMatchObject({
       agentPlatform: "pipecat",
-      agentId,
-      platformAgentName: "Lakeside production bot",
+      agentId: "",
+      platformAgentName: FIXTURE_AGENT_NAME,
     });
 
     const auth = contextFor(lakeside, "admin");
@@ -443,23 +452,11 @@ describe.skipIf(!storage.available)("a Pipecat bot's production traffic", () => 
       traceId: PRODUCTION_WIRE_TRACE,
       status: "pending",
     });
-
-    // The same key opens the SDK's seam: it is a project key that may send
-    // traces, so a reference that is no simulation answers "not a simulation"
-    // rather than a refusal of the key.
-    const confirmed = await api.app.inject({
-      method: "POST",
-      url: "/sdk/v1/confirm",
-      headers: { "content-type": "application/json", authorization: `Bearer ${monitoringKey}` },
-      payload: { provider_reference: "sim_not_a_live_one" },
-    });
-    expect(confirmed.statusCode, confirmed.body).toBe(404);
-    expect(confirmed.json()).toMatchObject({ error: "not_a_simulation" });
   });
 
-  it("stays under no agent when an ordinary project key carried it, as before", async () => {
+  it("shows no agent name when the bot sends none, and is still graded", async () => {
     const traceId = "7d2c9a0e5b1f4c3aa8e6b0d4c2f19e58";
-    const posted = await post(productionFlushUnder(traceId), lakesideKey);
+    const posted = await post(productionFlushUnder(traceId, false), lakesideKey);
     expect(posted.statusCode, posted.body).toBe(200);
     await api.drainEvidence();
 
@@ -469,16 +466,15 @@ describe.skipIf(!storage.available)("a Pipecat bot's production traffic", () => 
       agentId: "",
       platformAgentName: "",
     });
-    // Unbound traffic is still production traffic, and still graded.
     await expect(
       getGradingJobForTrace(contextFor(lakeside, "admin"), traceId),
     ).resolves.toMatchObject({ source: "production", traceId });
   });
 
-  it("files nothing under a LiveKit agent whose monitoring key carried it", async () => {
-    const { monitoringKey } = await anAgentWithItsMonitoringKey("livekit", "Lakeside LiveKit desk");
+  it("takes no name from the key: a guarded monitoring key names no agent", async () => {
+    const monitoringKey = await aLiveKitMonitoringKey("Lakeside LiveKit desk");
     const traceId = "7d2c9a0e5b1f4c3aa8e6b0d4c2f19e59";
-    const posted = await post(productionFlushUnder(traceId), monitoringKey);
+    const posted = await post(productionFlushUnder(traceId, false), monitoringKey);
     expect(posted.statusCode, posted.body).toBe(200);
     await api.drainEvidence();
 
