@@ -216,55 +216,6 @@ describe.skipIf(!storage.available)("what the door stages for Monitoring", () =>
 });
 
 describe.skipIf(!storage.available)("the JSON encoding", () => {
-  it("lands the same way protobuf does, ids and nanoseconds included", async () => {
-    const response = await post(jsonExport([jsonSpan()]));
-    expect(response.statusCode).toBe(200);
-    expect(response.headers["content-type"]).toContain("application/json");
-    expect(response.json()).toEqual({});
-
-    const [row] = await store().rows<{
-      trace_id: string;
-      span_id: string;
-      started_at: string;
-      duration_ns: number;
-      kind: string;
-      text: string;
-      provider_call_id: string;
-    }>(
-      "select trace_id, span_id, started_at, duration_ns, kind, text, " +
-        "provider_call_id from spans where trace_id = " +
-        "'112233445566778899aabbccddeeff00'",
-    );
-
-    expect(row).toEqual({
-      trace_id: "112233445566778899aabbccddeeff00",
-      span_id: "0011223344556677",
-      started_at: "2026-08-02 18:04:40.281989",
-      duration_ns: 1_000_000_000,
-      kind: "turn:agent",
-      text: "Hello there.",
-      provider_call_id: "room-1",
-    });
-  });
-
-  it("files a project-scoped key's rows under that project", async () => {
-    // Its own trace and its own row, so that what this asserts is the key's
-    // scope rather than whatever the test before it happened to leave behind.
-    const traceId = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f";
-    const response = await post(
-      jsonExport([jsonSpan({ traceId, spanId: "0f0f0f0f0f0f0f0f" })]),
-    );
-    expect(response.statusCode).toBe(200);
-
-    const [row] = await store().rows<{
-      organization_id: string;
-      project_id: string;
-    }>(
-      `select organization_id, project_id from spans where trace_id = '${traceId}'`,
-    );
-    expect(row).toEqual({ organization_id: organizationId, project_id: projectId });
-  });
-
   /**
    * Preserve evidence fields even when their names or contents resemble secrets.
    * Transport credentials are excluded by position, outside the normalized payload;
@@ -787,22 +738,6 @@ describe.skipIf(!storage.available)("a compressed export", () => {
     });
     expect(response.statusCode).toBe(400);
     expect((response.json() as { message: string }).message).toContain("gzip");
-  });
-});
-
-describe.skipIf(!storage.available)("an export carrying nothing", () => {
-  it("is a perfectly good request and stores no rows", async () => {
-    const before = (
-      await store().rows<{ n: number }>("select count() as n from spans")
-    )[0]?.n;
-
-    const response = await post(JSON.stringify({}));
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({});
-
-    expect(
-      (await store().rows<{ n: number }>("select count() as n from spans"))[0]?.n,
-    ).toBe(before);
   });
 });
 

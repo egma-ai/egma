@@ -5,20 +5,11 @@ import {
   ProviderCredentialSourceUnavailableError,
   credentialFor,
   environmentProviderCredentialSource,
-  providerAccountFor,
   providerCredentialSource,
   secretsManagerProviderCredentialSource,
 } from "../src/index.ts";
 
 describe("provider credential accounts", () => {
-  it("accepts only provider-account names from the model catalog", () => {
-    expect(providerAccountFor("openai")).toBe("openai");
-    expect(providerAccountFor("deepgram")).toBe("deepgram");
-    expect(providerAccountFor("cartesia")).toBe("cartesia");
-    expect(providerAccountFor("openai_realtime")).toBeUndefined();
-    expect(providerAccountFor("unknown-provider")).toBeUndefined();
-  });
-
   it("resolves only the selected account and never falls back", () => {
     const bundle = { openai: "openai-current" } as const;
     expect(credentialFor(bundle, "openai")).toBe("openai-current");

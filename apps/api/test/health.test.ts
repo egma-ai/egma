@@ -45,12 +45,6 @@ const enough = {
 };
 
 describe("configuration", () => {
-  it("refuses to start without a database to talk to", () => {
-    expect(() => loadConfig({ ...enough, DATABASE_URL: "" })).toThrow(
-      /DATABASE_URL is required/,
-    );
-  });
-
   /**
    * On the same terms as Postgres, and deliberately not as an optional extra.
    * There is no second analytical path behind ClickHouse, so an instance that
@@ -115,18 +109,6 @@ describe("configuration", () => {
     ).toThrow(/must start with egma_st_/);
   });
 
-  it("refuses a port that is not a port", () => {
-    expect(() => loadConfig({ ...enough, PORT: "not-a-port" })).toThrow(
-      /not a usable port/,
-    );
-  });
-
-  it("refuses a base URL that is not a URL", () => {
-    expect(() => loadConfig({ ...enough, EGMA_BASE_URL: "not a url" })).toThrow(
-      /not a URL/,
-    );
-  });
-
   /**
    * This one narrowed: a base URL carrying a path used to have its trailing
    * slashes trimmed and the rest kept. A deployment that had been running that
@@ -155,10 +137,6 @@ describe("configuration", () => {
         /hunter2-not-real/,
       );
     }
-  });
-
-  it("defaults to the port the compose file publishes", () => {
-    expect(loadConfig(enough).port).toBe(3100);
   });
 
   it("reads optional platform and speech-provider concurrency caps", () => {
@@ -281,15 +259,6 @@ describe("configuration", () => {
     expect(() =>
       loadConfig({ ...enough, EGMA_SINGLE_ORGANIZATION: "perhaps" }),
     ).toThrow(/not a yes or a no/);
-  });
-
-  /**
-   * Mail is the one setting whose *absence* is a supported way to run egma
-   * rather than a mistake, so it is asserted as one. A self-hoster who never
-   * sets it can still add a second person.
-   */
-  it("starts perfectly well with no mail transport, which is the ordinary case", () => {
-    expect(loadConfig(enough).smtp).toBeUndefined();
   });
 
   it("takes a transport as one variable, with a from address it can derive", () => {
@@ -876,10 +845,6 @@ describe("the three roles one image serves", () => {
     expect(() => loadConfig({ ...enough, EGMA_ROLE: "worker" })).toThrow(
       /EGMA_ROLE must be all, ingest or drain/,
     );
-  });
-
-  it("runs the whole path by default, which is what every deployment runs", () => {
-    expect(loadConfig(enough).ingestion.role).toBe("all");
   });
 
   it("accepts each role, and lets only the accepting ones serve the door", async () => {

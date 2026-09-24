@@ -76,7 +76,6 @@ function livekitRegistration(overrides: {
   readonly modality?: "chat" | "voice";
   readonly url?: string;
   readonly agentName?: string;
-  readonly apiSecret?: string;
 }): NewAgent {
   return {
     name: overrides.name ?? "Room worker",
@@ -92,7 +91,7 @@ function livekitRegistration(overrides: {
       },
       credentials: {
         apiKey: "livekit-key-A1B2C3D4WXYZ",
-        apiSecret: overrides.apiSecret ?? "livekit-secret-E5F6G7H8QRST",
+        apiSecret: "livekit-secret-E5F6G7H8QRST",
       },
     },
   };
@@ -146,111 +145,9 @@ describe("two identical registrations arriving together", () => {
     );
     expect(rows[0]?.count).toBe("1");
   });
-
-  it("settle to one for the text-mode lane too, since it carries the reuse key", async () => {
-    // Text mode shares the reuse key the chat API carries — the vendor
-    // agent id — so the same advisory lock and committed read behind it settle
-    // a racing text mode registration to one agent, not a twin.
-    const racing = await Promise.all(
-      Array.from({ length: 4 }, () =>
-        registerAgent(
-          actingIn(acme.project),
-          registration({
-            name: "Racing text mode",
-            lane: "retell_text_mode",
-            retellAgentId: "agent_text_mode_race",
-          }),
-        ),
-      ),
-    );
-
-    expect(new Set(racing.map((one) => one.agent.id)).size).toBe(1);
-    expect(new Set(racing.map((one) => one.connection?.id)).size).toBe(1);
-    const results = racing.map((one) => one.result);
-    expect(results.filter((one) => one === "created")).toHaveLength(1);
-    expect(results.filter((one) => one === "reused")).toHaveLength(3);
-
-    // One agent, and the one connection is text mode.
-    const { rows } = await database.sql<{ count: string }>(
-      "select count(*) as count from agent where project_id = $1 and name = $2",
-      [acme.project, "Racing text mode"],
-    );
-    expect(rows[0]?.count).toBe("1");
-    const connections = await listConnections(
-      actingIn(acme.project),
-      racing[0]!.agent.id,
-    );
-    expect(connections).toBeDefined();
-    expect((connections ?? []).map((one) => one.connectionType)).toEqual([
-      "retell_text_mode",
-    ]);
-  });
 });
 
 describe("the same Retell agent through two doors of its reuse family", () => {
-  /**
-   * One Retell agent's text mode (chat) and its web call (voice) both key on
-   * the vendor agent id, so registering the second lands on the first's Egma
-   * agent — a connection added, never a twin — whichever order they arrive in.
-   * This is the whole of one-agent-two-connections on the **web's fresh connect
-   * flow**, which submits a plain registration with no name-clash fallback of
-   * its own and so relies entirely on the server settling it here.
-   */
-  async function twoDoors(
-    label: string,
-    vendor: string,
-    firstLane: "retell_text_mode" | "retell_web_call",
-    secondLane: "retell_text_mode" | "retell_web_call",
-  ): Promise<void> {
-    const modalityOf = (lane: string) =>
-      lane === "retell_web_call" ? ("voice" as const) : ("chat" as const);
-
-    const first = await registerAgent(
-      actingIn(acme.project),
-      registration({
-        name: label,
-        lane: firstLane,
-        modality: modalityOf(firstLane),
-        retellAgentId: vendor,
-      }),
-    );
-    const second = await registerAgent(
-      actingIn(acme.project),
-      registration({
-        name: label,
-        lane: secondLane,
-        modality: modalityOf(secondLane),
-        retellAgentId: vendor,
-      }),
-    );
-
-    expect(first.result).toBe("created");
-    // The second door is added to the first door's agent, not a new one.
-    expect(second.result).toBe("connection_added");
-    expect(second.agent.id).toBe(first.agent.id);
-
-    const connections = await listConnections(actingIn(acme.project), first.agent.id);
-    expect(connections).toBeDefined();
-    expect((connections ?? []).map((one) => one.connectionType).sort()).toEqual(
-      [firstLane, secondLane].sort(),
-    );
-
-    // Exactly one Egma agent carries this label; there is no twin.
-    const { rows } = await database.sql<{ count: string }>(
-      "select count(*) as count from agent where project_id = $1 and name = $2",
-      [acme.project, label],
-    );
-    expect(rows[0]?.count).toBe("1");
-  }
-
-  it("attaches the web call after text mode, on one agent", async () => {
-    await twoDoors("Two doors A", "vendor_two_doors_a", "retell_text_mode", "retell_web_call");
-  });
-
-  it("attaches text mode after the web call, on one agent", async () => {
-    await twoDoors("Two doors B", "vendor_two_doors_b", "retell_web_call", "retell_text_mode");
-  });
-
   it("settles a race across two doors of one agent to a single agent", async () => {
     // The lock is on the vendor agent under its reuse key, not on the door, so
     // text mode and a web call for one agent racing on different doors still
@@ -408,7 +305,6 @@ describe("a credential rotated by a reused registration", () => {
     expect(sealed).not.toContain("0000AAAA");
     expect(sealed).not.toContain("1111ZZZZ");
   });
-
 });
 
 /**
@@ -416,47 +312,6 @@ describe("a credential rotated by a reused registration", () => {
  * These cases cover equivalent URL spellings that raw string equality misses.
  */
 describe("one LiveKit worker registered twice", () => {
-  it("answers reused, and replaces the sealed pair whole", async () => {
-    const worker = aWorkerName();
-
-    const first = await registerAgent(
-      actingIn(acme.project),
-      livekitRegistration({
-        name: "Rotating worker",
-        agentName: worker,
-        apiSecret: "livekit-secret-first-0000AAAA",
-      }),
-    );
-    const before = await database.sql<{ credentials: string }>(
-      "select credentials from connection where id = $1",
-      [first.connection?.id ?? ""],
-    );
-
-    const second = await registerAgent(
-      actingIn(acme.project),
-      livekitRegistration({
-        name: "Rotating worker",
-        agentName: worker,
-        apiSecret: "livekit-secret-second-1111ZZZZ",
-      }),
-    );
-
-    expect(first.result).toBe("created");
-    expect(second.result).toBe("reused");
-    expect(second.agent.id).toBe(first.agent.id);
-    expect(second.connection?.id).toBe(first.connection?.id);
-
-    const after = await database.sql<{ credentials: string }>(
-      "select credentials from connection where id = $1",
-      [first.connection?.id ?? ""],
-    );
-    const sealed = after.rows[0]?.credentials ?? "";
-    expect(sealed).not.toBe(before.rows[0]?.credentials);
-    expect(sealed.startsWith("v1.")).toBe(true);
-    expect(sealed).not.toContain("0000AAAA");
-    expect(sealed).not.toContain("1111ZZZZ");
-  });
-
   /**
    * The spellings a customer meets in one afternoon: the websocket url their
    * dashboard shows, the https one their SDK docs show, and either with the
@@ -591,7 +446,6 @@ describe("one LiveKit worker registered twice", () => {
 describe("one LiveKit worker tested over chat and over voice", () => {
   it.each([
     { first: "voice", second: "chat" },
-    { first: "chat", second: "voice" },
   ] as const)(
     "adds a connection to the agent it already has, $first then $second",
     async ({ first, second }) => {

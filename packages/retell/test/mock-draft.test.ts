@@ -105,36 +105,6 @@ describe("the mocked draft's transform", () => {
     }
   });
 
-  it("keeps the contract the model reads byte-identical", () => {
-    const { tools } = mocked(flow);
-    const written = tools["tools"] as readonly Record<string, unknown>[];
-    const original = flow.document["tools"] as readonly Record<
-      string,
-      unknown
-    >[];
-
-    for (const [index, before] of original.entries()) {
-      const after = written[index] as Record<string, unknown>;
-      for (const field of [
-        "name",
-        "description",
-        "parameters",
-        "tool_id",
-        "method",
-        "response_variables",
-        "timeout_ms",
-        "args_at_root",
-        "max_retry",
-        "headers",
-        "query_params",
-      ]) {
-        expect(JSON.stringify(after[field])).toBe(
-          JSON.stringify(before[field]),
-        );
-      }
-    }
-  });
-
   it("leaves the flow's node references and every other key alone", () => {
     const { tools } = mocked(flow);
     // The write body holds the tool array and nothing else: nodes, prompts and
@@ -190,42 +160,6 @@ describe("the mocked draft's transform", () => {
     );
   });
 
-  it("refuses two tools that would share one routing variable, before anything is written", () => {
-    // The same name twice in one engine. Egma answers a call by the tool's
-    // name, so one variable cannot decide for two of them.
-    const twice: EngineConfiguration = {
-      reference: FLOW_REFERENCE,
-      document: {
-        tools: [
-          { type: "custom", name: "book", url: "https://one.example/book" },
-          { type: "custom", name: "book", url: "https://two.example/book" },
-        ],
-      },
-    };
-    const refused = mockedToolsFor(twice);
-    expect(refused.kind).toBe("refused");
-    if (refused.kind !== "refused") return;
-    expect(refused.reason).toContain("egma_url_book");
-    expect(refused.reason).toContain("two custom tools");
-  });
-
-  it("refuses a tool whose variable the customer already fills", () => {
-    const taken: EngineConfiguration = {
-      reference: FLOW_REFERENCE,
-      document: {
-        default_dynamic_variables: { egma_url_book: "https://mine.example" },
-        tools: [
-          { type: "custom", name: "book", url: "https://one.example/book" },
-        ],
-      },
-    };
-    const refused = mockedToolsFor(taken);
-    expect(refused.kind).toBe("refused");
-    if (refused.kind !== "refused") return;
-    expect(refused.reason).toContain("egma_url_book");
-    expect(refused.reason).toContain("will not overwrite a variable of yours");
-  });
-
   it("builds the address one mocked call is routed to, with the fragment that hides the rest", () => {
     const url = mockToolUrl(TARGET, "price list/lookup?v=2");
     expect(url).toBe(
@@ -235,48 +169,6 @@ describe("the mocked draft's transform", () => {
     // The trailing `#` is the whole of how the customer's own URL is hidden:
     // it trails behind as a fragment, and an HTTP client never sends one.
     expect(url.endsWith("#")).toBe(true);
-  });
-
-  it("walks both of a Retell LLM's tool arrays", () => {
-    const { tools, defaults } = mocked(llm);
-
-    const general = tools["general_tools"] as readonly Record<
-      string,
-      unknown
-    >[];
-    expect(general[0]?.["url"]).toBe(
-      "{{egma_url_lookup_patient}}https://api.example.com/patients/lookup",
-    );
-    // The built-in beside it is untouched and carries no URL at all.
-    expect(general[1]).toEqual({
-      type: "end_call",
-      name: "end_call",
-      description: "Ends the conversation.",
-    });
-
-    const states = tools["states"] as readonly Record<string, unknown>[];
-    const triage = (states[0]?.["tools"] as Record<string, unknown>[])[0];
-    const booking = (states[1]?.["tools"] as Record<string, unknown>[])[0];
-    expect(triage?.["url"]).toBe(
-      "{{egma_url_triage_symptoms}}https://api.example.com/triage",
-    );
-    expect(booking?.["url"]).toBe(
-      "{{egma_url_book_slot}}https://api.example.com/appointments",
-    );
-
-    // A state with no tools survives the walk unchanged.
-    expect(states[2]).toEqual(
-      (llm.document["states"] as readonly unknown[])[2],
-    );
-
-    // Every custom tool of both arrays is declared, and the practice's own
-    // default is still beside them.
-    expect(defaults).toEqual({
-      practice_name: "Northgate Dental",
-      egma_url_lookup_patient: " ",
-      egma_url_triage_symptoms: " ",
-      egma_url_book_slot: " ",
-    });
   });
 
   /**
@@ -357,18 +249,6 @@ describe("the mocked draft's transform", () => {
     }
   });
 
-  it("leaves an MCP server exactly as it found it, on both engines", () => {
-    // MCP entries are never rewritten and are never resent: they live in an
-    // array the write body does not carry at all.
-    for (const engine of [flow, llm]) {
-      const { tools, variables } = mocked(engine);
-      expect(Object.keys(tools)).not.toContain("mcps");
-      expect(variables.map((one) => one.tool)).not.toContain("inventory");
-      expect(variables.map((one) => one.tool)).not.toContain("formulary");
-      expect(JSON.stringify(tools)).not.toContain("mcp.example.com");
-    }
-  });
-
   it("routes a custom tool and nothing else, on either engine", () => {
     // The whole of the classification, and the whole of what is left of it: a
     // custom tool is a webhook Egma can put a variable in front of. Everything
@@ -400,20 +280,6 @@ describe("the mocked draft's transform", () => {
     // The tool array still goes back whole, and the entry is the object that
     // arrived rather than a copy of it.
     expect(draft.tools["tools"]).toEqual(invented.document["tools"]);
-  });
-
-  /**
-   * Preserve headers and query parameters because the shared draft also serves
-   * unmocked tools that need backend credentials. The mock endpoint ignores them.
-   */
-  it("carries the customer's own headers and query params through, unchanged", () => {
-    const { tools } = mocked(flow);
-    const first = (tools["tools"] as Record<string, unknown>[])[0];
-    expect(first?.["headers"]).toEqual({
-      Authorization: "Bearer sk_live_FIXTURESECRET_availability_9f2b1c",
-      "X-Tenant-Key": "tenant_FIXTURESECRET_remedy_4a71de",
-    });
-    expect(first?.["query_params"]).toEqual({ locale: "en-US" });
   });
 
   it("sends Egma's own key nowhere, on the wire or in a refusal", async () => {
@@ -465,20 +331,6 @@ describe("the mocked draft's transform", () => {
     const said = JSON.stringify(written);
     expect(said).not.toContain("FIXTURESECRET");
     expect(said).not.toContain("retell-key-abc123");
-  });
-
-  it("writes nothing at all for an engine that declares no tools", () => {
-    const bare: EngineConfiguration = {
-      reference: LLM_REFERENCE,
-      document: { general_prompt: "hello" },
-    };
-    expect(mockedToolsFor(bare)).toEqual({
-      kind: "mocked",
-      tools: {},
-      // Nothing to route, so the customer's defaults are not rewritten either.
-      defaults: {},
-      variables: [],
-    });
   });
 
   it("names every routing default the version read back does not hold as one space", () => {

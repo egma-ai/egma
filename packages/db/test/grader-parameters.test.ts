@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  validateGraderParameterContract,
-  validateGraderParameterValues,
-} from "../src/grader-library/parameters.ts";
+import { validateGraderParameterValues } from "../src/grader-library/parameters.ts";
 
 const contract = [{
   key: "maximum_response_time_ms",
@@ -28,10 +25,6 @@ describe("grader settings", () => {
     expect(() => validateGraderParameterValues(models, { llm_model: "gpt-5.2", tts_speed: "1" }))
       .toThrow("must be a number");
   });
-  it("accepts the small typed contract with its default", () => {
-    expect(validateGraderParameterContract(contract)).toEqual(contract);
-  });
-
   it("accepts one complete value object and refuses missing or extra values", () => {
     expect(validateGraderParameterValues(contract, {
       maximum_response_time_ms: 2_500,

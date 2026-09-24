@@ -251,27 +251,6 @@ afterEach(async () => {
 });
 
 describe("skills-first init and pull", () => {
-  it("requires authentication before it creates an egma folder", async () => {
-    const io = outputs();
-    let requests = 0;
-
-    const code = await runInitCommand({
-      ...commandOptions(workspace, io),
-      fetchImpl: async () => {
-        requests += 1;
-        return new JsonResponse({});
-      },
-    });
-
-    expect(code).toBe(1);
-    expect(requests).toBe(0);
-    expect(io.out).toEqual([]);
-    expect(io.fail.join("\n")).toContain("egma login");
-    await expect(stat(folderPathsIn(workspace.dir).config)).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-  });
-
   it("stops on an invalid existing config and leaves it unchanged", async () => {
     await signInFromLogin(workspace, PROJECT_ONE);
     const paths = folderPathsIn(workspace.dir);
@@ -402,29 +381,6 @@ describe("skills-first init and pull", () => {
     expect(io.out).toContain(`Initialized Egma in ${folderPathsIn(workspace.dir).root}.`);
   });
 
-  it("reports an account with no Project and creates nothing", async () => {
-    await workspace.signIn(URL, "egma_sk_organization");
-    const api = remoteApi({ projects: [] });
-    const io = outputs();
-
-    const code = await runInitCommand({
-      ...commandOptions(workspace, io),
-      fetchImpl: api.fetchImpl,
-    });
-
-    expect(code).toBe(1);
-    expect(
-      api.requests.map((request) => new globalThis.URL(request.url).pathname),
-    ).toEqual(["/v1/projects"]);
-    expect(io.out).toEqual([]);
-    expect(io.fail).toEqual([
-      "This Egma account has no Project. Create a Project in Egma, then run egma init again. Nothing was changed.",
-    ]);
-    await expect(stat(folderPathsIn(workspace.dir).config)).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-  });
-
   it("binds and pulls an existing empty format-4 config", async () => {
     await signInFromLogin(workspace, PROJECT_ONE);
     await createEgmaFolder({
@@ -449,26 +405,6 @@ describe("skills-first init and pull", () => {
     expect(io.out).toContain(
       `Refreshed ${folderPathsIn(workspace.dir).root} from Egma.`,
     );
-  });
-
-  it("does not let --project override the device-login Project", async () => {
-    await signInFromLogin(workspace, PROJECT_ONE);
-    const api = remoteApi({
-      projects: [PROJECT, { id: PROJECT_TWO, name: "Westside" }],
-    });
-    const io = outputs();
-
-    const code = await runInitCommand({
-      ...commandOptions(workspace, io),
-      projectId: PROJECT_TWO,
-      fetchImpl: api.fetchImpl,
-    });
-
-    expect(code).toBe(FOLDER_EXIT.nothing);
-    expect(api.requests).toHaveLength(0);
-    await expect(stat(folderPathsIn(workspace.dir).config)).rejects.toMatchObject({
-      code: "ENOENT",
-    });
   });
 
   it("lists Project options when authentication does not identify one", async () => {

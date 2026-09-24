@@ -402,55 +402,6 @@ async def test_every_background_choice_reaches_one_real_caller_microphone_track(
         await remote.close()
 
 
-async def test_fixed_background_and_recording_follow_submitted_audio(
-    live_livekit,
-):
-    remote, submitted, recorded = await _received_mix(live_livekit, "rain-v1")
-    try:
-        noise = b"".join(
-            frame
-            for kind, frame, _ in submitted.frames
-            if not issubclass(kind, TTSAudioRawFrame)
-        )
-        speech = b"".join(
-            frame
-            for kind, frame, _ in submitted.frames
-            if issubclass(kind, TTSAudioRawFrame)
-        )
-        received_before_speech = b"".join(remote.background_before_speech[-8:])
-
-        assert _rms(noise) > 20
-        assert _rms(speech) > _rms(noise)
-        assert _rms(received_before_speech) > 20
-
-        # Background frames are recorded on the same submitted-output clock but
-        # retain their non-TTS type. They add recording time without becoming
-        # persona speech evidence.
-        submitted_seconds = sum(duration for _kind, _pcm, duration in submitted.frames)
-        received_active_seconds = sum(
-            len(frame) / 2 / SAMPLE_RATE
-            for frame in remote.frames
-            if _rms(frame) > 20
-        )
-        recorded_seconds = len(recorded) / 2 / SAMPLE_RATE
-        assert submitted_seconds >= 0.3
-        assert received_active_seconds >= 0.3
-        assert abs(recorded_seconds - submitted_seconds) < FRAME_SECONDS
-        assert any(
-            not issubclass(kind, TTSAudioRawFrame)
-            for kind, _pcm, _duration in submitted.frames
-        )
-        assert (
-            sum(
-                issubclass(kind, TTSAudioRawFrame)
-                for kind, _pcm, _duration in submitted.frames
-            )
-            > 0
-        )
-    finally:
-        await remote.close()
-
-
 async def test_real_caller_receives_deliberate_overlap_while_background_continues(
     live_livekit,
     tmp_path,

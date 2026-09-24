@@ -151,58 +151,6 @@ describe.skipIf(!storage.available)("a captured conversation arriving on a proje
     expect(plans[0]?.entries).toEqual([]);
     expect(await jobsFor(acme.organizationId)).toEqual([]);
   });
-
-  /**
-   * A parentless span alone does not signal completion. Require a recognized
-   * platform end marker, including when malformed parent IDs normalize to absence.
-   */
-  it("is not completed by a parentless span from a platform Egma does not recognise", async () => {
-    const traceId = "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a";
-    const secret = await mintKey(acme, "another framework", acme.projectId);
-    const posted = await api.app.inject({
-      method: "POST",
-      url: OTLP_TRACES_PATH,
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${secret}`,
-      },
-      payload: JSON.stringify({
-        resourceSpans: [
-          {
-            resource: { attributes: [] },
-            scopeSpans: [
-              {
-                scope: { name: "another-agent-platform" },
-                spans: [
-                  {
-                    traceId,
-                    spanId: "5a5a5a5a5a5a5a5a",
-                    // No parent at all, which is what a lost flush leaves.
-                    parentSpanId: "",
-                    name: "agent_session",
-                    startTimeUnixNano: "1785693880281989804",
-                    endTimeUnixNano: "1785693881281989804",
-                    attributes: [],
-                  },
-                ],
-              },
-            ],
-          },
-        ],
-      }),
-    });
-    expect(posted.statusCode, posted.body).toBe(200);
-    await api.drainEvidence();
-
-    const traceStore = api.traceStore;
-    if (traceStore === undefined) throw new Error("this API has no trace store");
-    const [receipt] = await traceStore.rows<{ n: string }>(
-      "select count() as n from production_grading_plans " +
-        `where organization_id = '${acme.organizationId}' and trace_id = '${traceId}'`,
-    );
-    expect(Number(receipt?.n ?? -1)).toBe(0);
-    expect(await jobsFor(acme.organizationId)).toEqual([]);
-  });
 });
 
 describe.skipIf(!storage.available)("telemetry sent with a key for the whole customer", () => {

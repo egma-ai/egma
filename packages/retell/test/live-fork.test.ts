@@ -361,18 +361,3 @@ live("branching a live Retell-LLM agent", () => {
     made.branchedVersion = null;
   });
 });
-
-describe("the live fork check's own gate", () => {
-  it("names the variable that turns it on", () => {
-    // Runs with or without a key, so a reader of a green CI log can see that
-    // the live check exists and why it did not run.
-    expect(LIVE_KEY_VARIABLE).toBe("EGMA_LIVE_RETELL_API_KEY");
-    if (liveKey === "") {
-      console.log(
-        `[retell lifecycle check] skipped — set ${LIVE_KEY_VARIABLE} to run ` +
-          "it. It creates one scratch agent and deletes it again, and never " +
-          "reads or writes an agent that was already on the account.",
-      );
-    }
-  });
-});

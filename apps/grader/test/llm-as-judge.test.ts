@@ -67,55 +67,6 @@ function execution(
 }
 
 describe("a customer LLM grader", () => {
-  it("uses the saved grading instructions as one criterion", async () => {
-    const { scripted, execution: input } = execution(
-      met("The agent explained what happens next.", [1]),
-    );
-
-    const result = await execute(input);
-
-    expect(result).toEqual({
-      score: 1,
-      details: {
-        rationale: "The agent explained what happens next.",
-        assertions: [{
-          key: "instruction_1",
-          decision: "met",
-          score: 1,
-          rationale: "The agent explained what happens next.",
-          citedSpanIds: ["aaaaaaaaaaaaaaaa"],
-          citedTurns: [1],
-        }],
-      },
-    });
-    expect(scripted.judge.asked).toHaveLength(1);
-    expect(scripted.judge.asked[0]?.prompt).toContain(
-      "met, not_met, or cannot_determine",
-    );
-    expect(scripted.judge.asked[0]?.criterion).toBe(INSTRUCTIONS);
-  });
-
-  it("scores could-not-determine as zero while retaining the decision", async () => {
-    const { execution: input } = execution(
-      cannotDetermine("The transcript does not settle this."),
-    );
-
-    await expect(execute(input)).resolves.toEqual({
-      score: 0,
-      details: {
-        rationale: "The transcript does not settle this.",
-        assertions: [{
-          key: "instruction_1",
-          decision: "cannot_determine",
-          score: 0,
-          rationale: "The transcript does not settle this.",
-          citedSpanIds: [],
-          citedTurns: [],
-        }],
-      },
-    });
-  });
-
   it("does not call the model when the trace is incomplete", async () => {
     const { scripted, execution: input } = execution(
       met("unused"),

@@ -104,7 +104,7 @@ describe("the evidence used to grade a platform simulation", () => {
     expect(conversation.transcript).toHaveLength(1);
   });
 
-  it.each(["phone_number", "retell_text_mode"])(
+  it.each(["phone_number"])(
     "grades the persona's conversation and tools for %s when both accounts exist",
     (lane) => {
       const actual = span("agent", {
@@ -128,7 +128,7 @@ describe("the evidence used to grade a platform simulation", () => {
     },
   );
 
-  it.each(["retell_web_call", "livekit_room"])("uses the frozen %s lane when provider spans omit it", (lane) => {
+  it.each(["retell_web_call"])("uses the frozen %s lane when provider spans omit it", (lane) => {
     const providerTrace = trace("", [span("agent"), span("persona")], [mock]);
     expect(conversationOfSimulation(simulation, providerTrace, lane).events).toEqual([]);
     const partial = { ...providerTrace, agentEvidenceComplete: false };

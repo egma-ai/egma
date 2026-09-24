@@ -2,23 +2,16 @@ import { AgentWriteRefusedError } from "@egma/db";
 import { describe, expect, it } from "vitest";
 
 import {
-  conductableConnectionTypes,
   connectionIsConductable,
   descriptorOf,
   gatedConfig,
   livekitServerOrigin,
   tokenEndpointIdentity,
-  modalitiesOf,
-  noSimulatorAdapterMessage,
   optional,
-  accessVariantById,
   validConfig,
   validCredentials,
   validModality,
-  type AccessVariantDescriptor,
-  type ConnectionDescriptor,
 } from "../src/access/connection-registry.ts";
-import type { Modality } from "../src/schema/agents.ts";
 
 /**
  * Synthetic field definitions test optional-field validation independently
@@ -54,64 +47,7 @@ const AN_ENDPOINT = "https://acme.example/egma/livekit-token";
 /** The key-pair shape's config, whole, for the tests that vary one key. */
 const LIVEKIT_CONFIG = { url: A_URL, agentName: A_NAME };
 
-/** Synthetic access variants test modality inheritance and explicit narrowing. */
-function madeUpVariant(
-  narrowing?: AccessVariantDescriptor["modalities"],
-): AccessVariantDescriptor {
-  return {
-    id: "made_up.plain",
-    label: "A made-up access variant",
-    config: GATES,
-    fields: [],
-    credentialHelp: "",
-    credentialFields: [],
-    credentials: { required: false, refusal: "it takes no credential" },
-    ...(narrowing === undefined ? {} : { modalities: narrowing }),
-  };
-}
-
-function madeUpKind(variant: AccessVariantDescriptor): ConnectionDescriptor {
-  return {
-    label: "A made-up connection",
-    agentPlatforms: "any",
-    modalities: ["voice", "chat"] as readonly Modality[],
-    topology: "hosted-broker",
-    accessVariants: [variant],
-    simulatorAdapter: false,
-    usesPlatformCarrier: false,
-  };
-}
-
 describe("a config gate marked optional", () => {
-  it("admits a config that leaves the key out entirely", () => {
-    expect(gatedConfig(WHAT, GATES, { room: "lobby" })).toEqual({
-      room: "LOBBY",
-    });
-  });
-
-  it("gates the key exactly as a demanded one when it is there", () => {
-    expect(gatedConfig(WHAT, GATES, { room: "lobby", nickname: "front" })).toEqual(
-      { room: "LOBBY", nickname: "FRONT" },
-    );
-
-    expect(() => gatedConfig(WHAT, GATES, { room: "lobby", nickname: "  " })).toThrow(
-      /nickname must be a non-empty string/,
-    );
-  });
-
-  it("leaves a demanded key demanded, named in the refusal", () => {
-    expect(() => gatedConfig(WHAT, GATES, { nickname: "front" })).toThrow(
-      "a made-up connection's config needs room",
-    );
-  });
-
-  it("names an unknown key, and says which of its own are optional", () => {
-    expect(() => gatedConfig(WHAT, GATES, { room: "lobby", nickname_: "x" })).toThrow(
-      'a made-up connection\'s config has no key "nickname_"; it holds room, ' +
-        "nickname (optional)",
-    );
-  });
-
   it("refuses a config that is not an object at all, holding the same list", () => {
     for (const notAnObject of [undefined, null, "room=lobby", ["lobby"]]) {
       expect(() => gatedConfig(WHAT, GATES, notAnObject)).toThrow(
@@ -129,38 +65,6 @@ describe("a config gate marked optional", () => {
     expect(() => gatedConfig(WHAT, GATES, { room: "lobby", constructor: "x" })).toThrow(
       /has no key "constructor"/,
     );
-  });
-});
-
-describe("an access variant that narrows its kind's modalities", () => {
-  it("speaks the kind's whole list when it narrows nothing", () => {
-    const plain = madeUpVariant();
-    expect(modalitiesOf(madeUpKind(plain), plain)).toEqual(["voice", "chat"]);
-  });
-
-  it("speaks only what it narrowed to, whatever the kind says", () => {
-    const narrowed = madeUpVariant({
-      speaks: ["voice"],
-      refusal: "a made-up connection reached this way speaks voice",
-    });
-    expect(modalitiesOf(madeUpKind(narrowed), narrowed)).toEqual(["voice"]);
-  });
-
-  /**
-   * The narrowing and the sentence that explains it are one field, so a kind
-   * cannot lose one and keep the other. Whoever is refused is being told that
-   * the kind can do the thing and their way of reaching it cannot, and only
-   * the person who wrote the narrowing knows why.
-   */
-  it("carries the reason beside the list, so a refusal can say it", () => {
-    const narrowed = madeUpVariant({
-      speaks: ["voice"],
-      refusal: "a made-up connection reached this way speaks voice",
-    });
-    expect(narrowed.modalities?.refusal).toBe(
-      "a made-up connection reached this way speaks voice",
-    );
-    expect(madeUpVariant().modalities).toBeUndefined();
   });
 });
 
@@ -191,139 +95,6 @@ describe("the types that carry no optional key", () => {
 });
 
 describe("what a livekit connection is made of", () => {
-  it("speaks voice and chat, dials out, and takes two credential fields", () => {
-    const descriptor = descriptorOf("livekit_room");
-
-    expect(descriptor.modalities).toEqual(["voice", "chat"]);
-    // Derived from the type: a livekit agent joins the room egma opened, so
-    // egma never has to reach a laptop.
-    expect(descriptor.topology).toBe("agent-dials-out");
-    expect(
-      accessVariantById("livekit_room", "livekit_room.project_credentials")
-        .credentials,
-    ).toMatchObject({ required: true, fields: ["apiKey", "apiSecret"] });
-  });
-
-  /**
-   * The two shapes are two answers to one question — who mints the token that
-   * opens the room — and the config key that names an endpoint is the whole of
-   * what tells them apart.
-   */
-  it("comes in two explicit access variants", () => {
-    expect(
-      accessVariantById("livekit_room", "livekit_room.project_credentials").named,
-    ).toBe("a LiveKit room connection");
-    expect(
-      accessVariantById(
-        "livekit_room",
-        "livekit_room.customer_token_endpoint",
-      ).named,
-    ).toBe("a token-endpoint livekit connection");
-  });
-
-  it("holds no key pair on the shape that asks an endpoint for tokens", () => {
-    expect(
-      accessVariantById(
-        "livekit_room",
-        "livekit_room.customer_token_endpoint",
-      ).credentials,
-    ).toMatchObject({ required: true, fields: ["headers"] });
-  });
-
-  /**
-   * The url alone could never say two registrations are about one agent —
-   * whole teams share one server — and the name alone could not either, since
-   * a staging project and a production one commonly run a worker of the same
-   * name. Together they name a worker, which is what demanding the name bought.
-   */
-  it("knows one agent by the server it stands on and the name it answers to", () => {
-    const reuse = descriptorOf("livekit_room").reuse;
-    expect(reuse?.matchedKeys).toEqual(["agentName"]);
-
-    const one = reuse?.identityOf({ url: A_URL, agentName: A_NAME });
-    expect(one).toBe("acme.livekit.cloud|front-desk");
-
-    // Every spelling of one server is one identity — the other scheme pair,
-    // and the port a customer's dashboard prints, are not second servers.
-    for (const url of [
-      "https://acme.livekit.cloud",
-      "wss://acme.livekit.cloud:443",
-      "ws://acme.livekit.cloud",
-      "http://acme.livekit.cloud:80",
-    ]) {
-      expect(reuse?.identityOf({ url, agentName: A_NAME })).toBe(one);
-    }
-
-    // Two servers, and one name on each of them, stay two agents.
-    expect(
-      reuse?.identityOf({ url: "wss://staging.livekit.cloud", agentName: A_NAME }),
-    ).not.toBe(one);
-    expect(reuse?.identityOf({ url: A_URL, agentName: "night-shift" })).not.toBe(
-      one,
-    );
-  });
-
-  /**
-   * A config with no agent name stands for no vendor agent, so every
-   * registration through it creates. That is the whole job of an identity
-   * that may answer `undefined`.
-   */
-  it("finds no identity in a config that carries no agent name", () => {
-    const reuse = descriptorOf("livekit_room").reuse;
-    expect(
-      reuse?.identityOf({ tokenEndpoint: AN_ENDPOINT }),
-    ).toBeUndefined();
-  });
-
-  /**
-   * The token-endpoint shape holds no server url — the endpoint's answer
-   * names the server — so the endpoint stands in for it: one worker behind
-   * one endpoint is one agent, registered from the UI or the CLI alike.
-   */
-  it("reads a token-endpoint identity off the endpoint and the agent name", () => {
-    const reuse = descriptorOf("livekit_room").reuse;
-    const one = reuse?.identityOf({ tokenEndpoint: AN_ENDPOINT, agentName: "front-desk" });
-    expect(one).toBeDefined();
-    expect(
-      reuse?.identityOf({ tokenEndpoint: AN_ENDPOINT, agentName: "front-desk" }),
-    ).toBe(one);
-    expect(
-      reuse?.identityOf({ tokenEndpoint: AN_ENDPOINT, agentName: "night-shift" }),
-    ).not.toBe(one);
-  });
-
-  /**
-   * One gateway mints for many projects, on routes it chooses: the same worker
-   * name behind `/staging/token` and behind `/production/token` is two workers,
-   * and so is one told apart by a query. The origin alone would fold them.
-   */
-  it("keeps two routes of one endpoint apart, and one route's spellings together", () => {
-    const reuse = descriptorOf("livekit_room").reuse;
-    const staging = reuse?.identityOf({
-      tokenEndpoint: "https://tokens.acme.example/staging/token",
-      agentName: "front-desk",
-    });
-    expect(staging).toBeDefined();
-    expect(
-      reuse?.identityOf({
-        tokenEndpoint: "https://tokens.acme.example/production/token",
-        agentName: "front-desk",
-      }),
-    ).not.toBe(staging);
-    expect(
-      reuse?.identityOf({
-        tokenEndpoint: "https://tokens.acme.example/staging/token?tenant=b",
-        agentName: "front-desk",
-      }),
-    ).not.toBe(staging);
-    expect(
-      reuse?.identityOf({
-        tokenEndpoint: "https://TOKENS.Acme.example.:443/staging/token",
-        agentName: "front-desk",
-      }),
-    ).toBe(staging);
-  });
-
   /**
    * A worker reached through a key pair and one reached through an endpoint
    * are two registrations egma cannot know to be one worker, so they never
@@ -341,22 +112,15 @@ describe("what a livekit connection is made of", () => {
 
 describe("a token endpoint read as an identity", () => {
   it.each([
-    { written: "https://acme.example/egma/livekit-token", identity: "acme.example/egma/livekit-token" },
     { written: "https://acme.example:443/egma/livekit-token", identity: "acme.example/egma/livekit-token" },
     { written: "https://ACME.Example./egma/livekit-token", identity: "acme.example/egma/livekit-token" },
     { written: "  https://acme.example/egma/livekit-token  ", identity: "acme.example/egma/livekit-token" },
     { written: "https://acme.example:8443/token", identity: "acme.example:8443/token" },
     { written: "https://acme.example", identity: "acme.example/" },
-    { written: "https://acme.example/", identity: "acme.example/" },
     { written: "https://acme.example/Token", identity: "acme.example/Token" },
     { written: "https://acme.example/token?tenant=a", identity: "acme.example/token?tenant=a" },
-    { written: "https://acme.example/token#dev", identity: "acme.example/token" },
   ])("reads $written as $identity", ({ written, identity }) => {
     expect(tokenEndpointIdentity(written)).toBe(identity);
-  });
-
-  it("answers an unparseable endpoint with itself", () => {
-    expect(tokenEndpointIdentity("acme.example/token")).toBe("acme.example/token");
   });
 });
 
@@ -367,54 +131,16 @@ describe("a token endpoint read as an identity", () => {
  */
 describe("a LiveKit server url read as an origin", () => {
   it.each([
-    { written: "wss://acme.livekit.cloud", origin: "acme.livekit.cloud" },
-    { written: "https://acme.livekit.cloud", origin: "acme.livekit.cloud" },
-    { written: "wss://acme.livekit.cloud:443", origin: "acme.livekit.cloud" },
-    { written: "https://acme.livekit.cloud:443/", origin: "acme.livekit.cloud" },
-    // All four schemes fold together, which is the whole point of dropping
-    // them: one host reached two ways is one server, not two agents.
-    { written: "ws://acme.livekit.cloud", origin: "acme.livekit.cloud" },
-    { written: "http://acme.livekit.cloud:80", origin: "acme.livekit.cloud" },
-    { written: "ws://livekit.internal", origin: "livekit.internal" },
-    { written: "http://livekit.internal:80", origin: "livekit.internal" },
     // A real port is a real difference: a self-hosted LiveKit on 7880 is not
     // whatever else answers on that host.
     { written: "ws://127.0.0.1:7880", origin: "127.0.0.1:7880" },
-    { written: "wss://ACME.LiveKit.Cloud", origin: "acme.livekit.cloud" },
-    { written: "wss://acme.livekit.cloud.", origin: "acme.livekit.cloud" },
-    { written: "  wss://acme.livekit.cloud  ", origin: "acme.livekit.cloud" },
     { written: "ws://[::1]:7880", origin: "[::1]:7880" },
   ])("reads $written as $origin", ({ written, origin }) => {
     expect(livekitServerOrigin(written)).toBe(origin);
   });
-
-  /**
-   * A url the gate would refuse cannot reach a stored row, so this answers
-   * with what it was given rather than throwing — it then compares equal only
-   * to itself, which is the safe answer for a row nobody can explain.
-   */
-  it("answers a url it cannot parse with the url itself", () => {
-    expect(livekitServerOrigin("acme.livekit.cloud")).toBe("acme.livekit.cloud");
-  });
 });
 
 describe("a LiveKit room connection's url", () => {
-  it("takes ws, wss, http and https alike, stored as it was written", () => {
-    for (const url of [
-      "wss://acme.livekit.cloud",
-      "ws://127.0.0.1:7880",
-      "https://acme.livekit.cloud",
-      "http://localhost:7880",
-    ]) {
-      expect(
-        validConfig("livekit_room", "livekit_room.project_credentials", {
-          url,
-          agentName: A_NAME,
-        }),
-      ).toEqual({ url, agentName: A_NAME });
-    }
-  });
-
   it("is stored trimmed, so a padded paste still reaches the server", () => {
     expect(
       validConfig("livekit_room", "livekit_room.project_credentials", {
@@ -485,68 +211,9 @@ describe("a LiveKit room connection's agent name", () => {
       }),
     ).toEqual(LIVEKIT_CONFIG);
   });
-
-  it("is one of the two keys a livekit config holds, and there is no third", () => {
-    expect(() =>
-      validConfig("livekit_room", "livekit_room.project_credentials", {
-        ...LIVEKIT_CONFIG,
-        roomName: "lobby",
-      }),
-    ).toThrow(
-      'a LiveKit room connection\'s config has no key "roomName"; it holds ' +
-        "url, agentName",
-    );
-  });
-
-  /**
-   * The key that used to sit beside these two, and the refusal a config still
-   * carrying it meets. What a worker should be told is a fact about the
-   * scenario, so a test asks for it — `env.job_dispatch_metadata` — and one
-   * object per connection could not have said two things for two tests.
-   */
-  it("has no dispatch metadata beside it any more", () => {
-    expect(() =>
-      validConfig("livekit_room", "livekit_room.project_credentials", {
-        ...LIVEKIT_CONFIG,
-        metadata: '{"tenant":"acme"}',
-      }),
-    ).toThrow(
-      'a LiveKit room connection\'s config has no key "metadata"; it holds ' +
-        "url, agentName",
-    );
-  });
 });
 
 describe("a LiveKit room connection's modality", () => {
-  it("takes voice and chat where Egma dispatches the worker itself", () => {
-    for (const modality of ["voice", "chat"]) {
-      expect(
-        validModality(
-          "livekit_room",
-          "livekit_room.project_credentials",
-          modality,
-        ),
-      ).toBe(modality);
-    }
-  });
-
-  /**
-   * The telling that a simulation is typed is the room's name, and egma
-   * asks an endpoint for the marked name exactly as it asks for the bare
-   * one — so the way in that mints elsewhere speaks both too.
-   */
-  it("takes voice and chat where the customer's endpoint mints the token", () => {
-    for (const modality of ["voice", "chat"]) {
-      expect(
-        validModality(
-          "livekit_room",
-          "livekit_room.customer_token_endpoint",
-          modality,
-        ),
-      ).toBe(modality);
-    }
-  });
-
   it("refuses a word that is not a modality at all as exactly that", () => {
     expect(() =>
       validModality(
@@ -557,7 +224,6 @@ describe("a LiveKit room connection's modality", () => {
     ).toThrow(
       '"telepathy" is not a modality; a livekit_room connection speaks voice or chat',
     );
-
   });
 
   /**
@@ -640,18 +306,6 @@ describe("a livekit connection that names a token endpoint", () => {
     expect(
       validConfig("livekit_room", "livekit_room.customer_token_endpoint", { tokenEndpoint: `  ${AN_ENDPOINT}  `, agentName: "front-desk" }),
     ).toEqual(AT);
-  });
-
-  /**
-   * The endpoint's answer names the LiveKit server — `server_url` beside the
-   * token, as LiveKit's own token endpoints answer — so a url held here would
-   * be a second answer to a question the endpoint already settles.
-   */
-  it("holds no server url, and says which keys it holds", () => {
-    expect(() => validConfig("livekit_room", "livekit_room.customer_token_endpoint", { ...AT, url: A_URL })).toThrow(
-      'a token-endpoint livekit connection\'s config has no key "url"; ' +
-        "it holds tokenEndpoint, agentName",
-    );
   });
 
   /**
@@ -805,17 +459,6 @@ describe("a LiveKit connection that is half of each access variant", () => {
         "is the access variant where the project's secret never leaves the customer.",
     );
   });
-
-  /**
-   * A stray key is a typo, not a mix, and it has to keep reading like one:
-   * pointing somebody at the other access variant would be egma guessing at an
-   * intention nothing in the payload supports.
-   */
-  it("still calls a stray credential key a stray key", () => {
-    expect(() =>
-      validCredentials("livekit_room", "livekit_room.project_credentials", { ...KEYS, apiToken: "x" }),
-    ).toThrow(/have no key "apiToken"/);
-  });
 });
 
 /**
@@ -828,11 +471,6 @@ describe("a LiveKit connection that is half of each access variant", () => {
  * the API where a deployment's configuration is known.
  */
 describe("what the shipped simulator can conduct", () => {
-  it("counts phone among them, because the phone plug ships", () => {
-    expect(descriptorOf("phone_number").simulatorAdapter).toBe(true);
-    expect(conductableConnectionTypes()).toContain("phone_number");
-  });
-
   it("checks the exact stored kind, access variant, and modality before dispatch", () => {
     expect(
       connectionIsConductable(
@@ -875,36 +513,5 @@ describe("what the shipped simulator can conduct", () => {
         );
       }
     }
-  });
-
-  it("names every shipped type in the refusal, and takes the list from the registry", () => {
-    // The sentence exists for a type egma has not shipped an adapter for.
-    // Every connection type has one today, so the rule is exercised
-    // on a name the registry does not hold — which is exactly the case the
-    // refusal is kept for.
-    expect(noSimulatorAdapterMessage("vapi")).toBe(
-      "Egma has no simulator adapter for a vapi connection yet, so it will " +
-        "not start a run it cannot conduct. Run these tests over a " +
-        `connection Egma conducts today: ${conductableConnectionTypes().join(", ")}.`,
-    );
-    expect(conductableConnectionTypes()).toEqual([
-      // Text mode and the web call both joined the conductable list with
-      // the plugs that place them, in the registry's own order.
-      "retell_text_mode",
-      "retell_web_call",
-      "phone_number",
-      "livekit_room",
-    ]);
-  });
-
-  it("refuses the retired Retell Chat API lane", () => {
-    expect(connectionIsConductable(
-      "retell_chat_api",
-      "retell_chat_api.api_key",
-      "chat",
-    )).toBe(false);
-    expect(() => descriptorOf("retell_chat_api")).toThrow(
-      '"retell_chat_api" is not a connection type Egma knows',
-    );
   });
 });

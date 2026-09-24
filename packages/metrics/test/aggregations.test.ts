@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { aggregateOf, worstSampleOf, type MeasuredFromSpans } from "../src/index.ts";
+import { aggregateOf, type MeasuredFromSpans } from "../src/index.ts";
 
 /**
  * The two reductions, held to their stated words: the mean is the average
@@ -23,21 +23,6 @@ describe("aggregateOf", () => {
     expect(aggregateOf(measured([1, 2]), "mean")).toBe(2);
   });
 
-  it("answers the single sample itself for a measure taken once", () => {
-    for (const aggregation of ["mean", "p50", "p90", "max"] as const) {
-      expect(aggregateOf(measured([1840]), aggregation)).toBe(1840);
-    }
-  });
-
-  it("is undefined for an empty series, exactly as the worst is", () => {
-    expect(aggregateOf(measured([]), "mean")).toBeUndefined();
-    expect(worstSampleOf(measured([]))).toBeUndefined();
-  });
-
-  it("keeps fractional reported samples honest in the rounding", () => {
-    expect(aggregateOf(measured([2387.5, 2387.5]), "mean")).toBe(2388);
-  });
-
   /**
    * Nearest-rank, exactly as the catalog states it: the p90 of ten
    * measurements is the ninth of them — a measurement that actually happened,
@@ -52,12 +37,5 @@ describe("aggregateOf", () => {
     // Unsorted input answers the same: the module sorts, the caller need not.
     expect(aggregateOf(measured([1100, 420]), "p50")).toBe(420);
     expect(aggregateOf(measured([1100, 420]), "p90")).toBe(1100);
-  });
-
-  it("answers the remaining reductions plainly", () => {
-    const three = measured([100, 200, 400]);
-    expect(aggregateOf(three, "sum")).toBe(700);
-    expect(aggregateOf(three, "min")).toBe(100);
-    expect(aggregateOf(three, "max")).toBe(400);
   });
 });

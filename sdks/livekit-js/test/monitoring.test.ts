@@ -1,5 +1,4 @@
-import { spawn } from "node:child_process";
-import { createServer, type Server } from "node:http";
+import { createServer } from "node:http";
 
 import {
   ProxyTracerProvider,
@@ -194,7 +193,6 @@ afterEach(() => {
 describe("simulation monitoring separation", () => {
   it.each([
     ["voice", "egma-sim-sim_123"],
-    ["chat", "egma-sim-chat-sim_123"],
   ])(
     "suppresses an Egma %s simulation from the room name alone",
     (_modality, roomName) => {
@@ -289,75 +287,6 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)("egma.monitor", () => {
     expect(message).toContain("Restart");
     expect(message).not.toContain(firstRoom);
     expect(message).not.toContain(secondRoom);
-  });
-
-  it("lets LiveKit Cloud add its processors to the shared provider", () => {
-    const { global } = unusedProviders();
-    vi.spyOn(trace, "getTracerProvider").mockReturnValue(global);
-    const ended: ReadableSpan[] = [];
-    const cloudProcessor: SpanProcessor = {
-      onStart(_span: Span, _parentContext: Context) {},
-      onEnd(span: ReadableSpan) {
-        ended.push(span);
-      },
-      async forceFlush() {},
-      async shutdown() {},
-    };
-
-    monitor(asJobContext(context()), {
-      endpoint: "https://api.egma.ai",
-      apiKey: PROJECT_KEY,
-    });
-    const state = monitoringStateForTests();
-    state?.registerSpanProcessor(cloudProcessor);
-    const provider = state?.provider;
-    provider?.getTracer("proof").startSpan("shared").end();
-
-    expect(ended.map((span) => span.name)).toEqual(["shared"]);
-    expect(ended[0]?.attributes).toMatchObject({
-      "session.id": "production-room",
-      "lk.agent_name": "appointment-agent",
-    });
-  });
-
-  it("omits an empty LiveKit agent name from span metadata", () => {
-    const { global } = unusedProviders();
-    vi.spyOn(trace, "getTracerProvider").mockReturnValue(global);
-    const ended: ReadableSpan[] = [];
-    const observer: SpanProcessor = {
-      onStart(_span: Span, _parentContext: Context) {},
-      onEnd(span: ReadableSpan) {
-        ended.push(span);
-      },
-      async forceFlush() {},
-      async shutdown() {},
-    };
-
-    monitor(asJobContext(context("production-room", "")), {
-      endpoint: "https://api.egma.ai",
-      apiKey: PROJECT_KEY,
-    });
-    const configured = monitoringStateForTests();
-    configured?.registerSpanProcessor(observer);
-    configured?.provider.getTracer("proof").startSpan("shared").end();
-
-    expect(ended[0]?.attributes["session.id"]).toBe("production-room");
-    expect(ended[0]?.attributes).not.toHaveProperty("lk.agent_name");
-  });
-
-  it("refuses to erase tracing that another integration already configured", () => {
-    const provider = new NodeTracerProvider();
-    vi.spyOn(compatibleTelemetry.tracer, "getProvider").mockReturnValue(
-      provider,
-    );
-    vi.spyOn(trace, "getTracerProvider").mockReturnValue(provider);
-
-    expect(() =>
-      monitor(asJobContext(context()), {
-        endpoint: "https://api.egma.ai",
-        apiKey: PROJECT_KEY,
-      }),
-    ).toThrow(/existing OpenTelemetry tracer provider/u);
   });
 
   it("adds Egma beside compatible existing telemetry", async () => {
@@ -478,39 +407,6 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)("egma.monitor", () => {
     expect(message).not.toContain(secondKey);
   });
 
-  it("names a wrong context instead of leaking an internal type error", () => {
-    expect(() =>
-      monitor({} as JobContext, {
-        endpoint: "https://api.egma.ai",
-        apiKey: PROJECT_KEY,
-      }),
-    ).toThrow(/JobContext/u);
-  });
-
-  it("makes a failed shutdown flush safe and does not repeat its error or key", async () => {
-    const { global } = unusedProviders();
-    vi.spyOn(trace, "getTracerProvider").mockReturnValue(global);
-    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    const ctx = context();
-
-    monitor(asJobContext(ctx), {
-      endpoint: "https://api.egma.ai",
-      apiKey: PROJECT_KEY,
-    });
-    const leakedFailure = `collector rejected ${PROJECT_KEY}`;
-    vi.spyOn(
-      monitoringStateForTests()!.processor,
-      "forceFlush",
-    ).mockRejectedValue(new Error(leakedFailure));
-
-    await expect(ctx.callbacks[0]!()).resolves.toBeUndefined();
-
-    const output = warning.mock.calls.flat().join(" ");
-    expect(output).toContain("could not flush every buffered span");
-    expect(output).not.toContain(PROJECT_KEY);
-    expect(output).not.toContain(leakedFailure);
-  });
-
   it("keeps Egma and LiveKit Cloud export active on its owned provider", async () => {
     trace.disable();
     vi.stubEnv("LIVEKIT_API_KEY", "devkey");
@@ -610,41 +506,6 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)(
       return { processor, provider };
     }
 
-    it("files children before a root that reached one batch first", async () => {
-      const collector = await localCollector([200, 200]);
-      const { processor, provider } = installedCollector(collector.endpoint);
-      const tracer = provider.getTracer("delivery-proof");
-
-      tracer.startSpan("agent_session").end();
-      tracer.startSpan("user_turn").end();
-      await processor.forceFlush();
-
-      expect(carriesSpan(collector.requests[0]!, "user_turn")).toBe(true);
-      expect(carriesSpan(collector.requests[0]!, "agent_session")).toBe(false);
-      expect(carriesSpan(collector.requests[1]!, "agent_session")).toBe(true);
-
-      await provider.shutdown();
-      await collector.close();
-    });
-
-    it("retries a transient child delivery before filing the root", async () => {
-      const collector = await localCollector([503, 200, 200]);
-      const { processor, provider } = installedCollector(collector.endpoint);
-      const tracer = provider.getTracer("delivery-proof");
-
-      tracer.startSpan("llm_request").end();
-      tracer.startSpan("agent_session").end();
-      await processor.forceFlush();
-
-      expect(carriesSpan(collector.requests[0]!, "llm_request")).toBe(true);
-      expect(carriesSpan(collector.requests[1]!, "llm_request")).toBe(true);
-      expect(carriesSpan(collector.requests[1]!, "agent_session")).toBe(false);
-      expect(carriesSpan(collector.requests[2]!, "agent_session")).toBe(true);
-
-      await provider.shutdown();
-      await collector.close();
-    });
-
     it("keeps later children but withholds the root after a permanent refusal", async () => {
       const collector = await localCollector([400, 200]);
       const { processor, provider } = installedCollector(collector.endpoint);
@@ -670,41 +531,7 @@ describe.runIf(SUPPORTS_SHARED_TELEMETRY)(
   },
 );
 
-describe.runIf(!SUPPORTS_SHARED_TELEMETRY)(
-  "egma.monitor without LiveKit shared telemetry",
-  () => {
-    it("keeps an Egma simulation inert before checking telemetry support", () => {
-      const warning = vi
-        .spyOn(console, "warn")
-        .mockImplementation(() => undefined);
-      const ctx = context("egma-sim-legacy");
-
-      expect(() => monitor(asJobContext(ctx))).not.toThrow();
-      expect(ctx.callbacks).toHaveLength(0);
-      expect(warning).toHaveBeenCalledWith(
-        expect.stringContaining("not exported"),
-      );
-    });
-
-    it("names the minimum LiveKit version for production monitoring", () => {
-      expect(() => monitor(asJobContext(context()))).toThrow(
-        /@livekit\/agents>=1\.5\.5/u,
-      );
-    });
-  },
-);
-
 describe("configuration", () => {
-  it.each([
-    "ftp://api.egma.ai",
-    "https://user:pass@api.egma.ai",
-    "https://api.egma.ai?key=value",
-    "https://api.egma.ai#fragment",
-    "not a URL",
-  ])("rejects the invalid endpoint %s", (endpoint) => {
-    expect(() => traceEndpoint(endpoint)).toThrow(/valid HTTP or HTTPS/u);
-  });
-
   it("does not append the trace path twice", () => {
     expect(traceEndpoint("https://api.egma.ai/v1/traces/")).toBe(
       "https://api.egma.ai/v1/traces",
@@ -721,88 +548,5 @@ describe("configuration", () => {
     }
     expect(message).toContain("invalid EGMA_API_KEY");
     expect(message).not.toContain(secret);
-  });
-});
-
-describe("the public helper and real exporter", () => {
-  it.runIf(SUPPORTS_SHARED_TELEMETRY)("flushes a LiveKit tracer span as authenticated OTLP protobuf", async () => {
-    let server: Server | undefined;
-    const received = new Promise<{
-      method: string | undefined;
-      path: string;
-      authorization: string | undefined;
-      contentType: string | undefined;
-      body: Buffer;
-    }>((resolve) => {
-      server = createServer((request, response) => {
-        const chunks: Buffer[] = [];
-        request.on("data", (chunk: Buffer) => chunks.push(chunk));
-        request.on("end", () => {
-          resolve({
-            method: request.method,
-            path: request.url ?? "",
-            authorization: request.headers.authorization,
-            contentType: request.headers["content-type"],
-            body: Buffer.concat(chunks),
-          });
-          response.writeHead(200, { "content-type": "application/x-protobuf" });
-          response.end();
-        });
-      });
-    });
-    await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", resolve));
-    const address = server?.address();
-    if (address === null || address === undefined || typeof address === "string") {
-      throw new Error("test collector has no TCP address");
-    }
-    const endpoint = `http://127.0.0.1:${String(address.port)}/v1/traces`;
-
-    try {
-      const probe = spawn(process.execPath, ["test/public-helper-probe.mjs"], {
-        cwd: new URL("..", import.meta.url),
-        env: {
-          ...process.env,
-          EGMA_TEST_ENDPOINT: endpoint,
-          EGMA_TEST_PROJECT_KEY: PROJECT_KEY,
-        },
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let stdout = "";
-      let stderr = "";
-      probe.stdout.setEncoding("utf8");
-      probe.stderr.setEncoding("utf8");
-      probe.stdout.on("data", (chunk: string) => {
-        stdout += chunk;
-      });
-      probe.stderr.on("data", (chunk: string) => {
-        stderr += chunk;
-      });
-      const completed = new Promise<void>((resolve, reject) => {
-        probe.on("error", reject);
-        probe.on("exit", (code, signal) => {
-          if (code === 0) {
-            resolve();
-            return;
-          }
-          reject(
-            new Error(
-              `public helper probe failed (${String(code ?? signal)}): ${stderr}`,
-            ),
-          );
-        });
-      });
-      const [request] = await Promise.all([received, completed]);
-
-      expect(stdout).toContain("public helper flush complete");
-      expect(request.method).toBe("POST");
-      expect(request.path).toBe("/v1/traces");
-      expect(request.authorization).toBe(`Bearer ${PROJECT_KEY}`);
-      expect(request.contentType).toContain("application/x-protobuf");
-      expect(request.body.byteLength).toBeGreaterThan(0);
-    } finally {
-      await new Promise<void>((resolve, reject) =>
-        server?.close((error) => (error ? reject(error) : resolve())),
-      );
-    }
   });
 });

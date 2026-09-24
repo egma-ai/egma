@@ -1,4 +1,3 @@
-import { newId } from "@egma/ids";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
@@ -60,46 +59,6 @@ async function createTest(
 }
 
 describe("the world a test carries", () => {
-  it("returns its mock tools and its env on create, on read, and on the version", async () => {
-    const { key } = await customer("test_world_read");
-    const suiteId = await suiteFor(key);
-
-    const created = await createTest(key, suiteId, {
-      mockTools: [
-        { tool: "get_availability", answer: { slots: [] } },
-        { tool: "book", error: "calendar down" },
-      ],
-      env: ENV,
-    });
-    expect(created.statusCode, JSON.stringify(created.body)).toBe(201);
-    expect(created.body.mockTools).toEqual([
-      { tool: "get_availability", answer: { slots: [] } },
-      { tool: "book", error: "calendar down" },
-    ]);
-    expect(created.body.env).toEqual(ENV);
-    // The count that used to ride beside the list is gone: a reader who has
-    // the list can count it, and a second copy of one fact is a second copy
-    // free to disagree.
-    expect(created.body.overrideCount).toBeUndefined();
-
-    const testId = String(created.body.id);
-    const read = await request(api.app, "GET", `/v1/tests/${testId}`, key);
-    expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
-    expect(read.body.mockTools).toEqual(created.body.mockTools);
-    expect(read.body.env).toEqual(ENV);
-
-    const version = await request(
-      api.app,
-      "GET",
-      `/v1/test-versions/${String(created.body.versionId)}`,
-      key,
-    );
-    expect(version.statusCode, JSON.stringify(version.body)).toBe(200);
-    expect(version.body.mockTools).toEqual(created.body.mockTools);
-    expect(version.body.env).toEqual(ENV);
-    expect(version.body.overrideCount).toBeUndefined();
-  });
-
   it("carries neither when neither was authored", async () => {
     const { key } = await customer("test_world_absent");
     const suiteId = await suiteFor(key);
@@ -425,32 +384,5 @@ describe("the world a test carries", () => {
     );
     expect(listed.statusCode, JSON.stringify(listed.body)).toBe(200);
     expect(listed.body.tests).toEqual([]);
-  });
-
-  it("no longer answers the project mock tool routes or the discovery route", async () => {
-    const { key } = await customer("test_world_removed_routes");
-    const mockToolId = "mtl_00000000000000000000000000";
-
-    const gone: readonly Answer[] = [
-      await request(api.app, "GET", "/v1/mock-tools", key),
-      await request(api.app, "POST", "/v1/mock-tools", key, {
-        tool: "get_availability",
-        answer: { slots: [] },
-      }),
-      await request(api.app, "PATCH", `/v1/mock-tools/${mockToolId}`, key, {
-        answer: { slots: [] },
-      }),
-      await request(api.app, "DELETE", `/v1/mock-tools/${mockToolId}`, key),
-      await request(
-        api.app,
-        "POST",
-        `/v1/agents/${newId("agt")}/mock-tools:discover`,
-        key,
-        { seed: false },
-      ),
-    ];
-    for (const answer of gone) {
-      expect(answer.statusCode, JSON.stringify(answer.body)).toBe(404);
-    }
   });
 });

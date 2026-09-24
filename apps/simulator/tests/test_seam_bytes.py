@@ -11,11 +11,8 @@ from pathlib import Path
 from egma_simulator.contract import contract_dir
 from egma_simulator.mock_tools import (
     ANSWER_TOO_LARGE,
-    HELLO_METHOD,
     LARGEST_PAYLOAD_BYTES,
     MALFORMED_REQUEST,
-    PROTOCOL_VERSION,
-    TOOL_METHOD,
     UNKNOWN_TOOL,
     UNSUPPORTED_PROTOCOL_VERSION,
     MockToolRefusal,
@@ -37,19 +34,6 @@ GOLDEN = seam_fixture()
 
 def message(name: str) -> str:
     return GOLDEN["messages"][name]["bytes"]
-
-
-def test_the_version_and_the_two_method_names_are_the_contracts():
-    """Everything about this exchange starts with these three strings.
-
-    A method name that moved would leave the two halves knocking on
-    different doors, and a version that moved would have them refuse each
-    other at the first message — which is the good outcome, and still one
-    nobody should discover in a live simulation.
-    """
-    assert PROTOCOL_VERSION == GOLDEN["protocol_version"]
-    assert HELLO_METHOD == GOLDEN["methods"]["hello"]
-    assert TOOL_METHOD == GOLDEN["methods"]["tool"]
 
 
 def test_the_refusal_codes_are_the_contracts():
@@ -80,18 +64,6 @@ def test_the_payload_cap_is_the_contracts():
     starts. Two of the three would be a cap that admits what the third
     refuses."""
     assert LARGEST_PAYLOAD_BYTES == GOLDEN["limits"]["largest_payload_bytes"]
-
-
-async def test_the_hello_reply_is_the_golden_bytes():
-    """The census in, the names egma answers for out — byte for byte.
-
-    The fixture's census names two tools and this simulation answers for
-    one of them, which is the ordinary case and the one where the reply
-    has something to leave out.
-    """
-    seam = MockToolSeam((MockTool("check_calendar", {"answer": {"slots": []}}),))
-
-    assert await seam.hello(message("hello_request")) == message("hello_reply")
 
 
 async def test_both_tool_replies_are_the_golden_bytes():

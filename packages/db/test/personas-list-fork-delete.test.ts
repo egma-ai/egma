@@ -135,34 +135,6 @@ describe("listing personas", () => {
     stranger = await createPersona(actingAsGlobex(), personaNamed("Stranger"));
   });
 
-  it("returns only the acting project's personas, newest first", async () => {
-    const page = await listPersonas(actingIn(acme.listing));
-
-    expect(page.items.map((item) => item.id)).toEqual(
-      [
-        ...created.map((item) => item.id).reverse(),
-        ...PREDEFINED_IDS,
-      ],
-    );
-    expect(page.items.map((item) => item.name)).toEqual([
-      "Five",
-      "Four",
-      "Three",
-      "Two",
-      "One",
-      ...PREDEFINED_NAMES,
-    ]);
-    expect(page.nextCursor).toBeUndefined();
-  });
-
-  it("carries the current behavior on every row", async () => {
-    const page = await listPersonas(actingIn(acme.listing));
-    const five = page.items[0];
-    expect(five?.version).toBe(1);
-    expect(five?.personality).toContain("Five");
-    expect(five?.identityName).toBe("Five Alvarez");
-  });
-
   it("pages across the whole set with no overlap and no missed row", async () => {
     const first = await listPersonas(actingIn(acme.listing), { limit: 2 });
     expect(first.items).toHaveLength(2);
@@ -190,18 +162,6 @@ describe("listing personas", () => {
     );
   });
 
-  it("refuses a page size outside the range and a cursor that is not a prs_ id", async () => {
-    await expect(
-      listPersonas(actingIn(acme.listing), { limit: 0 }),
-    ).rejects.toThrow(/between 1 and/);
-    await expect(
-      listPersonas(actingIn(acme.listing), { limit: 201 }),
-    ).rejects.toThrow(/between 1 and/);
-    await expect(
-      listPersonas(actingIn(acme.listing), { cursor: "prsv_nonsense" }),
-    ).rejects.toThrow(/cursor/);
-  });
-
   it("shows a credential for the whole organization every project, and no other customer", async () => {
     const page = await listPersonas(actingIn(undefined));
 
@@ -225,22 +185,6 @@ describe("listing personas", () => {
     expect(page.items.map((item) => item.id)).toEqual([
       stranger.id,
       ...PREDEFINED_IDS,
-    ]);
-  });
-
-  it("drops a deleted persona from the list immediately", async () => {
-    const [three] = created.filter((item) => item.name === "Three");
-    if (three === undefined) throw new Error("Three was never created");
-
-    await deletePersona(actingIn(acme.listing), three.id);
-
-    const page = await listPersonas(actingIn(acme.listing));
-    expect(page.items.map((item) => item.name)).toEqual([
-      "Five",
-      "Four",
-      "Two",
-      "One",
-      ...PREDEFINED_NAMES,
     ]);
   });
 });

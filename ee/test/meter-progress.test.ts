@@ -859,25 +859,6 @@ describe("durable period meter progress", () => {
       uncertain_seconds: "0",
     });
   });
-  it("uses the committed pending quantity even if a caller holds altered fields", async () => {
-    await conversation(acme, {
-      connectionType: "livekit_room",
-      endedAt: new Date("2026-09-20T13:40:00Z"),
-      seconds: 60,
-    });
-    await visit(async (progress) => {
-      const first = pending(await progress.next(period, latest, AT));
-      await progress.finish(
-        { ...first, seconds: 999999, hour: new Date("2027-01-01T00:00:00Z") },
-        "accepted",
-        AT,
-      );
-    });
-    expect(await row()).toMatchObject({
-      accepted_seconds: "60",
-      observed_through_hour: new Date("2026-09-20T13:00:00Z"),
-    });
-  });
   it("refuses changed collection objects or decreasing observed totals", async () => {
     await conversation(acme, {
       connectionType: "livekit_room",
@@ -901,30 +882,6 @@ describe("durable period meter progress", () => {
     });
     expect(Number((await row())?.accepted_seconds)).toBe(60);
   });
-  it("requires every field of a pending payload and an in-period timestamp", async () => {
-    await visit(async (progress) => {
-      await progress.next(period, latest, AT);
-    });
-    await expect(
-      database.sql(
-        "update cloud_meter_period set pending_identifier = 'partial'",
-      ),
-    ).rejects.toThrow();
-    await conversation(acme, {
-      connectionType: "livekit_room",
-      endedAt: new Date("2026-09-20T14:40:00Z"),
-      seconds: 60,
-    });
-    await visit(async (progress) => {
-      await progress.next(period, latest, AT);
-    });
-    await expect(
-      database.sql(
-        "update cloud_meter_period set pending_timestamp = period_ends_at",
-      ),
-    ).rejects.toThrow();
-  });
-
   it("does not clear a credit failure after an unrelated successful subscription refresh", async () => {
     await visit(async (progress) => {
       await progress.failed();

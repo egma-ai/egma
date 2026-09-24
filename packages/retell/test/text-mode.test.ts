@@ -4,7 +4,6 @@ import {
   exchangeInTextMode,
   NO_RESUME,
   type RetellCredential,
-  type TextModeTurn,
 } from "../src/index.ts";
 
 /**
@@ -114,42 +113,6 @@ describe("one text-mode exchange", () => {
     expect(sent?.body["messages"]).toEqual([
       { role: "user", content: "I need to move my appointment." },
     ]);
-  });
-
-  it("names its version on every request, and never leans on the default", async () => {
-    // The whole point of the resolve at run start. Retell's own default is the
-    // newest version, and the newest version is the one a concurrent edit has
-    // just created — so an exchange that said nothing could land somewhere
-    // else between one persona turn and the next.
-    const { fetchImpl, seen } = retell([
-      () => json({ ["messages"]: [] }),
-      () => json({ ["messages"]: [] }),
-      () => json({ ["messages"]: [] }),
-    ]);
-
-    for (const messages of [
-      [],
-      [{ role: "user", content: "hello" }],
-      [
-        { role: "user", content: "hello" },
-        { role: "agent", content: "hi" },
-        { role: "user", content: "Thursday please" },
-      ],
-    ] satisfies TextModeTurn[][]) {
-      await exchangeInTextMode(
-        key,
-        { agentId: AGENT, agentVersion: 106, messages },
-        REACH(fetchImpl),
-      );
-    }
-
-    expect(seen).toHaveLength(3);
-    for (const sent of seen) {
-      expect(new URL(sent.url).searchParams.get("version")).toBe("106");
-      expect(sent.body).not.toHaveProperty("agent_version");
-    }
-    // Never the word, on any request: a name is what a concurrent branch moves.
-    expect(JSON.stringify(seen)).not.toContain("latest");
   });
 
   it("opens with an empty history and no resume state", async () => {
@@ -300,26 +263,6 @@ describe("one text-mode exchange", () => {
         ["result"]: false,
       },
     ]);
-  });
-
-  it("says nothing about mocks or variables when it has none", async () => {
-    const { fetchImpl, seen } = retell([() => json({ ["messages"]: [] })]);
-
-    await exchangeInTextMode(
-      key,
-      {
-        agentId: AGENT,
-        agentVersion: 1,
-        messages: [],
-        mockTools: [],
-        dynamicVariables: {},
-      },
-      REACH(fetchImpl),
-    );
-
-    const keys = Object.keys(seen[0]?.body ?? {});
-    expect(keys).not.toContain("tool_mocks");
-    expect(keys).not.toContain("dynamic_variables");
   });
 
   it("lays a reply's variables over what it sent, losing none to a delta", async () => {

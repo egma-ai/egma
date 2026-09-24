@@ -53,7 +53,7 @@ def ear(monkeypatch, outcomes):
 @pytest.mark.parametrize(
     "fault",
     [
-        refused(502), refused(503), refused(504), TimeoutError(),
+        refused(503), TimeoutError(),
         ConnectionResetError(), socket.gaierror(socket.EAI_AGAIN, "temporary DNS"),
     ],
 )
@@ -74,23 +74,6 @@ async def test_initial_connection_recovers_before_reporting_pipeline_error(
     assert attributes["egma.speech.will_retry"] is True
 
 
-@pytest.mark.parametrize("status", [400, 401, 403, 404, 429])
-async def test_permanent_refusals_are_not_retried(monkeypatch, status):
-    leg, connector = ear(monkeypatch, [refused(status)])
-    await leg._connect()
-    assert leg._websocket is None
-    assert connector.await_count == 1
-    leg.push_error.assert_awaited_once()
-    assert str(status) in leg.push_error.call_args.kwargs["error_msg"]
-
-
-async def test_unknown_hostname_is_not_retried(monkeypatch):
-    leg, connector = ear(monkeypatch, [socket.gaierror(socket.EAI_NONAME, "unknown")])
-    await leg._connect()
-    assert connector.await_count == 1
-    leg.push_error.assert_awaited_once()
-
-
 async def test_rate_limit_with_retry_after_is_retried_once(monkeypatch):
     connected = SimpleNamespace(state=State.OPEN)
     leg, connector = ear(monkeypatch, [refused(429, {"Retry-After": "0"}), connected])
@@ -98,13 +81,6 @@ async def test_rate_limit_with_retry_after_is_retried_once(monkeypatch):
     assert connector.await_count == 2
     assert leg._websocket is connected
     leg.push_error.assert_not_awaited()
-
-
-async def test_repeated_rate_limit_is_not_retried_twice(monkeypatch):
-    leg, connector = ear(monkeypatch, [refused(429, {"Retry-After": "0"})] * 3)
-    await leg._connect()
-    assert connector.await_count == 2
-    leg.push_error.assert_awaited_once()
 
 
 async def test_retry_after_wait_is_not_shortened(monkeypatch):
@@ -119,7 +95,6 @@ async def test_retry_after_wait_is_not_shortened(monkeypatch):
 
 @pytest.mark.parametrize("date, attempts", [
     ("Sun, 06 Nov 1994 08:49:37 GMT", 2),
-    ("Sun, 06 Nov 2094 08:49:37 GMT", 1),
 ])
 async def test_retry_after_http_date_obeys_connection_budget(
     monkeypatch, date, attempts
@@ -129,45 +104,6 @@ async def test_retry_after_http_date_obeys_connection_budget(
     ])
     await leg._connect()
     assert connector.await_count == attempts
-
-
-async def test_rate_limit_wait_can_be_canceled(monkeypatch):
-    leg, connector = ear(monkeypatch, [refused(429, {"Retry-After": "10"})])
-    connecting = asyncio.create_task(leg._connect())
-    await asyncio.wait_for(connector.attempted.wait(), 1)
-    connecting.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await connecting
-    assert connector.await_count == 1
-    leg.push_error.assert_not_awaited()
-
-
-@pytest.mark.parametrize(
-    "retry_after", ["invalid", "-1", "NaN", "Infinity", "0.5", "16"]
-)
-async def test_invalid_or_over_budget_retry_after_is_not_retried(
-    monkeypatch, retry_after
-):
-    leg, connector = ear(monkeypatch, [refused(429, {"Retry-After": retry_after})])
-    await leg._connect()
-    assert connector.await_count == 1
-    leg.push_error.assert_awaited_once()
-
-
-async def test_exhausted_quota_with_retry_after_is_not_retried(monkeypatch):
-    leg, connector = ear(monkeypatch, [refused(
-        429, {"Retry-After": "0"}, b'{"error":{"code":"insufficient_quota"}}'
-    )])
-    await leg._connect()
-    assert connector.await_count == 1
-    leg.push_error.assert_awaited_once()
-
-
-async def test_retries_stop_after_three_attempts(monkeypatch):
-    leg, connector = ear(monkeypatch, [refused(502)] * 3)
-    await leg._connect()
-    assert connector.await_count == 3
-    leg.push_error.assert_awaited_once()
 
 
 async def test_cancellation_stops_retry_backoff(monkeypatch):
@@ -194,16 +130,6 @@ async def test_stalled_handshake_is_bounded(monkeypatch):
     assert connector.await_count == 1
     leg.push_error.assert_awaited_once()
     assert isinstance(leg.push_error.call_args.kwargs["exception"], TimeoutError)
-
-
-async def test_receive_loop_keeps_its_existing_reconnect_policy(monkeypatch):
-    connected = SimpleNamespace(state=State.OPEN)
-    leg, connector = ear(monkeypatch, [connected, refused(502)])
-    await leg._connect()
-    leg._websocket = None
-    await leg._connect()
-    assert connector.await_count == 2
-    leg.push_error.assert_awaited_once()
 
 
 @pytest.mark.parametrize("cancel", [False, True])

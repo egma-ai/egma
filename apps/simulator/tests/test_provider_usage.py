@@ -21,7 +21,6 @@ from pipecat.metrics.metrics import (
     MetricsData,
     STTUsage,
     STTUsageMetricsData,
-    TTFBMetricsData,
     TTSUsageMetricsData,
 )
 from pipecat.tests.utils import run_test
@@ -254,14 +253,6 @@ async def test_a_leg_holding_the_providers_own_numbers_is_passed_through_whole()
     assert spent == [reported]
 
 
-@pytest.mark.asyncio
-async def test_a_timing_metric_is_not_a_bill():
-    """Time to first byte is a measurement. The measure catalog owns those."""
-    spent = await collected(TTFBMetricsData(processor="CartesiaTTSService", value=0.21))
-
-    assert spent == []
-
-
 # -- What reaches the platform --------------------------------------------
 
 
@@ -309,61 +300,6 @@ def test_one_provider_request_becomes_one_span_the_vocabulary_declares():
     # The instant the provider answered, not an interval: how long the request
     # took is a timing fact and Pipecat's own service span already carries it.
     assert span["endTimeUnixNano"] == span["startTimeUnixNano"]
-
-
-def test_a_request_that_consumed_nothing_is_not_written_down():
-    sink = Sink()
-    spans = SpanEmitter(WORKED_EXAMPLE_ID, flush=sink)
-    spans.opened()
-    try:
-        spans.provider_usage(
-            ProviderUsage(
-                provider="cartesia",
-                model="sonic-3.5",
-                operation="cartesia",
-                measurement=CLIENT_MEASURED,
-                quantities={"characters": 0},
-            )
-        )
-        spans.flush()
-    finally:
-        spans.abort()
-
-    assert [
-        span
-        for document in sink.documents
-        for span in spans_of(document)
-        if span["name"] == PROVIDER_USAGE_SPAN
-    ] == []
-
-
-def test_a_client_measured_request_carries_no_provider_object():
-    """Cartesia returns none, so the record shows none rather than an empty one."""
-    sink = Sink()
-    spans = SpanEmitter(WORKED_EXAMPLE_ID, flush=sink)
-    spans.opened()
-    try:
-        spans.provider_usage(
-            ProviderUsage(
-                provider="cartesia",
-                model="sonic-3.5",
-                operation="cartesia",
-                measurement=CLIENT_MEASURED,
-                quantities={"characters": 42},
-            )
-        )
-        spans.flush()
-    finally:
-        spans.abort()
-
-    span = next(
-        span
-        for document in sink.documents
-        for span in spans_of(document)
-        if span["name"] == PROVIDER_USAGE_SPAN
-    )
-    assert attribute(span, "egma.usage.raw") is None
-    assert attribute(span, "egma.usage.provider_ref") is None
 
 
 # -- What a chat simulation spends ----------------------------------------

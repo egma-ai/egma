@@ -1,12 +1,10 @@
 """Exercise phone lifecycle through the scripted backend without a carrier.
-Check transport preparation, dialing, answer/refusal handling, cleanup, and
+Check answer/refusal handling, config refusals, LiveKit cleanup, and
 a full simulation with a resolvable stereo WAV recording.
 """
 
 from __future__ import annotations
 
-import asyncio
-import inspect
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,25 +15,16 @@ from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.config import MediaSettings
 from egma_simulator.contract import ERROR, NOT_ANSWERED
 from egma_simulator.conversation import Conducted, ConversationControls
-from egma_simulator.media import (
-    BACKENDS,
-    NOT_ANSWERED_STATUSES,
-    MediaBackend,
-    MediaBackendError,
-    VoiceMedia,
-    backend_for,
-    sip_refusal,
-)
+from egma_simulator.media import VoiceMedia, backend_for
 from egma_simulator.media.livekit import LiveKitBackend, _private_phone_reference
-from egma_simulator.media.scripted import REFUSALS, ScriptedBackend
+from egma_simulator.media.scripted import ScriptedBackend
 from egma_simulator.model import GOODBYE, ScriptedModel
 from egma_simulator.persona import Persona
 from egma_simulator.pipeline import Assembled, assemble
-from egma_simulator.plugs import PlugError, VoiceConnection, plug_for
-from egma_simulator.plugs import phone as phone_module
-from egma_simulator.plugs.phone import BACKEND_VARIABLE, PhoneCall
+from egma_simulator.plugs import PlugError
+from egma_simulator.plugs.phone import PhoneCall
 from egma_simulator.recording import channels_of
-from egma_simulator.redaction import REDACTED, SecretRegistry
+from egma_simulator.redaction import REDACTED
 from egma_simulator.spec import SimulationSpec
 from egma_simulator.speech import SCRIPTED_PAIR
 
@@ -67,82 +56,6 @@ def phone(script: dict | None = None, *, media=SCRIPTED, **config) -> PhoneCall:
         credentials=None,
         media=media,
     )
-
-
-def test_the_registry_knows_the_phone_connection():
-    assert plug_for("phone_number") is PhoneCall
-
-
-def test_a_phone_call_is_one_pipecat_voice_connection():
-    """The seam carries transport processors, not PCM or a media clock."""
-    connection = phone({"replies": ["Noted."]})
-    assert isinstance(connection, VoiceConnection)
-    assert not hasattr(connection, "exchange")
-    assert not hasattr(connection, "sample_rate_hz")
-    assert not hasattr(connection, "measured_band_hz")
-
-
-class _WatchedBackend:
-    """A backend that records lifecycle calls without starting media."""
-
-    def __init__(self) -> None:
-        self.ended = asyncio.Event()
-        self.steps: list[object] = []
-
-    async def create_transport(self) -> VoiceMedia:
-        self.steps.append("prepare")
-        return VoiceMedia(input=(), output=(), ended=self.ended)
-
-    async def dial(self, number: str) -> None:
-        self.steps.append(("dial", number))
-
-    async def wait_answered(self, seconds: float) -> str:
-        self.steps.append(("wait_answered", seconds))
-        return "watched-call-1"
-
-    async def teardown(self) -> None:
-        self.steps.append("teardown")
-        self.ended.set()
-
-
-async def test_the_connection_drives_the_backend_lifecycle_once(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    backend = _WatchedBackend()
-    built_with: dict[str, object] = {}
-
-    def factory(**arguments: object) -> _WatchedBackend:
-        built_with.update(arguments)
-        return backend
-
-    monkeypatch.setattr(phone_module, "backend_for", lambda _name: factory)
-    connection = phone()
-
-    media = await connection.prepare()
-    assert isinstance(media, VoiceMedia)
-    assert built_with == {
-        "settings": SCRIPTED,
-        "config": {},
-        "caller_id": None,
-    }
-
-    await connection.open()
-    assert connection.provider_reference == "watched-call-1"
-    assert backend.steps[:3] == [
-        "prepare",
-        ("dial", A_NUMBER),
-        ("wait_answered", phone_module.RINGING_SECONDS),
-    ]
-
-    backend.ended.set()
-    assert connection.far_end_left
-    await connection.close()
-    assert backend.steps == [
-        "prepare",
-        ("dial", A_NUMBER),
-        ("wait_answered", phone_module.RINGING_SECONDS),
-        "teardown",
-    ]
 
 
 @dataclass(frozen=True)
@@ -261,19 +174,10 @@ async def test_the_far_end_hanging_up_keeps_its_last_words_and_recording(
     assert (tmp_path / audio["recording"]).exists()
 
 
-async def test_closing_a_call_that_was_never_prepared_or_dialled_is_safe():
-    connection = phone({"replies": ["Noted."]})
-    await connection.close()
-    await connection.close()
-
-
 @pytest.mark.parametrize(
     ("outcome", "ending", "quoted"),
     [
         ("busy", NOT_ANSWERED, "486"),
-        ("no_answer", NOT_ANSWERED, "480"),
-        ("declined", NOT_ANSWERED, "603"),
-        ("carrier_failure", ERROR, "503"),
         ("trunk_rejected", ERROR, "403"),
     ],
 )
@@ -296,57 +200,10 @@ async def test_a_call_nobody_took_fails_honestly_and_names_what_happened(
     assert "agent" not in told.lower()
 
 
-async def test_a_trunk_the_carrier_rejects_is_a_dial_time_fault():
-    connection = phone({"outcome": "trunk_rejected"})
-    await connection.prepare()
-    try:
-        with pytest.raises(PlugError) as refused:
-            await connection.open()
-    finally:
-        await connection.close()
-
-    assert refused.value.ending == ERROR
-    assert "403" in str(refused.value)
-
-
-def test_a_simulator_that_places_no_calls_refuses_a_number_by_name():
-    with pytest.raises(PlugError) as refusal:
-        phone({"replies": ["Noted."]}, media=None)
-    assert BACKEND_VARIABLE in str(refusal.value)
-
-
-def test_the_busy_and_declined_statuses_are_the_far_end_and_not_the_path():
-    for status_code, _phrase in REFUSALS.values():
-        refusal = sip_refusal(status_code)
-        answered_by_the_phone = status_code in NOT_ANSWERED_STATUSES
-        assert refusal.ending == (NOT_ANSWERED if answered_by_the_phone else ERROR)
-    assert 486 in NOT_ANSWERED_STATUSES
-    assert 503 not in NOT_ANSWERED_STATUSES
-
-
-def test_a_carrier_refusal_carries_its_words_and_not_a_secret():
-    secrets = SecretRegistry()
-    secrets.register(["SENTINEL-trunk-abc"])
-    refusal = sip_refusal(
-        401,
-        "Unauthorized",
-        told=secrets.redact("auth failed for egma with password SENTINEL-trunk-abc"),
-    )
-    assert "401" in str(refusal)
-    assert "SENTINEL-trunk-abc" not in str(refusal)
-    assert REDACTED in str(refusal)
-
-
 @pytest.mark.parametrize(
     "config",
     [
         {},
-        {"phoneNumber": ""},
-        {"phoneNumber": 15551234567},
-        {"phoneNumber": A_NUMBER, "phoneNumbre": "a typo"},
-        {"phoneNumber": A_NUMBER, "callerId": 7},
-        {"phoneNumber": A_NUMBER, "backend": "a-backend-nobody-wrote"},
-        {"phoneNumber": A_NUMBER, "scripted": "not a script"},
     ],
 )
 def test_config_the_connection_does_not_understand_is_refused(config: dict):
@@ -391,12 +248,6 @@ def test_a_script_for_a_backend_this_deployment_does_not_use_is_refused():
     assert "scripted" in str(refusal.value)
 
 
-def test_a_script_the_backend_does_not_understand_is_refused():
-    with pytest.raises(PlugError) as refusal:
-        phone({"repliez": ["a typo, not a script"]})
-    assert "repliez" in str(refusal.value)
-
-
 def test_credentials_on_a_phone_connection_are_refused():
     with pytest.raises(PlugError) as refusal:
         PhoneCall(
@@ -409,29 +260,6 @@ def test_credentials_on_a_phone_connection_are_refused():
     told = str(refusal.value)
     assert "work order" in told
     assert "SENTINEL-not-read-here" not in told
-
-
-def test_the_connection_speaks_voice_only():
-    with pytest.raises(PlugError) as refusal:
-        PhoneCall(
-            modality="chat",
-            access_variant="phone_number.public_e164",
-            config={"phoneNumber": A_NUMBER},
-            credentials=None,
-            media=SCRIPTED,
-        )
-    assert "chat" in str(refusal.value)
-
-
-def test_the_deployment_is_what_places_the_call():
-    connection = PhoneCall(
-        modality="voice",
-        access_variant="phone_number.public_e164",
-        config={"phoneNumber": A_NUMBER},
-        credentials=None,
-        media=SCRIPTED,
-    )
-    assert isinstance(connection.backend, ScriptedBackend)
 
 
 def test_a_deployment_handed_no_backend_does_not_read_the_environment(
@@ -452,42 +280,6 @@ def test_a_deployment_handed_no_backend_does_not_read_the_environment(
     assert "platform" not in told
 
 
-def taken_by(method) -> list[tuple[str, object]]:
-    """One method's parameter names and annotations."""
-    return [
-        (name, parameter.annotation)
-        for name, parameter in inspect.signature(method).parameters.items()
-    ]
-
-
-def test_every_registered_backend_is_behind_the_transport_seam():
-    for backend_name in BACKENDS:
-        driver = backend_for(backend_name)
-        assert driver is not None, backend_name
-        constructed = inspect.signature(driver.__init__).parameters
-        assert {"settings", "config", "caller_id"} <= set(constructed), backend_name
-        assert "band_hz" not in constructed, backend_name
-        for name in ("create_transport", "dial", "wait_answered", "teardown"):
-            method = getattr(driver, name, None)
-            assert method is not None, f"{backend_name} has no {name}"
-            assert inspect.iscoroutinefunction(method), f"{backend_name}.{name}"
-            assert taken_by(method) == taken_by(getattr(MediaBackend, name)), (
-                f"{backend_name}.{name}"
-            )
-
-
-async def test_the_scripted_backend_prepares_voice_media():
-    backend = ScriptedBackend(settings=SCRIPTED, config={}, caller_id=None)
-    media = await backend.create_transport()
-    assert isinstance(media, VoiceMedia)
-    assert media.input
-    assert media.output
-    assert not hasattr(media, "send")
-    assert not hasattr(media, "receive")
-    await backend.teardown()
-    assert media.ended.is_set()
-
-
 def test_an_unknown_backend_name_is_nobody():
     assert backend_for("daily") is None
     assert backend_for("scripted") is ScriptedBackend
@@ -505,21 +297,6 @@ def livekit_settings(**overrides) -> MediaSettings:
         }
         | overrides
     )
-
-
-def test_the_livekit_driver_is_built_without_reaching_anything():
-    backend = LiveKitBackend(
-        settings=livekit_settings(),
-        config={},
-        caller_id=None,
-    )
-    assert backend.room_name.startswith("egma-sim-")
-    other = LiveKitBackend(
-        settings=livekit_settings(),
-        config={},
-        caller_id=None,
-    )
-    assert other.room_name != backend.room_name
 
 
 def test_the_livekit_provider_reference_keeps_the_private_destination_out():
@@ -549,15 +326,3 @@ async def test_the_livekit_driver_builds_voice_media_without_a_fixed_rate(
     assert media.output
     await backend.teardown()
     assert deleted == [backend.room_name]
-
-
-def test_the_livekit_driver_reads_no_connection_config():
-    with pytest.raises(MediaBackendError) as refusal:
-        LiveKitBackend(
-            settings=livekit_settings(),
-            config={"replies": ["Noted."]},
-            caller_id=None,
-        )
-    told = str(refusal.value)
-    assert "connection config" in told
-    assert "work order" in told

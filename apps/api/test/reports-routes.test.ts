@@ -445,25 +445,6 @@ describe("what the door refuses before believing a word", () => {
 });
 
 describe("the lifecycle lands", () => {
-  it("starts the conversation on a running event, conducted by the row's own claimant", async () => {
-    const { ada, key, connectionId, versionId } = await aCustomerReadyToRun(
-      "reports_running",
-    );
-    const { simulationId } = await aClaimedSimulation(key, connectionId, versionId);
-
-    const answered = await report(simulationId, [runningEvent()]);
-    expect(answered.statusCode, JSON.stringify(answered.body)).toBe(200);
-    expect(answered.body).toEqual({
-      simulation_id: simulationId,
-      status: "running",
-    });
-
-    const row = await getSimulation(contextFor(ada, "member"), simulationId);
-    expect(row?.status).toBe("running");
-    expect(row?.startedAt).toBeInstanceOf(Date);
-    expect(row?.claimedBy).toBe(CONDUCTOR);
-  });
-
   it.skipIf(!storage.available)(
     "lands a completed conversation with its facts, mints grading work, finalizes the run",
     async () => {

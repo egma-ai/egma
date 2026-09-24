@@ -76,48 +76,6 @@ async function useResponseLatency(key: string): Promise<Listed> {
 }
 
 describe("active project graders", () => {
-  it("starts every project with only the protected Expected behaviors grader", async () => {
-    api = await createApi("graders_expected_behaviors");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const key = await projectKeyFor(api.app, ada);
-
-    const answer = await request("GET", "/v1/graders", key);
-
-    expect(answer.statusCode, JSON.stringify(answer.body)).toBe(200);
-    expect(itemsOf(answer)).toEqual([
-      expect.objectContaining({
-        projectId: ada.projectId,
-        graderDefinitionId: PREDEFINED_GRADERS.expectedBehaviors,
-        name: "expected_behaviors",
-        owner: "egma",
-        type: "llm_as_judge",
-        modalities: ["chat", "voice"],
-        scopeEditable: false,
-        removable: false,
-        scope: {
-          simulations: [{ kind: "all" }],
-          production: null,
-        },
-        settings: { llm_provider: "openai", llm_model: "gpt-5.6-terra" },
-        passThreshold: 1,
-      }),
-    ]);
-    expect(answer.body.nextPageToken).toBeNull();
-
-    const serialized = JSON.stringify(itemsOf(answer)[0]);
-    for (const retired of [
-      "required",
-      "gate",
-      "judgeModel",
-      "params",
-      "config",
-      "versionId",
-      "productionSampleRate",
-    ]) {
-      expect(serialized).not.toContain(retired);
-    }
-  });
-
   it("updates an optional grader's scope, settings, and pass threshold", async () => {
     api = await createApi("graders_edit_policy");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");

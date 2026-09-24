@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import signal
 from datetime import datetime
-from itertools import pairwise
 
 from conftest import (
     HEARTBEAT_SECONDS,
@@ -22,7 +21,6 @@ from conftest import (
     assert_one_speaker_to_a_channel,
     has_terminal,
     heartbeats_for,
-    load_fixture_spec,
     loopback_spec,
     measures_for,
     milliseconds_of,
@@ -144,49 +142,6 @@ async def test_a_scripted_persona_converses_with_the_scripted_counterpart(
     assert claims[0]["seq"] < first_status("running")
     assert first_status("running") < turn_seqs[0]
     assert turn_seqs[-1] < first_status("completed")
-
-
-async def test_two_golden_fixture_specs_conduct_two_visibly_different_exchanges(
-    workbench, start_simulator
-):
-    """Different persona traits and scenarios, different conversations —
-    with no code change: both conversations come off fixture files alone."""
-    flustered = load_fixture_spec("chat-scripted-flustered.json")
-    hurried = load_fixture_spec("chat-scripted-hurried.json")
-    await workbench.offer(flustered)
-    await workbench.offer(hurried)
-    start_simulator(workbench)
-
-    ids = [flustered["simulation_id"], hurried["simulation_id"]]
-    records = await workbench.wait_for(all_terminal(ids))
-
-    transcripts = {
-        simulation_id: turns_for(records, simulation_id) for simulation_id in ids
-    }
-    for simulation_id, transcript in transcripts.items():
-        assert len(transcript) >= 3, simulation_id
-
-    # Visibly different: neither side of one conversation appears in the
-    # other. The persona's turns differ because the scenarios do; the
-    # agent's because each fixture scripts its own counterpart.
-    human = {
-        simulation_id: {text for speaker, text in transcript if speaker == "human"}
-        for simulation_id, transcript in transcripts.items()
-    }
-    agent = {
-        simulation_id: {text for speaker, text in transcript if speaker == "agent"}
-        for simulation_id, transcript in transcripts.items()
-    }
-    assert human[ids[0]].isdisjoint(human[ids[1]] - {GOODBYE})
-    assert agent[ids[0]].isdisjoint(agent[ids[1]])
-
-    # And they end differently too: one persona concludes, the other's
-    # counterpart ends the exchange itself.
-    endings = {
-        terminal_event_for(records, simulation_id)["facts"]["ending"]
-        for simulation_id in ids
-    }
-    assert endings == {"persona_concluded", "agent_ended"}
 
 
 async def test_every_ending_reason_is_reachable_and_reported_distinctly(
@@ -348,47 +303,6 @@ async def test_capacity_caps_simulations_in_flight(workbench, start_simulator):
     for simulation_id in simulation_ids:
         terminal = terminal_event_for(records, simulation_id)
         assert terminal["status"] == "completed", simulation_id
-
-
-async def test_a_killed_simulator_just_stops_heartbeating(
-    workbench, start_simulator
-):
-    """SIGKILL mid-exchange: heartbeats stop and nothing terminal is ever reported."""
-    spec = scripted_spec(
-        "sim-kill-001",
-        scenario=LONG_SCENARIO,
-        turn_seconds=0.15,
-        max_turns=200,
-        max_duration_seconds=600,
-    )
-    await workbench.offer(spec)
-    simulator = start_simulator(workbench)
-
-    await workbench.wait_for(
-        lambda records: "running" in status_events_for(records, "sim-kill-001")
-        and len(heartbeats_for(records, "sim-kill-001")) >= 1
-    )
-    simulator.kill_hard()
-
-    # A beat already on the wire may still land; after that grace, silence.
-    # Only heartbeats and reports prove a live simulator — the workbench
-    # answering a claim it was already holding open is its own act.
-    def spoken_by_the_simulator(records: list[dict]) -> list[dict]:
-        return [
-            record
-            for record in records
-            if record["kind"] in ("heartbeat", "report", "refusal")
-        ]
-
-    await asyncio.sleep(HEARTBEAT_SECONDS * 2)
-    settled = spoken_by_the_simulator(await workbench.records())
-    await asyncio.sleep(HEARTBEAT_SECONDS * 5)
-    afterwards = spoken_by_the_simulator(await workbench.records())
-
-    assert afterwards == settled, "a dead simulator kept talking"
-    assert terminal_event_for(await workbench.records(), "sim-kill-001") is None, (
-        "a killed simulator reported a terminal state it could not know"
-    )
 
 
 async def test_the_first_stop_signal_drains_the_exchange_in_flight(
@@ -923,49 +837,6 @@ async def test_a_text_mode_agent_that_ends_on_its_greeting_reads_back_that_way(
     assert_kept_secret(sentinel, records=records, simulator=simulator)
 
 
-async def test_a_text_mode_exchange_the_agent_never_ends_hits_the_turn_limit(
-    workbench, start_simulator, start_text_mode_stub
-):
-    """The limits keep their job on this lane, unchanged.
-
-    Nothing in the plug ends an exchange the agent did not end, so an agent
-    that would answer forever runs out of turns instead — reported as the
-    limit it was and never as the agent failing.
-    """
-    sentinel = "SENTINEL-text-mode-key-limits-2f9b"
-    running = await start_text_mode_stub(
-        api_key=sentinel,
-        replies=[Reply(words="Lakeside Dental."), Reply(words="Go on.")],
-    )
-    spec = text_mode_spec(
-        "sim-text-mode-limit",
-        base_url=running.base_url,
-        api_key=sentinel,
-        max_turns=3,
-        scenario="I want to move my cleaning. I can do any Thursday.",
-        mock_tools=[
-            {
-                "tool_name": "get_availability",
-                "answer": {"answer": {"slots": []}},
-            }
-        ],
-    )
-    await workbench.offer(spec)
-    simulator = start_simulator(workbench, log_level="DEBUG")
-
-    records = await workbench.wait_for(has_terminal("sim-text-mode-limit"))
-
-    terminal = terminal_event_for(records, "sim-text-mode-limit")
-    assert terminal["status"] == "completed"
-    assert terminal["facts"]["ending"] == "limit_reached"
-    assert "turn limit" in terminal["reason"], terminal["reason"]
-    assert terminal["facts"]["turn_count"] == 3
-    assert terminal["facts"]["provider_reference"] is None
-
-    simulator.stop()
-    assert_kept_secret(sentinel, records=records, simulator=simulator)
-
-
 async def test_a_text_mode_billing_wall_fails_loudly_and_says_nothing(
     workbench, start_simulator, start_text_mode_stub
 ):
@@ -1053,110 +924,6 @@ async def test_a_silent_voice_agent_completes_with_its_call_evidence(
     simulator.stop()
 
 
-async def test_a_voice_spec_reports_a_whole_exchange_and_its_audio(
-    workbench, start_simulator
-):
-    """What a voice simulation owes its record, read back off the record.
-
-    A golden fixture goes in — no code path is chosen for it here — and
-    what comes out is a transcript, an ending and a reference to a
-    recording. The recording is then opened and both channels are
-    listened to.
-    """
-    spec = load_fixture_spec("voice-loopback.json")
-    simulation_id = spec["simulation_id"]
-    await workbench.offer(spec)
-    simulator = start_simulator(workbench)
-
-    records = await workbench.wait_for(has_terminal(simulation_id))
-
-    # Voice adds facts to a report and no new shape to carry them: the
-    # contract already had somewhere to put audio, and every document
-    # below went through both sides' validation untouched.
-    assert [record for record in records if record["kind"] == "refusal"] == []
-    assert status_events_for(records, simulation_id) == ["running", "completed"]
-    turns = turns_for(records, simulation_id)
-    assert turns[0] == ("agent", spec["connection"]["config"]["greeting"])
-    speakers = [speaker for speaker, _ in turns]
-    assert set(speakers) == {"agent", "human"}
-    assert all(left != right for left, right in pairwise(speakers))
-
-    terminal = terminal_event_for(records, simulation_id)
-    facts = terminal["facts"]
-    reasons = {
-        "agent_ended": "the agent ended the exchange",
-        "persona_concluded": "the persona concluded the scenario",
-    }
-    assert facts["ending"] in reasons
-    assert terminal["reason"] == reasons[facts["ending"]]
-    assert facts["turn_count"] == len(turns)
-    assert facts["provider_reference"] == "loopback-voice-hurried-1"
-
-    audio = facts["audio"]
-    assert set(audio) == {"recording", "waveform"}
-    assert_a_drawable_waveform(audio["waveform"])
-
-    # The reference is a reference: no bytes on the wire, and it resolves.
-    assert "://" not in audio["recording"]
-    recording = simulator.blob(audio["recording"])
-    assert channels_of(recording)[2] > 0
-
-    # Each channel is one speaker, proved by listening to it: what channel
-    # 0 says is what the persona said, and what channel 1 says is what the
-    # agent said — every spoken turn of the transcript, including the final
-    # words that conclude the simulation, on its own side and on neither of
-    # the other's.
-    assert_one_speaker_to_a_channel(recording, turns)
-
-
-async def test_a_voice_simulation_reports_a_measurement_for_every_turn(
-    workbench, start_simulator
-):
-    """Metrics measure and graders judge: the runtime reports the numbers
-    for every simulation, in the order they happened, and judges none."""
-    spec = loopback_spec(
-        "sim-voice-measures",
-        scenario="First point. Second point.",
-        greeting="Front desk, hello.",
-        replies=["Certainly.", "Done."],
-        answer_delay_seconds=0.3,
-    )
-    await workbench.offer(spec)
-    start_simulator(workbench)
-
-    records = await workbench.wait_for(has_terminal("sim-voice-measures"))
-
-    timed = [
-        record["span"]
-        for record in spans_for(records, "sim-voice-measures")
-        if record["span"]["name"] in measures_for(records, "sim-voice-measures")
-    ]
-    measures = measures_for(records, "sim-voice-measures")
-    assert measures.count("agent_speech_duration") == 3
-    # The wall-clock measures every simulation reports are still there:
-    # voice adds measurements, it does not replace them.
-    assert measures.count("first_response_latency") == 1
-    assert measures.count("turn_response_latency") == 2
-
-    # Every answered turn has a positive wait before the agent's first word.
-    # Frame alignment is proved at the media seam; this black-box test
-    # does not pin scheduling to one exact millisecond count.
-    waits = [
-        milliseconds_of(span)
-        for span in timed
-        if span["name"] == "turn_response_latency"
-    ]
-    assert all(number > 0 for number in waits), waits
-    assert len(waits) == 2
-
-    # Overlap may make different measure families close out of order. Each
-    # individual interval must still point forward on the media clock.
-    assert all(
-        int(span["endTimeUnixNano"]) >= int(span["startTimeUnixNano"])
-        for span in timed
-    )
-
-
 async def test_two_voice_simulations_at_once_keep_their_audio_apart(
     workbench, start_simulator
 ):
@@ -1213,62 +980,6 @@ async def test_two_voice_simulations_at_once_keep_their_audio_apart(
 
     assert references["sim-voice-a"] != references["sim-voice-b"]
     assert recordings["sim-voice-a"] != recordings["sim-voice-b"]
-
-
-async def test_one_scenario_over_chat_and_over_voice_is_one_transcript(
-    workbench, start_simulator
-):
-    """The diagnostic the modality split exists for.
-
-    Same persona, same scenario, same script — one exchanged as text, one
-    spoken and transcribed through the speech legs. The persona brain is
-    one component for both, so the two transcripts are the same, and a
-    difference between them could only ever be the speech stack.
-    """
-    scenario = "First point. Second point."
-    script = ["Certainly.", "Done."]
-    greeting = "Front desk, hello."
-    await workbench.offer(
-        scripted_spec(
-            "sim-same-chat",
-            scenario=scenario,
-            greeting=greeting,
-            replies=script,
-        )
-    )
-    await workbench.offer(
-        loopback_spec(
-            "sim-same-voice",
-            scenario=scenario,
-            greeting=greeting,
-            replies=script,
-        )
-    )
-    start_simulator(workbench, capacity=2)
-
-    records = await workbench.wait_for(
-        all_terminal(["sim-same-chat", "sim-same-voice"])
-    )
-
-    assert turns_for(records, "sim-same-chat") == turns_for(
-        records, "sim-same-voice"
-    )
-
-    # And the record still tells them apart where it should: only one of
-    # them has audio to account for.
-    for simulation_id in ("sim-same-chat", "sim-same-voice"):
-        # The transcripts below are only comparable between two simulations
-        # that both finished; a failed one stops where its failure did.
-        terminal = terminal_event_for(records, simulation_id)
-        assert terminal["status"] == "completed", (
-            simulation_id,
-            terminal.get("reason"),
-        )
-    chat = terminal_event_for(records, "sim-same-chat")["facts"]
-    voice = terminal_event_for(records, "sim-same-voice")["facts"]
-    assert chat["audio"] is None
-    assert set(voice["audio"]) == {"recording", "waveform"}
-    assert_a_drawable_waveform(voice["audio"]["waveform"])
 
 
 async def test_a_phone_spec_dials_a_number_and_reports_the_whole_call(

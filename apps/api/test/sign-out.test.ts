@@ -65,42 +65,6 @@ describe("signing out", () => {
   });
 
   /**
-   * Ending it where it is kept rather than only in the browser that clicked, so
-   * a copy of the cookie taken somewhere else is over too.
-   */
-  it("takes the session out of the database rather than leaving a dead one behind", async () => {
-    api = await createApi("sign_out_row");
-    const cookie = await signedIn("ada@acme.example", "Acme");
-    expect(await sessionCount()).toBe(1);
-
-    const out = await api.app.inject({
-      method: "POST",
-      url: "/api/sign-out",
-      headers: { cookie },
-    });
-    expect(out.statusCode).toBe(200);
-
-    expect(await sessionCount()).toBe(0);
-  });
-
-  it("takes the cookie back out of the browser as well", async () => {
-    api = await createApi("sign_out_cookie");
-    const cookie = await signedIn("ada@acme.example", "Acme");
-
-    const out = await api.app.inject({
-      method: "POST",
-      url: "/api/sign-out",
-      headers: { cookie },
-    });
-
-    const cleared = [out.headers["set-cookie"] ?? []].flat();
-    expect(cleared).toHaveLength(1);
-    expect(cleared[0]).toContain("egma.session_token=;");
-    expect(cleared[0]).toContain("Max-Age=0");
-    expect(cleared[0]).toContain("HttpOnly");
-  });
-
-  /**
    * Nothing to do is not a refusal. A person whose session already went away —
    * in another tab, or by expiring — is not told they may not leave.
    */

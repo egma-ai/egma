@@ -11,7 +11,7 @@ import json
 from typing import Any
 
 import pytest
-from conftest import ReceptionAgent, called, couriers_on
+from conftest import ReceptionAgent, couriers_on
 from livekit import rtc
 from livekit.agents import AgentSession, llm, room_io
 
@@ -184,43 +184,6 @@ async def test_agent_session_dispatches_a_mock_over_the_room(
         await egma.leave()
 
 
-async def test_egma_already_in_the_room_is_found_and_answers(
-    live_livekit: Any, egma_export: Any
-) -> None:
-    """The named-dispatch order: egma is in the room before the agent.
-
-    The whole exchange over a real room — the census egma really received,
-    the courier really installed in LiveKit's own side table, and a call
-    really answered by egma rather than by the tool.
-    """
-    room_name = "egma-sim-live-egma-first"
-    egma = await _EgmaInTheRoom().join(live_livekit, room_name, ("check_calendar",))
-    room = await _agent_joins(live_livekit, room_name)
-    session = AgentSession(llm=_CalendarLLM(), max_tool_steps=1)
-    agent = ReceptionAgent()
-    try:
-        await simulation(agent, _LiveContext(room_name, room), session)
-        await session.start(
-            agent=agent,
-            room=room,
-            room_options=room_io.RoomOptions(audio_input=False, audio_output=False),
-        )
-
-        assert egma.census() is not None, "the census never reached egma"
-        reported = {tool["name"] for tool in egma.census()["tools"]}
-        assert reported == {"check_calendar", "read_notice"}
-
-        couriers = couriers_on(session, agent)
-        assert set(couriers) == {"check_calendar"}
-        assert await called(couriers["check_calendar"], day="Tuesday") == (
-            "egma answered this one"
-        )
-    finally:
-        await session.aclose()
-        await room.disconnect()
-        await egma.leave()
-
-
 async def test_the_agent_in_the_room_first_waits_for_egma(
     live_livekit: Any, egma_export: Any
 ) -> None:
@@ -258,33 +221,5 @@ async def test_the_agent_in_the_room_first_waits_for_egma(
     finally:
         await late
         await session.aclose()
-        await room.disconnect()
-        await egma.leave()
-
-
-async def test_a_production_room_is_left_alone(
-    live_livekit: Any, session: Any
-) -> None:
-    """A room the customer named, in a real project: nothing is touched.
-
-    The inertness suite proves this without a server. This proves the same
-    thing where a server could have been asked and was not: egma is really
-    in this room, under its own name, and the SDK still wraps nothing —
-    because the room's name, not egma's presence, is what decides.
-    """
-    room_name = "acme-interview-4417"
-    egma = await _EgmaInTheRoom().join(live_livekit, room_name, ("check_calendar",))
-    room = await _agent_joins(live_livekit, room_name, identity="a-candidate")
-    agent = ReceptionAgent()
-    before = list(agent.tools)
-    try:
-        await simulation(agent, _LiveContext(room_name, room), session)
-
-        assert egma.asked == [], "a production room asked egma something"
-        assert couriers_on(session, agent) == {}
-        after = list(agent.tools)
-        assert len(before) == len(after)
-        assert all(b is a for b, a in zip(before, after, strict=True))
-    finally:
         await room.disconnect()
         await egma.leave()

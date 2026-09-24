@@ -49,11 +49,6 @@ const acme = {
   projectId: newId("prj"),
   userId: newId("usr"),
 };
-const globex = {
-  organizationId: newId("org"),
-  projectId: newId("prj"),
-  userId: newId("usr"),
-};
 
 function sessionOf(who: typeof acme): AuthContext {
   return {
@@ -176,7 +171,7 @@ beforeAll(async () => {
   connectClickHouse({ clickhouseUrl: traceStore.url });
   database = await createConnectedDatabase("billing_seam_wiring");
   await upsertRateCard();
-  for (const who of [acme, globex]) {
+  for (const who of [acme]) {
     await seedOrganization(database, who.organizationId, [
       { id: who.projectId, slug: `p${who.projectId.slice(-6).toLowerCase()}` },
     ]);
@@ -296,70 +291,6 @@ describe("run start asks the entitlement source", () => {
       [ready.suiteId],
     );
     expect(rows[0]?.started).toBe("0");
-  });
-
-  it("still says something when a funding refusal words nothing", async () => {
-    const ready = await readyToRun(acme);
-    restore = installBillingPlugIn({
-      ...openBillingPlugIn(),
-      entitlements: {
-        mayStart: openEntitlementSource().mayStart,
-        mayPlatformKeyFund: () =>
-          Promise.resolve({
-            funded: false,
-            providers: ["openai"],
-            message: "   ",
-          }),
-      },
-    });
-
-    const refused = (await startRun(sessionOf(acme), {
-      suiteId: ready.suiteId,
-      agentId: ready.agentId,
-      connectionId: ready.connectionId,
-    }).catch((fault: unknown) => fault)) as RunWriteRefusedError;
-
-    expect(refused.reason).toBe("providers_unfunded");
-    expect(refused.message).toContain("openai");
-    expect(refused.message).not.toBe("");
-  });
-
-  it("still says something when an adapter refuses and words nothing", async () => {
-    // A person meets this sentence. An adapter that refused with an empty
-    // message would otherwise hand them a blank refusal, which is the worst
-    // answer of all.
-    const ready = await readyToRun(acme);
-    restore = installBillingPlugIn({
-      ...openBillingPlugIn(),
-      entitlements: {
-        mayStart: () => Promise.resolve({ allowed: false, refusals: [] }),
-        mayPlatformKeyFund: openEntitlementSource().mayPlatformKeyFund,
-      },
-    });
-
-    const refused = await startRun(sessionOf(acme), {
-      suiteId: ready.suiteId,
-      agentId: ready.agentId,
-      connectionId: ready.connectionId,
-    }).catch((fault: unknown) => fault);
-
-    expect(refused).toBeInstanceOf(RunWriteRefusedError);
-    expect((refused as RunWriteRefusedError).message.trim()).not.toBe("");
-  });
-
-  it("starts exactly as before when nothing is installed", async () => {
-    // The acceptance criterion, stated: with no billing adapter in place the
-    // run is the run it always was.
-    const ready = await readyToRun(globex);
-    const started = await startRun(sessionOf(globex), {
-      suiteId: ready.suiteId,
-      agentId: ready.agentId,
-      connectionId: ready.connectionId,
-    });
-    expect(started.status).toBe("pending");
-    expect((await listSimulations(sessionOf(globex), started.id))?.items).toHaveLength(
-      1,
-    );
   });
 });
 

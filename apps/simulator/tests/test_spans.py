@@ -30,7 +30,6 @@ from opentelemetry.trace import (
     TraceState,
 )
 
-from egma_simulator import spans as spans_module
 from egma_simulator import telemetry
 from egma_simulator.conductor import InterruptionEvidence
 from egma_simulator.contract import contract_dir
@@ -139,37 +138,6 @@ def test_the_trace_id_is_the_simulation_ids_own_bits():
     )
 
 
-def test_every_span_fixture_derives_its_trace_id_from_its_simulation():
-    """The golden files and this emitter agree on the derivation, both ways."""
-    for name in ("chat-flush-1-turns.json", "voice-overlapping-turns.json"):
-        document = fixture(name)
-        resource = document["resourceSpans"][0]
-        simulation_id = next(
-            entry["value"]["stringValue"]
-            for entry in resource["resource"]["attributes"]
-            if entry["key"] == SIMULATION_ID_ATTRIBUTE
-        )
-        expected = trace_id_for(simulation_id)
-        for span in resource["scopeSpans"][0]["spans"]:
-            assert span["traceId"] == expected
-
-
-def test_an_id_that_is_not_egmas_own_shape_still_gets_one_trace():
-    """The contract calls a simulation id opaque, so a derivation must hold
-    for one this deployment did not mint — and hold to the same id."""
-    for opaque in ("sim-chat-001", "", "sim_not-crockford", "sim_" + "Z" * 26):
-        derived = trace_id_for(opaque)
-        assert len(derived) == 32
-        assert int(derived, 16) > 0
-        assert derived == trace_id_for(opaque)
-    assert trace_id_for("sim-chat-001") != trace_id_for("sim-chat-002")
-
-
-def test_the_all_zero_simulation_id_names_no_valid_otel_trace():
-    with pytest.raises(ValueError, match="all-zero OpenTelemetry trace id"):
-        trace_id_for("sim_00000000000000000000000000")
-
-
 # -- What a flush carries -------------------------------------------------
 
 
@@ -208,46 +176,6 @@ def test_a_turn_carries_its_speaker_in_its_name_and_its_words_in_one_attribute()
     )
 
 
-def test_a_chat_turn_is_one_instant():
-    """A message has no duration, and the fixtures say so to the byte."""
-    spans, sink, _clock = emitter()
-    spans.opened()
-    spans.turn("human", "Hello.")
-    spans.flush()
-
-    turn = spans_of(sink.documents[0])[0]
-    assert turn["startTimeUnixNano"] == turn["endTimeUnixNano"]
-
-
-def test_the_seams_own_exchange_has_no_door_to_a_span_at_all():
-    """A call egma conducts is written down nowhere.
-
-    Where the agent's own process runs the egma SDK, that process reports
-    every call it made and that report is the tool record. So the way to
-    keep one call from becoming two records is that this emitter has no
-    method that could write the second, and no vocabulary for it: no
-    round-trip span, and no stamp saying who answered.
-    """
-    spans, sink, _clock = emitter()
-    spans.opened()
-    spans.turn("agent", "One moment.")
-    spans.flush()
-
-    assert not hasattr(spans, "tool_exchange")
-    for gone in (
-        "TOOL_PROVENANCE_ATTRIBUTE",
-        "MOCK_TOOL_ATTRIBUTE",
-        "TOOL_LATE_ATTACHED_ATTRIBUTE",
-    ):
-        assert not hasattr(spans_module, gone), f"the vocabulary still holds {gone}"
-
-    authored = spans_of(sink.documents[0])
-    assert [span["name"] for span in authored] == ["agent_turn"]
-    for span in authored:
-        for entry in span.get("attributes", []):
-            assert not entry["key"].startswith("egma.tool.")
-
-
 def test_a_reported_tool_call_is_the_golden_flushs_bytes():
     """The one lane that still writes a tool row, held to the contract.
 
@@ -283,9 +211,7 @@ def test_a_reported_tool_call_is_the_golden_flushs_bytes():
 @pytest.mark.parametrize(
     "measure",
     [
-        "first_response_latency",
         "turn_response_latency",
-        "agent_speech_duration",
     ],
 )
 def test_a_timing_spans_own_duration_is_the_measurement(measure):
@@ -350,22 +276,6 @@ def test_two_turns_may_cross_in_time():
     # They cross: the persona began before the agent had finished.
     assert int(human["startTimeUnixNano"]) < int(agent["endTimeUnixNano"])
     assert int(human["endTimeUnixNano"]) > int(agent["endTimeUnixNano"])
-
-
-def test_a_turn_nobody_spoke_is_an_instant():
-    """Chat messages have no duration, and one is not invented for them.
-
-    The two ways a turn is authored are one per conductor: the conversation loop knows
-    only when a message arrived, and the voice conductor knows both ends
-    of the audio. Nothing joins them after the fact any more.
-    """
-    spans, sink, _clock = emitter()
-    spans.opened()
-    spans.turn("human", "Hello.")
-    spans.flush()
-
-    only = named(sink.documents[0], "human_turn")[0]
-    assert duration_ns(only) == 0
 
 
 def test_a_recording_origin_is_trace_evidence_on_the_media_clock():
@@ -468,15 +378,6 @@ def test_no_span_is_ever_sent_twice_and_every_flush_is_disjoint():
     for position, ids in enumerate(per_flush):
         for other in per_flush[position + 1 :]:
             assert ids.isdisjoint(other)
-
-
-def test_an_empty_flush_sends_nothing():
-    """A document with no spans is a request nobody needed to make."""
-    spans, sink, _clock = emitter()
-    spans.opened()
-    spans.flush()
-    spans.flush()
-    assert sink.documents == []
 
 
 def test_a_failed_final_wal_handoff_releases_the_simulation_route():

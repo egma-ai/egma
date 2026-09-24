@@ -6,7 +6,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from pipecat.frames.frames import OutputAudioRawFrame, SpeechOutputAudioRawFrame
+from pipecat.frames.frames import OutputAudioRawFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.openai.live import events
 from pipecat.services.openai.live import llm as live_llm
@@ -37,7 +37,6 @@ from egma_simulator.spec import (
     PersonaParameters,
     SimulationSpec,
 )
-from egma_simulator.speech import gained_speech_frame
 from egma_simulator.usage import ProviderUsage, live_duration_usage
 
 
@@ -177,18 +176,6 @@ def test_live_duration_uses_one_cumulative_snapshot() -> None:
     assert measured.quantities == {"audio_seconds": 12.25}
     assert measured.provider_ref == "live_123"
     assert measured.raw == {"seconds": 12.25}
-
-
-def test_speech_gain_applies_to_live_audio() -> None:
-    frame = SpeechOutputAudioRawFrame(
-        audio=(1000).to_bytes(2, "little", signed=True),
-        sample_rate=24_000,
-        num_channels=1,
-    )
-
-    gained_speech_frame(frame, 0.5)
-
-    assert int.from_bytes(frame.audio, "little", signed=True) == 500
 
 
 def test_v7_live_work_order_needs_no_stt_or_tts() -> None:

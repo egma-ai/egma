@@ -531,21 +531,3 @@ live("the corrected version lifecycle, on the live agent", () => {
   }, 120_000);
 
 });
-
-describe("the live lifecycle proof's own gate", () => {
-  it("holds every check until the environment names a key and an agent", () => {
-    // Runs with or without the environment, so a reader of a green CI log can
-    // see that the live proof exists and exactly why it did not run.
-    expect(NEEDED).toContain("EGMA_LIVE_RETELL_API_KEY");
-    // No agent is a default: without one named, nothing here runs at all.
-    expect(NEEDED).toContain("EGMA_LIVE_RETELL_AGENT_ID");
-    expect(missing.length === 0).toBe(agentId !== "");
-    if (missing.length > 0) {
-      console.log(
-        `[live lifecycle] skipped — set ${missing.join(", ")} to run it. It ` +
-          "branches one draft on the agent named, and deletes it again; it " +
-          "starts no run and publishes nothing.",
-      );
-    }
-  });
-});

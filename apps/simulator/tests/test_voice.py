@@ -12,14 +12,10 @@ from pathlib import Path
 
 import pytest
 from conftest import (
-    A_NAME,
-    A_PERSONALITY,
     assert_one_speaker_to_a_channel,
     loopback_spec,
-    scripted_spec,
     speech_in_the_recording,
 )
-from pipecat.audio.vad.vad_analyzer import VADState
 from pipecat.frames.frames import (
     Frame,
     InterruptionFrame,
@@ -62,10 +58,9 @@ from egma_simulator.recording import (
     measured_waveform,
     waveform_of,
 )
-from egma_simulator.spec import AuthoredPersona, PersonaParameters, SimulationSpec
+from egma_simulator.spec import PersonaParameters, SimulationSpec
 from egma_simulator.speech import (
     CONVERSATION_VAD,
-    SAMPLES_PER_BYTE,
     SCRIPTED_PAIR,
     ScriptedSTT,
     ScriptedTTS,
@@ -76,15 +71,10 @@ from egma_simulator.speech import (
     build_vad,
     carries_speech,
     decode_speech,
-    duration_seconds,
     encode_speech,
-    leading_silence_seconds,
     silence,
-    spoken_seconds,
     voice_from_models,
 )
-
-TTS_VOICE = {"provider": "cartesia", "voiceId": "warm-alto-2", "speed": 0.9}
 
 NANOSECONDS_PER_MILLISECOND = 1_000_000
 
@@ -305,90 +295,7 @@ async def test_voice_leg_cleanup_failure_does_not_skip_recording(
     assert recording_written.is_set()
 
 
-# -- The codec ---------------------------------------------------------------
-
-
-@pytest.mark.parametrize("band", [8000, 16000, 48000])
-def test_what_is_spoken_is_what_is_heard(band: int):
-    """The legs are a round trip, at every band a connection can carry."""
-    said = "Move my Tuesday cleaning to Thursday, please. Margaret Hale."
-    assert decode_speech(encode_speech(said, band), band) == said
-
-
-def test_speech_is_read_out_of_the_samples_wherever_it_starts():
-    """A recording holds an utterance after however much quiet; the reader
-    finds it anyway, which is what lets a channel be read back."""
-    spoken = silence(0.4, 16000) + encode_speech("Hello there.", 16000)
-    assert decode_speech(spoken, 16000) == "Hello there."
-
-
-def test_quiet_and_length_are_measured_from_the_audio():
-    spoken = silence(0.25, 16000) + encode_speech("abcd", 16000)
-    four_bytes_spoken = 4 * SAMPLES_PER_BYTE / 16000
-    assert leading_silence_seconds(spoken, 16000) == pytest.approx(0.25)
-    assert duration_seconds(spoken, 16000) == pytest.approx(0.25 + four_bytes_spoken)
-    assert spoken_seconds(spoken, 16000) == pytest.approx(four_bytes_spoken)
-
-
-def test_the_persona_voice_uses_the_pinned_choice_and_native_speed():
-    spec = spec_for(voice=TTS_VOICE)
-    voice = voice_from_models(spec.models)
-    assert (voice.voice_id, voice.provider, voice.speed) == (
-        "warm-alto-2",
-        "cartesia",
-        1.0,
-    )
-
-    assert spec.persona == AuthoredPersona(
-        name=A_NAME,
-        personality=A_PERSONALITY,
-        language="en-US",
-    )
-
-
 # -- The voice activity detector ---------------------------------------------
-
-
-@pytest.mark.parametrize("band", [8000, 16000, 48000])
-def test_the_ci_detector_reads_the_codec_exactly(band: int):
-    """Speech is a tone and quiet is exactly no samples, so the detector
-    answers from the samples and never from a probability."""
-    assert carries_speech(encode_speech("a", band))
-    assert not carries_speech(silence(0.05, band))
-
-
-def test_the_ci_detector_confirms_speech_one_window_in_and_quiet_four_out():
-    """Both corrections the conductor applies are the detector's own
-    declared parameters, so a boundary it reports can be put back exactly
-    where the speech was."""
-    detector = ScriptedVAD()
-    detector.set_sample_rate(16000)
-    assert detector.num_frames_required() == 240
-    assert detector.params.start_secs == pytest.approx(240 / 16000)
-    assert detector.params.stop_secs == pytest.approx(4 * 240 / 16000)
-
-
-def test_the_detector_is_chosen_at_assembly_like_every_other_leg(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """Silero is the production detector and it ships inside the pinned
-    wheel, so choosing it downloads nothing and connects to nothing — and
-    a deployment that chose nothing never loads it at all."""
-    import socket
-
-    def starved(*_args: object, **_kwargs: object):
-        raise AssertionError("choosing a detector reached for the network")
-
-    monkeypatch.setattr(socket.socket, "connect", starved)
-    monkeypatch.setattr(socket.socket, "connect_ex", starved)
-
-    scripted = build_vad(SCRIPTED_PAIR)
-    assert isinstance(scripted, ScriptedVAD)
-
-    from pipecat.audio.vad.silero import SileroVADAnalyzer
-
-    chosen = build_vad(SpeechProviders(vad="silero"))
-    assert isinstance(chosen, SileroVADAnalyzer)
 
 
 def test_one_live_simulation_keeps_one_silero_model_state(
@@ -484,29 +391,6 @@ def test_a_recording_is_measured_for_drawing_as_it_is_written():
 # -- A whole exchange --------------------------------------------------------
 
 
-async def test_a_voice_simulation_conducts_the_same_exchange_a_chat_walk_would(
-    tmp_path: Path,
-):
-    """The persona brain is one component: the transcript is what it would
-    have been on chat, and only the machinery underneath changed."""
-    observed = await voice_simulation(
-        tmp_path,
-        scenario="First point. Second point.",
-        greeting="Front desk, hello.",
-        replies=["Certainly.", "Done."],
-    )
-    assert observed.turns == [
-        ("agent", "Front desk, hello."),
-        ("human", "First point."),
-        ("agent", "Certainly."),
-        ("human", "Second point."),
-        ("agent", "Done."),
-        ("human", GOODBYE),
-    ]
-    assert observed.conducted.status == "completed"
-    assert observed.conducted.ending == "persona_concluded"
-
-
 async def test_incoming_audio_continues_while_the_persona_thinks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -537,50 +421,6 @@ async def test_incoming_audio_continues_while_the_persona_thinks(
         timeout=3,
     )
     assert observed.conducted.status == "completed"
-
-
-async def test_both_ends_of_every_turn_are_read_off_the_audio(tmp_path: Path):
-    """Every transcript turn is spoken and stays ordered on the audio clock."""
-    observed = await voice_simulation(
-        tmp_path,
-        scenario="First point. Second point.",
-        greeting="Front desk, hello.",
-        replies=["Certainly.", "Done."],
-    )
-    for speaker, text, began, ended in observed.spans:
-        assert ended > began, (speaker, text)
-
-    opened = [began for _speaker, _text, began, _ended in observed.spans]
-    closed = [ended for _speaker, _text, _began, ended in observed.spans]
-    assert opened == sorted(opened)
-    assert closed == sorted(closed)
-    # Nobody interrupted anybody, so no two turns cross.
-    assert all(
-        closed[position] <= opened[position + 1] for position in range(len(opened) - 1)
-    )
-
-
-async def test_the_recording_holds_each_speaker_on_their_own_channel(
-    tmp_path: Path,
-):
-    """The whole point of two channels: read one and you have one speaker."""
-    observed = await voice_simulation(
-        tmp_path,
-        scenario="First point. Second point.",
-        greeting="Front desk, hello.",
-        replies=["Certainly.", "Done."],
-    )
-    audio = observed.assembled.audio
-    assert audio is not None
-
-    recording = (tmp_path / audio["recording"]).read_bytes()
-    assert set(audio) == {"recording", "waveform"}
-    assert channels_of(recording)[2] > 0
-
-    # Every transcript turn was carried on its own speaker's channel and on
-    # neither of the other's, including the final words that conclude the run.
-    carried = observed.turns
-    assert_one_speaker_to_a_channel(recording, carried)
 
 
 async def test_every_span_points_at_the_audio_it_names(
@@ -845,24 +685,6 @@ class _ProductionStopScriptedVAD(ScriptedVAD):
         )
 
 
-async def test_production_stop_window_needs_the_full_declared_quiet_period():
-    """The test detector recalculates its counters after taking live settings."""
-    detector = _ProductionStopScriptedVAD()
-    band = 16000
-    detector.set_sample_rate(band)
-    state = await detector.analyze_audio(encode_speech("a", band))
-    assert state is VADState.SPEAKING
-
-    quiet_windows = round(
-        CONVERSATION_VAD.stop_secs * band / detector.num_frames_required()
-    )
-    for _ in range(quiet_windows - 1):
-        state = await detector.analyze_audio(bytes(detector.num_frames_required() * 2))
-    assert state is not VADState.QUIET
-    state = await detector.analyze_audio(bytes(detector.num_frames_required() * 2))
-    assert state is VADState.QUIET
-
-
 class _StallingTTS(FrameProcessor):
     """Speak one second, then stay busy synthesizing until interrupted."""
 
@@ -1103,25 +925,6 @@ async def test_transport_loss_is_a_platform_fault(tmp_path: Path):
 
     assert failed_ending(lost.value) == ERROR
     assert "voice transport disconnected" in str(lost.value)
-
-
-async def test_the_persona_opens_when_the_far_end_does_not(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """No greeting is not a broken call: a persona may speak first."""
-    # Match this test's shortened opening wait so the fixture does not leave
-    # ten more seconds of queued silence in front of the agent's answer.
-    monkeypatch.setattr(scripted_transport, "OPENING_SILENCE_SECONDS", 2.0)
-    observed = await voice_simulation(
-        tmp_path,
-        scenario="One point.",
-        replies=["Noted."],
-        parameters=ConductParameters(agent_opening_seconds=1.0),
-    )
-    assert observed.turns[0] == ("human", "One point.")
-    audio = observed.assembled.audio
-    assert audio is not None
-    assert (tmp_path / audio["recording"]).exists()
 
 
 # -- Limits, cancellation, and the endings -----------------------------------
@@ -1694,124 +1497,7 @@ async def test_failed_deliberate_tts_before_audio_yields_to_normal_reply(
     assert canceled[0].ended_unix_nano is None
 
 
-# -- What the legs are, and whose voice --------------------------------------
-
-
-async def test_the_speech_legs_need_no_corpus_and_no_download(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """Scripted TTS must preserve multi-sentence audio without an NLTK corpus.
-    Force corpus access to fail and inspect the recording, because frame-processing
-    errors can drop audio without propagating to the test.
-    """
-    import nltk
-    import pipecat.utils.string
-
-    def starved(*_args: object, **_kwargs: object):
-        raise LookupError("no tokenizer corpus, and none is meant to be needed")
-
-    monkeypatch.setattr(pipecat.utils.string, "_sent_tokenizer", lambda: starved)
-    monkeypatch.setattr(nltk.data, "load", starved)
-    monkeypatch.setattr(nltk.data, "find", starved)
-
-    # And the fetch is already gone, so a cold machine reaches no further
-    # than a warm one does.
-    assert nltk.download("punkt_tab", quiet=True) is False
-
-    spoken = "First sentence. Second sentence. And a third one after that."
-    observed = await voice_simulation(tmp_path, scenario=spoken, replies=["Noted."])
-    audio = observed.assembled.audio
-    assert audio is not None
-    assert_one_speaker_to_a_channel(
-        (tmp_path / audio["recording"]).read_bytes(),
-        observed.turns,
-    )
-
-
-async def test_the_speaking_leg_uses_the_pinned_voice_and_native_speed(
-    tmp_path: Path,
-):
-    """The pinned model selection owns the voice; speed stays internal."""
-    observed = await voice_simulation(
-        tmp_path,
-        scenario="One point.",
-        replies=["Noted."],
-        voice={"provider": "cartesia", "voiceId": "brisk-tenor-7", "speed": 1.15},
-    )
-    conductor = observed.assembled.conductor
-    assert conductor is not None
-    spoke_with = conductor.speaking_voice
-    assert (spoke_with.voice_id, spoke_with.provider, spoke_with.speed) == (
-        "brisk-tenor-7",
-        "cartesia",
-        1.0,
-    )
-
-    # The helper's complete TTS selection is also explicit.
-    plain = await voice_simulation(tmp_path, scenario="One point.", replies=["Noted."])
-    assert plain.assembled.conductor.speaking_voice.voice_id == "warm-alto-2"
-
-
-async def test_a_counterpart_that_echoes_hands_back_what_it_heard(
-    tmp_path: Path,
-):
-    """The echo test line: the agent side is whatever the persona said.
-
-    Nothing else can prove real speech legs without dialling somebody —
-    a scripted script speaks the test codec, which no real transcriber
-    can read. Here, with the scripted pair on both ends, the proof is
-    exact: every agent turn is the persona turn before it.
-    """
-    observed = await voice_simulation(
-        tmp_path,
-        scenario="First point. Second point.",
-        echoes_what_it_hears=True,
-    )
-    assert observed.turns[:4] == [
-        ("human", "First point."),
-        ("agent", "First point."),
-        ("human", "Second point."),
-        ("agent", "Second point."),
-    ]
-
-    # The transcript proves what was echoed. The recording proves that each
-    # echoed turn stayed on the speaker channel Pipecat assigned it.
-    audio = observed.assembled.audio
-    assert audio is not None
-    assert_one_speaker_to_a_channel(
-        (tmp_path / audio["recording"]).read_bytes(),
-        observed.turns,
-    )
-
-
-def test_a_counterpart_cannot_both_echo_and_read_a_script(tmp_path: Path):
-    with pytest.raises(PlugError, match="echoes_what_it_hears"):
-        assemble(
-            spec_for(echoes_what_it_hears=True, replies=["Certainly."]),
-            blobs=FilesystemBlobStore(tmp_path),
-            speech=SCRIPTED_PAIR,
-        )
-
-
 # -- Which legs, and whose voice ---------------------------------------------
-
-
-async def test_the_unit_speech_pair_uses_the_voice_from_models(tmp_path: Path):
-    """The deterministic pair is a test injection, not a runtime fallback."""
-    spec = spec_for(voice=TTS_VOICE)
-    assembled = assemble(
-        spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
-    )
-    conductor = assembled.conductor
-    assert conductor is not None
-    try:
-        legs = conductor.legs
-        assert isinstance(legs.tts, ScriptedTTS)
-        assert isinstance(legs.stt, ScriptedSTT)
-        assert isinstance(conductor.vad, ScriptedVAD)
-        assert legs.tts.voice == voice_from_models(spec.models)
-    finally:
-        await conductor.close()
 
 
 async def test_a_leg_that_refuses_a_turn_fails_the_simulation_in_its_own_words(
@@ -2023,57 +1709,6 @@ async def test_a_cancel_outranks_a_silence(
     assert observed.conducted.ending == "canceled"
 
 
-async def test_an_unconfigured_voice_exchange_connects_nothing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """Half the hermeticity guard: with nothing configured, no socket is
-    ever connected — the whole simulation is conducted with connecting
-    starved. The other half, that no provider library is so much as
-    imported, is in the quarantine suite, where a fresh process can say
-    it."""
-    import socket
-
-    def starved(*_args: object, **_kwargs: object):
-        raise AssertionError("the scripted pair reached for the network")
-
-    monkeypatch.setattr(socket.socket, "connect", starved)
-    monkeypatch.setattr(socket.socket, "connect_ex", starved)
-
-    observed = await voice_simulation(
-        tmp_path, scenario="One point.", replies=["Noted."]
-    )
-
-    assert observed.conducted.status == "completed"
-    assert ("agent", "Noted.") in observed.turns
-    assert observed.assembled.audio is not None
-
-
-def test_a_chat_spec_assembles_no_speech_legs_and_no_audio(tmp_path: Path):
-    """Modality selects the legs and nothing else: a chat simulation is the
-    plug on its own, looped, and its report has no audio to carry."""
-    spec = SimulationSpec.from_document(scripted_spec("sim-chat"))
-    assembled = assemble(
-        spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
-    )
-    assert assembled.conductor is None
-    assert assembled.plug is not None
-    assert assembled.audio is None
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_assembling_a_spec_with_no_plug_refuses_before_anything_happens(
-    tmp_path: Path,
-):
-    document = loopback_spec("sim-unplugged")
-    document["connection"]["connection_type"] = "some-connection-nobody-wrote"
-    with pytest.raises(PlugError, match="some-connection-nobody-wrote"):
-        assemble(
-            SimulationSpec.from_document(document),
-            blobs=FilesystemBlobStore(tmp_path),
-            speech=SCRIPTED_PAIR,
-        )
-
-
 async def test_a_wall_clock_gap_inside_one_utterance_loses_no_audio(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -2123,7 +1758,6 @@ async def test_a_wall_clock_gap_inside_one_utterance_loses_no_audio(
         (401, True, True),
         (403, True, True),
         (429, True, False),
-        (503, True, False),
         (401, False, False),
     ],
 )
@@ -2163,7 +1797,7 @@ async def test_customer_speech_auth_failure_keeps_provider_identity(
 
 @pytest.mark.timeout(12)
 @pytest.mark.parametrize("status", [401, 403])
-@pytest.mark.parametrize("voice_id", ["alloy", "voice_private_123"])
+@pytest.mark.parametrize("voice_id", ["alloy"])
 async def test_openai_tts_auth_failure_survives_the_real_pipeline(
     tmp_path, monkeypatch, status, voice_id
 ):

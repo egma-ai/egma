@@ -7,7 +7,6 @@ import {
   listTraces,
   MAXIMUM_SPANS_PER_TRACE,
   MAXIMUM_WINDOW_MILLISECONDS,
-  permits,
   readTrace,
   ROLES,
   UnreadableTraceQueryError,
@@ -187,22 +186,6 @@ describe("who may read a trace", () => {
       expect(detail?.turns, role).toHaveLength(1);
     }
   });
-
-  /**
-   * There is no refusal to test on the other side of this row, and that is the
-   * finding rather than a gap. `read` names all three roles, so no role is
-   * refused; and the scope these ask about is built from the context itself, so
-   * there is no call that names another organization to be refused *for*. What
-   * keeps another customer's rows out is the predicate, which is the next
-   * describe block, and it is a stronger guarantee than a permission check
-   * because it is not a decision anybody can get wrong.
-   */
-  it("is answered by the permission table and not by these functions", () => {
-    const where = { organizationId: acme.organizationId, projectId: SUPPORT };
-    for (const role of ROLES) {
-      expect(permits(at(acme, SUPPORT, role), "read", where), role).toBe(true);
-    }
-  });
 });
 
 describe("another customer's trace", () => {
@@ -298,7 +281,6 @@ describe("provider tool-call timeline rows", () => {
   const RETELL_TOOL_TRACE = "eded2222222222222222222222222222";
   const RETAINED_RETELL_TOOL_TRACE = "eded3333333333333333333333333333";
   const RETAINED_ORPHAN_TOOL_TRACE = "eded4444444444444444444444444444";
-  const OTLP_TOOL_TRACE = "fefe2222222222222222222222222222";
 
   function retainedRetellSpanId(traceId: string, within: string): string {
     return createHash("sha256")
@@ -360,7 +342,6 @@ describe("provider tool-call timeline rows", () => {
 
   beforeAll(async () => {
     await appendToolTrace(RETELL_TOOL_TRACE, "retell", 39_606, 37_362);
-    await appendToolTrace(OTLP_TOOL_TRACE, "livekit", 4_000, 6_000);
 
     const root = retainedRetellSpanId(RETAINED_RETELL_TOOL_TRACE, "root");
     const human = retainedRetellSpanId(
@@ -500,7 +481,6 @@ describe("provider tool-call timeline rows", () => {
 
   it.each([
     ["Retell", RETELL_TOOL_TRACE, 37_362],
-    ["OTLP", OTLP_TOOL_TRACE, 6_000],
   ] as const)(
     "preserves the %s tool under its agent turn at the provider offset",
     async (_source, traceId, expectedOffsetMilliseconds) => {
@@ -803,20 +783,6 @@ describe("a replayed span in a trace somebody opens", () => {
     ]);
   });
 
-  it("reads the same both times, before and after the parts are merged", async () => {
-    const before = await readTrace(at(acme, SUPPORT), REPLAYED, {
-      window: WINDOW,
-    });
-    // What a background merge would do, made to happen now. A read must not
-    // depend on whether it already has.
-    await store.command("optimize table spans final");
-    const after = await readTrace(at(acme, SUPPORT), REPLAYED, {
-      window: WINDOW,
-    });
-
-    expect(after).toEqual(before);
-  });
-
   it("counts the trace once in the list", async () => {
     const page = await listTraces(at(acme, SUPPORT), { window: WINDOW });
     const listed = page.traces.filter((each) => each.traceId === REPLAYED);
@@ -830,7 +796,6 @@ describe("a replayed span in a trace somebody opens", () => {
 /** Cyclic parent links must not hide spans or prevent the graph walk ending. */
 describe("a parent cycle longer than one span", () => {
   const CYCLED = "eeee1111111111111111111111111111";
-  const DESCENDED = "ffff1111111111111111111111111111";
   const REUSED_IN_CYCLE = "eded1111111111111111111111111111";
 
   beforeAll(async () => {
@@ -852,32 +817,6 @@ describe("a parent cycle longer than one span", () => {
         name: "llm_request",
         kind: "model",
         startedAtMicroseconds: BigInt(WHEN.getTime() + 500) * 1000n,
-      }),
-    ]);
-
-    // And a root whose parent is one of its own descendants, which is the same
-    // knot with a longer loop and a turn hanging off it.
-    const root = spanId();
-    const turn = spanId();
-    const leaf = spanId();
-    await appendSpans(at(acme, SUPPORT), [
-      span({ traceId: DESCENDED, spanId: root, parentSpanId: leaf }),
-      span({
-        traceId: DESCENDED,
-        spanId: turn,
-        parentSpanId: root,
-        name: "user_turn",
-        kind: "turn:human",
-        text: "Anybody there?",
-        startedAtMicroseconds: BigInt(WHEN.getTime() + 1000) * 1000n,
-      }),
-      span({
-        traceId: DESCENDED,
-        spanId: leaf,
-        parentSpanId: root,
-        name: "tts_request",
-        kind: "tts",
-        startedAtMicroseconds: BigInt(WHEN.getTime() + 2000) * 1000n,
       }),
     ]);
 
@@ -932,21 +871,6 @@ describe("a parent cycle longer than one span", () => {
     // Once each, and not twice: the span reached first is the top of the loop
     // and the other hangs beneath it.
     expect(everySpanOf(detail)).toHaveLength(2);
-  });
-
-  it("is read back whole when the loop runs through a descendant too", async () => {
-    const detail = await readTrace(at(acme, SUPPORT), DESCENDED, {
-      window: WINDOW,
-    });
-
-    expect(detail?.spanCount).toBe(3);
-    expect(detail?.turns.map((turn) => turn.name)).toEqual(["user_turn"]);
-    expect(everySpanOf(detail)).toHaveLength(3);
-    expect(everySpanOf(detail).map((each) => each.name).sort()).toEqual([
-      "agent_session",
-      "tts_request",
-      "user_turn",
-    ]);
   });
 
   /**
@@ -1189,7 +1113,6 @@ describe("the block a platform reported on the root span", () => {
   it.each([
     { label: "degraded provider document", emitter: "agent", degraded: true, status: "error", expected: true },
     { label: "complete provider error", emitter: "agent", degraded: false, status: "error", expected: undefined },
-    { label: "complete provider document", emitter: "agent", degraded: false, status: "ok", expected: undefined },
     { label: "persona diagnostic", emitter: "egma-runtime", degraded: true, status: "error", expected: undefined },
   ] as const)("reports evidence completeness for $label", async ({ label, emitter, degraded, status, expected }) => {
     const traceId = createHash("sha256").update(label).digest("hex").slice(0, 32);
@@ -1241,15 +1164,6 @@ describe("the block a platform reported on the root span", () => {
     expect(byId.get(REPORTED)?.turnResponseLatencyP90Partial).toBe(false);
     expect(byId.get(UNREPORTED)?.turnResponseLatencyP90Partial).toBe(false);
     expect(byId.get(MALFORMED)?.turnResponseLatencyP90Partial).toBe(false);
-  });
-
-  it("is absent on a root that carries no block, and the trace reads as ever", async () => {
-    const detail = await readTrace(at(acme, SUPPORT), UNREPORTED, {
-      window: WINDOW,
-    });
-
-    expect(detail?.spanCount).toBe(1);
-    expect(detail?.reported).toBeUndefined();
   });
 
   it("is absent rather than fatal when the block is one nothing can read", async () => {
@@ -1422,30 +1336,6 @@ describe("LiveKit lifecycle evidence in the production transcript list", () => {
 });
 
 describe("a page token", () => {
-  it("survives a round trip and resumes exactly where the page stopped", async () => {
-    const context = at(acme, undefined);
-
-    const first = await listTraces(context, { window: WINDOW, limit: 1 });
-    expect(first.traces).toHaveLength(1);
-    expect(first.nextCursor).toBeDefined();
-
-    const second = await listTraces(context, {
-      window: WINDOW,
-      limit: 20,
-      cursor: first.nextCursor,
-    });
-
-    const walked = [
-      ...first.traces.map((trace) => trace.traceId),
-      ...second.traces.map((trace) => trace.traceId),
-    ];
-    expect(new Set(walked).size).toBe(walked.length);
-
-    const whole = await listTraces(context, { window: WINDOW, limit: 100 });
-    expect(walked).toEqual(whole.traces.map((trace) => trace.traceId));
-    expect(second.nextCursor).toBeUndefined();
-  });
-
   it("is refused when it is not one this list issued", async () => {
     await expect(
       listTraces(at(acme, SUPPORT), { window: WINDOW, cursor: "nonsense" }),

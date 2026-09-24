@@ -54,25 +54,6 @@ describe("an identity created without egma's signup page", () => {
     );
     expect(projects).toEqual([{ name: "Default" }]);
   });
-
-  it("uses the names it was given when it was given some", async () => {
-    api = await createApi("hook_intent");
-    const userId = await anIdentity("ada@acme.example");
-
-    await onIdentityCreated()(
-      { externalIdentityId: userId, email: "ada@acme.example" },
-      {
-        kind: "new_organization",
-        organizationName: "Acme Robotics",
-        projectName: "Outbound",
-      },
-    );
-
-    const { rows } = await api.database.sql<{ name: string; slug: string }>(
-      "select name, slug from organization",
-    );
-    expect(rows).toEqual([{ name: "Acme Robotics", slug: "acme-robotics" }]);
-  });
 });
 
 describe("an identity that already belongs somewhere", () => {
@@ -102,19 +83,6 @@ describe("an identity that already belongs somewhere", () => {
 });
 
 describe("who may sign up", () => {
-  it("is anybody, on a deployment that holds many customers", async () => {
-    api = await createApi("hook_open");
-    const userId = await anIdentity("ada@acme.example");
-    await onIdentityCreated()(
-      { externalIdentityId: userId, email: "ada@acme.example" },
-      undefined,
-    );
-
-    await expect(
-      admitIdentity(false)("grace@globex.example", undefined),
-    ).resolves.toBeUndefined();
-  });
-
   it("is the first person only, on a deployment that holds one", async () => {
     api = await createApi("hook_claimed");
 

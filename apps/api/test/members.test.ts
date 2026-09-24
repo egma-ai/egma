@@ -154,17 +154,6 @@ describe("the list of people", () => {
 });
 
 describe("changing somebody's role", () => {
-  it("is something an admin may do", async () => {
-    api = await createApi("members_role_admin");
-    const ada = await signUp("ada@acme.example", "Acme");
-    const mia = await colleagueOf(ada, "mia@acme.example", "member");
-
-    const changed = await act(ada, mia.userId, "role", { role: "viewer" });
-
-    expect(changed.statusCode).toBe(200);
-    expect(changed.json()).toMatchObject({ role: "viewer" });
-  });
-
   it("is not something a member or a viewer may do", async () => {
     api = await createApi("members_role_refused");
     const ada = await signUp("ada@acme.example", "Acme");

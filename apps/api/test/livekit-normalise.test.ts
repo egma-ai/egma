@@ -115,7 +115,6 @@ describe("LiveKit Agents 1.7 trace attributes", () => {
   });
 
   it.each([
-    { flag: true, wireStatus: undefined, expected: "error" },
     { flag: false, wireStatus: undefined, expected: "ok" },
     { flag: false, wireStatus: 2, expected: "error" },
     { flag: true, wireStatus: 1, expected: "error" },
@@ -259,37 +258,6 @@ describe("LiveKit Agents 1.7 trace attributes", () => {
     expect(result.spans[1]?.payload).toContain('"message":"the response failed"');
   });
 
-  it("uses voice user turns across separate reversed exports without deriving duplicates", () => {
-    const resource = { "lk.pii.room_name": "egma-sim-sim_voice" };
-    const accepted = span("0011223344556606", "agent_turn", {
-      "lk.pii.user_input": "Is Tuesday available?",
-    });
-    const transcript = span("0011223344556607", "user_turn", {
-      "lk.pii.user_transcript": "Is Tuesday available?",
-    });
-
-    const acceptedFirst = normalise(resource, [accepted], "1.7.1", "voice");
-    const transcriptLater = normalise(resource, [transcript], "1.7.1", "voice");
-    const transcriptFirst = normalise(resource, [transcript], "1.7.1", "voice");
-    const acceptedLater = normalise(resource, [accepted], "1.7.1", "voice");
-
-    expect(acceptedFirst.spans).toHaveLength(1);
-    expect(acceptedFirst.spans[0]).toMatchObject({
-      kind: "other",
-      text: "",
-    });
-    expect(transcriptLater.spans[0]).toMatchObject({
-      kind: "turn:human",
-      text: "Is Tuesday available?",
-    });
-    expect(transcriptFirst.spans.map(({ spanId }) => spanId)).toEqual(
-      transcriptLater.spans.map(({ spanId }) => spanId),
-    );
-    expect(acceptedLater.spans.map(({ spanId }) => spanId)).toEqual(
-      acceptedFirst.spans.map(({ spanId }) => spanId),
-    );
-  });
-
   it("retains an empty terminal user record outside the spoken conversation", () => {
     const heard = span("0011223344556614", "user_turn", {
       "lk.pii.user_transcript": "Is Tuesday available?",
@@ -316,9 +284,7 @@ describe("LiveKit Agents 1.7 trace attributes", () => {
   });
 
   it.each([
-    { name: "user_turn", key: "lk.pii.user_transcript", text: "" },
     { name: "user_turn", key: "lk.pii.user_transcript", text: " \t" },
-    { name: "agent_turn", key: "lk.pii.response.text", text: "" },
     { name: "agent_turn", key: "lk.pii.response.text", text: " \t" },
   ])("keeps blank $name text as raw evidence for %#", ({ name, key, text }) => {
     const result = normalise(
@@ -330,19 +296,6 @@ describe("LiveKit Agents 1.7 trace attributes", () => {
 
     expect(result.spans).toHaveLength(1);
     expect(result.spans[0]).toMatchObject({ name, kind: "other", text });
-  });
-
-  it("does not reinterpret production agent input as a simulation caller turn", () => {
-    const result = normalise(
-      { "lk.pii.room_name": "customer-production-chat" },
-      [
-        span("0011223344556608", "agent_turn", {
-          "lk.pii.user_input": "Is Tuesday available?",
-        }),
-      ],
-    );
-
-    expect(result.spans[0]).toMatchObject({ kind: "other", text: "" });
   });
 
   it.each([

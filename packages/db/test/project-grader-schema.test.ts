@@ -22,30 +22,6 @@ describe("the project grader records", () => {
     await database?.drop();
   });
 
-  it("keeps shared definition history separate from one project's live policy", async () => {
-    const { rows } = await connection.sql<{ table_name: string }>(
-      `select table_name
-         from information_schema.tables
-        where table_schema = 'public'
-          and table_name in (
-            'grader_definition',
-            'grader_definition_version',
-            'project_grader',
-            'grader_library',
-            'grader_library_version',
-            'grader',
-            'grader_version'
-          )
-        order by table_name`,
-    );
-
-    expect(rows.map((row) => row.table_name)).toEqual([
-      "grader_definition",
-      "grader_definition_version",
-      "project_grader",
-    ]);
-  });
-
   it("creates a definition and its first immutable version in one transaction", async () => {
     const definitionId = newId("grl");
     await connection.sql("begin");

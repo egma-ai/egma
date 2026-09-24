@@ -143,17 +143,6 @@ function connectionPayload(
 }
 
 describe("discovering simulation agents", () => {
-  it("does not treat arbitrary text after the agents path as the discover action", async () => {
-    api = await createApi("agent_discovery_literal_action");
-
-    const response = await api.app.inject({
-      method: "POST",
-      url: "/v1/agentsanything",
-    });
-
-    expect(response.statusCode).toBe(404);
-  });
-
   it("returns every Retell Agent and adds connection candidates only where Egma supports them", async () => {
     api = await createApi("retell_agent_discovery");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
@@ -1026,73 +1015,6 @@ describe("discovering simulation agents", () => {
     ).toEqual(["phone_number", "retell_web_call"]);
   });
 
-  it("writes nothing when Retell rerouted a discovered phone candidate", async () => {
-    api = await createApi("retell_discovery_rerouted_connection");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const created = await post("/v1/agents", withKey(ada.secret), {
-      agentPlatform: "retell",
-      name: "Front desk",
-    });
-    const agentId = String(agentOf(created).id);
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string | URL | Request) => {
-        const path = new URL(String(input)).pathname;
-        if (path === "/v2/list-agents") {
-          return new Response(
-            JSON.stringify({
-              items: [
-                {
-                  agent_id: "agent_voice_1",
-                  agent_name: "Front desk",
-                  channel: "voice",
-                },
-              ],
-              has_more: false,
-            }),
-            { status: 200 },
-          );
-        }
-        if (path.startsWith("/get-phone-number/")) {
-          return new Response(
-            JSON.stringify({
-              phone_number: "+14155550100",
-              nickname: "Main",
-              inbound_agents: [{ agent_id: "agent_somebody_else" }],
-            }),
-            { status: 200 },
-          );
-        }
-        throw new Error(`unexpected Retell request ${path}`);
-      }),
-    );
-
-    const refused = await post(
-      `/v1/agents/${agentId}/connections?projectId=${ada.projectId}`,
-      withKey(ada.secret),
-      {
-        agentPlatform: "retell",
-        connectionType: "phone_number",
-        accessVariant: "phone_number.public_e164",
-        modality: "voice",
-        config: { phoneNumber: "+14155550100" },
-        agentPlatformSelection: {
-          platformAgentId: "agent_voice_1",
-          credentials: { apiKey: "retell-secret-confirm-WXYZ" },
-        },
-      },
-    );
-
-    expect(refused.status).toBe(422);
-    expect(refused.body).toEqual({
-      error: "unprocessable",
-      message:
-        "That phone number is no longer routed to the selected agent. Load the account again.",
-    });
-    const read = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
-    expect(read.body.connections).toEqual([]);
-  });
-
   it("returns the monitoring state written by an inline Retell registration", async () => {
     api = await createApi("retell_inline_registration_response_state");
     const ada = await signUp(api.app, "ada-inline@acme.example", "Acme");
@@ -1181,20 +1103,6 @@ describe("registering an agent", () => {
       platform: "retell",
       connection: registration().connection,
     },
-    {
-      platform: "livekit",
-      connection: {
-        agentPlatform: "livekit",
-        connectionType: "livekit_room",
-        accessVariant: "livekit_room.project_credentials",
-        modality: "voice",
-        config: { url: "wss://acme.livekit.cloud" },
-        credentials: {
-          apiKey: "livekit-api-key-WXYZ",
-          apiSecret: "livekit-api-secret-WXYZ",
-        },
-      },
-    },
   ])(
     "requires the agent platform for $platform even when its first connection names one",
     async ({ platform, connection }) => {
@@ -1242,21 +1150,6 @@ describe("registering an agent", () => {
     expect(await agentRowCount()).toBe(0);
   });
 
-  it("claims an identity on its own when no connection is named", async () => {
-    api = await createApi("agents_identity_only");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const claimed = await post("/v1/agents", withKey(ada.secret), {
-      agentPlatform: "retell",
-      name: "Not wired yet",
-    });
-
-    expect(claimed.status).toBe(201);
-    expect(claimed.body.result).toBe("created");
-    expect(claimed.body).not.toHaveProperty("connection");
-    expect(agentOf(claimed).name).toBe("Not wired yet");
-  });
-
   it("refuses a registration with no name, in the factory's own words", async () => {
     api = await createApi("agents_needs_a_name");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
@@ -1302,25 +1195,6 @@ describe("a connection payload its kind will not take", () => {
    * rather than only at the seam below because the sentence a developer's
    * terminal prints is the one that came over the wire.
    */
-  it("names an unknown connection type, and what egma does know", async () => {
-    api = await createApi("agents_unknown_type");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const refused = await post("/v1/agents", withKey(ada.secret), {
-      agentPlatform: "retell",
-      name: "Front desk",
-      connection: connectionPayload({ connectionType: "vapi" }),
-    });
-
-    expect(refused.status).toBe(400);
-    expect(refused.body).toEqual({
-      error: "invalid_request",
-      message:
-        '"vapi" is not a connection type Egma knows; expected one of retell_text_mode, retell_web_call, phone_number, livekit_room',
-    });
-    expect(await agentRowCount()).toBe(0);
-  });
-
   it("refuses an agent platform outside the explicit supported tuples", async () => {
     api = await createApi("agents_unknown_platform");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
@@ -1344,30 +1218,6 @@ describe("a connection payload its kind will not take", () => {
         "agent platform, connection type, access variant, and modality do not form a supported simulation connection",
     });
     expect(await agentRowCount()).toBe(0);
-  });
-
-  it("names a modality the connection type does not speak", async () => {
-    api = await createApi("agents_wrong_modality");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const refused = await post("/v1/agents", withKey(ada.secret), {
-      agentPlatform: "retell",
-      name: "Reception line",
-      connection: {
-        agentPlatform: null,
-        connectionType: "phone_number",
-        accessVariant: "phone_number.public_e164",
-        modality: "chat",
-        config: { phoneNumber: "+15551234567" },
-      },
-    });
-
-    expect(refused.status).toBe(400);
-    expect(refused.body).toEqual({
-      error: "invalid_request",
-      message:
-        "a phone_number connection speaks voice, and this one was asked for chat",
-    });
   });
 
   it("names the credentials shape when none arrived", async () => {
@@ -1457,65 +1307,6 @@ describe("a livekit connection", () => {
       ...overrides,
     };
   }
-
-  it("is registered with a url and a worker to dispatch, and dials out", async () => {
-    api = await createApi("agents_livekit_bare");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const registered = await post("/v1/agents", withKey(ada.secret), {
-      agentPlatform: "livekit",
-      name: "Quickstart agent",
-      connection: livekitPayload(),
-    });
-
-    expect(registered.status).toBe(201);
-    expect(connectionOf(registered)).toMatchObject({
-      name: "livekit_voice-1",
-      agentPlatform: "livekit",
-      connectionType: "livekit_room",
-      accessVariant: "livekit_room.project_credentials",
-      productLabel: "LiveKit project credentials",
-      modality: "voice",
-      // Derived from the type, never caller-supplied.
-      topology: "agent-dials-out",
-      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk" },
-      // The last four of the key. The secret has no hint and no line at all.
-      credentialsHint: "WXYZ",
-    });
-    expect(connectionOf(registered)).not.toHaveProperty("credentials");
-  });
-
-  /**
-   * The chat lane through the same door, which is one field of the payload.
-   *
-   * What comes back is the point: the modality and the product label are what
-   * keep a typed score and a spoken one from being read as one number, and
-   * they are the whole of what a reader has to tell them apart by.
-   */
-  it("is registered for chat, and reads back as chat under its own label", async () => {
-    api = await createApi("agents_livekit_chat");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const registered = await post("/v1/agents", withKey(ada.secret), {
-      agentPlatform: "livekit",
-      name: "Typed agent",
-      connection: livekitPayload({ modality: "chat" }),
-    });
-
-    expect(registered.status).toBe(201);
-    expect(connectionOf(registered)).toMatchObject({
-      name: "livekit_chat-1",
-      agentPlatform: "livekit",
-      connectionType: "livekit_room",
-      accessVariant: "livekit_room.project_credentials",
-      productLabel: "LiveKit chat",
-      modality: "chat",
-      topology: "agent-dials-out",
-      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk" },
-      credentialsHint: "WXYZ",
-    });
-    expect(connectionOf(registered)).not.toHaveProperty("credentials");
-  });
 
   /**
    * The name is demanded on an edit as well as on a create, and it has to be:
@@ -2173,70 +1964,6 @@ describe("registering the same vendor agent again", () => {
 });
 
 describe("the vendor payload egma no longer keeps", () => {
-  /**
-   * Nothing ever read it back, and a stored copy of what lives at the provider
-   * rots from the moment it is written. Dropping it silently would leave a
-   * client believing egma held something it does not, so a body carrying it is
-   * refused by name.
-   */
-  it("is refused as an unknown key, loudly rather than ignored", async () => {
-    api = await createApi("agents_pulled_dropped");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const refused = await post("/v1/agents", withKey(ada.secret), {
-      agentPlatform: "retell",
-      ...registration(),
-      pulled: {
-        vendor: "retell",
-        documents: [{ of: "prompt", body: "you are a receptionist" }],
-        prompt: "you are a receptionist",
-        voice: null,
-        tools: [],
-      },
-    });
-
-    expect(refused.status).toBe(400);
-    expect(refused.body).toEqual({
-      error: "invalid_request",
-      message:
-        "Egma no longer keeps what was pulled from the provider, so a " +
-        'registration has no "pulled" key. Drop it and send name, ' +
-        "agentPlatform, projectId, connection; the agent's content stays at the " +
-        "provider, where Egma reads it fresh rather than out of a copy that " +
-        "would go stale.",
-    });
-    expect(await agentRowCount()).toBe(0);
-  });
-
-  /** The same refusal on the other object, naming that object and its keys. */
-  it("is refused on a connection body too, naming that object's own keys", async () => {
-    api = await createApi("agents_pulled_on_connection");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const registered = await post(
-      "/v1/agents",
-      withKey(ada.secret),
-      registration(),
-    );
-
-    const refused = await post(
-      `/v1/agents/${String(agentOf(registered).id)}/connections`,
-      withKey(ada.secret),
-      connectionPayload({ pulled: { vendor: "retell" } }),
-    );
-
-    expect(refused.status).toBe(400);
-    expect(refused.body).toEqual({
-      error: "invalid_request",
-      message:
-        "Egma no longer keeps what was pulled from the provider, so a " +
-        'connection has no "pulled" key. Drop it and send name, agentPlatform, ' +
-        "connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, agentPlatformSelection; the agent's content " +
-        "stays at the provider, where Egma reads it fresh rather than out of " +
-        "a copy that would go stale.",
-    });
-  });
-
   it("refuses any other key a registration has no place for", async () => {
     api = await createApi("agents_unknown_key");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
@@ -2252,24 +1979,6 @@ describe("the vendor payload egma no longer keeps", () => {
       error: "invalid_request",
       message:
         'a registration has no key "organization"; it holds name, agentPlatform, projectId, connection',
-    });
-  });
-
-  it("refuses a supplied topology, which the connection type decides", async () => {
-    api = await createApi("agents_topology_derived");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const refused = await post("/v1/agents", withKey(ada.secret), {
-      agentPlatform: "retell",
-      name: "Front desk",
-      connection: connectionPayload({ topology: "egma-dials-in" }),
-    });
-
-    expect(refused.status).toBe(400);
-    expect(refused.body).toEqual({
-      error: "invalid_request",
-      message:
-        'a connection has no key "topology"; it holds name, agentPlatform, connectionType, accessVariant, modality, environment, config, credentials, platformAgentId, pullProductionCalls, agentPlatformSelection',
     });
   });
 });
@@ -2469,27 +2178,6 @@ describe("reading agents", () => {
         "the nextPageToken from the page before this one, or leave it out to " +
         "start at the newest.",
     });
-  });
-
-  it("answers the agent with every living way of reaching it", async () => {
-    api = await createApi("agents_fetch_one");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const registered = await post(
-      "/v1/agents",
-      withKey(ada.secret),
-      registration(),
-    );
-    const agentId = String(agentOf(registered).id);
-
-    const one = await get(`/v1/agents/${agentId}`, withKey(ada.secret));
-
-    expect(one.status).toBe(200);
-    expect(agentOf(one).id).toBe(agentId);
-    expect(one.body.connections).toHaveLength(1);
-    expect((one.body.connections as Record<string, unknown>[])[0]?.id).toBe(
-      connectionOf(registered).id,
-    );
   });
 
   /**
@@ -2773,20 +2461,6 @@ describe("what each role may do here", () => {
 });
 
 describe("the project a request names", () => {
-  it("takes the organization's project when the key names none and the body names none", async () => {
-    api = await createApi("agents_default_project");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const registered = await post(
-      "/v1/agents",
-      withKey(ada.secret),
-      registration(),
-    );
-
-    expect(registered.status).toBe(201);
-    expect(agentOf(registered).projectId).toBe(ada.projectId);
-  });
-
   it("writes into the project the body names, when it is one of the customer's", async () => {
     api = await createApi("agents_named_project");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");

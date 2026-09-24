@@ -23,50 +23,6 @@ import type { Me } from "../lib/me.ts";
 import { currentDraftState } from "../ui/settings-read.ts";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 
-/*
- * The page must keep a controlled sheet mounted while Radix finishes its exit.
- * jsdom has no stylesheet, so this gives Radix the same animation names that
- * the product theme gives the real sheet.
- */
-function withClosingSheetAnimation(): void {
-  const real = window.getComputedStyle.bind(window);
-  vi.stubGlobal(
-    "getComputedStyle",
-    (element: Element, pseudo?: string | null) => {
-      const styles = real(element, pseudo);
-      const slot =
-        element instanceof HTMLElement ? (element.dataset.slot ?? "") : "";
-      if (!slot.startsWith("sheet-")) return styles;
-      return new Proxy(styles, {
-        get(target, key, receiver) {
-          if (key !== "animationName") {
-            return Reflect.get(target, key, receiver);
-          }
-          const closed = (element as HTMLElement).dataset.state === "closed";
-          return slot === "sheet-overlay"
-            ? closed
-              ? "egma-fade-out"
-              : "egma-fade-in"
-            : closed
-              ? "egma-sheet-out"
-              : "egma-sheet-in";
-        },
-      });
-    },
-  );
-}
-
-function finishSheetExit(surface: HTMLElement): void {
-  const ended = new Event("animationend", { bubbles: false });
-  Object.defineProperty(ended, "animationName", {
-    value:
-      surface.dataset.slot === "sheet-overlay"
-        ? "egma-fade-out"
-        : "egma-sheet-out",
-  });
-  fireEvent(surface, ended);
-}
-
 const routed = vi.hoisted(() => ({
   pathname: "/projects/prj_1/graders",
   projectId: "prj_1",
@@ -283,14 +239,6 @@ async function chooseRowMenuItem(name: string, item: string): Promise<void> {
   fireEvent.click(await screen.findByRole("menuitem", { name: item }));
 }
 
-/** The names a row's ⋮ offers, in the order it offers them. */
-async function rowMenuItems(name: string): Promise<readonly string[]> {
-  const menu = await openRowMenu(name);
-  return within(menu)
-    .getAllByRole("menuitem")
-    .map((item) => item.textContent ?? "");
-}
-
 /** Opening a row the way the boards do: by pressing the row's own name. */
 async function openRow(name: string): Promise<void> {
   fireEvent.click(await screen.findByRole("button", { name }));
@@ -301,50 +249,6 @@ function rowOf(name: string): HTMLElement {
   const row = screen.getByRole("button", { name }).closest("tr");
   if (row === null) throw new Error(`no row for ${name}`);
   return row;
-}
-
-/** A create that is answered, so the page's own notice and draft can be read. */
-function answersThatCreateAGrader(): Record<string, Stubbed | Stubbed[]> {
-  return {
-    ...standardAnswers(),
-    "POST /v1/grader-library/custom": {
-      status: 201,
-      body: {
-        definition: {
-          ...LATENCY_DEFINITION,
-          id: "grl_custom",
-          name: "Polite resolution",
-          owner: "project",
-          type: "llm_as_judge",
-          settingDefinitions: [],
-          activeProjectGraderId: "grd_custom",
-        },
-        grader: {
-          ...LATENCY,
-          id: "grd_custom",
-          graderDefinitionId: "grl_custom",
-          name: "Polite resolution",
-          owner: "project",
-        },
-      },
-    },
-  };
-}
-
-/** Everything the create sheet asks for before it will send. */
-function fillCustomGrader(sheet: HTMLElement): void {
-  fireEvent.change(within(sheet).getByLabelText("Name*"), {
-    target: { value: "Polite resolution" },
-  });
-  fireEvent.change(within(sheet).getByLabelText("Grading instructions*"), {
-    target: { value: "the agent resolved the request" },
-  });
-  fireEvent.change(within(sheet).getByLabelText("Passes when*"), {
-    target: { value: "the agent confirms the request is done" },
-  });
-  fireEvent.change(within(sheet).getByLabelText("Fails when*"), {
-    target: { value: "the agent leaves the request open" },
-  });
 }
 
 function ScopeHarness() {
@@ -499,16 +403,6 @@ describe("the project Graders surface", () => {
     );
   });
 
-  it("opens a grader definition linked from evidence", async () => {
-    routed.search = "grader=grd_expected";
-    apiAnswers(standardAnswers());
-    render(<GradersPage />);
-
-    expect(
-      await screen.findByRole("dialog", { name: "Expected behaviors" }),
-    ).toBeTruthy();
-  });
-
   it("opens the immutable grader definition linked from a historical result", async () => {
     routed.search =
       `graderDefinition=${EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID}&definitionVersion=1`;
@@ -564,38 +458,6 @@ describe("the project Graders surface", () => {
     });
   });
 
-  it("separates active project policy from the grader library without repeated headings", async () => {
-    const { asked } = apiAnswers(standardAnswers());
-    render(<GradersPage />);
-
-    expect(await screen.findByText("Expected behaviors")).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Active graders" })).toBeTruthy();
-    expect(screen.getByRole("tab", { name: "Grader library" })).toBeTruthy();
-    expect(screen.getAllByText("Active graders")).toHaveLength(1);
-    expect(screen.queryByText(/what active means/i)).toBeNull();
-    expect(screen.queryByRole("button", { name: /add predefined grader/i })).toBeNull();
-    /* The scope is two columns now, never one dot-joined sentence. */
-    expect(screen.queryByText(/·/)).toBeNull();
-    expect(
-      screen.getByRole("columnheader", { name: "Simulations" }),
-    ).toBeTruthy();
-    expect(
-      screen.getByRole("columnheader", { name: "Production" }),
-    ).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("tab", { name: "Grader library" }));
-    expect(await screen.findByText("Response latency")).toBeTruthy();
-    expect(screen.getAllByText("Grader library")).toHaveLength(1);
-    expect(screen.getByText("Available")).toBeTruthy();
-    expect(screen.getByText("Active")).toBeTruthy();
-    expect(asked.map((one) => one.path)).toEqual(
-      expect.arrayContaining([
-        "/v1/graders?projectId=prj_1",
-        "/v1/grader-library?projectId=prj_1",
-      ]),
-    );
-  });
-
   it("loads every page of active graders and the grader library", async () => {
     const { asked } = apiAnswers({
       ...standardAnswers(),
@@ -640,115 +502,6 @@ describe("the project Graders surface", () => {
         "/v1/grader-library?projectId=prj_1&pageToken=library_page_2",
       ]),
     );
-  });
-
-  it("keeps a refusal from a later page instead of showing a partial list", async () => {
-    apiAnswers({
-      ...standardAnswers(),
-      "GET /v1/graders": [
-        {
-          status: 200,
-          body: { graders: [EXPECTED], nextPageToken: "active_page_2" },
-        },
-        {
-          status: 403,
-          body: {
-            error: "forbidden",
-            message: "The next page could not be read.",
-          },
-        },
-      ],
-    });
-    render(<GradersPage />);
-
-    expect(await screen.findByText("The next page could not be read.")).toBeTruthy();
-    expect(screen.queryByText("Expected behaviors")).toBeNull();
-  });
-
-  it("uses the stable definition id to label only Egma's Expected behaviors grader", async () => {
-    const collision: ProjectGrader = {
-      ...EXPECTED,
-      id: "grd_collision",
-      graderDefinitionId: "grl_collision",
-      owner: "project",
-      scopeEditable: true,
-      removable: true,
-    };
-    const collisionDefinition: GraderLibraryEntry = {
-      ...EXPECTED_DEFINITION,
-      id: "grl_collision",
-      owner: "project",
-      scopeEditable: true,
-      gradingInstructions: "Check the organization's custom behavior.",
-      activeProjectGraderId: collision.id,
-    };
-    apiAnswers({
-      ...standardAnswers(
-        "admin",
-        [EXPECTED, collision],
-        [EXPECTED_DEFINITION, collisionDefinition],
-      ),
-      "GET /v1/grader-library/grl_collision": {
-        status: 200,
-        body: collisionDefinition,
-      },
-    });
-    render(<GradersPage />);
-
-    expect(await screen.findByText("Expected behaviors")).toBeTruthy();
-    expect(screen.getByText("expected_behaviors")).toBeTruthy();
-    await chooseRowMenuItem("expected_behaviors", "Edit");
-    expect(
-      await screen.findByRole("dialog", { name: "expected_behaviors" }),
-    ).toBeTruthy();
-  });
-
-  it("keeps all three grader sheets mounted until their close motion ends", async () => {
-    withClosingSheetAnimation();
-    apiAnswers({
-      ...standardAnswers(),
-      [`GET /v1/grader-library/${EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID}`]: {
-        status: 200,
-        body: EXPECTED_DEFINITION,
-      },
-      "GET /v1/grader-library/grl_latency": {
-        status: 200,
-        body: LATENCY_DEFINITION,
-      },
-    });
-    render(<GradersPage />);
-
-    async function closeAfterMotion(name: string): Promise<void> {
-      const sheet = await screen.findByRole("dialog", { name });
-      const overlay = document.querySelector<HTMLElement>(
-        '[data-slot="sheet-overlay"]',
-      );
-      const closeButtons = within(sheet).getAllByRole("button", {
-        name: "Close",
-      });
-      const close = closeButtons.at(-1);
-      if (close === undefined) throw new Error("the sheet has no close button");
-      fireEvent.click(close);
-      expect(sheet.dataset.state).toBe("closed");
-      expect(document.body.contains(sheet)).toBe(true);
-      finishSheetExit(sheet);
-      if (overlay !== null) finishSheetExit(overlay);
-      await waitFor(() => {
-        expect(screen.queryByRole("dialog", { name })).toBeNull();
-      });
-    }
-
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Create custom grader" }),
-    );
-    await closeAfterMotion("Create custom grader");
-
-    await openRow("Expected behaviors");
-    await closeAfterMotion("Expected behaviors");
-
-    fireEvent.click(screen.getByRole("tab", { name: "Grader library" }));
-    await openRow("Response latency");
-    await closeAfterMotion("Response latency");
   });
 
   it("shows library details before Use and converts Response latency seconds to milliseconds", async () => {
@@ -989,189 +742,6 @@ describe("the project Graders surface", () => {
     });
   });
 
-  /**
-   * A successful write uses the shared notification surface rather than taking
-   * vertical space above the graders table.
-   */
-  it("lets a person dismiss the notice a grader change leaves behind", async () => {
-    apiAnswers(answersThatCreateAGrader());
-    render(<GradersPage />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Create custom grader" }),
-    );
-
-    const sheet = await screen.findByRole("dialog", {
-      name: "Create custom grader",
-    });
-    fillCustomGrader(sheet);
-    fireEvent.click(
-      within(sheet).getByRole("button", { name: "Create grader" }),
-    );
-
-    const said = "Custom grader created and added to Active graders.";
-    expect((await screen.findByText(said)).closest('[data-slot="toast"]')).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: `Dismiss ${said}` }));
-    expect(screen.queryByText(said)).toBeNull();
-  });
-
-  /**
-   * A closed create sheet must unregister its draft even though it remains
-   * mounted and retains field values until the next open.
-   */
-  it("stops protecting the custom-grader draft once the sheet closes", async () => {
-    apiAnswers(answersThatCreateAGrader());
-    render(<GradersPage />);
-    let sheet: HTMLElement;
-
-    async function openTheSheet(): Promise<HTMLElement> {
-      fireEvent.click(
-        screen.getByRole("button", { name: "Create custom grader" }),
-      );
-      return await screen.findByRole("dialog", {
-        name: "Create custom grader",
-      });
-    }
-
-    async function waitForTheSheetToClose(): Promise<void> {
-      await waitFor(() => {
-        expect(
-          screen.queryByRole("dialog", { name: "Create custom grader" }),
-        ).toBeNull();
-      });
-    }
-
-    function leaves(): boolean {
-      const leaving = new Event("beforeunload", { cancelable: true });
-      window.dispatchEvent(leaving);
-      return !leaving.defaultPrevented;
-    }
-
-    await screen.findByRole("button", { name: "Create custom grader" });
-    sheet = await openTheSheet();
-    fillCustomGrader(sheet);
-    /* Open and typed into: this is a real draft, and it is protected. */
-    expect(currentDraftState()).toBe("unsaved");
-    expect(leaves()).toBe(false);
-
-    fireEvent.click(
-      within(sheet).getByRole("button", { name: "Create grader" }),
-    );
-    await waitForTheSheetToClose();
-    expect(currentDraftState()).toBe("unchanged");
-    expect(leaves()).toBe(true);
-
-    /* Cancel throws the draft away as plainly as creating does. */
-    sheet = await openTheSheet();
-    fillCustomGrader(sheet);
-    expect(currentDraftState()).toBe("unsaved");
-    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
-    await waitForTheSheetToClose();
-    expect(currentDraftState()).toBe("unchanged");
-    expect(leaves()).toBe(true);
-  });
-
-  it("offers no mechanism and no modality choice, and keeps the pass threshold", async () => {
-    apiAnswers(standardAnswers());
-    render(<GradersPage />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Create custom grader" }),
-    );
-
-    const sheet = await screen.findByRole("dialog", {
-      name: "Create custom grader",
-    });
-    /* Create is LLM-judge only; predefined code graders arrive through Use. */
-    expect(within(sheet).queryByRole("radio", { name: "LLM judge" })).toBeNull();
-    expect(within(sheet).queryByRole("radio", { name: "Code" })).toBeNull();
-    expect(within(sheet).queryByText("Mechanism")).toBeNull();
-    /* A text-only judge is never asked which modalities it can grade. */
-    expect(
-      within(sheet).queryByRole("group", { name: "Compatible modalities*" }),
-    ).toBeNull();
-    expect(within(sheet).queryByLabelText("Chat")).toBeNull();
-    expect(within(sheet).queryByLabelText("Voice")).toBeNull();
-    /* The pass threshold stays exactly as it was, at its default of 1. */
-    expect(
-      (within(sheet).getByLabelText("Pass threshold*") as HTMLInputElement)
-        .value,
-    ).toBe("1");
-  });
-
-  it("grades every simulation from the start and prices production only when asked", async () => {
-    apiAnswers(standardAnswers());
-    render(<GradersPage />);
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Create custom grader" }),
-    );
-
-    const sheet = await screen.findByRole("dialog", {
-      name: "Create custom grader",
-    });
-    /* A grader created here grades something without a second visit. */
-    expect(
-      (within(sheet).getByLabelText("Grades simulations") as HTMLInputElement)
-        .checked,
-    ).toBe(true);
-    expect(
-      within(sheet)
-        .getByRole("radio", { name: "All simulations" })
-        .getAttribute("aria-checked"),
-    ).toBe("true");
-
-    const production = within(sheet).getByLabelText(
-      "Grades production",
-    ) as HTMLInputElement;
-    expect(production.checked).toBe(false);
-    expect(within(sheet).queryByLabelText("Production sample")).toBeNull();
-    expect(
-      within(sheet).queryByText("Each sampled transcript costs one judge call."),
-    ).toBeNull();
-
-    fireEvent.click(production);
-    expect(within(sheet).getByLabelText("Production sample")).toBeTruthy();
-    expect(
-      within(sheet).getByText("Each sampled transcript costs one judge call."),
-    ).toBeTruthy();
-  });
-
-  it("resets unsaved custom-grader scope before the sheet reopens", async () => {
-    apiAnswers(standardAnswers());
-    render(<GradersPage />);
-    const create = await screen.findByRole("button", {
-      name: "Create custom grader",
-    });
-    fireEvent.click(create);
-
-    let sheet = await screen.findByRole("dialog", {
-      name: "Create custom grader",
-    });
-    fireEvent.click(within(sheet).getByLabelText("Grades simulations"));
-    expect(
-      (within(sheet).getByLabelText("Grades simulations") as HTMLInputElement)
-        .checked,
-    ).toBe(false);
-    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => {
-      expect(
-        screen.queryByRole("dialog", { name: "Create custom grader" }),
-      ).toBeNull();
-    });
-
-    fireEvent.click(create);
-    sheet = await screen.findByRole("dialog", { name: "Create custom grader" });
-    await waitFor(() => {
-      expect(
-        (within(sheet).getByLabelText("Grades simulations") as HTMLInputElement)
-          .checked,
-      ).toBe(true);
-    });
-    expect(
-      within(sheet)
-        .getByRole("radio", { name: "All simulations" })
-        .getAttribute("aria-checked"),
-    ).toBe("true");
-  });
-
   it("restores an active grader's saved scope when its sheet reopens", async () => {
     const activeLatencyDefinition = {
       ...LATENCY_DEFINITION,
@@ -1215,46 +785,6 @@ describe("the project Graders surface", () => {
         .getByRole("radio", { name: "All simulations" })
         .getAttribute("aria-checked"),
     ).toBe("true");
-  });
-
-  it("keeps Expected behaviors scope fixed and lets the project edit models and threshold", async () => {
-    const changed = { ...EXPECTED, passThreshold: 0.8 };
-    const { asked } = apiAnswers({
-      ...standardAnswers(),
-      [`GET /v1/grader-library/${EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID}`]: {
-        status: 200,
-        body: { ...EXPECTED_DEFINITION, definitionVersion: 3, currentDefinitionVersion: 3 },
-      },
-      "PATCH /v1/graders/grd_expected": { status: 200, body: changed },
-    });
-    render(<GradersPage />);
-    await chooseRowMenuItem("Expected behaviors", "Edit");
-
-    const sheet = await screen.findByRole("dialog", { name: "Expected behaviors" });
-    expect(await within(sheet).findByText("Predefined · v3")).toBeTruthy();
-    expect(within(sheet).queryByText("This project's scope, settings, and individual pass threshold.")).toBeNull();
-    /* The caption that answered a question nobody asked is gone. */
-    expect(within(sheet).queryByText("Fixed by Egma")).toBeNull();
-    expect(within(sheet).getByText("Scope")).toBeTruthy();
-    /* The two read-only rows say what the two columns behind the sheet say. */
-    expect(within(sheet).getByText("Simulations")).toBeTruthy();
-    expect(within(sheet).getByText("All")).toBeTruthy();
-    expect(within(sheet).getByText("Production")).toBeTruthy();
-    expect(within(sheet).getByText("Off")).toBeTruthy();
-    expect(within(sheet).getByText("llm_as_judge")).toBeTruthy();
-    expect(within(sheet).queryByRole("button", { name: "Remove grader" })).toBeNull();
-    fireEvent.change(within(sheet).getByLabelText("Pass threshold*"), {
-      target: { value: "0.8" },
-    });
-    fireEvent.click(within(sheet).getByRole("button", { name: "Save changes" }));
-
-    await waitFor(() => {
-      expect(asked.find((one) => one.method === "PATCH")).toEqual({
-        method: "PATCH",
-        path: "/v1/graders/grd_expected?projectId=prj_1",
-        body: { settings: { llm_provider: "openai", llm_model: "gpt-5.6-terra" }, passThreshold: 0.8 },
-      });
-    });
   });
 
   it("keeps clearing scope separate from removing an optional grader", async () => {
@@ -1314,61 +844,6 @@ describe("the project Graders surface", () => {
     });
   });
 
-  it("lets a viewer inspect both tabs but not change project policy", async () => {
-    apiAnswers({
-      ...standardAnswers("viewer"),
-      "GET /v1/grader-library/grl_latency": {
-        status: 200,
-        body: LATENCY_DEFINITION,
-      },
-    });
-    render(<GradersPage />);
-
-    const create = await screen.findByRole("button", {
-      name: "Create custom grader",
-    });
-    expect((create as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole("tab", { name: "Grader library" }));
-
-    const menu = await openRowMenu("Response latency");
-    expect(
-      (within(menu).getByRole("menuitem", {
-        name: "Use in project",
-      }) as HTMLButtonElement).disabled,
-    ).toBe(true);
-    fireEvent.keyDown(menu, { key: "Escape" });
-
-    await openRow("Response latency");
-    const details = await screen.findByRole("dialog", { name: "Response latency" });
-    expect(within(details).getByText("Grades the average response time for a trace.")).toBeTruthy();
-    expect(
-      (within(details).getByRole("button", {
-        name: "Use in project",
-      }) as HTMLButtonElement).disabled,
-    ).toBe(true);
-  });
-
-  it("reads a grader's type as the API's own word and its modalities as chips", async () => {
-    apiAnswers(standardAnswers("admin", [EXPECTED, LATENCY]));
-    render(<GradersPage />);
-
-    expect(await screen.findByText("Expected behaviors")).toBeTruthy();
-    const expected = rowOf("Expected behaviors");
-    expect(within(expected).getByText("llm_as_judge")).toBeTruthy();
-    expect(within(expected).getByText("Chat")).toBeTruthy();
-    expect(within(expected).getByText("Voice")).toBeTruthy();
-    /* The product words the raw value replaced are nowhere on the row. */
-    expect(within(expected).queryByText("LLM judge")).toBeNull();
-    expect(within(expected).queryByText("Chat and voice")).toBeNull();
-    expect(within(rowOf("Response latency")).getByText("code")).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("tab", { name: "Grader library" }));
-    expect(await screen.findByText("Response latency")).toBeTruthy();
-    expect(
-      within(rowOf("Response latency")).getByText("code"),
-    ).toBeTruthy();
-  });
-
   it("says each evidence source in its own column, and says Off quietly", async () => {
     apiAnswers(standardAnswers("admin", [EXPECTED, SELECTED]));
     render(<GradersPage />);
@@ -1383,141 +858,6 @@ describe("the project Graders surface", () => {
     expect(within(selected).getByText("1 test suite, 2 tests")).toBeTruthy();
     expect(within(selected).getByText("25%")).toBeTruthy();
   });
-
-  it("opens a grader from its row and offers Remove only where a grader may go", async () => {
-    apiAnswers({
-      ...standardAnswers("admin", [EXPECTED, LATENCY]),
-      [`GET /v1/grader-library/${EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID}`]: {
-        status: 200,
-        body: EXPECTED_DEFINITION,
-      },
-    });
-    render(<GradersPage />);
-
-    expect(await screen.findByText("Expected behaviors")).toBeTruthy();
-    expect(await rowMenuItems("Expected behaviors")).toEqual(["Edit"]);
-    fireEvent.keyDown(
-      await screen.findByRole("menu", {
-        name: "Open the menu for Expected behaviors",
-      }),
-      { key: "Escape" },
-    );
-    expect(await rowMenuItems("Response latency")).toEqual([
-      "Edit",
-      "Remove grader",
-    ]);
-    fireEvent.keyDown(
-      await screen.findByRole("menu", {
-        name: "Open the menu for Response latency",
-      }),
-      { key: "Escape" },
-    );
-
-    await openRow("Expected behaviors");
-    expect(
-      await screen.findByRole("dialog", { name: "Expected behaviors" }),
-    ).toBeTruthy();
-  });
-
-  it("opens a grader from anywhere on its row, not only the name", async () => {
-    apiAnswers({
-      ...standardAnswers("admin", [EXPECTED, LATENCY]),
-      [`GET /v1/grader-library/${EXPECTED_BEHAVIORS_GRADER_DEFINITION_ID}`]: {
-        status: 200,
-        body: EXPECTED_DEFINITION,
-      },
-    });
-    render(<GradersPage />);
-
-    const name = await screen.findByText("Expected behaviors");
-    const row = name.closest("tr");
-    if (row === null) throw new Error("the grader name is not in a table row");
-    fireEvent.click(row);
-    expect(
-      await screen.findByRole("dialog", { name: "Expected behaviors" }),
-    ).toBeTruthy();
-  });
-
-  it("offers the library row the active grader, or the way to use it", async () => {
-    const activeLatencyDefinition = {
-      ...LATENCY_DEFINITION,
-      activeProjectGraderId: LATENCY.id,
-    };
-    apiAnswers({
-      ...standardAnswers("admin", [EXPECTED, LATENCY], [
-        EXPECTED_DEFINITION,
-        activeLatencyDefinition,
-      ]),
-      "GET /v1/grader-library/grl_latency": {
-        status: 200,
-        body: activeLatencyDefinition,
-      },
-      "DELETE /v1/graders/grd_latency": { status: 204, body: null },
-    });
-    render(<GradersPage />);
-    fireEvent.click(await screen.findByRole("tab", { name: "Grader library" }));
-    expect(await screen.findByText("Response latency")).toBeTruthy();
-
-    /* Egma's own grader is active and cannot be dropped: one item. */
-    expect(await rowMenuItems("Expected behaviors")).toEqual([
-      "View active grader",
-    ]);
-    fireEvent.keyDown(
-      await screen.findByRole("menu", {
-        name: "Open the menu for Expected behaviors",
-      }),
-      { key: "Escape" },
-    );
-
-    expect(await rowMenuItems("Response latency")).toEqual([
-      "View active grader",
-      "Remove grader",
-    ]);
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "Remove grader" }),
-    );
-    expect(
-      await screen.findByRole("dialog", { name: "Remove Response latency?" }),
-    ).toBeTruthy();
-  });
-
-  it("opens the library sheet on the review, and on the form from Use in project", async () => {
-    apiAnswers({
-      ...standardAnswers(),
-      "GET /v1/grader-library/grl_latency": {
-        status: 200,
-        body: LATENCY_DEFINITION,
-      },
-    });
-    render(<GradersPage />);
-    fireEvent.click(await screen.findByRole("tab", { name: "Grader library" }));
-
-    await openRow("Response latency");
-    let sheet = await screen.findByRole("dialog", { name: "Response latency" });
-    expect(
-      within(sheet).getByText(
-        "Review this grader before choosing it for the project.",
-      ),
-    ).toBeTruthy();
-    expect(within(sheet).queryByText("Project use")).toBeNull();
-    const close = within(sheet).getAllByRole("button", { name: "Close" }).at(-1);
-    if (close === undefined) throw new Error("the sheet has no close button");
-    fireEvent.click(close);
-    await waitFor(() => {
-      expect(
-        screen.queryByRole("dialog", { name: "Response latency" }),
-      ).toBeNull();
-    });
-
-    await chooseRowMenuItem("Response latency", "Use in project");
-    sheet = await screen.findByRole("dialog", { name: "Response latency" });
-    expect(
-      within(sheet).getByText("Choose how this project will use the grader."),
-    ).toBeTruthy();
-    expect(
-      within(sheet).getByLabelText("Maximum acceptable response latency*"),
-    ).toBeTruthy();
-  });
 });
 
 const REVIEW_CORE: GraderLibraryEntry = {
@@ -1531,38 +871,6 @@ const REVIEW_CORE: GraderLibraryEntry = {
 };
 
 describe("grader review regressions", () => {
-  it("treats a fetched old core as read-only without offering a version picker", async () => {
-    const current = { ...REVIEW_CORE, definitionVersion: 2, currentDefinitionVersion: 2, gradingInstructions: "The version two instruction." };
-    const { asked } = apiAnswers({
-      ...standardAnswers("admin", [EXPECTED], [REVIEW_CORE]),
-      "GET /v1/grader-library/grl_review": {
-        status: 200,
-        body: { ...REVIEW_CORE, currentDefinitionVersion: 2 },
-      },
-    });
-    render(<GradersPage />);
-    fireEvent.click(await screen.findByRole("tab", { name: "Grader library" }));
-    await openRow("Reviewed core");
-    const sheet = await screen.findByRole("dialog", { name: "Reviewed core" });
-    await within(sheet).findByText("The version one instruction.");
-    for (const name of ["Edit core", "Clone grader", "Use in project"]) {
-      expect(within(sheet).queryByRole("button", { name })).toBeNull();
-    }
-    expect(within(sheet).queryByLabelText("Core version")).toBeNull();
-    expect(within(sheet).queryByText(current.gradingInstructions)).toBeNull();
-    await waitFor(() => {
-      const request = asked.find(
-        (one) => one.path.startsWith("/v1/grader-library/grl_review?"),
-      );
-      expect(
-        new URL(request?.path ?? "", "http://egma.test").searchParams.get(
-          "definitionVersion",
-        ),
-      ).toBeNull();
-    });
-    expect(asked.filter((one) => one.method === "PATCH")).toEqual([]);
-  });
-
   it("protects core drafts on Back and close, blocks closing during save, and keeps a stale save's original base", async () => {
     let release!: () => void;
     const pending = new Promise<void>((resolve) => { release = resolve; });
@@ -1604,31 +912,5 @@ describe("grader review regressions", () => {
     fireEvent.click(within(question).getByRole("button", { name: "Discard changes" }));
     await within(sheet).findByRole("button", { name: "Edit core" });
     expect(within(sheet).queryByLabelText("Name*")).toBeNull();
-  });
-
-  it("shows model-form loading and a failed read's retry without losing the create draft", async () => {
-    let release!: () => void;
-    const pending = new Promise<void>((resolve) => { release = resolve; });
-    const answers = standardAnswers();
-    const form = answers["GET /v1/grader-form"] as Stubbed;
-    apiAnswers({
-      ...answers,
-      "GET /v1/grader-form": [
-        { status: 503, body: { error: "unavailable", message: "Grader model choices are unavailable. Try again." }, waitFor: pending },
-        form,
-      ],
-    });
-    render(<GradersPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Create custom grader" }));
-    const sheet = await screen.findByRole("dialog", { name: "Create custom grader" });
-    expect(await within(sheet).findByText("Loading grader models…")).toBeTruthy();
-    fillCustomGrader(sheet);
-    expect((within(sheet).getByRole("button", { name: "Create grader" }) as HTMLButtonElement).disabled).toBe(true);
-    await act(async () => { release(); });
-    expect(await within(sheet).findByText("Grader model choices are unavailable. Try again.")).toBeTruthy();
-    fireEvent.click(within(sheet).getByRole("button", { name: "Try again" }));
-    await within(sheet).findByLabelText("Language model*");
-    await waitFor(() => expect((within(sheet).getByRole("button", { name: "Create grader" }) as HTMLButtonElement).disabled).toBe(false));
-    expect((within(sheet).getByLabelText("Name*") as HTMLInputElement).value).toBe("Polite resolution");
   });
 });

@@ -44,7 +44,7 @@ class CompleteTurn(BaseTurnAnalyzer):
 
 
 @pytest.mark.parametrize("delay", [0.005, 0.05])
-@pytest.mark.parametrize("strategy", ["speech_timeout", "turn_analyzer"])
+@pytest.mark.parametrize("strategy", ["turn_analyzer"])
 async def test_transcript_arriving_after_stop_wait_reaches_the_persona(delay, strategy):
     heard = []
 

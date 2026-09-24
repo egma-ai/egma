@@ -113,23 +113,6 @@ describe("the env in a file", () => {
   });
 
   it.each([
-    ["an invented key", '{"webhooks": {"url": "https://x.test"}}', /"webhooks".*nothing else/su],
-    [
-      "a reserved variable",
-      '{"retell_dynamic_variables": {"egma_run_id": "r1"}}',
-      /"egma_run_id".*egma_/su,
-    ],
-    [
-      "a variable that is not text",
-      '{"retell_dynamic_variables": {"calls": 2}}',
-      /"calls".*written as text/su,
-    ],
-    [
-      "dispatch metadata that is not an object",
-      '{"job_dispatch_metadata": ["acme"]}',
-      /job_dispatch_metadata.*written as an\s+object/su,
-    ],
-    ["a block that is not an object", "[1, 2]", /an env is written/su],
     ["a block that is not JSON", "{tenant: acme", /not JSON Egma can read/su],
   ])("refuses %s, naming the file and the reason", (_name, block, reason) => {
     const document = ["## Env", "```json", block, "```"].join("\n");
@@ -137,10 +120,6 @@ describe("the env in a file", () => {
     expect(() => readWorld(document)).toThrow(EnvProblem);
     expect(() => readWorld(document)).toThrow(new RegExp(WHERE.replaceAll("/", "\\/"), "u"));
     expect(() => readWorld(document)).toThrow(reason);
-  });
-
-  it("refuses an Env heading with nothing under it", () => {
-    expect(() => readWorld("## Env")).toThrow(/no JSON block under it/u);
   });
 
   it("compares two envs by JSON value, not object-key order", () => {

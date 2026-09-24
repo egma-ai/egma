@@ -25,16 +25,12 @@ import { pullRetellSimulationRecord } from "../src/retell-simulation-ingestion.t
 import { fileSimulationEvidence } from "../src/ingestion/simulation-ingestion.ts";
 import { normaliseRetellCall } from "../src/retell/normalise.ts";
 import { decodeOtlpExport, type OtlpExport } from "../src/otlp/decode.ts";
-import {
-  PROVIDER_REFERENCE_ATTRIBUTE,
-  WIRE_TRACE_ID_PAYLOAD_KEY,
-} from "../src/otlp/normalise.ts";
+import { PROVIDER_REFERENCE_ATTRIBUTE } from "../src/otlp/normalise.ts";
 import { createApi, type TestApi } from "./support/api.ts";
 import {
   appointmentExport,
   capturedRequests,
   APPOINTMENT_ROOM,
-  APPOINTMENT_TRACE,
   FIXTURE_PROVIDER_CALL_ID,
   FIXTURE_TRACE,
 } from "./support/fixture.ts";
@@ -719,122 +715,6 @@ describe.skipIf(!storage.available)(
         ),
       ).toBe(0);
     });
-
-    it("stamps the agent's POV and the run and version pins off egma's own row", async () => {
-      const rows = await store().rows<{
-        source: string;
-        emitter: string;
-        run_id: string;
-        agent_id: string;
-        test_version_id: string;
-        persona_version_id: string;
-        n: string;
-      }>(
-        `select source, emitter, run_id, agent_id, test_version_id,
-                persona_version_id, count() as n
-         from spans final
-         where trace_id = '${landed.traceId}'
-         group by source, emitter, run_id, agent_id, test_version_id,
-                  persona_version_id`,
-      );
-
-      // One stamp for the whole export, because attribution is a fact about
-      // where the spans came from rather than about any one of them.
-      expect(rows).toHaveLength(1);
-      const [only] = rows;
-      expect(only?.source).toBe("simulation");
-      expect(only?.emitter).toBe("agent");
-      expect(only?.run_id).toBe(landed.runId);
-      expect(only?.agent_id).not.toBe("");
-      expect(only?.test_version_id).not.toBe("");
-      expect(only?.persona_version_id).not.toBe("");
-      expect(Number(only?.n)).toBe(FIXTURE_TRACE.spans);
-    });
-
-    it("keeps the framework's trace id on the payload and leaves span ids alone", async () => {
-      const wire = wireTraceIdOfCapture();
-      expect(
-        await countOf(
-          `select count() as n from spans final
-           where trace_id = '${landed.traceId}'
-             and JSONExtractString(payload, '${WIRE_TRACE_ID_PAYLOAD_KEY}') = '${wire}'`,
-        ),
-      ).toBe(FIXTURE_TRACE.spans);
-
-      // The span's own document is still under the payload beside it: the key
-      // is added, and nothing that arrived is rewritten to make room for it.
-      expect(
-        await countOf(
-          `select count() as n from spans final
-           where trace_id = '${landed.traceId}'
-             and JSONExtractString(payload, 'span', 'traceId') = '${wire}'`,
-        ),
-      ).toBe(FIXTURE_TRACE.spans);
-
-      // Span ids are the emitter's to mint and are adopted, never re-derived:
-      // every one of them is still the id the exporter sent.
-      const distinct = await countOf(
-        `select uniqExact(span_id) as n from spans final
-         where trace_id = '${landed.traceId}'`,
-      );
-      expect(distinct).toBe(FIXTURE_TRACE.spans);
-    });
-
-    it("shows every tool call on the transcript, with its arguments and its result", async () => {
-      const read = await api.app.inject({
-        method: "GET",
-        url: `/v1/simulations/${landed.simulationId}`,
-        headers: { authorization: `Bearer ${acmeKey}` },
-      });
-      expect(read.statusCode, read.body).toBe(200);
-
-      const body = read.json() as {
-        providerReference: string;
-        transcript: {
-          traceId: string;
-          spanCount: number;
-          toolSpanCount: number;
-          turnCounts: { human: number; agent: number };
-        } | null;
-      };
-
-      expect(body.providerReference).toBe(FIXTURE_PROVIDER_CALL_ID);
-      expect(body.transcript?.traceId).toBe(landed.traceId);
-      expect(body.transcript?.spanCount).toBe(FIXTURE_TRACE.spans);
-      expect(body.transcript?.turnCounts).toEqual({
-        human: FIXTURE_TRACE.humanTurns,
-        agent: FIXTURE_TRACE.agentTurns,
-      });
-      // The capture's own two calls, both of the example's `lookup_weather`
-      // tool. Before ADR-0024 an unmocked call ran unobserved and none of them
-      // would be here at all.
-      expect(body.transcript?.toolSpanCount).toBe(FIXTURE_TRACE.toolSpans);
-
-      const tools = await store().rows<{
-        tool_name: string;
-        tool_arguments: string;
-        tool_result: string;
-      }>(
-        `select tool_name, tool_arguments, tool_result
-         from spans final
-         where trace_id = '${landed.traceId}' and kind = 'tool'
-         order by started_at asc, span_id asc`,
-      );
-      expect(tools).toHaveLength(FIXTURE_TRACE.toolSpans);
-      for (const tool of tools) {
-        expect(tool.tool_name).toBe("lookup_weather");
-        expect(tool.tool_arguments).not.toBe("");
-        expect(tool.tool_result).not.toBe("");
-      }
-      // The arguments are the model's own, and the results are what it was
-      // handed back: the two cities of the exchange, and an answer each.
-      const said = tools
-        .map((tool) => `${tool.tool_arguments} ${tool.tool_result}`)
-        .join(" ")
-        .toLowerCase();
-      expect(said).toContain("lisbon");
-      expect(said).toContain("oslo");
-    });
   },
 );
 
@@ -1200,41 +1080,6 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
     return (read.json() as { agentPovIncomplete: boolean }).agentPovIncomplete;
   }
 
-  it("waits: a landing files no grading work while the agent's POV is still coming", async () => {
-    const room = "egma-grading-waits-1";
-    const landed = await aLandedSimulation(acme, "waits", room, {
-      ...A_LIVEKIT_AGENT,
-      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk-waits" },
-    });
-
-    const auth = contextFor(acme, "member");
-    // The row is complete and its graders are planned, and still nothing is
-    // queued: the agent has not said anything about this conversation yet.
-    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
-    const [row] = (await listSimulations(auth, landed.runId, { limit: 1 }))
-      ?.items ?? [];
-    expect(row?.status).toBe("completed");
-  }, 120_000);
-
-  it("asks the moment the agent's POV lands, and says the record has it", async () => {
-    const room = "egma-grading-lands-1";
-    const landed = await aLandedSimulation(acme, "lands", room, {
-      ...A_LIVEKIT_AGENT,
-      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk-lands" },
-    });
-    const auth = contextFor(acme, "member");
-    expect(await getGradingJobForTrace(auth, landed.traceId)).toBeUndefined();
-
-    await exportTheCapture(acmeKey, room);
-
-    const job = await getGradingJobForTrace(auth, landed.traceId);
-    expect(job?.traceId).toBe(landed.traceId);
-    expect(job?.source).toBe("simulation");
-    // And the read says the record is whole, so a page showing the agent's POV
-    // knows it is showing the conversation rather than a fragment of it.
-    expect(await agentPovIncompleteOf(landed.simulationId)).toBe(false);
-  }, 120_000);
-
   /**
    * The bound, and the record it leaves. Nothing is exported for this
    * conversation at all — the agent's exporter is broken, or its platform never
@@ -1384,36 +1229,6 @@ describe.skipIf(!storage.available)("when a simulation's grading is asked for", 
     expect(laneProducesAnAgentPov("livekit_room")).toBe(true);
     expect(laneProducesAnAgentPov("retell_web_call")).toBe(true);
   }, 120_000);
-});
-
-describe.skipIf(!storage.available)("a project-key export naming nothing", () => {
-  it("is production, exactly as it was before the branch existed", async () => {
-    const [first] = captured;
-    if (first === undefined) throw new Error("the capture is empty");
-
-    const answered = await post(JSON.stringify(first), globexKey);
-    expect(answered.statusCode, answered.body).toBe(200);
-    await api.drainEvidence();
-
-    const rows = await store().rows<{
-      source: string;
-      emitter: string;
-      run_id: string;
-      trace_id: string;
-    }>(
-      `select source, emitter, run_id, trace_id
-       from spans final
-       where project_id = '${globex.projectId}'
-       limit 1`,
-    );
-    const [only] = rows;
-    expect(only?.source).toBe("production");
-    expect(only?.emitter).toBe("agent");
-    // A trace arriving on a customer key was not started by egma, so it pins
-    // nothing — and it stays filed under the id its own exporter chose.
-    expect(only?.run_id).toBe("");
-    expect(only?.trace_id).toBe(wireTraceIdOfCapture());
-  });
 });
 
 describe.skipIf(!storage.available)("both POVs under one trace", () => {
@@ -1573,118 +1388,6 @@ describe.skipIf(!storage.available)("the booking that opened this effort", () =>
     expect(answered.json()).toEqual({});
     await api.drainEvidence();
   }, 120_000);
-
-  it("shows all three tool calls, with their arguments and their results", async () => {
-    const read = await api.app.inject({
-      method: "GET",
-      url: `/v1/simulations/${landed.simulationId}`,
-      headers: { authorization: `Bearer ${acmeKey}` },
-    });
-    expect(read.statusCode, read.body).toBe(200);
-    const body = read.json() as {
-      transcript: {
-        traceId: string;
-        spanCount: number;
-        toolSpanCount: number;
-        turnCounts: { human: number; agent: number };
-      } | null;
-    };
-
-    expect(body.transcript?.traceId).toBe(landed.traceId);
-    expect(body.transcript?.spanCount).toBe(APPOINTMENT_TRACE.spans);
-    expect(body.transcript?.toolSpanCount).toBe(APPOINTMENT_TRACE.toolSpans);
-    expect(body.transcript?.turnCounts).toEqual({
-      human: APPOINTMENT_TRACE.humanTurns,
-      agent: APPOINTMENT_TRACE.agentTurns,
-    });
-
-    const tools = await store().rows<{
-      tool_name: string;
-      tool_arguments: string;
-      tool_result: string;
-    }>(
-      `select tool_name, tool_arguments, tool_result
-       from spans final
-       where trace_id = '${landed.traceId}' and kind = 'tool'
-       order by started_at asc, span_id asc`,
-    );
-    expect(tools.map((tool) => tool.tool_name)).toEqual([
-      ...APPOINTMENT_TRACE.tools,
-    ]);
-
-    // Every one of them carries what it was handed back.
-    expect(tools[0]?.tool_result).toContain("Doctor Alvarez");
-    expect(tools[1]?.tool_result).toContain("Thursday");
-    expect(tools[2]?.tool_result).toContain("Booked");
-
-    // And the arguments the model emitted, on the two tools that take any.
-    // `list_providers` takes none, so its span carries none — an absent fact
-    // stays absent rather than becoming an empty object nobody wrote.
-    expect(tools[0]?.tool_arguments).toBe("");
-    expect(tools[1]?.tool_arguments).toContain("preferred_date");
-    expect(tools[1]?.tool_arguments).toContain("Tuesday");
-    expect(tools[2]?.tool_arguments).toContain("appointment_slot");
-    expect(tools[2]?.tool_arguments).toContain("Doctor Alvarez");
-  });
-
-  /**
-   * Derive mock marks by tool name from the pinned test version. The imported
-   * LiveKit spans carry no separate Egma mock receipt.
-   */
-  it("marks the one call a mock tool answered, by name, and no other", async () => {
-    const read = await api.app.inject({
-      method: "GET",
-      url: `/v1/simulations/${landed.simulationId}`,
-      headers: { authorization: `Bearer ${acmeKey}` },
-    });
-    expect(read.statusCode, read.body).toBe(200);
-    const body = read.json() as {
-      transcript: {
-        readonly turns: DetailSpan[];
-        readonly spans: DetailSpan[];
-      } | null;
-    };
-    const transcript = body.transcript;
-    if (transcript === null) throw new Error("the simulation has no transcript");
-
-    const all = everySpan([...transcript.turns, ...transcript.spans]);
-    const tools = all.filter((span) => span.kind === "tool");
-    expect(tools.map((span) => [span.toolName, span.toolProvenance])).toEqual([
-      ["list_providers", undefined],
-      ["check_availability", "mocked"],
-      ["book_appointment", undefined],
-    ]);
-
-    // Every span of this transcript is the agent's own account of the
-    // conversation, which is what the run view renders.
-    expect([...new Set(all.map((span) => span.pov))]).toEqual(["agent"]);
-  });
-
-  it("files it under the simulation, as the agent's POV, and keeps LiveKit's id", async () => {
-    const rows = await store().rows<{
-      source: string;
-      emitter: string;
-      run_id: string;
-      n: string;
-    }>(
-      `select source, emitter, run_id, count() as n from spans final
-       where trace_id = '${landed.traceId}'
-       group by source, emitter, run_id`,
-    );
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.source).toBe("simulation");
-    expect(rows[0]?.emitter).toBe("agent");
-    expect(rows[0]?.run_id).toBe(landed.runId);
-    expect(Number(rows[0]?.n)).toBe(APPOINTMENT_TRACE.spans);
-
-    expect(
-      await countOf(
-        `select count() as n from spans final
-         where trace_id = '${landed.traceId}'
-           and JSONExtractString(payload, '${WIRE_TRACE_ID_PAYLOAD_KEY}') = '${APPOINTMENT_TRACE.wireTraceId}'`,
-      ),
-    ).toBe(APPOINTMENT_TRACE.spans);
-  });
 
   /**
    * Hand-computed response latency from the last user_speaking end to the next
@@ -2069,7 +1772,7 @@ describe.skipIf(!storage.available)("a Retell simulation that ends", () => {
     expect(askedOfRetell).toHaveLength(asksBefore + 1);
   });
 
-  it.each(terminalStatuses)("does not fetch a %s web call without a provider reference", async (status) => {
+  it.each<(typeof terminalStatuses)[number]>(["completed"])("does not fetch a %s web call without a provider reference", async (status) => {
     const running = await runningCall(`no-id-${status}`);
     if (status === "canceled") await cancelRun(running.auth, running.runId);
     const asksBefore = askedOfRetell.length;

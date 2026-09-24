@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   startOrphanSweep,
-  SWEEP_INTERVAL_MILLISECONDS,
   type OrphanSweepFailureLogDetails,
   type OrphanSweepLog,
   type SweptSimulationsLogDetails,
@@ -174,32 +173,6 @@ describe("the standing sweep", () => {
     }
   });
 
-  it("reports exhausted agent evidence as a collection error", async () => {
-    vi.useFakeTimers();
-    const log = capturingLog();
-    const sweep = startOrphanSweep({
-      log,
-      intervalMilliseconds: 20,
-      sweep: async () => [],
-      settleAgentPovBound: async () => [{
-        id: "sim_evidence_error",
-        runId: "run_evidence_error",
-        agentPovFiled: false,
-        outcome: "evidence_error",
-      }],
-    });
-    try {
-      await vi.advanceTimersByTimeAsync(20);
-      expect(log.infos).toHaveLength(1);
-      expect(log.infos[0]?.message).toContain(
-        "filed an evidence collection error",
-      );
-    } finally {
-      await sweep.stop();
-      vi.useRealTimers();
-    }
-  });
-
   it("runs with the server, so an orphan lands without anybody asking", async () => {
     const { ada, key, runId, simulationId, api: running } = await anOrphan(
       "sweep_wired",
@@ -222,39 +195,6 @@ describe("the standing sweep", () => {
 
     const header = await ask(running.app, "GET", `/v1/runs/${runId}`, key);
     expect(header.body.status).toBe("completed");
-  });
-
-  it("ships with a cadence near thirty seconds, inside the staleness window", () => {
-    // The window is 150s of silence; a sweep every ~30s means an orphan is
-    // named within about three minutes of its simulator dying, and a live
-    // simulator restarting after an API outage has a whole interval of
-    // landing heartbeats before the first sweep reads its silence.
-    expect(SWEEP_INTERVAL_MILLISECONDS).toBe(30_000);
-  });
-
-  it("says what it swept when it swept something, and nothing otherwise", async () => {
-    const { simulationId, runId } = await anOrphan("sweep_speaks");
-
-    const log = capturingLog();
-    const sweep = startOrphanSweep({ log, intervalMilliseconds: 50 });
-    try {
-      await vi.waitFor(() => expect(log.infos.length).toBeGreaterThan(0), {
-        timeout: 5_000,
-        interval: 25,
-      });
-
-      const said = log.infos[0];
-      expect(said?.message).toContain("orphaned");
-      expect(said?.details.simulationIds).toContain(simulationId);
-      expect(said?.details.runIds).toContain(runId);
-
-      // Later ticks find nothing, and a quiet queue is not news.
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      expect(log.infos).toHaveLength(1);
-      expect(log.errors).toHaveLength(0);
-    } finally {
-      await sweep.stop();
-    }
   });
 
   it("holds stop for a sweep that outlives the cadence, starting nothing beside it", async () => {

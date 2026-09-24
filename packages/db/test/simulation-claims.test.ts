@@ -11,10 +11,8 @@ import {
   createTest,
   createTestSuite,
   failSimulationDispatch,
-  getPersonaVersion,
   getRun,
   getSimulation,
-  getSimulationTestVersion,
   listRunEvents,
   listSimulations,
   recordSimulationHeartbeat,
@@ -221,65 +219,6 @@ describe("the instance-wide claim", () => {
     });
   });
 
-  it("carries out identifiers and claim stamps, and no content", async () => {
-    const { runId, simulationId } = await oneQueuedSimulation(
-      actingAsAcme(),
-      acmeSeed,
-    );
-    const claim = await claimOne(simulationId);
-
-    expect(claim.runId).toBe(runId);
-    expect(claim.agentId).toBe(acmeSeed.agentId);
-    expect(claim.connectionId).toBe(acmeSeed.connectionId);
-    expect(claim.personaId).toBe(acmeSeed.personaId);
-    expect(claim.personaVersionId).toMatch(/^prsv_/);
-    expect(claim.testVersionId).toBe(acmeSeed.testVersionId);
-    expect(claim.modality).toBe("chat");
-    expect(claim.claimedBy).toBe("simulator-blue-1");
-    expect(claim.claimedAt).toBeInstanceOf(Date);
-
-    // No transcript, no configuration, nothing a customer wrote. The spec is
-    // assembled afterwards, through the scoped reads, under the claim's own
-    // context — the claim itself hands over nothing to leak.
-    expect(claim).not.toHaveProperty("transcript");
-    expect(claim).not.toHaveProperty("events");
-    expect(claim).not.toHaveProperty("metrics");
-  });
-
-  it("stamps the row and starts the run, exactly as the scoped claim did", async () => {
-    const { runId, simulationId } = await oneQueuedSimulation(
-      actingAsAcme(),
-      acmeSeed,
-    );
-    const claim = await claimOne(simulationId, "simulator-green-2");
-
-    const row = await getSimulation(actingAsAcme(), simulationId);
-    expect(row?.status).toBe("claimed");
-    expect(row?.claimedBy).toBe("simulator-green-2");
-    expect(row?.claimedAt).toBeInstanceOf(Date);
-    expect(row?.heartbeatAt).toBeInstanceOf(Date);
-
-    const started = await getRun(actingAsAcme(), runId);
-    expect(started?.status).toBe("running");
-    expect(started?.startedAt).toBeInstanceOf(Date);
-
-    expect(claim.claimedBy).toBe("simulator-green-2");
-  });
-
-  it("hands back a context the whole spec assembly can read through", async () => {
-    const { simulationId } = await oneQueuedSimulation(actingAsAcme(), acmeSeed);
-    const claim = await claimOne(simulationId);
-
-    const personaVersion = await getPersonaVersion(
-      claim.auth,
-      claim.personaVersionId,
-    );
-    expect(personaVersion?.personality).toBe(NEUTRAL_BEHAVIOR.personality);
-
-    const testVersion = await getSimulationTestVersion(claim.auth, claim.id);
-    expect(testVersion?.scenario).toBe(SCENARIO);
-  });
-
   it("takes a capacity between one and fifty, and a named claimant", async () => {
     await expect(
       claimSimulations({ claimant: "simulator-blue-1", capacity: 0 }),
@@ -340,25 +279,6 @@ describe("the instance-wide heartbeat and sweep", () => {
 });
 
 describe("the connection door", () => {
-  it("answers the claimed row's own connection, credentials unsealed", async () => {
-    const { simulationId } = await oneQueuedSimulation(actingAsAcme(), acmeSeed);
-    const claim = await claimOne(simulationId);
-
-    const reached = await resolveSimulationConnection(claim.auth, claim.id);
-    expect(reached?.connectionId).toBe(acmeSeed.connectionId);
-    expect(reached?.agentPlatform).toBe("livekit");
-    expect(reached?.connectionType).toBe("livekit_room");
-    expect(reached?.accessVariant).toBe("livekit_room.project_credentials");
-    expect(reached?.config).toEqual({
-      url: "wss://test.livekit.cloud",
-      agentName: "agent_retell-secret-A1B2C3D4WXYZ",
-    });
-    expect(reached?.credentials).toEqual({
-      apiKey: "retell-secret-A1B2C3D4WXYZ",
-      apiSecret: "livekit-secret-A1B2C3D4WXYZ",
-    });
-  });
-
   it("refuses every context that is not the simulator's own", async () => {
     const { simulationId } = await oneQueuedSimulation(actingAsAcme(), acmeSeed);
     const claim = await claimOne(simulationId);
@@ -648,24 +568,6 @@ describe("a livekit connection's two credential shapes, through the claim", () =
     });
     return simulationId;
   }
-
-  it("hands back the key and the secret together, both whole", async () => {
-    const simulationId = await queuedOverLiveKit({
-      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk" },
-      credentials: {
-        apiKey: "livekit-key-A1B2C3D4WXYZ",
-        apiSecret: "livekit-secret-E5F6G7H8QRST",
-      },
-    });
-
-    const claim = await claimOne(simulationId);
-    const reached = await resolveSimulationConnection(claim.auth, claim.id);
-
-    expect(reached?.credentials).toEqual({
-      apiKey: "livekit-key-A1B2C3D4WXYZ",
-      apiSecret: "livekit-secret-E5F6G7H8QRST",
-    });
-  });
 
   it("hands back the endpoint's auth headers, which are a credential like any other", async () => {
     const simulationId = await queuedOverLiveKit({

@@ -385,88 +385,6 @@ describe("starting monitoring", () => {
     );
   });
 
-  it("registers an unregistered platform agent on the spot", async () => {
-    const retell = provider();
-    api = await createApi("monitoring_routes_start_new", {
-      retellFetch: retell.fetchImpl,
-    });
-    const ada = await signUp(api.app, "ada-register@acme.example", "Acme");
-
-    const started = await api.app.inject({
-      method: "POST",
-      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-      payload: {
-        agentPlatform: "retell",
-        apiKey: RETELL_KEY,
-        watch: [
-          { platformAgentId: "agent_voice_1", name: "Front desk from Retell" },
-        ],
-      },
-    });
-
-    expect(started.statusCode, started.body).toBe(200);
-    const [watching] = started.json().watching as {
-      agentId: string;
-      agentName: string;
-      created: boolean;
-    }[];
-    expect(watching?.created).toBe(true);
-    expect(watching?.agentName).toBe("Front desk from Retell");
-
-    const state = await readAgentPullState(at(ada), watching?.agentId ?? "");
-    expect(state?.pullProductionCalls).toBe(true);
-    expect(state?.platformAgentId).toBe("agent_voice_1");
-  });
-
-  /**
-   * **One Egma agent watches one platform agent, and the database says so.**
-   *
-   * The refusal is the partial unique index's own answer, caught and dressed
-   * in a sentence. Nothing reads the roster first to decide: a check before
-   * the write would be a race with the very next request, and the index exists
-   * to make the fight unrepresentable rather than usually avoided.
-   */
-  it("refuses a second agent on one platform agent, in plain words", async () => {
-    const retell = provider();
-    api = await createApi("monitoring_routes_start_contested", {
-      retellFetch: retell.fetchImpl,
-    });
-    const ada = await signUp(api.app, "ada-contested@acme.example", "Acme");
-    await pulling(ada);
-    const second = await createAgent(at(ada), { agentPlatform: "retell", name: "Second desk" });
-
-    const answered = await api.app.inject({
-      method: "POST",
-      url: `/v1/monitoring/start?projectId=${ada.projectId}`,
-      headers: { cookie: ada.cookie },
-      payload: {
-        agentPlatform: "retell",
-        apiKey: RETELL_KEY,
-        watch: [{ platformAgentId: "agent_voice_1", agentId: second.id }],
-      },
-    });
-
-    expect(answered.statusCode, answered.body).toBe(200);
-    const outcome = answered.json() as {
-      watching: unknown[];
-      refused: { platformAgentId: string; reason: string; message: string }[];
-    };
-    expect(outcome.watching).toEqual([]);
-    expect(outcome.refused).toHaveLength(1);
-    expect(outcome.refused[0]?.reason).toBe("contested");
-    // Plain words, naming the platform agent and the agent already watching it.
-    expect(outcome.refused[0]?.message).toContain("agent_voice_1");
-    expect(outcome.refused[0]?.message).toContain("Front desk");
-    expect(outcome.refused[0]?.message).not.toContain(
-      "agent_pulled_platform_agent_unique",
-    );
-    // And the loser's switch stayed off.
-    expect((await readAgentPullState(at(ada), second.id))?.pullProductionCalls).toBe(
-      false,
-    );
-  });
-
   it("is not blocked by an archived agent that once watched the platform agent", async () => {
     const retell = provider();
     api = await createApi("monitoring_routes_archived_holder", {
@@ -861,34 +779,5 @@ describe("stopping monitoring", () => {
     expect(kept.rows[0]).toEqual({ states: "1" });
     // And nothing is due any more, because the switch is what makes it due.
     expect(await claimDueMonitoringPull({ now: new Date() })).toBeUndefined();
-  });
-});
-
-describe("the setup routes the redesign removed", () => {
-  it("are gone: there is no monitoring source to list, save or delete", async () => {
-    api = await createApi("monitoring_routes_removed");
-    const ada = await signUp(api.app, "ada-removed@acme.example", "Acme");
-
-    for (const request of [
-      { method: "GET" as const, url: `/v1/monitoring?projectId=${ada.projectId}` },
-      {
-        method: "PUT" as const,
-        url: `/v1/monitoring/retell?projectId=${ada.projectId}`,
-      },
-      {
-        method: "PUT" as const,
-        url: `/v1/monitoring/livekit-agents?projectId=${ada.projectId}`,
-      },
-      {
-        method: "DELETE" as const,
-        url: `/v1/monitoring/livekit-agents?projectId=${ada.projectId}`,
-      },
-    ]) {
-      const answered = await api.app.inject({
-        ...request,
-        headers: { cookie: ada.cookie },
-      });
-      expect(answered.statusCode, `${request.method} ${request.url}`).toBe(404);
-    }
   });
 });

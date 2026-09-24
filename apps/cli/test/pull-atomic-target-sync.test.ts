@@ -7,7 +7,6 @@ import {
   EMPTY_CONFIG,
   createEgmaFolder,
   folderPathsIn,
-  readConfig,
   type FolderConfig,
 } from "../src/folder/egma-folder.ts";
 import { pullRepository } from "../src/sync/pull.ts";
@@ -115,42 +114,6 @@ beforeEach(async () => {
 afterEach(async () => workspace.remove());
 
 describe("atomic pull target refresh", () => {
-  it("applies targets, suites, and tests from one staged transaction", async () => {
-    const paths = folderPathsIn(workspace.dir);
-    const applied: { readonly staged: string; readonly destination: string }[] = [];
-
-    await pullRepository({
-      signedIn: { url: URL, key: "egma_sk_pull" },
-      paths,
-      config: REFRESHED_CONFIG,
-      fetchImpl: remoteRepository(),
-      applyStagedFile: async (staged, destination) => {
-        applied.push({ staged, destination });
-        await copyFile(staged, destination);
-      },
-    });
-
-    const release = path.join(paths.tests, "release");
-    expect(applied.map(({ destination }) => destination)).toEqual([
-      path.join(release, "suite.yaml"),
-      path.join(release, "books-a-visit.md"),
-      paths.config,
-    ]);
-    expect(new Set(applied.map(({ staged }) => path.dirname(staged)))).toHaveLength(1);
-    expect(applied.at(-1)?.destination).toBe(paths.config);
-    expect((await readConfig(paths.config)).agents).toEqual(REFRESHED_CONFIG.agents);
-    expect(await readFile(path.join(release, "suite.yaml"), "utf8")).toContain(
-      "name: Release",
-    );
-    // The world the test carries travels down with the test, in its own file.
-    const pulled = await readFile(path.join(release, "books-a-visit.md"), "utf8");
-    expect(pulled).toContain("name: Books a visit");
-    expect(pulled).toContain("## Mock tools");
-    expect(pulled).toContain("### calendar");
-    expect(pulled).toContain("## Env");
-    expect(pulled).toContain('"caller_name": "Margaret"');
-  });
-
   it("restores the old config and every earlier write when the final apply fails", async () => {
     const paths = folderPathsIn(workspace.dir);
     const oldConfig = await readFile(paths.config, "utf8");

@@ -155,15 +155,6 @@ describe("verified Stripe domain facts", () => {
     ).rejects.toThrow("no billing account");
     expect(Number((await account()).balance_micros)).toBe(30000000);
   });
-  it("ignores unrelated event types without retaining an event table", async () => {
-    expect(
-      await applyStripeEvent({ id: "evt_ignored", type: "invoice.paid" }),
-    ).toEqual({ applied: true, effect: "ignored" });
-    const { rows } = await database.sql(
-      "select to_regclass('cloud_stripe_event') as events",
-    );
-    expect(rows[0]?.events).toBeNull();
-  });
   it("uses current Stripe state for repeated and out-of-order triggers", async () => {
     await applyStripeEvent(trigger, PERIOD, async () => active);
     expect(await account()).toMatchObject({

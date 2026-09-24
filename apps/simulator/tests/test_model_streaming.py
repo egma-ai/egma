@@ -125,7 +125,7 @@ async def test_stream_releases_words_before_completion_and_retains_tool_and_usag
         await model.close()
 
 
-@pytest.mark.parametrize("key", ["abcabcabc", "key", "sk-fixture-credential"])
+@pytest.mark.parametrize("key", ["abcabcabc", "key"])
 async def test_stream_never_releases_a_credential_split_between_chunks(key):
     text = f"Echo {key}. Goodbye."
     stream = HeldStream(

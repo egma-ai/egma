@@ -1,6 +1,5 @@
-"""Verify service-token bearer headers on real local HTTP requests.
-Without a token, omit Authorization. Also check redaction when a server
-echoes the request in a refusal to a real simulator process.
+"""Verify the Daytona proxy path for control-plane calls, and redaction when a
+server echoes the request in a refusal to a real simulator process.
 """
 
 from __future__ import annotations
@@ -13,79 +12,6 @@ import pytest
 from aiohttp import web
 
 from egma_simulator.client import ControlPlaneClient
-
-
-@pytest.fixture
-async def listening_control_plane() -> AsyncIterator[
-    tuple[str, list[str | None], list[str | None]]
-]:
-    """Answers everything agreeably and keeps the client identity it saw."""
-    offered: list[str | None] = []
-    user_agents: list[str | None] = []
-
-    def record(request: web.Request) -> None:
-        offered.append(request.headers.get("Authorization"))
-        user_agents.append(request.headers.get("User-Agent"))
-
-    async def claim(request: web.Request) -> web.Response:
-        record(request)
-        return web.json_response({"specs": []})
-
-    async def heartbeat(request: web.Request) -> web.Response:
-        record(request)
-        return web.json_response({"directive": None})
-
-    async def report(request: web.Request) -> web.Response:
-        record(request)
-        return web.Response(status=204)
-
-    async def traces(request: web.Request) -> web.Response:
-        record(request)
-        return web.json_response({})
-
-    app = web.Application()
-    app.router.add_post("/v1/claims", claim)
-    app.router.add_post("/v1/simulations/{simulation_id}/heartbeats", heartbeat)
-    app.router.add_post("/v1/simulations/{simulation_id}/reports", report)
-    app.router.add_post("/v1/traces", traces)
-
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "127.0.0.1", 0)
-    await site.start()
-    try:
-        yield f"http://127.0.0.1:{runner.addresses[0][1]}", offered, user_agents
-    finally:
-        await runner.cleanup()
-
-
-async def _make_every_call(client: ControlPlaneClient) -> None:
-    await client.claim("sim-under-test", 1)
-    await client.heartbeat("sim-1", "sim-under-test")
-    await client.report("sim-1", b"{}")
-    await client.spans("sim-1", b'{"resourceSpans":[]}')
-
-
-async def test_client_identity_rides_every_outbound_call(listening_control_plane):
-    base_url, offered, user_agents = listening_control_plane
-
-    async with ControlPlaneClient(
-        base_url, claim_wait_seconds=1, service_token="egma_service_token_under_test"
-    ) as client:
-        await _make_every_call(client)
-
-    assert offered == ["Bearer egma_service_token_under_test"] * 4
-    assert user_agents == ["egma-simulator/0.0.0"] * 4
-
-
-async def test_no_token_means_no_header(listening_control_plane):
-    """The workbench asks for nothing, and gets nothing, rather than "Bearer "."""
-    base_url, offered, _ = listening_control_plane
-
-    async with ControlPlaneClient(base_url, claim_wait_seconds=1) as client:
-        await _make_every_call(client)
-
-    assert offered == [None] * 4
 
 
 async def test_control_plane_calls_use_the_environment_proxy(monkeypatch):

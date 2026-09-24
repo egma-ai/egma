@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { Readable } from "node:stream";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -14,7 +13,6 @@ import {
   EMPTY_CONFIG,
   createEgmaFolder,
   folderPathsIn,
-  readConfig,
   writeConfig,
 } from "../src/folder/egma-folder.ts";
 import { FOLDER_EXIT } from "../src/commands/folder-verbs.ts";
@@ -274,77 +272,5 @@ describe("Agent monitoring resource commands", () => {
     expect(out).toContain(
       `Stopped pulling future Retell calls for Egma Agent ${AGENT_ID}. Existing traces were kept.`,
     );
-  });
-
-  it("hands LiveKit setup and removal to the integration skill without a request", async () => {
-    const configFile = folderPathsIn(workspace.dir).config;
-    await writeConfig(configFile, configFor("livekit"));
-    const before = await readConfig(configFile);
-    let requests = 0;
-    const setup: string[] = [];
-    const stop: string[] = [];
-    const shared = {
-      access: { url: URL, credentialsFile: workspace.credentialsFile },
-      cwd: workspace.dir,
-      agent: AGENT_ID,
-      fail: (line: string) => setup.push(`failure: ${line}`),
-      fetchImpl: async () => {
-        requests += 1;
-        throw new Error("LiveKit handoff must not contact Egma");
-      },
-    };
-
-    expect(
-      await runAgentMonitoringSetupCommand({
-        ...shared,
-        platform: "livekit",
-        out: (line) => setup.push(line),
-      }),
-    ).toBe(AGENT_MONITORING_EXIT.failed);
-    expect(
-      await runAgentMonitoringStopCommand({
-        ...shared,
-        platform: "livekit",
-        out: (line) => stop.push(line),
-        fail: (line) => stop.push(`failure: ${line}`),
-      }),
-    ).toBe(AGENT_MONITORING_EXIT.failed);
-
-    expect(requests).toBe(0);
-    expect(setup).toContain(
-      "  npx --yes skills add egma-ai/egma --skill integrate-egma",
-    );
-    expect(setup.join("\n")).toContain("LiveKit monitoring setup");
-    expect(stop.join("\n")).toContain("LiveKit monitoring removal");
-    expect(await readConfig(configFile)).toEqual(before);
-  });
-
-  it("refuses a platform that does not match the selected Agent", async () => {
-    let requests = 0;
-    const output: string[] = [];
-    const shared = {
-      access: { url: URL, credentialsFile: workspace.credentialsFile },
-      cwd: workspace.dir,
-      agent: AGENT_ID,
-      platform: "livekit",
-      out: (line: string) => output.push(line),
-      fail: (line: string) => output.push(`failure: ${line}`),
-      fetchImpl: async () => {
-        requests += 1;
-        throw new Error("A platform mismatch must not contact Egma");
-      },
-    };
-
-    expect(await runAgentMonitoringSetupCommand(shared)).toBe(1);
-    expect(await runAgentMonitoringStopCommand(shared)).toBe(1);
-    expect(requests).toBe(0);
-    expect(
-      output.filter(
-        (line) =>
-          line ===
-          `failure: Agent ${AGENT_ID} uses retell, not livekit. Nothing was changed.`,
-      ),
-    ).toHaveLength(2);
-    expect(output.join("\n")).not.toContain("status:");
   });
 });

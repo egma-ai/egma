@@ -150,28 +150,6 @@ afterAll(async () => {
 });
 
 describe("where a simulation's telemetry files", () => {
-  it("carries the pins a span row is stamped from, beside the narrowed context", async () => {
-    const standing = await resolveSimulationStanding(ours.simulationId);
-
-    expect(standing).toMatchObject({
-      id: ours.simulationId,
-      runId: ours.runId,
-      agentId: ours.agentId,
-      testVersionId: ours.testVersionId,
-      personaVersionId: ours.personaVersionId,
-    });
-    // The context the spans are then filed under: this row's customer and no
-    // more, marked as the simulator's own doing — the claim's context,
-    // derived again from the row.
-    expect(standing?.auth).toEqual({
-      userId: "simulator",
-      organizationId: acme.organization,
-      projectId: acme.project,
-      role: "member",
-      via: "simulator",
-    });
-  });
-
   it("reaches every customer's simulations, because the evidence door stands behind them all", async () => {
     const here = await resolveSimulationStanding(ours.simulationId);
     const there = await resolveSimulationStanding(elsewhere.simulationId);

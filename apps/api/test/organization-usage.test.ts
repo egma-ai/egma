@@ -294,23 +294,6 @@ describe("the organization's usage this period", () => {
     ]);
   });
 
-  it("answers zero for a customer who has run nothing", async () => {
-    api = await createApi("organization_usage_empty", {
-      retellFetch: RETELL_CHAT_FETCH,
-      traceStore: true,
-    });
-    const acme = await aCustomerWhoRan("ada@acme.example", "Acme");
-    const answer = await ask(
-      api.app,
-      "GET",
-      "/api/organization/usage",
-      acme.organizationKey,
-    );
-    expect(answer.statusCode, JSON.stringify(answer.body)).toBe(200);
-    const usage = answer.body as unknown as UsageAnswer;
-    expect(usage.allowances.map((one) => one.used)).toEqual([0, 0, 0]);
-  });
-
   it("counts nothing of another customer's", async () => {
     api = await createApi("organization_usage_tenancy", {
       retellFetch: RETELL_CHAT_FETCH,

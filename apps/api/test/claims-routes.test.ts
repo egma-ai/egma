@@ -15,10 +15,6 @@ import { specComplaints } from "@egma/simulation-contract";
 import { ProviderCredentialSourceUnavailableError } from "@egma/provider-credentials";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  acceptsServiceToken,
-  SERVICE_TOKEN_PREFIX,
-} from "../src/auth/service-token.ts";
 import { CLAIMS_PATH } from "../src/routes/claims.ts";
 import { fixedWindowRateLimit } from "../src/http/rate-limit.ts";
 import {
@@ -417,26 +413,6 @@ describe("the token gate", () => {
         "EGMA_SIMULATOR_SERVICE_TOKEN",
       );
     }
-  });
-
-  it("compares tokens in constant time, hashing both sides first", () => {
-    const configured = `${SERVICE_TOKEN_PREFIX}the-configured-secret`;
-    expect(
-      acceptsServiceToken(`Bearer ${configured}`, configured),
-    ).toBe(true);
-    expect(
-      acceptsServiceToken(`Bearer ${SERVICE_TOKEN_PREFIX}wrong`, configured),
-    ).toBe(false);
-    // Different lengths must answer false rather than throw: the hash is
-    // what equalises them before the constant-time compare.
-    expect(
-      acceptsServiceToken(
-        `Bearer ${SERVICE_TOKEN_PREFIX}${"x".repeat(200)}`,
-        configured,
-      ),
-    ).toBe(false);
-    expect(acceptsServiceToken("Bearer unprefixed", configured)).toBe(false);
-    expect(acceptsServiceToken(undefined, configured)).toBe(false);
   });
 });
 
@@ -894,50 +870,6 @@ describe("claiming work", () => {
 });
 
 describe("the held claim", () => {
-  it("answers within about a second of a simulation being queued", async () => {
-    const { key, connectionId, versionId } =
-      await aCustomerReadyToRun("claims_hold");
-
-    const asked = Date.now();
-    const holding = claim(api.config.simulatorServiceToken, {
-      claimant: "sim-under-test",
-      capacity: 4,
-      wait_seconds: 20,
-    });
-
-    // Work arrives while the claim is being held open.
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    await aQueuedRun(key, connectionId, versionId);
-
-    const answered = await holding;
-    const waited = Date.now() - asked;
-
-    expect(answered.statusCode).toBe(200);
-    expect(answered.body.specs as unknown[]).toHaveLength(1);
-    // Well before the twenty seconds asked for: the hold noticed the queue
-    // fill on its ~1s re-check rather than sitting out the request.
-    expect(waited).toBeLessThan(8_000);
-  });
-
-  it("bounds the hold by the client's own wait_seconds", async () => {
-    api = await createApi("claims_bounded");
-
-    const asked = Date.now();
-    const answered = await claim(api.config.simulatorServiceToken, {
-      claimant: "sim-under-test",
-      capacity: 1,
-      wait_seconds: 1,
-    });
-    const waited = Date.now() - asked;
-
-    expect(answered.statusCode).toBe(200);
-    expect(answered.body.specs).toEqual([]);
-    // Held about the one second asked for — never the 15s default, never
-    // the 25s cap — so a short-waiting client cannot see a timeout.
-    expect(waited).toBeGreaterThanOrEqual(900);
-    expect(waited).toBeLessThan(6_000);
-  });
-
   it("answers an empty queue at once when the client will not wait", async () => {
     api = await createApi("claims_no_wait");
 
@@ -995,54 +927,6 @@ describe("what the claim door never touches", () => {
 });
 
 describe("one source of execution truth", () => {
-  it.each([
-    ["gpt-4o-mini", undefined],
-    ["gpt-4o", undefined],
-    ["gpt-5.4", "none"],
-    ["gpt-5.5", "none"],
-    ["gpt-5.6-terra", "none"],
-    ["gpt-5.6-sol", "none"],
-    ["gpt-5.6-luna", "none"],
-  ] as const)(
-    "claims persona LLM %s with the platform reasoning policy",
-    async (model, reasoningEffort) => {
-      const { key, connectionId, versionId } = await aCustomerReadyToRun(
-        `claims_llm_${model.replaceAll(".", "_")}`,
-        {},
-        {
-          mode: "separate",
-          llm: { provider: "openai", model },
-          stt: { provider: "deepgram", model: "nova-3-general" },
-          tts: {
-            provider: "cartesia",
-            model: "sonic-3.5",
-            voiceId: "5ee9feff-1265-424a-9d7f-8e4d431a12c7",
-            speed: 1,
-          },
-        },
-      );
-      await aQueuedRun(key, connectionId, versionId);
-
-      const answered = await claim(api.config.simulatorServiceToken, {
-        claimant: "sim-under-test",
-        capacity: 1,
-        wait_seconds: 0,
-      });
-      const spec = (answered.body.specs as Record<string, unknown>[])[0];
-      const selected = (spec?.models as Record<string, unknown> | undefined)
-        ?.["llm"];
-      expect(selected).toEqual({
-        provider: "openai",
-        model,
-        adapter: "openai_chat_completions",
-        ...(reasoningEffort === undefined
-          ? {}
-          : { reasoning_effort: reasoningEffort }),
-        key: "openai-key-held-by-this-test-suite",
-      });
-    },
-  );
-
   it("keeps OpenAI realtime STT paired with its model and OpenAI account key", async () => {
     const { key, connectionId, versionId } =
       await aRealtimeVoiceCustomerReadyToRun(

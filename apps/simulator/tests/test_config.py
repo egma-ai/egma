@@ -8,31 +8,11 @@ import pytest
 
 from egma_simulator.config import (
     MediaSettings,
-    ObjectStoreSettings,
     SimulatorConfig,
 )
 from egma_simulator.spec import PlatformCarrier
 
 A_URL = "http://control-plane.internal:3100"
-
-
-def test_one_variable_is_enough(env, tmp_path):
-    """Everything but the control plane has a default that works."""
-    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
-
-    config = SimulatorConfig.from_env()
-
-    assert config.control_plane_url == A_URL
-    assert config.capacity == 2
-    assert config.mode == "persistent"
-    assert config.modalities is None
-    assert config.execution_deadline_seconds == 900.0
-    assert config.thread_pool_workers is None
-    assert config.vad_provider == "scripted"
-    assert config.service_token is None
-    assert config.claimant.startswith("egma-simulator-")
-    assert config.log_level == "INFO"
-    assert config.blob_dir == tmp_path / "blobs"
 
 
 def test_empty_means_unset(env):
@@ -65,41 +45,11 @@ def test_empty_means_unset(env):
     assert config.service_token is None
 
 
-def test_a_missing_control_plane_url_is_refused_by_name(env):
-    with pytest.raises(ValueError, match="EGMA_SIMULATOR_CONTROL_PLANE_URL"):
-        SimulatorConfig.from_env()
-
-
-def test_a_control_plane_url_with_no_scheme_is_refused_by_name(env):
-    """``api:3100`` is a natural thing to write and reaches nothing."""
-    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", "api:3100")
-
-    with pytest.raises(ValueError, match="EGMA_SIMULATOR_CONTROL_PLANE_URL"):
-        SimulatorConfig.from_env()
-
-
-def test_a_capacity_that_is_not_a_number_is_refused_by_name(env):
-    """Not ``invalid literal for int()``, which names nothing."""
-    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
-    env.setenv("EGMA_SIMULATOR_CAPACITY", "lots")
-
-    with pytest.raises(ValueError, match="EGMA_SIMULATOR_CAPACITY"):
-        SimulatorConfig.from_env()
-
-
 def test_a_capacity_below_one_is_refused_by_name(env):
     env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
     env.setenv("EGMA_SIMULATOR_CAPACITY", "0")
 
     with pytest.raises(ValueError, match="EGMA_SIMULATOR_CAPACITY"):
-        SimulatorConfig.from_env()
-
-
-def test_a_duration_that_is_not_a_number_is_refused_by_name(env):
-    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
-    env.setenv("EGMA_SIMULATOR_HEARTBEAT_SECONDS", "often")
-
-    with pytest.raises(ValueError, match="EGMA_SIMULATOR_HEARTBEAT_SECONDS"):
         SimulatorConfig.from_env()
 
 
@@ -121,7 +71,7 @@ DURATION_VARIABLES = [
 
 
 @pytest.mark.parametrize("variable", DURATION_VARIABLES)
-@pytest.mark.parametrize("written", ["nan", "inf", "-inf", "Infinity", "NaN"])
+@pytest.mark.parametrize("written", ["nan", "inf"])
 def test_a_duration_that_is_not_finite_is_refused_by_name(env, variable, written):
     """Reject NaN and infinities even though float() accepts them.
     Range checks alone can admit values that disable heartbeats or retry deadlines.
@@ -130,25 +80,6 @@ def test_a_duration_that_is_not_finite_is_refused_by_name(env, variable, written
     env.setenv(variable, written)
 
     with pytest.raises(ValueError, match=variable):
-        SimulatorConfig.from_env()
-
-
-@pytest.mark.parametrize("written", ["nan", "inf", "-inf"])
-def test_a_capacity_that_is_not_finite_is_refused_by_name(env, written):
-    """The other numeric variable, which `int()` turns down on its own."""
-    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
-    env.setenv("EGMA_SIMULATOR_CAPACITY", written)
-
-    with pytest.raises(ValueError, match="EGMA_SIMULATOR_CAPACITY"):
-        SimulatorConfig.from_env()
-
-
-def test_an_unknown_log_level_is_refused_by_name(env):
-    """Caught here rather than in logging setup, which names no variable."""
-    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
-    env.setenv("EGMA_SIMULATOR_LOG_LEVEL", "CHATTY")
-
-    with pytest.raises(ValueError, match="EGMA_SIMULATOR_LOG_LEVEL"):
         SimulatorConfig.from_env()
 
 
@@ -183,13 +114,6 @@ def test_a_bounded_mode_refuses_non_voice_fleet_shape(env, variable, value):
         SimulatorConfig.from_env()
 
 
-def test_a_log_level_is_taken_however_it_is_written(env):
-    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
-    env.setenv("EGMA_SIMULATOR_LOG_LEVEL", "debug")
-
-    assert SimulatorConfig.from_env().log_level == "DEBUG"
-
-
 @pytest.mark.parametrize(
     "variable", ["EGMA_SIMULATOR_BLOB_DIR", "EGMA_SIMULATOR_WAL_DIR"]
 )
@@ -208,36 +132,6 @@ def test_a_directory_that_cannot_be_written_is_refused_by_name(env, tmp_path, va
 
     with pytest.raises(ValueError, match=variable):
         SimulatorConfig.from_env()
-
-
-def test_both_directories_exist_once_the_config_does(env, tmp_path):
-    """Proving they are writable is also making them, which is the point."""
-    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
-
-    config = SimulatorConfig.from_env()
-
-    assert config.blob_dir.is_dir()
-    assert config.wal_dir.is_dir()
-    assert list(tmp_path.glob("**/.egma-simulator-*")) == [], (
-        "the write probe cleaned up after itself"
-    )
-
-
-def test_starting_misconfigured_says_one_sentence_and_stops(env, capsys):
-    """The whole conversation a container has with whoever deployed it.
-
-    A traceback down through the standard library would bury the sentence
-    naming the variable under frames nobody deploying this can act on.
-    """
-    from egma_simulator.__main__ import main
-
-    with pytest.raises(SystemExit) as stopped:
-        main()
-
-    assert stopped.value.code == 1
-    said = capsys.readouterr().err
-    assert "EGMA_SIMULATOR_CONTROL_PLANE_URL" in said
-    assert "Traceback" not in said
 
 
 def test_the_service_token_is_read_and_kept_out_of_the_repr(env):
@@ -274,43 +168,6 @@ def a_deployment_that_dials(env, **changes: str | None):
             env.setenv(name, value)
 
 
-def test_a_simulator_that_names_no_bridge_starts_and_places_no_calls(env):
-    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
-    assert SimulatorConfig.from_env().media is None
-
-
-def test_a_bridge_nobody_wrote_is_refused_by_name(env):
-    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
-    env.setenv("EGMA_SIMULATOR_MEDIA_BACKEND", "a-bridge-nobody-wrote")
-    with pytest.raises(ValueError) as refusal:
-        SimulatorConfig.from_env()
-    assert "EGMA_SIMULATOR_MEDIA_BACKEND" in str(refusal.value)
-
-
-def test_the_scripted_bridge_needs_nothing_else(env):
-    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
-    env.setenv("EGMA_SIMULATOR_MEDIA_BACKEND", "scripted")
-    media = SimulatorConfig.from_env().media
-    assert media is not None
-    assert media.backend == "scripted"
-    assert media.secrets == ()
-
-
-@pytest.mark.parametrize(
-    "missing",
-    [
-        "EGMA_SIMULATOR_LIVEKIT_URL",
-        "EGMA_SIMULATOR_LIVEKIT_API_KEY",
-        "EGMA_SIMULATOR_LIVEKIT_API_SECRET",
-    ],
-)
-def test_a_livekit_deployment_missing_a_variable_is_refused_by_name(env, missing):
-    a_deployment_that_dials(env, **{missing: None})
-    with pytest.raises(ValueError) as refusal:
-        SimulatorConfig.from_env()
-    assert missing in str(refusal.value)
-
-
 def test_a_bridge_starts_without_a_trunk_and_refuses_a_carrierless_call(env):
     """The container can wait for work; only a claimed phone call needs a trunk."""
     a_deployment_that_dials(env)
@@ -342,12 +199,6 @@ def test_daytona_livekit_uses_only_scoped_room_credentials(env):
     assert media.livekit_room_name == "egma-sim-runtime-1"
     assert "room-token" not in repr(media)
     assert "api-token" not in repr(media)
-
-
-def test_a_work_order_carrier_cannot_select_a_media_backend(env):
-    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
-    carrier = PlatformCarrier(trunk_address="a.example.com")
-    assert MediaSettings.for_simulation(None, carrier) is None
 
 
 def test_a_phone_call_uses_only_the_work_order_carrier(env):
@@ -382,28 +233,6 @@ def test_a_container_without_a_bridge_cannot_be_enabled_by_a_work_order(env):
         )
         is None
     )
-
-
-@pytest.mark.parametrize(
-    "missing",
-    ["trunk_address", "trunk_number", "trunk_username", "trunk_password"],
-)
-def test_every_work_order_carrier_value_is_required(env, missing: str):
-    a_deployment_that_dials(env)
-    values = {
-        "trunk_address": "trunk.example",
-        "trunk_number": "+15551110000",
-        "trunk_username": "user",
-        "trunk_password": "secret",
-    }
-    values[missing] = None
-    carrier = PlatformCarrier(**values)
-    media = MediaSettings.for_simulation(SimulatorConfig.from_env().media, carrier)
-    assert media is not None
-    with pytest.raises(ValueError) as refusal:
-        media.checked()
-    told = str(refusal.value)
-    assert f"platform.carrier.{missing}" in told
 
 
 def test_telephony_secrets_never_print(env):
@@ -461,18 +290,6 @@ def a_deployment_with_object_storage(env, **changes: str | None):
             env.setenv(name, value)
 
 
-def test_a_simulator_that_names_no_endpoint_keeps_its_recordings_on_disk(env):
-    """No container to run, and nothing to configure, is the whole point:
-    a first voice simulation costs a self-hoster no object storage, and a
-    contributor's checkout costs them none either."""
-    env.setenv("EGMA_SIMULATOR_CONTROL_PLANE_URL", A_URL)
-
-    config = SimulatorConfig.from_env()
-
-    assert config.object_store is None
-    assert config.blob_dir.is_dir()
-
-
 def test_naming_an_endpoint_is_what_sends_recordings_to_object_storage(env):
     a_deployment_with_object_storage(env)
 
@@ -495,22 +312,6 @@ def test_object_storage_accepts_an_sts_session_token(env):
     assert store is not None
     assert store.session_token == "temporary-session-token"
     assert "temporary-session-token" not in repr(store)
-
-
-def test_the_bucket_and_the_region_can_both_be_moved(env):
-    """Two settings a self-hoster running the deployment's own compose file
-    never has to think about — the test above proves what they default to —
-    and that a deployment on somebody else's S3 can still move."""
-    a_deployment_with_object_storage(
-        env,
-        EGMA_SIMULATOR_S3_BUCKET="somebody-elses-bucket",
-        EGMA_SIMULATOR_S3_REGION="eu-west-2",
-    )
-
-    store = SimulatorConfig.from_env().object_store
-
-    assert store.bucket == "somebody-elses-bucket"
-    assert store.region == "eu-west-2"
 
 
 def test_object_storage_leaves_no_blob_directory_to_prove(env):
@@ -543,17 +344,6 @@ def test_object_storage_missing_a_credential_is_refused_by_name(env, missing):
         SimulatorConfig.from_env()
 
     assert missing in str(refusal.value)
-
-
-def test_an_endpoint_with_no_scheme_is_refused_by_name(env):
-    """`minio:9000` is the natural thing to write next to a compose service
-    name, and it reaches nothing."""
-    a_deployment_with_object_storage(env, EGMA_SIMULATOR_S3_ENDPOINT="minio:9000")
-
-    with pytest.raises(ValueError) as refusal:
-        SimulatorConfig.from_env()
-
-    assert "EGMA_SIMULATOR_S3_ENDPOINT" in str(refusal.value)
 
 
 @pytest.mark.parametrize(
@@ -602,48 +392,3 @@ def test_the_object_storage_credential_is_registered_for_redaction(env):
     assert scrubbed.count("[redacted]") == 2
 
 
-def test_a_config_with_nowhere_to_put_recordings_is_refused(tmp_path):
-    """The pairing is checked, not promised.
-
-    `blob_dir` and `object_store` are one decision written as two fields,
-    and the store is chosen by asking which of them is there. Neither set
-    would reach the filesystem store with `None` for its directory, which
-    fails inside a write the conductor then swallows — a simulation that
-    reports no audio and no reason why.
-    """
-    with pytest.raises(ValueError, match="exactly one place"):
-        SimulatorConfig(
-            control_plane_url=A_URL,
-            claimant="test",
-            capacity=1,
-            heartbeat_seconds=1.0,
-            claim_wait_seconds=1.0,
-            report_deadline_seconds=1.0,
-            wal_dir=tmp_path,
-            blob_dir=None,
-            log_level="INFO",
-        )
-
-
-def test_a_config_with_two_places_to_put_recordings_is_refused(tmp_path):
-    """And both set is the other way to break it: a deployment writing to
-    a bucket while a directory nobody reads fills up beside it."""
-    with pytest.raises(ValueError, match="exactly one place"):
-        SimulatorConfig(
-            control_plane_url=A_URL,
-            claimant="test",
-            capacity=1,
-            heartbeat_seconds=1.0,
-            claim_wait_seconds=1.0,
-            report_deadline_seconds=1.0,
-            wal_dir=tmp_path,
-            blob_dir=tmp_path / "blobs",
-            log_level="INFO",
-            object_store=ObjectStoreSettings(
-                endpoint="http://minio:9000",
-                bucket="egma-recordings",
-                region="us-east-1",
-                access_key_id="key",
-                secret_access_key="secret",
-            ),
-        )

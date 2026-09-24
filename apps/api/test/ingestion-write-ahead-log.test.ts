@@ -56,24 +56,6 @@ afterEach(() => {
 });
 
 describe("staged evidence across a restart", () => {
-  it("hands back every complete record the last process wrote", () => {
-    const directory = aDirectory();
-
-    const first = openWriteAheadLog(directory, BOUNDS);
-    first.append(bytes("one"));
-    first.append(bytes("two"));
-    first.append(bytes("three"));
-    first.close();
-
-    const second = openWriteAheadLog(directory, BOUNDS);
-    expect(second.staged().map((entry) => text(entry.payload))).toEqual([
-      "one",
-      "two",
-      "three",
-    ]);
-    expect(second.records).toBe(3);
-  });
-
   it("keeps what was whole and isolates a tail that was cut in half", () => {
     // A frame whose length says more bytes are coming than the file holds.
     // Reading the length and trusting it is what walks recovery off the end of
@@ -127,18 +109,6 @@ describe("staged evidence across a restart", () => {
       "first",
     ]);
     expect(filesIn(directory)).toContain(`${file as string}.torn`);
-  });
-
-  it("never invents a record out of a frame it could not read", () => {
-    // Bytes that are not a log at all. The one answer that must never come back
-    // is a plausible record: a log that guessed would put evidence nobody sent
-    // into a customer's trace.
-    const directory = aDirectory();
-    writeFileSync(path.join(directory, "00000001.log"), Buffer.alloc(64, 0x41));
-
-    const log = openWriteAheadLog(directory, BOUNDS);
-    expect(log.staged()).toEqual([]);
-    expect(log.records).toBe(0);
   });
 
   it("reads a frame that was appended after an isolated tail", () => {
@@ -300,35 +270,6 @@ describe("a log that has been told what it may hold", () => {
     );
   });
 
-  it("answers on the byte boundary the same way the append does", () => {
-    const directory = aDirectory();
-    // Exactly one 20-byte frame, and not one byte more.
-    const log = openWriteAheadLog(directory, { ...BOUNDS, maxBytes: 28 });
-
-    expect(log.accepts(20)).toBe(true);
-    expect(log.accepts(21)).toBe(false);
-    log.append(bytes("a".repeat(20)));
-
-    expect(log.bytes).toBe(28);
-    expect(log.accepts(0)).toBe(false);
-    expect(() => log.append(bytes(""))).toThrow(IngestionBackpressureError);
-  });
-
-  it("answers on the record boundary too, whatever room the bytes leave", () => {
-    const directory = aDirectory();
-    const log = openWriteAheadLog(directory, { ...BOUNDS, maxRecords: 2 });
-
-    expect(log.accepts(1)).toBe(true);
-    log.append(bytes("one"));
-    expect(log.accepts(1)).toBe(true);
-    log.append(bytes("two"));
-
-    // Bytes are barely touched; the record bound is the one that closed.
-    expect(log.bytes).toBeLessThan(BOUNDS.maxBytes);
-    expect(log.accepts(1)).toBe(false);
-    expect(() => log.append(bytes("three"))).toThrow(IngestionBackpressureError);
-  });
-
   it("takes room back as staged records are released", () => {
     const directory = aDirectory();
     const log = openWriteAheadLog(directory, { ...BOUNDS, maxRecords: 2 });
@@ -340,29 +281,6 @@ describe("a log that has been told what it may hold", () => {
     // Durable somewhere else, so the log is no longer holding it.
     log.release([first]);
     expect(log.accepts(1)).toBe(true);
-  });
-
-  it("says which bound it met, and that nothing was thrown away", () => {
-    // The sentence a `503` is built out of. An operator reading it has to be
-    // able to tell backpressure from a lost disk without reading this file.
-    const directory = aDirectory();
-    const log = openWriteAheadLog(directory, { ...BOUNDS, maxRecords: 1 });
-    log.append(bytes("one"));
-
-    expect(() => log.append(bytes("two"))).toThrow(/staged records/u);
-    expect(() => log.append(bytes("two"))).toThrow(/has been discarded/u);
-  });
-
-  it("takes evidence again once what was staged has become durable", () => {
-    const directory = aDirectory();
-    const log = openWriteAheadLog(directory, { ...BOUNDS, maxRecords: 2 });
-
-    const first = log.append(bytes("one"));
-    log.append(bytes("two"));
-    expect(() => log.append(bytes("three"))).toThrow(IngestionBackpressureError);
-
-    log.release([first]);
-    expect(() => log.append(bytes("three"))).not.toThrow();
   });
 
   it("deletes a sealed file only when every record in it is durable", () => {

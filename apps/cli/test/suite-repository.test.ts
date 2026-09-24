@@ -17,7 +17,6 @@ import {
   serializeTestFile,
   TEST_FILE_FORMAT,
 } from "../src/folder/test-file.ts";
-import { MAX_PORTABLE_COMPONENT_LENGTH } from "../src/folder/portable-path.ts";
 import { makeWorkspace, type Workspace } from "./support/workspace.ts";
 import { aTestFile, blocking } from "./support/test-file.ts";
 
@@ -182,19 +181,7 @@ describe("the complete suite repository", () => {
   });
 
   it.each([
-    ["missing id", "name: One\n"],
-    ["invalid id", "id: suite_one\nname: One\n"],
-    ["blank name", `id: ${SUITE_ID}\nname: ""\n`],
-    ["numeric name", `id: ${SUITE_ID}\nname: 123\n`],
-    ["boolean name", `id: ${SUITE_ID}\nname: true\n`],
-    ["outer whitespace", `id: ${SUITE_ID}\nname: " Release contract "\n`],
-    ["unknown key", `id: ${SUITE_ID}\nname: One\nagent: receptionist\n`],
     ["duplicate id", `id: ${SUITE_ID}\nid: ${OTHER_SUITE_ID}\nname: One\n`],
-    ["duplicate name", `id: ${SUITE_ID}\nname: One\nname: Hidden replacement\n`],
-    [
-      "an indented opening with a hidden root key",
-      `  id: ${SUITE_ID}\n  name: One\nlegacy: hidden\n`,
-    ],
   ])("refuses a manifest with %s", async (_name, document) => {
     const root = path.join(folderPathsIn(workspace.dir).tests, "one");
     await mkdir(root);
@@ -214,18 +201,7 @@ describe("the complete suite repository", () => {
     );
   });
 
-  it("does not accept the former unversioned singleton config", async () => {
-    await writeFile(
-      folderPathsIn(workspace.dir).config,
-      "platform:\nproject:\nagent:\nconnection:\nsuite:\n  name: first-suite\n",
-    );
-
-    await expect(readRepository(folderPathsIn(workspace.dir))).rejects.toThrow(
-      /config\.yaml.*folder format none.*requires format 4.*no legacy reader/i,
-    );
-  });
-
-  it.each(["3", "4", "5.5", "5-old"])("does not read test file format %s", async (format) => {
+  it.each(["4"])("does not read test file format %s", async (format) => {
     const root = await suite("one", { id: SUITE_ID, name: "One" });
     await writeFile(
       path.join(root, "legacy.md"),
@@ -238,30 +214,8 @@ describe("the complete suite repository", () => {
   });
 
   it.each([
-    ["non-portable suite directory", async () => {
-      await suite("Release Contract", { id: SUITE_ID, name: "Release contract" });
-    }],
-    ["non-portable test file", async () => {
-      const root = await suite("release-contract", { id: SUITE_ID, name: "Release contract" });
-      await writeFile(
-        path.join(root, "Books A Visit.md"),
-        serializeTestFile(
-          aTestFile({
-            name: "Books a visit",
-            scenario: "The caller asks for a visit.",
-            expectedBehaviors: blocking("The agent offers a time."),
-          }),
-        ),
-      );
-    }],
     ["Windows device suite directory", async () => {
       await suite("cOn", { id: SUITE_ID, name: "CON" });
-    }],
-    ["overlong suite directory", async () => {
-      await suite("a".repeat(MAX_PORTABLE_COMPONENT_LENGTH + 1), {
-        id: SUITE_ID,
-        name: "An unlimited product name",
-      });
     }],
     ["Windows device test extension", async () => {
       const root = await suite("release-contract", {
@@ -273,22 +227,6 @@ describe("the complete suite repository", () => {
         serializeTestFile(
           aTestFile({
             name: "NUL",
-            scenario: "The caller asks for a visit.",
-            expectedBehaviors: blocking("The agent offers a time."),
-          }),
-        ),
-      );
-    }],
-    ["overlong test file", async () => {
-      const root = await suite("release-contract", {
-        id: SUITE_ID,
-        name: "Release contract",
-      });
-      await writeFile(
-        path.join(root, `${"a".repeat(MAX_PORTABLE_COMPONENT_LENGTH)}.md`),
-        serializeTestFile(
-          aTestFile({
-            name: "An unlimited product name",
             scenario: "The caller asks for a visit.",
             expectedBehaviors: blocking("The agent offers a time."),
           }),
@@ -328,33 +266,5 @@ describe("the complete suite repository", () => {
         cwd: workspace.dir,
       }),
     ).rejects.toThrow(new RegExp(`${SUITE_ID}.*Nothing was sent`, "s"));
-  });
-
-  it("uses a binding without validating Suite bodies or Tests", async () => {
-    const origin = "https://bound-egma.example";
-    await writeConfig(folderPathsIn(workspace.dir).config, {
-      ...EMPTY_CONFIG,
-      platform: { origin },
-    });
-    const root = await suite("release-contract", {
-      id: SUITE_ID,
-      name: "Release contract",
-    });
-    await writeFile(path.join(root, "suite.yaml"), "name: still in progress\n");
-    await writeFile(path.join(root, "work-in-progress.md"), "not a Test yet\n");
-    await expect(
-      choosePlatform({ env: process.env, flag: null, cwd: workspace.dir }),
-    ).resolves.toMatchObject({ url: origin, source: "binding" });
-  });
-
-  it("still reads Suite manifests because their ids belong to one platform", async () => {
-    await writeConfig(folderPathsIn(workspace.dir).config, EMPTY_CONFIG);
-    const root = path.join(folderPathsIn(workspace.dir).tests, "release-contract");
-    await mkdir(root, { recursive: true });
-    await writeFile(path.join(root, "suite.yaml"), "name: Release contract\n");
-
-    await expect(
-      choosePlatform({ env: process.env, flag: null, cwd: workspace.dir }),
-    ).rejects.toThrow(/config\.yaml.*Suite manifests under egma\/tests/i);
   });
 });

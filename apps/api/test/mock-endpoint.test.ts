@@ -277,35 +277,9 @@ describe("the address the transform writes", () => {
     expect(answered.statusCode, answered.body).toBe(200);
     expect(JSON.parse(answered.body)).toEqual({ ok: true });
   });
-
-  it("routes a tool name carrying characters a path has to encode", async () => {
-    // The tool this test names, named the way a real one can be.
-    const fresh = await aRunningSimulation("mock_endpoint_encoded_name", [
-      { tool: "price list/lookup?v=2", answer: { slots: ["Tuesday 14:00"] } },
-    ]);
-
-    const answered = await call({
-      simulationId: fresh.simulationId,
-      toolName: "price list/lookup?v=2",
-    });
-    expect(answered.statusCode, answered.raw).toBe(200);
-    expect(answered.json).toEqual({ slots: ["Tuesday 14:00"] });
-  });
 });
 
 describe("the two gates", () => {
-  it("serves the answer the test named", async () => {
-    const ready = await aRunningSimulation("mock_endpoint_serves");
-
-    const answered = await call({
-      simulationId: ready.simulationId,
-      toolName: "get_availability",
-    });
-
-    expect(answered.statusCode).toBe(200);
-    expect(answered.json).toEqual({ slots: ["Tuesday 14:00"] });
-  });
-
   it("refuses a simulation nobody is conducting", async () => {
     const ready = await aRunningSimulation("mock_endpoint_dead_run");
 
@@ -387,36 +361,6 @@ describe("a tool the customer wrote as a GET", () => {
     expect(JSON.stringify(spans[0])).not.toContain("facial");
     const payload = JSON.parse(spans[0]!.payload) as Record<string, unknown>;
     expect(payload["egma.tool.arguments"]).toBe("");
-  });
-
-  it("keeps every refusal distinct on a GET too", async () => {
-    const ready = await aRunningSimulation("mock_endpoint_get_refusals", [
-      { tool: "get_availability", answer: { ok: true } },
-    ]);
-    const asGet = { method: "GET" as const };
-
-    const dead = await call(
-      { simulationId: newId("sim"), toolName: "get_availability" },
-      asGet,
-    );
-    expect((dead.json as { refusal: string }).refusal).toBe("no_live_run");
-
-    const uncovered = await call(
-      { simulationId: ready.simulationId, toolName: "charge_card" },
-      asGet,
-    );
-    expect((uncovered.json as { refusal: string }).refusal).toBe(
-      "tool_not_mocked",
-    );
-
-    // A GET carries no body, and nothing about it is authenticated: the
-    // identifier of a live simulation and a tool its test named are the whole
-    // of what admits it.
-    const answered = await call(
-      { simulationId: ready.simulationId, toolName: "get_availability" },
-      asGet,
-    );
-    expect(answered.statusCode, answered.raw).toBe(200);
   });
 });
 

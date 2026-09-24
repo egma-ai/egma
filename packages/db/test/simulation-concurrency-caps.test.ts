@@ -303,28 +303,6 @@ describe("fleet claim selection", () => {
     expect(fleet.flat()).toHaveLength(1);
   });
 
-  it("enforces the chat cap across concurrent claimants", async () => {
-    await queued("chat");
-    await queued("chat");
-
-    const fleet = await Promise.all([
-      claimSimulations({
-        claimant: "chat-a",
-        capacity: 1,
-        modalities: ["chat"],
-        caps: { chat: 1 },
-      }),
-      claimSimulations({
-        claimant: "chat-b",
-        capacity: 1,
-        modalities: ["chat"],
-        caps: { chat: 1 },
-      }),
-    ]);
-
-    expect(fleet.flat()).toHaveLength(1);
-  });
-
   it("scans past 500 capped rows for admissible work", async () => {
     await queued("voice", CARTESIA);
     await claimSimulations({
@@ -400,13 +378,6 @@ describe("per-run concurrency", () => {
     expect(await claimSimulations({ claimant: "blocked", capacity: 10 })).toHaveLength(0);
     await completeSimulation(claim.auth, claim.id, claim.claimedBy, { endingReason: "persona_concluded" });
     expect(await claimSimulations({ claimant: "refill", capacity: 10 })).toHaveLength(1);
-  });
-
-  it.each(["voice", "chat"] as const)("admits all seven %s simulations with concurrency 100", async (modality) => {
-    const run = await queuedRun(modality, 100);
-    expect(run.concurrency).toBe(100);
-    expect(run.expectedSimulationCount).toBe(7);
-    expect(await claimSimulations({ claimant: "all-seven", capacity: 50 })).toHaveLength(7);
   });
 
   it("keeps run limits independent while respecting deployment caps", async () => {

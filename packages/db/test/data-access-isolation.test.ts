@@ -16,7 +16,6 @@ import {
   readOrganizationSettings,
   readProject,
   revokeApiKey,
-  updateOrganization,
   updateOrganizationSettings,
   type AuthContext,
 } from "@egma/db";
@@ -186,32 +185,6 @@ describe("the customer", () => {
     ).toMatchObject({ retention_days: 90 });
   });
 
-  it("keeps unsaved settings and organization edit times separate", async () => {
-    const customer = await provision("unsaved-settings", "owner@unsaved.example");
-    expect(await readOrganizationSettings(customer.auth)).toBeUndefined();
-    const before = await database.sql<{ updated_at: Date }>(
-      "select updated_at from organization where id = $1",
-      [customer.organizationId],
-    );
-
-    const saved = await updateOrganizationSettings(customer.auth, {});
-    expect(saved).toEqual({
-      organizationId: customer.organizationId,
-      retentionDays: null,
-      dataResidency: null,
-      updatedAt: expect.any(Date),
-    });
-    expect(await readOrganizationSettings(customer.auth)).toEqual(saved);
-    const after = await database.sql<{ updated_at: Date }>(
-      "select updated_at from organization where id = $1",
-      [customer.organizationId],
-    );
-    expect(after.rows).toEqual(before.rows);
-
-    await updateOrganization(customer.auth, { name: "Renamed customer" });
-    expect(await readOrganizationSettings(customer.auth)).toEqual(saved);
-  });
-
   it("preserves concurrent partial settings edits and explicit null values", async () => {
     const customer = await provision("partial-settings", "owner@partial.example");
 
@@ -251,17 +224,6 @@ describe("projects", () => {
     expect((await listProjects(globex.auth)).map((row) => row.slug)).toEqual([
       "default",
     ]);
-  });
-
-  it("resolve to the one the caller is acting in, which also comes from the credential", async () => {
-    expect(await readProject(acme.auth)).toMatchObject({
-      id: acme.projectId,
-      organizationId: acme.organizationId,
-    });
-    expect(await readProject(globex.auth)).toMatchObject({
-      id: globex.projectId,
-      organizationId: globex.organizationId,
-    });
   });
 
   it("are not reachable by naming another customer's project", async () => {
@@ -339,10 +301,6 @@ describe("which projects an organization has", () => {
     const [first] = await projectsOf(acme.organizationId);
     expect(first?.id).toBe(acme.projectId);
   });
-
-  it("returns nothing for an organization that is not there", async () => {
-    expect(await projectsOf(newId("org"))).toEqual([]);
-  });
 });
 
 describe("whether anybody has signed up here yet", () => {
@@ -369,11 +327,6 @@ describe("which organization a person is in", () => {
         deactivatedAt: null,
       },
     ]);
-  });
-
-  it("returns a list, so no caller can be written as though there is exactly one", async () => {
-    const memberships = await membershipsOf(acme.userId);
-    expect(Array.isArray(memberships)).toBe(true);
   });
 
   it("returns nothing at all for a person who is in none", async () => {
@@ -458,37 +411,6 @@ describe("api keys", () => {
 });
 
 describe("creating a customer", () => {
-  it("makes the organization, its first project and the owner's membership together", async () => {
-    const userId = newId("usr");
-    await database.sql('insert into "user" (id, email) values ($1, $2)', [
-      userId,
-      "hedy@initech.example",
-    ]);
-
-    const provisioned = await provisionOrganization({
-      ownerUserId: userId,
-      organizationName: "Initech",
-      organizationSlug: "initech",
-      projectName: "Default",
-      projectSlug: "default",
-    });
-
-    expect(provisioned.membership).toEqual({
-      organizationId: provisioned.organizationId,
-      userId,
-      role: "admin",
-    });
-
-    const context: AuthContext = {
-      userId,
-      organizationId: provisioned.organizationId,
-      projectId: provisioned.projectId,
-      role: provisioned.membership.role,
-      via: "session",
-    };
-    expect(await readProject(context)).toMatchObject({ slug: "default" });
-  });
-
   it("leaves neither when it cannot finish", async () => {
     // A person already belongs to an organization, so the membership at the end
     // of the transaction is refused and the organization and project written

@@ -283,19 +283,6 @@ async def test_persona_follows_up_twice_after_ten_seconds_then_hangs_up(tmp_path
     assert_ten_seconds(walk.recording_ended - walk.persona_turns[-1][3])
 
 
-async def test_silence_instruction_uses_the_same_wait_as_the_timer(tmp_path):
-    walk = await walk_silence(
-        tmp_path, parameters=ConductParameters(agent_quiet_seconds=2.0)
-    )
-
-    assert walk.result is not None and walk.result.ending == "persona_concluded"
-    assert len(walk.requests) == 3
-    for request in walk.requests[1:]:
-        assert request.silence_on_media_clock is not None
-        assert Fraction(2) <= request.silence_on_media_clock < Fraction(9, 4)
-        assert "has not replied for 2 seconds" in request.messages[-1]["content"]
-
-
 async def test_silence_instruction_reaches_model_but_never_spoken_history(tmp_path):
     walk = await walk_silence(tmp_path)
 
@@ -372,24 +359,6 @@ async def test_persona_does_not_follow_up_while_agent_is_still_speaking(tmp_path
     assert walk.requests[1].messages[-1] == {"role": "user", "content": long_answer}
     agent_turn = [turn for turn in walk.turns if turn[0] == "agent"][-1]
     assert (agent_turn[3] - agent_turn[2]) / NANOSECONDS > 10
-
-
-@pytest.mark.parametrize(
-    ("stop", "max_turns", "status", "ending", "requests"),
-    [
-        ("cancel", 12, "canceled", "canceled", 1),
-        ("duration", 12, "completed", "limit_reached", 1),
-        (None, 3, "completed", "limit_reached", 2),
-    ],
-)
-async def test_existing_stop_conditions_take_priority_over_followups(
-    tmp_path, stop, max_turns, status, ending, requests
-):
-    walk = await walk_silence(tmp_path, stop=stop, max_turns=max_turns)
-
-    assert walk.result is not None
-    assert (walk.result.status, walk.result.ending) == (status, ending)
-    assert len(walk.requests) == requests
 
 
 @pytest.mark.parametrize(

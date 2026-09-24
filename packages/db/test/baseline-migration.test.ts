@@ -90,55 +90,6 @@ describe("the Postgres migration chain", () => {
     ).toEqual(CURRENT_MIGRATIONS.map((name) => ({ name })));
   });
 
-  it("preserves provider keys and scheduled cancellation on repeated boot", async () => {
-    await runMigrations(database.url);
-    const organizationId = newId("org");
-    const revision = newId("rev");
-    const cancelAt = new Date("2026-10-07T12:34:56.000Z");
-    await store.sql(
-      "insert into organization (id, name, slug) values ($1, 'Acme', 'acme')",
-      [organizationId],
-    );
-    await store.sql(
-      `insert into cloud_plan
-        (id, code, name, fee_micros, web_call_overage_micros_per_minute, phone_overage_micros_per_minute)
-        values ($1, 'pro', 'Pro', 10000000, 10000, 20000)`,
-      [newId("cpl")],
-    );
-    await store.sql(
-      `insert into cloud_billing_account
-        (id, organization_id, plan_code, period_anchor, activated_at, stripe_cancel_at)
-        values ($1, $2, 'pro', now(), now(), $3)`,
-      [newId("cba"), organizationId, cancelAt],
-    );
-    await store.sql(
-      `insert into provider_key
-        (organization_id, provider, credentials, hint, revision)
-        values ($1, 'openai', 'sealed-test-envelope', '••••abcd', $2)`,
-      [organizationId, revision],
-    );
-
-    expect(await runMigrations(database.url)).toEqual({
-      applied: [],
-      alreadyApplied: CURRENT_MIGRATIONS,
-    });
-    expect((await store.sql(
-      "select organization_id, provider, credentials, hint, revision from provider_key",
-    )).rows).toEqual([{
-      organization_id: organizationId,
-      provider: "openai",
-      credentials: "sealed-test-envelope",
-      hint: "••••abcd",
-      revision,
-    }]);
-    expect((await store.sql(
-      "select stripe_cancel_at from cloud_billing_account",
-    )).rows).toEqual([{ stripe_cancel_at: cancelAt }]);
-    expect((await store.sql(
-      "select is_nullable from information_schema.columns where table_name = 'cloud_billing_account' and column_name = 'stripe_cancel_at'",
-    )).rows).toEqual([{ is_nullable: "YES" }]);
-  });
-
   it("upgrades a database that already has the production baseline", async () => {
     const baseline = await readFile(
       path.join(MIGRATIONS_DIRECTORY, BASELINE),

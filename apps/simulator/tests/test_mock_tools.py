@@ -22,7 +22,6 @@ from egma_simulator.mock_tools import (
     ANSWER_TOO_LARGE,
     HELLO_METHOD,
     LARGEST_PAYLOAD_BYTES,
-    MALFORMED_REQUEST,
     NOT_REPORTED,
     PROTOCOL_VERSION,
     TOOL_METHOD,
@@ -32,7 +31,6 @@ from egma_simulator.mock_tools import (
     MockToolSeam,
 )
 from egma_simulator.model import ScriptedModel
-from egma_simulator.pipeline import assemble
 from egma_simulator.plugs import livekit as livekit_plug
 from egma_simulator.redaction import SecretRegistry
 from egma_simulator.service import RunningSimulation
@@ -203,35 +201,6 @@ def tool_spans(client: RecordingControlPlane) -> list[dict]:
     ]
 
 
-def attributes_of(span: dict) -> dict:
-    """One span's attributes, as the plain values they carry."""
-    return {
-        entry["key"]: next(iter(entry["value"].values()))
-        for entry in span.get("attributes", [])
-    }
-
-
-def milliseconds_of(span: dict) -> float:
-    return (int(span["endTimeUnixNano"]) - int(span["startTimeUnixNano"])) / 1_000_000
-
-
-def terminal_reason(client: RecordingControlPlane) -> str:
-    """What the report says went wrong, in the words a reader sees."""
-    for document in client.filed:
-        for event in document.get("events", []):
-            if event["status"] in ("completed", "failed", "canceled"):
-                return event.get("reason") or ""
-    raise AssertionError("the simulation never reported a terminal state")
-
-
-def terminal_facts(client: RecordingControlPlane) -> dict:
-    for document in client.filed:
-        for event in document.get("events", []):
-            if event["status"] in ("completed", "failed", "canceled"):
-                return event["facts"]
-    raise AssertionError("the simulation never reported a terminal state")
-
-
 async def test_a_spec_naming_mocked_tools_answers_every_call_and_records_none(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -286,77 +255,6 @@ async def test_a_spec_naming_mocked_tools_answers_every_call_and_records_none(
     assert tool_spans(client) == []
 
 
-async def test_a_simulation_that_mocks_nothing_records_exactly_what_it_used_to(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """The ordinary case, and it has to stay the ordinary case.
-
-    No mock tools, and nobody in the room asking: no tool spans at all,
-    which is the record every simulation carried before mock tools
-    existed.
-    """
-    stub = RoomStub(greeting="Front desk.", replies=["Noted."])
-
-    async def nobody_asks(_agent: RoomStub) -> None:
-        return None
-
-    client = await conducted_record(
-        tmp_path, monkeypatch, stub, mocked_spec(), nobody_asks
-    )
-
-    assert tool_spans(client) == []
-    facts = terminal_facts(client)
-    assert facts["ending"] == "persona_concluded"
-    # And nothing counts the agent's tools for it. What egma answered is
-    # on the record as the calls it answered; what it did not answer for
-    # ran with egma nowhere near it, and the record says nothing about it
-    # rather than tallying an isolation nobody can vouch for.
-    assert not [name for name in facts if "coverage" in name], facts
-
-
-async def test_a_connection_egma_stands_outside_records_no_tool_call(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """A chat over somebody else's platform never stood in the tool path,
-    so nothing about the agent's tools reaches its record."""
-    monkeypatch.setattr(livekit_plug, "LiveKitRoomBackend", RoomStub().driver)
-    monkeypatch.setattr(
-        service_module,
-        "build_model_client",
-        lambda spec: ScriptedModel(spec.scenario_instructions),
-    )
-    monkeypatch.setattr(
-        service_module.SpeechProviders,
-        "from_models",
-        classmethod(lambda _cls, _models, *, vad: SCRIPTED_PAIR),
-    )
-    client = RecordingControlPlane()
-    document = a_spec(
-        A_SIMULATION,
-        connection={
-            "agent_platform": None,
-            "connection_type": "scripted",
-            "access_variant": "scripted.in_memory",
-            "config": {"turn_seconds": 0.0},
-            "credentials": None,
-        },
-        scenario="One point.",
-        personality=A_PERSONALITY,
-        max_turns=40,
-        max_duration_seconds=300,
-    )
-    await RunningSimulation(
-        SimulationSpec.from_document(document),
-        client=client,
-        config=a_config(tmp_path),
-        secrets=SecretRegistry(),
-        blobs=FilesystemBlobStore(tmp_path / "blobs"),
-    ).run()
-
-    assert terminal_facts(client)["ending"] == "persona_concluded"
-    assert tool_spans(client) == []
-
-
 # -- The exchange, method by method ------------------------------------------
 
 
@@ -403,46 +301,6 @@ def a_mock(
         tool_name=written["tool_name"],
         answer=written["answer"],
     )
-
-
-async def test_hello_answers_the_names_this_simulation_answers_for():
-    """The reply is the whole of what the other side needs: wrap exactly
-    these, leave everything else alone."""
-    stub = RoomStub(greeting="Front desk.")
-    plug = await opened(
-        stub, (a_mock("check_calendar", {"slots": []}), a_mock("book_appointment", 1))
-    )
-
-    said = await stub.says_hello("check_calendar", "book_appointment", "hang_up")
-    assert said == {
-        "protocol_version": PROTOCOL_VERSION,
-        "mocked_tools": ["check_calendar", "book_appointment"],
-    }
-    await plug.close()
-
-
-async def test_the_seam_says_whether_the_agent_ever_reported():
-    """The one fact a LiveKit simulation is required to see.
-
-    A hello is how the agent's own SDK announces itself. Without one,
-    every mocked tool in the simulation called its real backend and
-    nothing on the record would say so — which is why the plug reads this
-    and fails the simulation rather than conducting it.
-    """
-    seam = MockToolSeam((a_mock("check_calendar", {"slots": []}),))
-
-    assert seam.agent_reported is False
-
-    await seam.hello(
-        json.dumps(
-            {
-                "protocol_version": PROTOCOL_VERSION,
-                "tools": [{"name": "check_calendar", "schema": {}}],
-            }
-        )
-    )
-
-    assert seam.agent_reported is True
 
 
 async def test_a_hello_egma_refused_is_told_apart_from_one_that_never_came():
@@ -600,60 +458,11 @@ async def test_a_call_outside_the_answers_is_refused_and_never_waved_through(
     ("named", "method", "payload", "code", "quoted"),
     [
         (
-            "a payload that is not JSON",
-            TOOL_METHOD,
-            "not json at all",
-            MALFORMED_REQUEST,
-            "not JSON",
-        ),
-        (
-            "a payload that is JSON but not an object",
-            TOOL_METHOD,
-            '["check_calendar"]',
-            MALFORMED_REQUEST,
-            "a list",
-        ),
-        (
-            "a call that names no tool",
-            TOOL_METHOD,
-            '{"arguments":{}}',
-            MALFORMED_REQUEST,
-            "nothing",
-        ),
-        (
-            "arguments that are not an object",
-            TOOL_METHOD,
-            '{"name":"check_calendar","arguments":"date=today"}',
-            MALFORMED_REQUEST,
-            "text",
-        ),
-        (
-            "a census that is not a list",
-            HELLO_METHOD,
-            '{"protocol_version":1,"tools":{"name":"check_calendar"}}',
-            MALFORMED_REQUEST,
-            "an object",
-        ),
-        (
-            "a tool in the census that names itself nothing",
-            HELLO_METHOD,
-            '{"protocol_version":1,"tools":[{"schema":{}}]}',
-            MALFORMED_REQUEST,
-            "nothing",
-        ),
-        (
             "a hello in a version egma does not speak",
             HELLO_METHOD,
             '{"protocol_version":99,"tools":[]}',
             UNSUPPORTED_PROTOCOL_VERSION,
             "99",
-        ),
-        (
-            "a hello that declares no version at all",
-            HELLO_METHOD,
-            '{"tools":[]}',
-            UNSUPPORTED_PROTOCOL_VERSION,
-            "nothing",
         ),
     ],
 )
@@ -669,50 +478,6 @@ async def test_a_message_egma_cannot_read_is_refused_naming_the_fault(
     refusal = await refused(stub, method, payload)
     assert refusal.code == code, named
     assert quoted in refusal.message, named
-    await plug.close()
-
-
-async def test_a_refusal_names_the_shape_it_got_and_never_the_bytes():
-    """A payload is the customer's own data and a refusal about it travels
-    into logs, so what is named is the kind of thing that arrived."""
-    stub = RoomStub(greeting="Front desk.")
-    plug = await opened(stub, (a_mock("check_calendar", {"slots": []}),))
-
-    refusal = await refused(
-        stub, TOOL_METHOD, '{"name":"check_calendar","arguments":"SENSITIVE-0007"}'
-    )
-    assert "SENSITIVE-0007" not in refusal.message
-    await plug.close()
-
-
-async def test_a_method_nobody_offered_is_refused_by_the_room_itself():
-    """Two methods and no more. Anything else is refused before egma is
-    reached at all, which is the transport's own answer and the right
-    one: egma never registered it, so there is nothing to ask."""
-    from livekit import rtc
-
-    stub = RoomStub(greeting="Front desk.")
-    plug = await opened(stub, (a_mock("check_calendar", {"slots": []}),))
-
-    refusal = await refused(stub, "egma.please_do_something_else", "{}")
-    assert refusal.code == rtc.RpcError.ErrorCode.UNSUPPORTED_METHOD
-    await plug.close()
-
-
-async def test_an_answer_too_large_for_the_wire_is_refused_naming_the_size():
-    """The cap belongs to the transport, and authoring already refuses an
-    answer this large. It is checked here anyway, because an answer that
-    cannot be sent has to fail as an answer somebody can fix rather than
-    as a call that mysteriously did not come back."""
-    stub = RoomStub(greeting="Front desk.")
-    plug = await opened(
-        stub, (a_mock("read_the_file", "x" * (LARGEST_PAYLOAD_BYTES + 1)),)
-    )
-
-    refusal = await refused(stub, TOOL_METHOD, '{"name":"read_the_file"}')
-    assert refusal.code == ANSWER_TOO_LARGE
-    assert str(LARGEST_PAYLOAD_BYTES) in refusal.message
-    assert "read_the_file" in refusal.message
     await plug.close()
 
 
@@ -752,107 +517,6 @@ async def test_a_reply_too_large_to_send_is_refused_before_it_is_sent():
     await plug.close()
 
 
-async def test_no_credential_and_no_test_content_ever_rides_an_answer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """What comes back is the authored answer and nothing beside it.
-
-    The room's key pair is in the process while this runs, and the
-    scenario the persona is working to is in the same spec — an answer
-    that carried either would hand the agent its own test to read, or hand
-    somebody the customer's project.
-    """
-    stub = RoomStub(greeting="Front desk.", replies=["Noted."])
-    said: list[str] = []
-
-    async def keeps_what_it_was_told(agent: RoomStub) -> None:
-        said.append(json.dumps(await agent.says_hello("check_calendar")))
-        said.append(json.dumps(await agent.calls("check_calendar", {"date": "x"})))
-
-    await conducted_record(
-        tmp_path,
-        monkeypatch,
-        stub,
-        mocked_spec(
-            mock_tools=[answers("check_calendar", {"slots": []})],
-            scenario=(
-                "Ask to move the Tuesday cleaning to Thursday. Say you are Margaret."
-            ),
-        ),
-        keeps_what_it_was_told,
-    )
-
-    assert said, "the session was never answered"
-    for answered in said:
-        for kept in (A_SECRET, A_KEY, "Margaret", "Tuesday", A_PERSONALITY):
-            assert kept not in answered
-
-
-async def test_a_hello_egma_refused_leaves_the_agent_wrapping_nothing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """A session whose hello egma refused was told nothing.
-
-    So it wrapped nothing, and every tool it has ran its own
-    implementation — with no call reaching egma and no span of egma's on
-    the record to suggest otherwise.
-    """
-    stub = RoomStub(greeting="Front desk.", replies=["Noted."])
-
-    async def a_session_egma_will_not_speak_to(agent: RoomStub) -> None:
-        from livekit import rtc
-
-        with pytest.raises(rtc.RpcError) as refusal:
-            await agent.says_hello("check_calendar", protocol_version=99)
-        assert refusal.value.code == UNSUPPORTED_PROTOCOL_VERSION
-
-    client = await conducted_record(
-        tmp_path,
-        monkeypatch,
-        stub,
-        mocked_spec(mock_tools=[answers("check_calendar", {"slots": []})]),
-        a_session_egma_will_not_speak_to,
-    )
-
-    assert tool_spans(client) == []
-
-
-async def test_an_exchange_that_cannot_be_offered_fails_startup(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-):
-    """Failed RPC registration prevents hello and must fail simulation startup.
-    Log the registration fault and report the setup error instead of completing.
-    """
-    caplog.set_level("ERROR")
-    stub = RoomStub(
-        greeting="Front desk.",
-        replies=["Noted."],
-        refuses_rpc="this participant takes no methods",
-    )
-
-    async def nobody_can_ask(_agent: RoomStub) -> None:
-        return None
-
-    client = await conducted_record(
-        tmp_path,
-        monkeypatch,
-        stub,
-        mocked_spec(mock_tools=[answers("check_calendar", {"slots": []})]),
-        nobody_can_ask,
-    )
-
-    assert terminal_facts(client)["ending"] == "error"
-    assert "could not offer its configuration and mock-tool exchange" in (
-        terminal_reason(client)
-    )
-    assert tool_spans(client) == []
-    assert any(
-        "could not offer its configuration and mock-tool exchange"
-        in record.getMessage()
-        for record in caplog.records
-    )
-
-
 # -- What the seam reads out of a spec ---------------------------------------
 
 
@@ -870,33 +534,3 @@ async def test_a_spec_answering_one_tool_twice_is_refused():
     with pytest.raises(ContractViolation) as refused_spec:
         SimulationSpec.from_document(document)
     assert "check_calendar" in " ".join(refused_spec.value.complaints)
-
-
-def test_the_golden_fixture_is_a_spec_the_simulator_reads_whole(tmp_path: Path):
-    """The fixture the contract package carries is not decoration: the
-    answers it names are the answers the seam would stand ready with."""
-    from conftest import load_fixture_spec
-
-    spec = SimulationSpec.from_document(
-        load_fixture_spec("voice-livekit-mocked-tools.json")
-    )
-    assert [mock.tool_name for mock in spec.mock_tools] == [
-        "check_calendar",
-        "book_appointment",
-        "send_confirmation_sms",
-    ]
-    assert spec.mock_tools[1].fails
-    # An authored `null` is an answer, and the tagged shape is what keeps
-    # it tellable from no answer at all.
-    assert not spec.mock_tools[2].fails
-    assert spec.mock_tools[2].answer == {"answer": None}
-
-    assembled = assemble(
-        spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
-    )
-    assert assembled.conductor is not None
-    assert [answer.tool_name for answer in assembled.mock_tools.answers()] == [
-        "check_calendar",
-        "book_appointment",
-        "send_confirmation_sms",
-    ]

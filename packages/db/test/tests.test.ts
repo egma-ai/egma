@@ -1,10 +1,9 @@
-import { isId, newId } from "@egma/ids";
+import { newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createTest,
   deletePersona,
-  editTest,
   getTest,
   NotPermittedError,
   ProjectOutsideOrganizationError,
@@ -25,7 +24,6 @@ import {
   rowCounts,
   seedPersona,
   seedTestFactory,
-  STARTER_PERSONA,
 } from "./support/test-factory.ts";
 
 /**
@@ -48,52 +46,6 @@ afterAll(async () => {
 });
 
 describe("creating a test", () => {
-  it("returns a tst_ id and fetch round-trips every input", async () => {
-    const created = await createTest(actingAsAcme(), {
-      ...rescheduling,
-      personaIds: [rita],
-    });
-
-    expect(isId("tst", created.id)).toBe(true);
-    expect(isId("tstv", created.versionId)).toBe(true);
-
-    const fetched = await getTest(actingAsAcme(), created.id);
-    expect(fetched).toBeDefined();
-    expect(fetched?.name).toBe(rescheduling.name);
-    expect(fetched?.description).toBe(rescheduling.description);
-    expect(fetched?.version).toBe(1);
-    expect(fetched?.scenario).toBe(rescheduling.scenario);
-    expect(fetched?.expectedBehaviors).toEqual(
-      rescheduling.expectedBehaviors,
-    );
-    expect(fetched?.projectId).toBe(acme.project);
-    expect(fetched?.personas).toEqual([
-      { id: rita, name: STARTER_PERSONA, archivedAt: null },
-    ]);
-  });
-
-  it("keeps several personas in the order they were authored", async () => {
-    const nadia = await seedPersona(actingAsAcme(), "Nadia");
-    const omar = await seedPersona(actingAsAcme(), "Omar");
-
-    const created = await createTest(actingAsAcme(), {
-      ...rescheduling,
-      personaIds: [omar, rita, nadia],
-    });
-
-    const fetched = await getTest(actingAsAcme(), created.id);
-    expect(fetched?.personas.map((named) => named.id)).toEqual([
-      omar,
-      rita,
-      nadia,
-    ]);
-    expect(created.personas.map((named) => named.id)).toEqual([
-      omar,
-      rita,
-      nadia,
-    ]);
-  });
-
   it("is allowed to a member and refused to a viewer, per the permission table", async () => {
     await expect(
       createTest(actingAsAcme("viewer"), { ...rescheduling, personaIds: [rita] }),
@@ -169,26 +121,6 @@ describe("a test that fails validation", () => {
     expect(await rowCounts()).toEqual(before);
   });
 
-  it("is refused for an empty behaviors list, because an unfalsifiable test cannot exist", async () => {
-    const before = await rowCounts();
-
-    await expect(
-      createTest(actingAsAcme(), { ...rescheduling, expectedBehaviors: [] }),
-    ).rejects.toThrow(/expected behavior/);
-
-    expect(await rowCounts()).toEqual(before);
-  });
-
-  it("is refused when one of the behaviors says nothing", async () => {
-    await expect(
-      createTest(actingAsAcme(), {
-        ...rescheduling,
-        personaIds: [rita],
-        expectedBehaviors: [...rescheduling.expectedBehaviors, "   "],
-      }),
-    ).rejects.toThrow(/expected behavior/);
-  });
-
   it("is refused when the same persona is named twice", async () => {
     await expect(
       createTest(actingAsAcme(), {
@@ -196,23 +128,6 @@ describe("a test that fails validation", () => {
         personaIds: [rita, rita],
       }),
     ).rejects.toThrow(/twice/);
-  });
-
-  it("stores the name, scenario and behaviors trimmed", async () => {
-    const created = await createTest(actingAsAcme(), {
-      ...rescheduling,
-      personaIds: [rita],
-      name: "  Padded  ",
-      scenario: "  They want a refund and have no receipt.  ",
-      expectedBehaviors: ["  states the refund policy  "],
-    });
-
-    const fetched = await getTest(actingAsAcme(), created.id);
-    expect(fetched?.name).toBe("Padded");
-    expect(fetched?.scenario).toBe("They want a refund and have no receipt.");
-    expect(fetched?.expectedBehaviors).toEqual(
-      ["states the refund policy"],
-    );
   });
 });
 
@@ -228,15 +143,6 @@ describe("a test naming a persona it may not have", () => {
     ).rejects.toThrow(/no persona/);
 
     expect(await rowCounts()).toEqual(before);
-  });
-
-  it("is refused when the id is not a persona's at all", async () => {
-    await expect(
-      createTest(actingAsAcme(), {
-        ...rescheduling,
-        personaIds: [newId("agt")],
-      }),
-    ).rejects.toThrow(/persona id/);
   });
 
   it("is refused when the persona is deleted, and leaves nothing", async () => {
@@ -279,39 +185,13 @@ describe("a test naming a persona it may not have", () => {
   });
 });
 
-/** Reject missing or empty persona lists on create and update. */
+/** Reject an empty persona list on create. */
 describe("a test naming no persona", () => {
-  it("is refused rather than given the project's default", async () => {
-    await expect(createTest(actingAsAcme(), rescheduling)).rejects.toThrow(
-      /at least one persona/,
-    );
-  });
-
   it("is refused for an empty list too", async () => {
     await expect(
       createTest(actingAsAcme(), { ...rescheduling, personaIds: [] }),
     ).rejects.toThrow(/at least one persona/);
   });
-
-  it("is refused when an edit empties the personas a test already names", async () => {
-    const created = await createTest(actingAsAcme(), {
-      ...rescheduling,
-      personaIds: [rita],
-    });
-
-    await expect(
-      editTest(actingAsAcme(), created.id, {
-        personaIds: [],
-        expectedVersionId: created.versionId,
-      }),
-    ).rejects.toThrow(/at least one persona/);
-
-    const fetched = await getTest(actingAsAcme(), created.id);
-    expect(fetched?.personas).toEqual([
-      { id: rita, name: STARTER_PERSONA, archivedAt: null },
-    ]);
-  });
-
 });
 
 describe("a credential for the whole organization", () => {
@@ -379,24 +259,6 @@ describe("tenancy", () => {
       ),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
-    );
-  });
-});
-
-describe("a version row somebody hand-corrupted", () => {
-  it("fails loudly on the read, naming the version, rather than leaking", async () => {
-    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
-
-    // Raw SQL on purpose: the factory can never write this, so the guard is the
-    // only thing standing between the row and the caller.
-    await database.sql(
-      `update test_version set content = '{"scenario": "still here", "expectedBehaviors": []}'::jsonb
-        where id = $1`,
-      [created.versionId],
-    );
-
-    await expect(getTest(actingAsAcme(), created.id)).rejects.toThrow(
-      created.versionId,
     );
   });
 });

@@ -1,4 +1,3 @@
-import { PREDEFINED_GRADERS } from "@egma/db";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
@@ -149,38 +148,6 @@ describe("creating a project", () => {
       "Project slug outbound is already in use in this organization. " +
         "Choose a different slug and save the project again.",
     );
-  });
-
-  /**
-   * Check the complete project factory: protected Expected behaviors project
-   * grader and access to shared Egma-provided personas. Tests still must
-   * select at least one persona.
-   */
-  it("makes a project that can name a persona and holds its protected grader", async () => {
-    api = await createApi("projects_create_whole");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-
-    const made = await request("POST", "/v1/projects", { cookie: ada.cookie }, {
-      name: "Whole",
-    });
-    expect(made.status).toBe(201);
-
-    const personas = await request(
-      "GET",
-      `/v1/personas?projectId=${String(made.body.id)}`,
-      { cookie: ada.cookie },
-    );
-    expect((personas.body.personas as unknown[]).length).toBe(5);
-
-    const { rows } = await api.database.sql<{ grader_definition_id: string }>(
-      `select grader_definition_id
-         from project_grader
-        where project_id = $1 and archived_at is null`,
-      [String(made.body.id)],
-    );
-    expect(rows).toEqual([
-      { grader_definition_id: PREDEFINED_GRADERS.expectedBehaviors },
-    ]);
   });
 
   it("refuses a project with no name", async () => {

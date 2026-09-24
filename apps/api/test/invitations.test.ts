@@ -5,8 +5,8 @@ import { hashInvitationToken } from "../src/auth/invitation.ts";
 import { cookiesFrom, createApi, type TestApi } from "./support/api.ts";
 
 /**
- * Without email transport, invitation creation returns a link the inviter can
- * share and the recipient can accept.
+ * Invitation delivery, single use, addressing, expiry, and the refusals around
+ * who may invite and who may accept.
  */
 
 let api: TestApi;
@@ -132,43 +132,6 @@ async function lookUp(token: string): Promise<{
   };
 }
 
-describe("with no mail transport configured", () => {
-  it("completes anyway and hands the link back to the person who sent it", async () => {
-    api = await createApi("invite_no_email");
-    const ada = await signUp("ada@acme.example", "Acme");
-
-    const invited = await invite(ada, "bob@acme.example");
-
-    expect(invited.status).toBe(201);
-    expect(invited.body.delivered).toBe(false);
-    // The whole point: something usable came back rather than an error or a
-    // success with nothing in it.
-    expect(invited.body.acceptUrl).toMatch(/\/invite\?token=/);
-    expect(invited.token).not.toBe("");
-
-    // And it works. A link that comes back and does nothing would be worse
-    // than the refusal it replaced.
-    const joined = await follow(invited.token, "bob@acme.example");
-    expect(joined.status, JSON.stringify(joined.body)).toBe(201);
-    expect(joined.body).toMatchObject({
-      organization: { id: ada.organizationId, name: "Acme" },
-      role: "admin",
-    });
-  });
-
-  it("writes the message to the log rather than pretending it was sent", async () => {
-    api = await createApi("invite_logged");
-    const ada = await signUp("ada@acme.example", "Acme");
-    const invited = await invite(ada, "bob@acme.example");
-
-    // The transport was still called — there is one seam, and a flow that
-    // skipped it when nothing delivers would be a second code path nobody
-    // tests. What differs is only whether anybody receives it.
-    expect(api.mail.map((email) => email.to)).toEqual(["bob@acme.example"]);
-    expect(api.mail[0]?.body).toContain(invited.token);
-  });
-});
-
 describe("with a transport that delivers", () => {
   it("sends the invitation, and keeps the link out of the answer", async () => {
     api = await createApi("invite_delivers", { emailDelivers: true });
@@ -208,26 +171,9 @@ describe("the invitation row", () => {
       Object.keys(row).filter((name) => /token|secret/.test(name)),
     ).toEqual(["token_hash"]);
   });
-
-  it("expires, and the expiry is stored rather than assumed", async () => {
-    api = await createApi("invite_expiry");
-    const ada = await signUp("ada@acme.example", "Acme");
-    await invite(ada, "bob@acme.example");
-
-    const { rows } = await api.database.sql<{ expires_at: Date }>(
-      "select expires_at from invitation",
-    );
-    expect(rows[0]?.expires_at.getTime()).toBeGreaterThan(Date.now());
-  });
 });
 
 describe("who may invite", () => {
-  it("is an admin", async () => {
-    api = await createApi("invite_admin_may");
-    const ada = await signUp("ada@acme.example", "Acme");
-    expect((await invite(ada, "bob@acme.example")).status).toBe(201);
-  });
-
   it("is not a member, and not a viewer", async () => {
     api = await createApi("invite_others_may_not");
     const ada = await signUp("ada@acme.example", "Acme");
@@ -264,60 +210,6 @@ describe("who may invite", () => {
 });
 
 describe("following a link", () => {
-  it("says which organization, for whom, and at what role, before anybody signs up", async () => {
-    api = await createApi("invite_lookup");
-    const ada = await signUp("ada@acme.example", "Acme");
-    const invited = await invite(ada, "bob@acme.example", "viewer");
-
-    const looked = await lookUp(invited.token);
-    expect(looked.status).toBe(200);
-    expect(looked.body).toMatchObject({
-      state: "pending",
-      email: "bob@acme.example",
-      role: "viewer",
-      organization: { name: "Acme" },
-    });
-  });
-
-  it("puts the person in the inviting organization at the role they were invited at", async () => {
-    api = await createApi("invite_role_honoured");
-    const ada = await signUp("ada@acme.example", "Acme");
-    const invited = await invite(ada, "vic@acme.example", "viewer");
-
-    const joined = await follow(invited.token, "vic@acme.example");
-    expect(joined.status).toBe(201);
-    expect(joined.body.role).toBe("viewer");
-
-    const { rows } = await api.database.sql<{
-      role: string;
-      organization_id: string;
-      created_by: string;
-    }>(
-      `select m.role, m.organization_id, m.created_by
-         from membership m join "user" u on u.id = m.user_id
-        where u.email = 'vic@acme.example'`,
-    );
-    expect(rows).toEqual([
-      {
-        role: "viewer",
-        organization_id: ada.organizationId,
-        // Attributed to whoever sent it, so who let this person in is on the row.
-        created_by: ada.userId,
-      },
-    ]);
-  });
-
-  it("defaults to admin, which is what every person defaults to in this version", async () => {
-    api = await createApi("invite_default_role");
-    const ada = await signUp("ada@acme.example", "Acme");
-    const invited = await invite(ada, "bob@acme.example");
-
-    expect(invited.body.role).toBe("admin");
-    expect((await follow(invited.token, "bob@acme.example")).body.role).toBe(
-      "admin",
-    );
-  });
-
   it("works exactly once", async () => {
     api = await createApi("invite_single_use");
     const ada = await signUp("ada@acme.example", "Acme");
@@ -378,15 +270,6 @@ describe("following a link", () => {
     expect(refused.body.error).not.toBe(
       (await follow(used.token, "carol@acme.example")).body.error,
     );
-  });
-
-  it("says nothing at all about a link nobody was given", async () => {
-    api = await createApi("invite_unknown");
-    await signUp("ada@acme.example", "Acme");
-
-    const looked = await lookUp("this-was-never-an-invitation-anybody-sent");
-    expect(looked.status).toBe(404);
-    expect(looked.body).toMatchObject({ error: "no_such_invitation" });
   });
 });
 

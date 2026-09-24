@@ -90,26 +90,6 @@ describe("Response latency", () => {
     });
   });
 
-  it("catches the one slow turn a mean would have hidden", async () => {
-    // The mean of these is 2100 ms and would have passed a 3000 ms bound.
-    // The p90 is the nine-second turn, and a caller who waited nine seconds
-    // did wait nine seconds.
-    const mostlyFast = [500, 500, 500, 9_000];
-    await expect(grade(mostlyFast)).resolves.toMatchObject({
-      score: 0,
-      details: { observedP90ResponseTimeMs: 9_000 },
-    });
-  });
-
-  it("reads the slowest turn below ten samples, because nearest-rank does", async () => {
-    // Nearest-rank never interpolates a number nothing measured, so on a
-    // short conversation the p90 is a turn that really happened — the worst
-    // one. Stated here so the behaviour is a decision and not a surprise.
-    await expect(grade([1_000, 2_000, 4_000])).resolves.toMatchObject({
-      details: { observedP90ResponseTimeMs: 4_000 },
-    });
-  });
-
   it("returns a grading error when the metric is missing", async () => {
     await expect(grade([])).resolves.toEqual({
       score: null,

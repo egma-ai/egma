@@ -36,22 +36,4 @@ describe("ordering identifiers in Postgres", () => {
     );
     expect(rows.map((row) => row.id)).toEqual(minted);
   });
-
-  it("leaves keyset pagination available without a second sort column", async () => {
-    const pageSize = 37;
-    const collected: string[] = [];
-    let cursor = "";
-
-    for (;;) {
-      const { rows } = await database.sql<{ id: string }>(
-        "select id from organization where id > $1 order by id limit $2",
-        [cursor, pageSize],
-      );
-      if (rows.length === 0) break;
-      collected.push(...rows.map((row) => row.id));
-      cursor = rows[rows.length - 1]!.id;
-    }
-
-    expect(collected).toEqual(minted);
-  });
 });

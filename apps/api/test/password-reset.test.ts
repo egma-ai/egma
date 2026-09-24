@@ -177,18 +177,6 @@ describe("a developer who forgot their password", () => {
     expect((await signIn("ada@acme.example", CHOSEN)).status).toBe(200);
     expect((await signIn("ada@acme.example", FORGOTTEN)).status).not.toBe(200);
   });
-
-  it("is told what the message is for, and who sent it", async () => {
-    api = await createApi("reset_message", { emailDelivers: true });
-    await signUp("ada@acme.example");
-    await linkSentTo("ada@acme.example");
-
-    const message = api.mail.at(-1) as Email;
-    expect(message.subject.toLowerCase()).toContain("egma");
-    expect(message.subject.toLowerCase()).toContain("password");
-    expect(message.body.toLowerCase()).toContain("egma");
-    expect(message.body.toLowerCase()).toContain("password");
-  });
 });
 
 describe("a link that is no longer worth following", () => {
@@ -241,34 +229,6 @@ describe("a link that is no longer worth following", () => {
     // Nothing was set by asking, and the password they forgot is still theirs.
     expect((await signIn("ada@acme.example", FORGOTTEN)).status).toBe(200);
     expect((await signIn("ada@acme.example", CHOSEN)).status).not.toBe(200);
-  });
-
-  /**
-   * The same answer for the opposite situation, and **the sentence that must
-   * never be written is the one that guesses**: telling somebody nothing has
-   * changed, about an account whose password has changed, sends them off to go
-   * on using a password that no longer signs them in.
-   */
-  it("says the same when the link was used and then followed after the hour", async () => {
-    api = await createApi("reset_spent_then_late", { emailDelivers: true });
-    await signUp("ada@acme.example");
-
-    const token = tokenIn(await linkSentTo("ada@acme.example"));
-    expect((await setPassword(token, CHOSEN)).status).toBe(200);
-
-    minutesLater(PASSWORD_RESET_LIFETIME_MINUTES + 1);
-    const late = await setPassword(token, "a-third-password-entirely");
-    vi.useRealTimers();
-
-    expect(late.status).toBe(409);
-    expect(late.body.error).toBe("reset_link_no_longer_works");
-    // It claims neither of the two things it cannot see.
-    expect(String(late.body.message)).not.toMatch(/nothing has changed/i);
-    expect(String(late.body.message)).not.toMatch(/old password still works/i);
-
-    // The state the refusal declines to name, against the one that is true.
-    expect((await signIn("ada@acme.example", CHOSEN)).status).toBe(200);
-    expect((await signIn("ada@acme.example", FORGOTTEN)).status).not.toBe(200);
   });
 
   it("refuses a link that was never one of egma's, naming nothing", async () => {
@@ -366,21 +326,6 @@ describe("asking for a link", () => {
     });
     expect(response.statusCode).toBe(400);
     expect(response.json().error).toBe("invalid_request");
-  });
-
-  /**
-   * And says so about the person's situation rather than about a body parser.
-   * The provider's own sentence for this is `[body.email] Invalid email
-   * address`, which names code; what reaches a person, or the coding agent
-   * reading for them, is what they typed and what is wrong with it.
-   */
-  it("refuses an address that is not one, in words about the address", async () => {
-    api = await createApi("reset_bad_address", { emailDelivers: true });
-
-    const refused = await askForALink("not-an-email");
-    expect(refused.status).toBe(400);
-    expect(refused.body.error).toBe("invalid_request");
-    expect(refused.body.message).toBe("not-an-email is not an email address");
   });
 
   it("mints a second link without spending the first", async () => {

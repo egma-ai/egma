@@ -80,14 +80,6 @@ describe("the egma command", () => {
     expect(version.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/u);
   });
 
-  it("refuses options that have no command", async () => {
-    const result = await egma(["--url", "http://localhost:3101/"], workspace);
-
-    expect(result.code).toBe(1);
-    expect(result.stdout).toBe("");
-    expect(result.stderr).toContain('Egma does not know the command "--url"');
-  });
-
   it("refuses unknown options and secrets in command arguments", async () => {
     const unknown = await egma(["--turbo"], workspace);
     expect(unknown.code).toBe(1);

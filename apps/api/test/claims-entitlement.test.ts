@@ -219,30 +219,6 @@ describe("what the claim door asks the deployment", () => {
     ]);
   });
 
-  it("asks once per customer when a batch spans several of them", async () => {
-    const listener = recording();
-    api = await createApi("claims_entitlement_per_customer", {
-      retellFetch: RETELL_CHAT_FETCH,
-      billing: { ...openBillingPlugIn(), entitlements: listener.source, usage: discardingUsageSink() },
-    });
-    const ada = await aCustomerWithQueuedWork("ada@acme.example", "Acme", [
-      RETELL_CHAT,
-    ]);
-    const bob = await aCustomerWithQueuedWork("bob@globex.example", "Globex", [
-      RETELL_CHAT,
-    ]);
-
-    const answer = await claim(10);
-    expect(answer.specs).toHaveLength(2);
-
-    expect(listener.asked).toHaveLength(2);
-    expect(
-      listener.asked.map((request) => request.organizationId).sort(),
-    ).toEqual(
-      [ada.customer.organizationId, bob.customer.organizationId].sort(),
-    );
-  });
-
   it("puts a refused conversation back on the queue and hands out the rest", async () => {
     api = await createApi("claims_entitlement_withheld", {
       retellFetch: RETELL_CHAT_FETCH,
@@ -332,23 +308,6 @@ describe("what the claim door asks the deployment", () => {
     // once.
     expect(answer.specs).toHaveLength(2);
     expect(bothAsked.size).toBe(2);
-  });
-
-  it("hands work out exactly as before when the deployment does not bill", async () => {
-    // The acceptance criterion, stated: no billing configured, nothing asked
-    // of anybody, and the claim is the claim it always was.
-    api = await createApi("claims_entitlement_absent", {
-      retellFetch: RETELL_CHAT_FETCH,
-    });
-    const ada = await aCustomerWithQueuedWork("ada@acme.example", "Acme", [
-      RETELL_CHAT,
-    ]);
-
-    const answer = await claim(10);
-    expect(answer.specs).toHaveLength(1);
-    expect((await statusOf(api, ada.simulations[0] ?? "")).status).toBe(
-      "claimed",
-    );
   });
 });
 

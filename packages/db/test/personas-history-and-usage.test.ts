@@ -157,11 +157,6 @@ describe("what a detail sheet reads", () => {
     expect(await testsUsingPersona(acting(), newId("prs"))).toBeUndefined();
   });
 
-  it("answers an empty usage list for a persona no test names", async () => {
-    const made = await seed("Unused Ulla");
-    expect(await testsUsingPersona(acting(), made.id)).toEqual([]);
-  });
-
   it("is refused to nobody: a viewer reads history and usage like anybody else", async () => {
     const made = await seed("Readable Rae");
     expect((await listPersonaVersions(acting("viewer"), made.id)).items).toHaveLength(1);

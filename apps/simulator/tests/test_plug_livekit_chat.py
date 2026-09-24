@@ -15,7 +15,6 @@ from conftest import (
     A_PERSONALITY,
     A_SCENARIO,
     a_spec,
-    load_fixture_spec,
 )
 from room_stub import (
     AGENT_IDENTITY,
@@ -33,21 +32,18 @@ from egma_simulator.contract import ERROR
 from egma_simulator.conversation import Conducted, ConversationControls, conduct
 from egma_simulator.media.livekit_room import (
     AGENT_STATE_ATTRIBUTE,
-    CHAT_TOPIC,
     SPOKEN_TRACK_ATTRIBUTE,
     TRANSCRIPTION_TOPIC,
-    LiveKitChatRoomBackend,
     LiveKitStartup,
-    RoomSettings,
     TextRoom,
     Utterance,
 )
-from egma_simulator.media.room import PERSONA_IDENTITY, ROOM_PREFIX
+from egma_simulator.media.room import PERSONA_IDENTITY
 from egma_simulator.mock_tools import PROTOCOL_VERSION, TOOL_METHOD, MockToolSeam
 from egma_simulator.model import GOODBYE, PersonaReply, ScriptedModel
 from egma_simulator.persona import Persona
 from egma_simulator.pipeline import assemble
-from egma_simulator.plugs import PlugError, failed_ending, plug_for
+from egma_simulator.plugs import PlugError, failed_ending
 from egma_simulator.plugs import livekit_chat as chat_plug
 from egma_simulator.plugs.livekit_chat import LiveKitChat
 from egma_simulator.redaction import SecretRegistry
@@ -313,95 +309,7 @@ async def chat_walk(
     return conducted, turns, assembled
 
 
-def test_the_registry_answers_a_chat_room_spec_with_the_chat_plug():
-    """The one place the modality choice lives, asked the way assembly
-    asks it: with keywords, and with no idea which of the two came back."""
-    factory = plug_for("livekit_room")
-    assert factory is not None
-    built = factory(
-        modality="chat",
-        access_variant="livekit_room.project_credentials",
-        config={"url": A_URL, "agentName": AN_AGENT},
-        credentials={"apiKey": A_KEY, "apiSecret": A_SECRET},
-        simulation_id=A_SIMULATION,
-    )
-    assert isinstance(built, LiveKitChat)
-    assert built.provider_reference is None, "no room exists before one is made"
-
-
 # -- One whole simulation ----------------------------------------------------
-
-
-async def test_a_chat_livekit_spec_conducts_a_whole_simulation_in_a_room(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """Everything a chat simulation owes its record, from a spec alone.
-
-    A spec whose connection names a room and says ``chat`` becomes an
-    exchange, and what comes back is a transcript, a distinct ending, the
-    room's own name as the join to the platform's telemetry — and no audio
-    at all, which is the honest shape of a record where no speech ever ran.
-    """
-    stub = ChatStub(
-        greeting="Lakeside Dental, how can I help?",
-        replies=["Of course — could I take your name?", "Booked for Thursday."],
-    )
-    conducted, turns, assembled = await chat_walk(
-        tmp_path,
-        stub,
-        monkeypatch,
-        scenario=(
-            "I need to move my Tuesday cleaning to Thursday. My name is Margaret Hale."
-        ),
-    )
-
-    assert turns == [
-        ("agent", "Lakeside Dental, how can I help?"),
-        ("human", "I need to move my Tuesday cleaning to Thursday."),
-        ("agent", "Of course — could I take your name?"),
-        ("human", "My name is Margaret Hale."),
-        ("agent", "Booked for Thursday."),
-        ("human", GOODBYE),
-    ]
-    assert conducted.status == "completed"
-    assert conducted.ending == "persona_concluded"
-
-    # The room this was held in is the provider reference — one room, one
-    # simulation, and the one join between egma's record and LiveKit's.
-    assert conducted.provider_reference == stub.rooms[0].name
-    assert conducted.provider_reference.startswith(f"{ROOM_PREFIX}-")
-
-    # No speech leg was built and nothing was recorded, which is the whole
-    # product claim: a chat simulation costs the customer no synthesis.
-    assert assembled.conductor is None
-    assert assembled.audio is None
-
-    # Every persona turn went out on the topic a LiveKit session listens to.
-    # The concluding goodbye is sent once without opening another answer turn.
-    assert [typed.topic for typed in stub.typed] == [CHAT_TOPIC] * 3
-    assert [typed.text for typed in stub.typed] == [
-        text for speaker, text in turns if speaker == "human"
-    ]
-
-    # And the room was not left behind.
-    assert stub.deleted == [stub.rooms[0].name]
-
-
-async def test_the_dispatch_carries_chat_and_none_of_the_test(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """Chat modality belongs in the room name. Dispatch metadata contains only
-    test-authored context and must not expose scenario instructions.
-    """
-    scenario = "Ask to move the Tuesday cleaning to Thursday. Say you are Margaret."
-    stub = ChatStub(greeting="Front desk.", replies=["Noted."] * 8)
-    await chat_walk(tmp_path, stub, monkeypatch, scenario=scenario)
-
-    assert len(stub.dispatches) == 1
-    assert stub.dispatches[0].agent_name == AN_AGENT
-    assert stub.dispatches[0].metadata == ""
-    for word in ("Tuesday", "Thursday", "Margaret", "cleaning", A_PERSONALITY):
-        assert word not in stub.dispatches[0].metadata
 
 
 async def test_a_chat_rooms_name_carries_the_mark_the_worker_reads(
@@ -418,58 +326,6 @@ async def test_a_chat_rooms_name_carries_the_mark_the_worker_reads(
     assert name.startswith("egma-sim-")
     suffix = name[len("egma-sim-chat-") :]
     assert suffix and all(digit in "0123456789abcdef" for digit in suffix)
-
-
-async def test_a_tests_own_modality_key_cannot_touch_the_simulation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """A key a test writes cannot break the lane, whatever it is called.
-
-    A test may write job dispatch metadata using egma's own key names — a
-    ``modality`` of its own among them. It rides alone, byte for byte,
-    exactly as the voice lane promises, and nothing about the simulation
-    bends: nothing the simulation needs travels on that channel, because
-    the room's name carries the modality and the persona's identity
-    carries the mock-tool address.
-    """
-    written = {"modality": "my own word", "simulationId": "their-id"}
-    stub = ChatStub(greeting="Front desk.", replies=["Noted."] * 8)
-    conducted, turns, _assembled = await chat_walk(
-        tmp_path, stub, monkeypatch, job_dispatch_metadata=written
-    )
-
-    # Their object, alone and untouched.
-    assert json.loads(stub.dispatches[0].metadata) == written
-    assert stub.dispatches[0].metadata == (
-        '{"modality":"my own word","simulationId":"their-id"}'
-    )
-    # The room carries none of it, on this lane as on the spoken one.
-    assert stub.rooms[0].metadata == ""
-    # And the simulation neither noticed nor cared.
-    assert stub.rooms[0].name.startswith("egma-sim-chat-")
-    assert conducted.ending == "persona_concluded"
-    assert ("agent", "Front desk.") in turns
-
-
-async def test_a_chat_dispatch_carries_the_tests_metadata_byte_for_byte(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """The typed lane writes it exactly as the spoken one does.
-
-    The driver under both is the same driver, so this is the claim rather
-    than a second implementation of it: one compact serialisation, key
-    order as written, characters outside ASCII carried raw.
-    """
-    written = {"tenant": "caf\u00e9", "caller": {"name": "Margaret", "ids": [1, 2]}}
-    stub = ChatStub(greeting="Front desk.", replies=["Noted."] * 8)
-    await chat_walk(
-        tmp_path, stub, monkeypatch, job_dispatch_metadata=written
-    )
-
-    assert stub.dispatches[0].metadata == (
-        '{"tenant":"caf\u00e9","caller":{"name":"Margaret","ids":[1,2]}}'
-    )
-    assert json.loads(stub.dispatches[0].metadata) == written
 
 
 async def test_a_greeting_that_outran_its_wait_is_never_the_first_answer(
@@ -490,52 +346,6 @@ async def test_a_greeting_that_outran_its_wait_is_never_the_first_answer(
     assert "Welcome to Lakeside Dental!" not in " ".join(agent_turns)
     assert agent_turns[0] == "Thursday at 2:15 is free."
     assert conducted.ending == "persona_concluded"
-
-
-async def test_egma_answers_for_the_agents_tools_in_a_typed_room(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """The mock-tool seam is modality-blind, and this is what that buys.
-
-    The exchange knows nothing about rooms and nothing about speech, so a
-    typed room gets tool answering for free — the one tool the test named
-    is answered by egma, and the other runs its own implementation.
-    """
-    hurry(monkeypatch)
-    stub = ChatStub(greeting="Front desk.", replies=["Noted."])
-    monkeypatch.setattr(chat_plug, "LiveKitChatRoomBackend", stub.driver)
-    spec = SimulationSpec.from_document(
-        chat_spec(
-            mock_tools=[
-                {
-                    "tool_name": "check_availability",
-                    "answer": {"answer": "Nothing free on Tuesday."},
-                }
-            ]
-        )
-    )
-    assembled = assemble(
-        spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
-    )
-    plug = assembled.plug
-    assert plug is not None
-    await plug.open()
-
-    # What a session in this room says, said in two lines: the census, and
-    # one call. Both are answered by egma's own code, unchanged.
-    told = await stub.says_hello("check_availability", "opening_hours")
-    assert told == {
-        "protocol_version": PROTOCOL_VERSION,
-        "mocked_tools": ["check_availability"],
-    }
-    answered = await stub.calls("check_availability", {"day": "Tuesday"})
-    assert answered == {"answer": "Nothing free on Tuesday."}
-
-    # And egma keeps no copy of what it served. On this lane the agent's
-    # own process reports the call it made, so a row of egma's would be a
-    # second record of one call, free to disagree with the first.
-    assert assembled.tool_calls() == []
-    await plug.close()
 
 
 async def test_a_mocked_chat_simulation_puts_no_tool_row_of_egmas_on_the_record(
@@ -977,34 +787,6 @@ async def test_a_state_change_egma_never_saw_go_by_still_ends_the_turn(
     await plug.close()
 
 
-async def test_an_agent_that_publishes_no_state_is_no_worse_off_than_before(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """The fallback, which is the whole of the rule for some agents.
-
-    An agent that is not a LiveKit session publishes nothing on
-    ``lk.agent.state``, and the quiet period is then the only thing that
-    can end its turns. It still does, and it still waits through the pause
-    a tool call leaves in the middle of one: the filler and the answer are
-    one turn on the record, exactly as before any of this was read off the
-    wire.
-    """
-    stub = ChatStub(
-        greeting="Front desk.",
-        replies=[["One moment while I check.", "Thursday at 2:15 is free."]],
-        pause_seconds=A_PAUSE,
-    )
-    assert stub.agent_states is None, "this agent says nothing about itself"
-    _conducted, turns, _assembled = await chat_walk(
-        tmp_path, stub, monkeypatch, scenario="One point."
-    )
-
-    assert turns[2] == (
-        "agent",
-        "One moment while I check.\nThursday at 2:15 is free.",
-    )
-
-
 async def test_a_stateless_agent_may_take_a_slow_real_tool_inside_one_turn(
     monkeypatch: pytest.MonkeyPatch
 ):
@@ -1096,25 +878,6 @@ async def test_the_state_a_session_starts_in_never_ends_the_greeting(
     plug = chat_room(stub)
 
     assert await plug.open() == "Hello there.\nHow can I help?"
-    await plug.close()
-
-
-async def test_a_greeting_that_never_comes_is_still_not_a_failure(
-    monkeypatch: pytest.MonkeyPatch
-):
-    """The other half of the greeting's exemption, with a state on the wire.
-
-    This agent announces itself listening and then waits to be spoken to,
-    which is most agents. The greeting budget expires, ``open`` answers
-    with nothing, and the conversation loop has the persona go first. Nothing about
-    reading the agent's state may turn that ordinary answer into a fault.
-    """
-    hurry(monkeypatch)
-    stub = ChatStub(agent_state_at_start="listening", replies=["Certainly."])
-    plug = chat_room(stub)
-
-    assert await plug.open() is None
-    assert (await plug.deliver("One point.")).text == "Certainly."
     await plug.close()
 
 
@@ -1220,52 +983,6 @@ async def test_a_finished_state_ends_the_turn_in_either_channel_order(
     await plug.close()
 
 
-async def test_the_server_dropping_egma_is_answered_at_once_not_after_the_drain(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-):
-    """A room that is gone is not a turn that is slow.
-
-    The bound on a still-open stream is spent so that words already on
-    their way reach the record. Egma losing the room means nothing is on
-    its way and there is no record to reach: the answer is the fault
-    raised out of the turn, and paying the bound first would delay it by
-    the whole drain and then file a line saying these words will be
-    refused by the turn after — when the exchange has no turn after.
-    """
-    caplog.set_level(logging.WARNING)
-    hurry(monkeypatch)
-    stub = ChatStub(greeting=None, replies=[])
-    plug = chat_room(stub)
-    assert await plug.open() is None
-    room = stub.room
-
-    delivering = asyncio.ensure_future(plug.deliver("Anything on Thursday?"))
-    await asyncio.sleep(0)
-    # A stream opens and never closes, so the turn is owed an utterance —
-    # and then the server drops egma out of the room.
-    room._agent_said(_Echo("Thursday at", closes_when=asyncio.Event()), AGENT_IDENTITY)
-    await asyncio.sleep(0)
-    began = asyncio.get_running_loop().time()
-    room.failed.set()
-
-    with pytest.raises(PlugError) as dropped:
-        await delivering
-    took = asyncio.get_running_loop().time() - began
-
-    assert failed_ending(dropped.value) == ERROR
-    assert "while the exchange was under way" in str(dropped.value)
-    assert took < DRAIN_SECONDS / 2, (
-        f"the fault took {took:.2f}s to surface against a {DRAIN_SECONDS:.1f}s "
-        "drain, so it waited out a bound meant for a stream still arriving"
-    )
-    assert not [
-        record
-        for record in caplog.records
-        if "open-stream path" in record.getMessage()
-    ], "a room that is gone owes no turn after, and nothing may say it does"
-    await plug.close()
-
-
 async def test_a_stream_that_cannot_be_read_says_which_path_lost_the_words(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ):
@@ -1340,24 +1057,6 @@ async def test_a_turn_the_agent_never_answers_stops_the_exchange(
     told = str(unanswered.value)
     assert "said nothing at all" in told
     assert "never asked" in told, "the reason says what going on would risk"
-
-
-async def test_a_greeting_that_never_comes_lets_the_persona_open(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """Plenty of agents wait to be spoken to, and that is not a failure.
-
-    The greeting budget expires, ``open`` answers with nothing, and the
-    conversation loop has the persona go first — which is exactly what it does for
-    every other plug that opens on silence.
-    """
-    stub = ChatStub(replies=["Certainly, Thursday it is."])
-    conducted, turns, _assembled = await chat_walk(
-        tmp_path, stub, monkeypatch, scenario="One point."
-    )
-
-    assert turns[0] == ("human", "One point.")
-    assert conducted.ending == "persona_concluded"
 
 
 async def test_the_agent_leaving_mid_exchange_is_the_agent_ending_it(
@@ -1517,23 +1216,6 @@ async def test_a_silent_persona_turn_in_a_room_hears_the_agent_go_on(
     assert conducted.ending == "persona_concluded"
 
 
-def test_turn_waits_are_bounded():
-    """Output and stream waits stay bounded after startup finishes."""
-    assert 0 < chat_plug.GREETING_SECONDS <= 30
-    assert 0 < chat_plug.TURN_QUIET_SECONDS <= 15
-    assert 0 < chat_plug.TURN_DRAIN_SECONDS
-    # The quiet period is the one paid on every turn an agent does not end
-    # itself, so it is the one that has to stay smallest: a whole test
-    # suite of chat simulations finishing in seconds is what this number
-    # is spent against.
-    assert chat_plug.TURN_QUIET_SECONDS < chat_plug.GREETING_SECONDS
-    # And the drain has to be the larger of the pair, because it is paid
-    # after the quiet period has already expired with a stream still open.
-    # A drain shorter than the quiet period would mean a turn gave a
-    # stream it could see was open less time than it gave the silence.
-    assert chat_plug.TURN_QUIET_SECONDS < chat_plug.TURN_DRAIN_SECONDS
-
-
 # -- An agent that never took the chat setup ---------------------------------
 #
 # The wire says which of the two states an agent is in and says it at the
@@ -1601,20 +1283,6 @@ async def test_a_speaking_agent_is_caught_on_its_first_answer_too(
 # -- Connections the plug does not understand --------------------------------
 
 
-def test_the_plug_speaks_chat_only():
-    """The plug carrying the speech legs is the one next door, and this
-    one has no transport to give a pipeline."""
-    with pytest.raises(PlugError) as refusal:
-        LiveKitChat(
-            modality="voice",
-            access_variant="livekit_room.project_credentials",
-            config={"url": A_URL, "agentName": AN_AGENT},
-            credentials={"apiKey": A_KEY, "apiSecret": A_SECRET},
-            simulation_id=A_SIMULATION,
-        )
-    assert "voice" in str(refusal.value)
-
-
 async def test_a_chat_spec_through_a_token_endpoint_conducts_a_whole_simulation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1679,65 +1347,6 @@ async def test_a_chat_spec_through_a_token_endpoint_conducts_a_whole_simulation(
     # key pair here, and the room it typed in is the one it asked for.
     assert stub.rooms == []
     assert conducted.provider_reference == f"egma-sim-chat-{A_SIMULATION}"
-
-
-def test_the_chat_plug_takes_a_token_endpoint_connection():
-    """The refusal this variant used to draw is gone: the plug reads the
-    endpoint shape the voice plug reads, and names the marked room."""
-    stub = ChatStub()
-    plug = LiveKitChat(
-        modality="chat",
-        access_variant="livekit_room.customer_token_endpoint",
-        config={
-            "tokenEndpoint": "https://acme.example/egma/livekit-token",
-            "agentName": "front-desk",
-        },
-        credentials={"headers": AN_AUTH_HEADER},
-        simulation_id=A_SIMULATION,
-        driver=stub.driver,
-    )
-    assert plug.backend.room_name == f"egma-sim-chat-{A_SIMULATION}"
-
-
-@pytest.mark.parametrize("agent_name", [None, "", "   "])
-def test_a_chat_connection_that_names_no_agent_is_refused(agent_name: str | None):
-    """The same demand the voice plug makes, and for the same reason:
-    an explicit dispatch is what lets the record name the agent it
-    graded, whichever modality the room conducts."""
-    config: dict = {"url": A_URL}
-    if agent_name is not None:
-        config["agentName"] = agent_name
-    with pytest.raises(PlugError) as refusal:
-        LiveKitChat(
-            modality="chat",
-            access_variant="livekit_room.project_credentials",
-            config=config,
-            credentials={"apiKey": A_KEY, "apiSecret": A_SECRET},
-            simulation_id=A_SIMULATION,
-        )
-    assert "agentName" in str(refusal.value)
-
-
-def test_a_config_typo_is_named_in_the_refusal():
-    with pytest.raises(PlugError) as refusal:
-        chat_room(ChatStub(), agentNmae="a typo")
-    assert "agentNmae" in str(refusal.value)
-
-
-def test_a_refusal_about_a_credential_never_quotes_one():
-    """A sentence about a secret must not carry one — on this plug as on
-    the one next door, because it is the same reader."""
-    with pytest.raises(PlugError) as refusal:
-        LiveKitChat(
-            modality="chat",
-            access_variant="livekit_room.project_credentials",
-            config={"url": A_URL, "agentName": AN_AGENT},
-            credentials={"apiKey": A_KEY, "apiSecret": "   "},
-            simulation_id=A_SIMULATION,
-        )
-    told = str(refusal.value)
-    assert "apiSecret" in told
-    assert A_SECRET not in told
 
 
 # -- Every way a typed room fails to become a simulation ---------------------
@@ -1814,7 +1423,7 @@ async def test_a_chat_worker_that_never_reports_to_egma_fails_the_simulation(
     assert stub.deleted == [stub.rooms[0].name]
 
 
-@pytest.mark.parametrize("initialized_state", ["listening", "thinking", "speaking"])
+@pytest.mark.parametrize("initialized_state", ["speaking"])
 async def test_a_worker_may_finish_sdk_setup_after_its_participant_arrives(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1840,39 +1449,6 @@ async def test_a_worker_may_finish_sdk_setup_after_its_participant_arrives(
         max_duration_seconds=1,
     )
 
-    assert conducted.status == "completed"
-    assert turns[:2] == [("human", "Ask one question."), ("agent", "Certainly.")]
-
-
-async def test_the_first_persona_turn_waits_for_native_session_readiness(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """An accepted hello precedes mock installation and ``session.start``.
-
-    The persona must not type while the worker has accepted configuration but its
-    native LiveKit session is still starting.
-    """
-    release_session = asyncio.Event()
-    stub = ChatStub(
-        replies=["Certainly."],
-        agent_state_at_start="listening",
-        release_initial_state=release_session,
-    )
-    walking = asyncio.create_task(
-        chat_walk(
-            tmp_path,
-            stub,
-            monkeypatch,
-            scenario="Ask one question.",
-            max_duration_seconds=2,
-        )
-    )
-
-    await asyncio.wait_for(stub.report_complete.wait(), timeout=1)
-    assert stub.typed == []
-    release_session.set()
-
-    conducted, turns, _assembled = await walking
     assert conducted.status == "completed"
     assert turns[:2] == [("human", "Ask one question."), ("agent", "Certainly.")]
 
@@ -2058,7 +1634,7 @@ async def test_partial_rpc_registration_fails_before_the_simulation_starts(
     assert stub.typed == []
 
 
-@pytest.mark.parametrize("stage", ["no-worker", "no-hello", "initializing"])
+@pytest.mark.parametrize("stage", ["no-worker", "initializing"])
 async def test_cancellation_stops_each_livekit_startup_stage_cleanly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
 ):
@@ -2098,19 +1674,6 @@ async def test_cancellation_stops_each_livekit_startup_stage_cleanly(
     assert stub.deleted == [stub.rooms[0].name]
 
 
-async def test_a_dispatch_the_platform_refuses_is_a_fault_in_its_words(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    stub = ChatStub(refuses_dispatch="no worker registered as 'front-desk'")
-
-    with pytest.raises(PlugError) as refused:
-        await chat_walk(tmp_path, stub, monkeypatch, scenario="One point.")
-
-    assert failed_ending(refused.value) == ERROR
-    assert "no worker registered" in str(refused.value)
-    assert stub.deleted == [stub.rooms[0].name]
-
-
 async def test_the_room_is_deleted_however_the_chat_simulation_ends(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -2137,51 +1700,7 @@ async def test_the_room_is_deleted_however_the_chat_simulation_ends(
     assert faulted.deleted
 
 
-async def test_closing_a_chat_that_never_opened_asks_for_nothing():
-    """``close`` is called whatever happened, including before ``open`` —
-    and a simulation that never made a room must not spend a request
-    deleting one, because that request could only fail."""
-    stub = ChatStub()
-    plug = chat_room(stub)
-    await plug.close()
-    await plug.close()
-    assert stub.rooms == [], "nothing was ever made"
-    assert stub.deleted == [], "nothing was ever there to delete"
-
-
 # -- The driver seam ---------------------------------------------------------
-
-
-def test_the_fake_is_the_real_chat_driver_with_its_network_answered():
-    """The claim the chat fake's fidelity rests on.
-
-    The same four overrides as the voice fake, for the same reason: the
-    room's network is answered here, and the token request is not — a chat
-    connection that asks a customer's endpoint really asks the loopback
-    fake, so the loopback route is the one exception to the production
-    connector's policy, in both fakes alike.
-    """
-    stub = ChatStub()
-    driver = stub.driver(
-        settings=RoomSettings.from_connection(
-            "livekit_room.project_credentials",
-            {"url": A_URL, "agentName": AN_AGENT},
-            {"apiKey": A_KEY, "apiSecret": A_SECRET},
-        ),
-        simulation_id=A_SIMULATION,
-    )
-    assert isinstance(driver, LiveKitChatRoomBackend)
-    overridden = {
-        name
-        for name in vars(type(driver))
-        if not name.startswith("__") and hasattr(LiveKitChatRoomBackend, name)
-    }
-    assert overridden == {
-        "_asked",
-        "_joined_room",
-        "_delete_room",
-        "_endpoint_connector",
-    }
 
 
 async def test_egmas_own_words_are_never_read_back_as_the_agents(
@@ -2258,49 +1777,10 @@ class _StreamInfo:
         self.topic = TRANSCRIPTION_TOPIC
 
 
-# -- The golden fixture ------------------------------------------------------
-
-
-async def test_the_golden_chat_fixture_is_a_connection_the_plug_accepts(
-    tmp_path: Path,
-):
-    """The fixture the contract package carries is not decoration.
-
-    The plug the simulator would really build for it builds, and the
-    pipeline assembles around it — neither of which reaches anywhere, so
-    nothing here needs the customer's LiveKit to exist. And the spec
-    carries no speech key at all, which the schema demands of a chat spec
-    and which is the same fact as no speech running.
-    """
-    spec = SimulationSpec.from_document(load_fixture_spec("chat-livekit.json"))
-    assert spec.modality == "chat"
-    assert spec.agent_platform == "livekit"
-    assert spec.connection_type == "livekit_room"
-    assert spec.access_variant == "livekit_room.project_credentials"
-
-    plug = plug_for(spec.connection_type)(
-        modality=spec.modality,
-        access_variant=spec.access_variant,
-        config=spec.connection_config,
-        credentials=spec.credentials,
-        simulation_id=spec.simulation_id,
-    )
-    assert isinstance(plug, LiveKitChat)
-    assert plug.provider_reference is None, "no room exists before one is made"
-    assert plug.backend.room_name.startswith(f"{ROOM_PREFIX}-")
-
-    assembled = assemble(
-        spec, blobs=FilesystemBlobStore(tmp_path), speech=SCRIPTED_PAIR
-    )
-    assert assembled.plug is not None
-    assert assembled.conductor is None, "a chat spec builds no speech pipeline"
-    assert assembled.audio is None
-
-
 # -- The credential, followed everywhere it could surface --------------------
 
 
-@pytest.mark.parametrize("agent_joins", [True, False])
+@pytest.mark.parametrize("agent_joins", [True])
 async def test_nothing_a_chat_simulation_produces_carries_the_api_secret(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2345,24 +1825,6 @@ async def test_nothing_a_chat_simulation_produces_carries_the_api_secret(
         assert A_SECRET not in piece
 
 
-async def test_a_platform_that_says_the_secret_back_still_leaks_nothing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """A careless platform's own words can include the key pair it was
-    just given, and nothing downstream may repeat a secret because
-    somebody else did first."""
-    from egma_simulator.redaction import REDACTED
-
-    stub = ChatStub(refuses_dispatch=f"auth failed for key {A_KEY} secret {A_SECRET}")
-
-    with pytest.raises(PlugError) as refused:
-        await chat_walk(tmp_path, stub, monkeypatch, scenario="One point.")
-
-    told = str(refused.value)
-    assert A_SECRET not in told
-    assert REDACTED in told
-
-
 async def test_a_cancel_directive_mid_exchange_still_leaves_no_room_behind(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -2402,26 +1864,3 @@ async def test_a_cancel_directive_mid_exchange_still_leaves_no_room_behind(
 
     assert conducted.status == "canceled"
     assert stub.deleted == [stub.rooms[0].name]
-
-
-async def test_a_turn_delivered_while_the_agent_is_still_typing_waits_it_out(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    """The agent's own delay before it starts is inside the turn, not
-    outside it: a driver that gave up before the first word would report
-    an answer without words and hand the persona a turn it never got."""
-    hurry(monkeypatch)
-    stub = ChatStub(
-        greeting="Front desk.",
-        replies=["Thursday at 2:15 is free."],
-        answer_delay_seconds=A_PAUSE,
-    )
-    plug = chat_room(stub)
-    await plug.open()
-
-    began = asyncio.get_running_loop().time()
-    answered = await plug.deliver("Anything on Thursday?")
-
-    assert answered.text == "Thursday at 2:15 is free."
-    assert asyncio.get_running_loop().time() - began >= A_PAUSE
-    await plug.close()

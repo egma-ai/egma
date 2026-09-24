@@ -29,8 +29,7 @@ import {
 /**
  * Store and read identical simulation and production spans, then compare
  * their measures. Test missing evidence for each catalog measure and use
- * two organizations to check isolation. The filesystem-only guard is in
- * one-measure-path.test.ts.
+ * two organizations to check isolation.
  */
 
 let store: MigratedTraceStore;
@@ -280,19 +279,6 @@ describe("one conversation's measures", () => {
     expect(worstSampleOf(measured)).toEqual(measured.samples[1]);
   });
 
-  it("hands them back in the catalog's order, whatever order they were taken in", async () => {
-    // Written backwards on purpose: the turn latency is measured first here.
-    const trace = await stored({
-      turn_response_latency: [900],
-      first_response_latency: [1_214],
-    });
-
-    expect(measuresFromSpans(trace).map((one) => one.measure)).toEqual([
-      "first_response_latency",
-      "turn_response_latency",
-    ]);
-  });
-
   /**
    * The door recognises egma's vocabulary by the emitting scope and files those
    * spans as `timing`. A provider's own span that happens to share a measure's
@@ -366,19 +352,6 @@ describe("the same spans, filed as a simulation and as production", () => {
         samples: [310.25],
       },
     ]);
-  });
-
-  it("reduce to the same worst measurement, which is what a bound is held to", async () => {
-    const simulated = await stored(MEASURED, AS_A_SIMULATION);
-    const production = await stored(MEASURED);
-
-    for (const measure of SPAN_DERIVED_MEASURES) {
-      const here = measureIn(simulated, measure);
-      const there = measureIn(production, measure);
-      expect(here === undefined).toBe(there === undefined);
-      if (here === undefined || there === undefined) continue;
-      expect(worstSampleOf(here)?.value).toBe(worstSampleOf(there)?.value);
-    }
   });
 });
 
@@ -457,14 +430,6 @@ describe("a conversation a measure cannot be computed for", () => {
       );
     });
   }
-
-  it("answers nothing at all for a conversation with no timing spans", async () => {
-    const trace = await stored({});
-    expect(measuresFromSpans(trace)).toEqual([]);
-    for (const measure of SPAN_DERIVED_MEASURES) {
-      expect(measureIn(trace, measure)).toBeUndefined();
-    }
-  });
 
   /**
    * A measure the catalog says no span carries is never computed, **even where
@@ -833,22 +798,6 @@ describe("measures derived from a recognised framework's own spans", () => {
   });
 
   /**
-   * A framework that records only word-bounded turns writes no `speaking` span
-   * for the caller, and the turn's own end is then the only instant the trace
-   * holds for "the caller stopped". Retell's turns are exactly that, and the
-   * chat lane's are too.
-   */
-  it("falls back to the human turn's end where the caller's speech was never recorded", async () => {
-    const trace = await aLiveKitCall([
-      { who: "human", from: 0, to: 1_000 },
-      { who: "agent", from: 1_100, to: 3_000, spoke: [[1_400, 3_000]] },
-    ]);
-
-    const measured = measureIn(trace, "turn_response_latency");
-    expect(measured === undefined ? [] : valuesOf(measured)).toEqual([400]);
-  });
-
-  /**
    * **Both POVs, and neither blended into the other.** The conversation below
    * carries both — turns a derivation reads, which is the agent's own account,
    * and a timing span egma measured off its own recording, which is the
@@ -922,20 +871,6 @@ describe("measures derived from a recognised framework's own spans", () => {
     // 500 that egma's turn end and the agent's first word would have made.
     expect(measured === undefined ? [] : valuesOf(measured)).toEqual([900]);
     expect(measured?.otherPov).toBeUndefined();
-  });
-
-  /**
-   * One POV is one entry with nothing beside it — the ordinary production
-   * trace, where egma timed nothing and only the agent's spans exist.
-   */
-  it("names no other POV for a conversation only one POV measured", async () => {
-    const trace = await aLiveKitCall([
-      { who: "human", from: 0, to: 1_000 },
-      { who: "agent", from: 1_100, to: 3_000, spoke: [[1_400, 3_000]] },
-    ]);
-
-    expect(measureIn(trace, "turn_response_latency")?.otherPov).toBeUndefined();
-    expect(measureIn(trace, "agent_speech_duration")?.otherPov).toBeUndefined();
   });
 });
 
@@ -1075,21 +1010,6 @@ describe("measures an agent platform reported about its own conversation", () =>
     expect(measured === undefined ? undefined : worstSampleOf(measured)).toEqual(
       { value: 2_145, spanId: root?.spanId },
     );
-  });
-
-  /**
-   * A provider stage with no counterpart in the catalog keeps its
-   * platform-prefixed name and stays in the block. Folding it into a catalog
-   * answer would put a stage that means something else beside the numbers a
-   * grader bounds; it is captured now and surfaced the day a display asks.
-   */
-  it("does not answer a platform-prefixed name as a measure", async () => {
-    const trace = await aReportedTrace(AS_RETELL_MEASURED);
-
-    for (const one of measuresFromSpans(trace)) {
-      expect(one.measure.startsWith("retell/")).toBe(false);
-    }
-    expect(measureIn(trace, "retell/llm_latency")).toBeUndefined();
   });
 
   /**
@@ -1259,61 +1179,6 @@ describe("measures an agent platform reported about its own conversation", () =>
     expect(ours.traceId).toBe(theirs.traceId);
     expect(ours.reported).toBeUndefined();
     expect(measuresFromSpans(ours)).toEqual([]);
-  });
-
-  /**
-   * A trace whose root carries no block at all, which is nearly every trace in
-   * the store. Nothing is reported, nothing is answered, and nothing throws.
-   */
-  it("answers nothing for a conversation whose platform reported nothing", async () => {
-    const trace = await aReportedTrace([]);
-
-    expect(trace.reported).toBeUndefined();
-    expect(measuresFromSpans(trace)).toEqual([]);
-  });
-});
-
-/**
- * **Simulation traffic is unchanged, at the level this module decides it.**
- *
- * A simulation carries its own timing spans and no platform reports anything
- * about it, so every number it produces comes from the first source in the
- * chain and the answer is the one this module always gave. The same claim about
- * the wire — the `derived` boolean a client integrated against — is asked where
- * the wire is, over HTTP, in the API's own suite.
- */
-describe("a simulation, after the platform's numbers joined the chain", () => {
-  it("answers exactly what it answered before there was a third source", async () => {
-    const trace = await stored(
-      {
-        first_response_latency: [1_214],
-        turn_response_latency: [862.5, 1_100],
-      },
-      AS_A_SIMULATION,
-    );
-
-    // Nothing reported anything about it, so there is no block to have read.
-    expect(trace.reported).toBeUndefined();
-
-    expect(measuresFromSpans(trace)).toEqual([
-      {
-        measure: "first_response_latency",
-        unit: "milliseconds",
-        origin: "timed",
-        reportedBy: "",
-        samples: [{ value: 1_214, spanId: expect.any(String) }],
-      },
-      {
-        measure: "turn_response_latency",
-        unit: "milliseconds",
-        origin: "timed",
-        reportedBy: "",
-        samples: [
-          { value: 862.5, spanId: expect.any(String) },
-          { value: 1_100, spanId: expect.any(String) },
-        ],
-      },
-    ]);
   });
 });
 

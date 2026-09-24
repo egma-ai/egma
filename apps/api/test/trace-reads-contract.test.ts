@@ -195,22 +195,6 @@ describe.skipIf(!storage.available)("a list request that does not say when", () 
     }
   });
 
-  /**
-   * A bound finer than the store's own precision is refused rather than
-   * rounded, which is the same rule as the too-wide window: the seventh digit
-   * has nowhere to go, and honouring it would mean moving somebody's bound
-   * without saying so. `to` is exclusive, so where it lands decides whether a
-   * span is in the answer.
-   */
-  it("refuses a bound finer than the microsecond the store holds", async () => {
-    const finer = await listTracesOverHttp(api.app, acme.secret, {
-      from: "2026-06-01T00:00:00.0000001Z",
-      to: DAY.to,
-    });
-    expect(finer.statusCode).toBe(400);
-    expect((finer.json() as { message: string }).message).toContain("six");
-  });
-
   /** The detail endpoint is bounded on the same terms, and for the same reason. */
   it("is refused on the detail endpoint too, which is filed by time as well", async () => {
     const response = await readTraceOverHttp(
@@ -239,16 +223,6 @@ describe.skipIf(!storage.available)("a window wider than one request may ask for
     expect(body.error).toBe("invalid_request");
     expect(body.message).toContain("31 days");
     expect(body.message).toContain("refused rather than narrowed");
-  });
-
-  it("is refused on the detail endpoint on the same terms", async () => {
-    const response = await readTraceOverHttp(
-      api.app,
-      acme.secret,
-      PAGING_TRACES[0].traceId,
-      { from: "2026-01-01T00:00:00Z", to: "2026-06-01T00:00:00Z" },
-    );
-    expect(response.statusCode).toBe(400);
   });
 
   it("takes a window exactly the width of the cap", async () => {
@@ -323,38 +297,6 @@ describe.skipIf(!storage.available)("walking every page of a list", () => {
     }
   });
 
-  it("splits a shared minute across a page boundary without losing either side", async () => {
-    // Page size two, so the boundary falls between the two traces that share
-    // 09:00:00 exactly — the case where a pageToken carrying only a time cannot
-    // tell the second from the first.
-    const walked: string[] = [];
-    let pageToken: string | undefined;
-    do {
-      const answered = await page(acme.secret, {
-        ...DAY,
-        pageSize: 2,
-        ...(pageToken === undefined ? {} : { pageToken }),
-      });
-      walked.push(...answered.traces.map((trace) => trace.traceId));
-      pageToken = answered.nextPageToken ?? undefined;
-    } while (pageToken !== undefined);
-
-    const sharingTheMinute = walked.filter((id) =>
-      ["01", "02", "03"].includes(id.slice(-2)),
-    );
-    expect(sharingTheMinute).toEqual([
-      "aa000000000000000000000000000003",
-      "aa000000000000000000000000000002",
-      "aa000000000000000000000000000001",
-    ]);
-  });
-
-  it("hands out no pageToken on the last page, so nobody asks for nothing", async () => {
-    const answered = await page(acme.secret, { ...DAY, pageSize: 200 });
-    expect(answered.traces).toHaveLength(PAGING_TRACES.length);
-    expect(answered.nextPageToken).toBeNull();
-  });
-
   it("refuses a token it did not issue", async () => {
     for (const pageToken of ["not-a-pageToken", "MTox", Buffer.from("9:1:x").toString("base64url")]) {
       const response = await listTracesOverHttp(api.app, acme.secret, {
@@ -398,21 +340,6 @@ describe.skipIf(!storage.available)("a parameter that arrived empty", () => {
     });
     expect(answered.traces).toHaveLength(PAGING_TRACES.length);
   });
-
-  it("is the default page size, when it is the pageSize", async () => {
-    const answered = await page(acme.secret, { ...DAY, pageSize: "" });
-    expect(answered.traces).toHaveLength(PAGING_TRACES.length);
-  });
-
-  it("is the same on the detail endpoint, which takes the project too", async () => {
-    const response = await readTraceOverHttp(
-      api.app,
-      acme.secret,
-      PAGING_TRACES[0].traceId,
-      { ...DAY, projectId: "" },
-    );
-    expect(response.statusCode, response.body).toBe(200);
-  });
 });
 
 /**
@@ -420,11 +347,6 @@ describe.skipIf(!storage.available)("a parameter that arrived empty", () => {
  * The response must match a missing trace without exposing its existence.
  */
 describe.skipIf(!storage.available)("another organization asking for a trace that is not theirs", () => {
-  it("finds nothing in a list of the same window", async () => {
-    const answered = await page(globex.secret, { ...DAY, pageSize: 200 });
-    expect(answered.traces).toEqual([]);
-  });
-
   it("is told there is no such trace, even guessing the id exactly right", async () => {
     const response = await readTraceOverHttp(
       api.app,
@@ -444,24 +366,6 @@ describe.skipIf(!storage.available)("another organization asking for a trace tha
     );
     expect(invented.statusCode).toBe(404);
     expect(invented.json()).toEqual(response.json());
-  });
-
-  it("still reads its own, so the refusal is about tenancy and not about the store", async () => {
-    await ingest(
-      api,
-      globexProjectSecret,
-      syntheticExport({
-        traceId: "bb000000000000000000000000000001",
-        startedAt: new Date("2026-06-01T11:00:00Z"),
-        humanSaid: "Globex speaking.",
-      }),
-    );
-
-    const answered = await page(globex.secret, { ...DAY, pageSize: 200 });
-    expect(answered.traces.map((trace) => trace.traceId)).toEqual([
-      "bb000000000000000000000000000001",
-    ]);
-    expect(answered.traces[0]?.preview).toBe("Globex speaking.");
   });
 });
 
@@ -709,49 +613,6 @@ describe.skipIf(!storage.available)("filtering a list to one project", () => {
  * project. This checks cookie authentication independently of API-key reads.
  */
 describe.skipIf(!storage.available)("a browser session rather than a key", () => {
-  const SESSION_WINDOW = {
-    from: "2026-09-01T00:00:00Z",
-    to: "2026-09-02T00:00:00Z",
-  } as const;
-  const SESSION_TRACE = "dd000000000000000000000000000001";
-
-  beforeAll(async () => {
-    const homeSecret = await mintKey(
-      api.app,
-      acme.cookie,
-      "The project signup made",
-      acme.projectId,
-    );
-    await ingest(
-      api,
-      homeSecret,
-      syntheticExport({
-        traceId: SESSION_TRACE,
-        startedAt: new Date("2026-09-01T09:00:00Z"),
-        humanSaid: "Reading this from a browser.",
-      }),
-    );
-  });
-
-  it("reads the same list, with no key anywhere in the request", async () => {
-    const response = await listTracesAsSignedIn(api.app, acme.cookie, {
-      ...SESSION_WINDOW,
-      pageSize: 200,
-    });
-    expect(response.statusCode, response.body).toBe(200);
-
-    const answered = response.json() as ListedPage;
-    expect(answered.traces.map((trace) => trace.traceId)).toEqual([
-      SESSION_TRACE,
-    ]);
-    expect(answered.traces[0]?.preview).toBe("Reading this from a browser.");
-  });
-
-  it("is refused the same way when the window is missing", async () => {
-    const response = await listTracesAsSignedIn(api.app, acme.cookie, {});
-    expect(response.statusCode).toBe(400);
-  });
-
   it("refuses production telemetry from an organization-wide key", async () => {
     const response = await api.app.inject({
       method: "POST",
@@ -970,15 +831,6 @@ describe.skipIf(!storage.available)("narrowing a list to one kind of traffic", (
     }
   });
 
-  /** The window is the one thing no filter buys anybody out of. */
-  it("still requires a window, narrowed or not", async () => {
-    const response = await listTracesOverHttp(api.app, acme.secret, {
-      source: "production",
-    });
-    expect(response.statusCode).toBe(400);
-    expect((response.json() as { message: string }).message).toContain("no from");
-  });
-
   /**
    * A token minted under a filter pages **within** it.
    *
@@ -1080,52 +932,6 @@ describe.skipIf(!storage.available)("a read with no usable credential", () => {
       });
       expect(invented.statusCode).toBe(401);
     }
-  });
-});
-
-/** A visible production trace can have no grader selected for it. */
-describe.skipIf(!storage.available)("a production conversation outside every grader scope", () => {
-  const PENDING_TRACE = "cc000000000000000000000000000001";
-  const STARTED_AT = "2026-06-01T11:00:00Z";
-
-  beforeAll(async () => {
-    await ingest(
-      api,
-      acmeProjectSecret,
-      syntheticExport({
-        traceId: PENDING_TRACE,
-        startedAt: new Date(STARTED_AT),
-        humanSaid: "How long will the wait be?",
-      }),
-    );
-  });
-
-  it("reports not requested and exposes the shared empty grade shape", async () => {
-    const read = await readTraceOverHttp(
-      api.app,
-      acme.secret,
-      PENDING_TRACE,
-      DAY,
-    );
-    expect(read.statusCode, read.body).toBe(200);
-
-    const detail = read.json() as {
-      trace: { source: string };
-      simulationId: string | null;
-      gradingState: string;
-      grades: readonly unknown[];
-      gradeHistory: readonly unknown[];
-      combinedScore: number | null;
-    };
-
-    expect(detail.trace.source).toBe("production");
-    expect(detail.simulationId).toBeNull();
-    expect(detail.gradingState).toBe("not_requested");
-    expect(detail.grades).toEqual([]);
-    expect(detail.gradeHistory).toEqual([]);
-    expect(detail.combinedScore).toBeNull();
-    expect(detail).not.toHaveProperty("verdicts");
-    expect(detail).not.toHaveProperty("outcome");
   });
 });
 

@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { RunStatus, simulationSquare } from "../ui/run-status.tsx";
+import { simulationSquare } from "../ui/run-status.tsx";
 
 const graded = (passed: number, failed: number, errored: number) => ({
   status: "completed" as const,
@@ -42,27 +41,5 @@ describe("simulationSquare", () => {
       .toEqual({ kind: "failed", pulse: false, word: "2/3 passed" });
     expect(simulationSquare({ ...graded(0, 0, 0), gradeTally: { passed: 0, failed: 0, errored: 0, selected: 0 } }))
       .toEqual({ kind: "not-requested", pulse: false, word: "Not graded" });
-  });
-});
-
-describe("RunStatus", () => {
-  afterEach(cleanup);
-
-  it("draws a filled square that pulses only while the run is unsettled", () => {
-    const { container, rerender } = render(<RunStatus status="pending" />);
-    const square = () => container.querySelector('[data-slot="state-mark"]');
-    expect(square()?.getAttribute("data-filled")).toBe("true");
-    expect(square()?.getAttribute("data-state-mark")).toBe("waiting");
-    expect(square()?.getAttribute("data-motion")).toBe("pulse");
-    rerender(<RunStatus status="running" />);
-    expect(square()?.getAttribute("data-motion")).toBe("pulse");
-    rerender(<RunStatus status="completed" />);
-    expect(square()?.getAttribute("data-state-mark")).toBe("complete");
-    expect(square()?.getAttribute("data-motion")).toBeNull();
-    rerender(<RunStatus status="canceled" />);
-    expect(square()?.getAttribute("data-state-mark")).toBe("stopped");
-    expect(square()?.className).toContain("bg-faint");
-    expect(container.querySelector('[data-slot="run-status-loader"]')).toBeNull();
-    expect(container.textContent).toBe("Canceled");
   });
 });

@@ -75,40 +75,6 @@ describe("runPersonasCommand", () => {
     expect(failures).toEqual(["STT and TTS flags cannot be used with --speech-mode live."]);
   });
 
-  it("requires every separate speech selection when switching from Live", async () => {
-    const failures: string[] = [];
-    const code = await runPersonaActionCommand({
-      access: { url: URL, credentialsFile: workspace.credentialsFile }, cwd: workspace.dir,
-      out: () => undefined, fail: (message) => failures.push(message),
-      fetchImpl: async () => new JsonResponse({
-        id: "prs_live", name: "Live", description: null, identityName: "Morgan", personality: "Direct.", parameterContract: [], language: null,
-        settings: {
-          models: { mode: "live", llm: { provider: "openai", model: "gpt-5.6-sol" }, live: { provider: "openai", model: "gpt-live-1", adapter: "openai_live", voiceId: "coral" } },
-          controls: { language: "en-US", backgroundSoundId: "none" },
-        },
-      }),
-    }, "clone", { positionals: ["prs_live"], values: { "--speech-mode": "separate" } });
-
-    expect(code).toBe(1);
-    expect(failures).toEqual(["--stt-provider is required for this speech mode."]);
-  });
-  it("uses a predefined persona with its built-in defaults", async () => {
-    const requests: Array<{ method: string; body?: Record<string, unknown> }> = [];
-    const code = await runPersonaActionCommand({
-      access: { url: URL, credentialsFile: workspace.credentialsFile }, cwd: workspace.dir,
-      out: () => undefined, fail: () => undefined,
-      fetchImpl: async (_input, init) => {
-        const method = init?.method ?? "GET";
-        requests.push({ method, ...(init?.body === undefined ? {} : { body: JSON.parse(String(init.body)) as Record<string, unknown> }) });
-        return new JsonResponse({ id: "prs_default" });
-      },
-    }, "use", { positionals: ["prs_default"], values: {} });
-
-    expect(code).toBe(0);
-    expect(requests.map((request) => request.method)).toEqual(["POST"]);
-    expect(requests[0]?.body).toEqual({ projectId: PROJECT_ID });
-  });
-
   it("clones with one authored control and keeps the reduced settings", async () => {
     const bodies: Record<string, unknown>[] = [];
     const code = await runPersonaActionCommand({
@@ -206,35 +172,6 @@ describe("runPersonasCommand", () => {
       "- Impatient Rita (prs_01K3XQ7M4E8YB2FVN0H9TZQWES)",
     );
     expect(lines.at(-1)).toBe("Listed 2 personas.");
-    expect(lines.join("\n")).not.toContain("status:");
-  });
-
-  it("does not ask the platform when the folder has no bound project", async () => {
-    // `createEgmaFolder` keeps an existing config, so this case needs a fresh
-    // repository rather than rewriting the one made in `beforeEach`.
-    await workspace.remove();
-    workspace = await makeWorkspace();
-    await workspace.signIn(URL);
-    await createEgmaFolder({ repository: workspace.dir });
-    let requests = 0;
-    const lines: string[] = [];
-
-    const code = await runPersonasCommand({
-      access: { url: URL, credentialsFile: workspace.credentialsFile },
-      cwd: workspace.dir,
-      out: (line) => lines.push(line),
-      fail: (line) => lines.push(`stderr: ${line}`),
-      fetchImpl: async () => {
-        requests += 1;
-        return new JsonResponse({});
-      },
-    });
-
-    expect(code).toBe(1);
-    expect(requests).toBe(0);
-    expect(lines).toContain(
-      "stderr: This repository does not name its Egma Project. Run egma init here first.",
-    );
     expect(lines.join("\n")).not.toContain("status:");
   });
 

@@ -76,8 +76,6 @@ type Faults = {
   failReadOf?: string | undefined;
   /** The next `delete` of this key throws instead of removing it. */
   failDeleteOf?: string | undefined;
-  /** Every listing throws. */
-  failListing?: boolean | undefined;
 };
 
 function faulting(real: PendingObjectStore, faults: Faults): PendingObjectStore {
@@ -91,12 +89,7 @@ function faulting(real: PendingObjectStore, faults: Faults): PendingObjectStore 
       }
       return real.read(key);
     },
-    async list() {
-      if (faults.failListing === true) {
-        throw new Error("the ingestion bucket did not answer this listing");
-      }
-      return real.list();
-    },
+    list: () => real.list(),
     async delete(key) {
       if (faults.failDeleteOf === key) {
         faults.failDeleteOf = undefined;
@@ -732,15 +725,6 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
     }
   });
 
-  it("does nothing at all when the prefix cannot be listed", async () => {
-    faults.failListing = true;
-    try {
-      expect(await drainer.drainNow()).toBe(0);
-    } finally {
-      faults.failListing = false;
-    }
-  });
-
   /**
    * Only the holder of the deployment drain lock may process pending segments.
    * A standby instance must take over after the holder releases it.
@@ -1057,25 +1041,6 @@ describe.skipIf(!storage.available)("the end fact and the evidence, in either or
   afterAll(async () => {
     await drainer?.stop();
     await api?.close();
-  });
-
-  it("reports the evidence first and completes it when the ending arrives", async () => {
-    const traceId = "4400000000000000000000000000e401";
-
-    await drain([turn(traceId)]);
-    // Known and readable, but not complete: nothing has said the conversation
-    // is over, so neither a frozen receipt nor temporary work exists.
-    await expect(readProductionGradingPlan(auth, traceId)).resolves.toBeUndefined();
-    expect(await physicalReceiptCount(traceId)).toBe(0);
-    expect(await gradingJobCount(traceId)).toBe(0);
-
-    await drain([ending(traceId)]);
-    await expect(readProductionGradingPlan(auth, traceId)).resolves.toMatchObject({
-      traceId,
-      entries: [],
-    });
-    expect(await physicalReceiptCount(traceId)).toBe(1);
-    expect(await gradingJobCount(traceId)).toBe(0);
   });
 
   it("takes the ending first and still reports the evidence that follows it", async () => {

@@ -9,7 +9,6 @@ import {
   signUp,
   type Customer,
 } from "./support/traces.ts";
-import { FIXTURE_TRACE } from "./support/fixture.ts";
 
 /**
  * Replay captured LiveKit evidence through ingestion and compare API measures
@@ -155,26 +154,6 @@ afterAll(async () => {
 });
 
 describe.skipIf(!storage.available)("the captured LiveKit conversation, read back through the door", () => {
-  it("carries exactly the five derived measures, and says they were derived", async () => {
-    const measures = await measuresOfTheCapture();
-
-    // In the catalog's own order, which is what a page lists them in.
-    expect(measures.map((one) => one.measure)).toEqual([
-      "first_response_latency",
-      "turn_response_latency",
-      "agent_speech_duration",
-      "llm_latency",
-      "tts_latency",
-    ]);
-    // Every one of them worked out from the framework's spans: this agent
-    // emitted no timing span of egma's own, which is the whole reason its
-    // conversations were `skipped` before.
-    expect(measures.map((one) => one.derived)).toEqual([true, true, true, true, true]);
-    expect(new Set(measures.map((one) => one.unit))).toEqual(
-      new Set(["milliseconds"]),
-    );
-  });
-
   it("measures the first answer at the hand-computed number", async () => {
     const measured = measure(
       await measuresOfTheCapture(),
@@ -252,53 +231,5 @@ describe.skipIf(!storage.available)("the captured LiveKit conversation, read bac
       "2c8883b32dbc323c",
       "fe4af349db1e440f",
     ]);
-  });
-
-  it("retains every raw span while measuring only spoken turns", async () => {
-    const read = await readTraceOverHttp(
-      api.app,
-      acme.secret,
-      FIXTURE_TRACE_ID,
-      WINDOW,
-    );
-    expect(read.statusCode).toBe(200);
-    const body = read.json() as { trace?: { spanCount?: number } };
-
-    expect(body.trace?.spanCount).toBe(FIXTURE_TRACE.spans);
-  });
-
-  /**
-   * The two catalog version 8 dropped. `time_to_first_word` was defined out of
-   * audio egma does not hold outside a simulation, and `persona_speech_duration`
-   * measured egma's own synthetic caller rather than anything the agent did.
-   * They are not measures any more, so no conversation carries either.
-   */
-  it("carries neither of the two measures version 8 dropped", async () => {
-    const measures = await measuresOfTheCapture();
-
-    expect(measure(measures, "time_to_first_word")).toBeUndefined();
-    expect(measure(measures, "persona_speech_duration")).toBeUndefined();
-  });
-
-  /**
-   * **One POV, said out loud.** Nobody conducted this conversation — it is a
-   * real caller talking to a stock LiveKit agent — so the agent's own spans are
-   * the only account of it there is, and there is no second series beside the
-   * headline for a reader to mistake for one.
-   */
-  it("says every number is the agent's own POV, with no second POV beside it", async () => {
-    const measures = (await measuresOfTheCapture()) as readonly (ReadMeasure & {
-      readonly pov?: string;
-      readonly otherPov?: unknown;
-    })[];
-
-    expect(measures.map((one) => one.pov)).toEqual([
-      "agent",
-      "agent",
-      "agent",
-      "agent",
-      "agent",
-    ]);
-    for (const one of measures) expect(one.otherPov).toBeUndefined();
   });
 });

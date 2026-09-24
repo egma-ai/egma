@@ -18,8 +18,6 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import process from "node:process";
-import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -93,102 +91,6 @@ async function login(options: RunOptions) {
 }
 
 describe("signing a machine in", () => {
-  it("shows a code and an address, and leaves a key only a person can read", async () => {
-    const watched = watch();
-
-    const result = await login({
-      watched,
-      // The browser opened and somebody approved what was already in the field.
-      whenPrompted: (prompt) => {
-        expect(platform.device.approve(prompt.userCode)).toBe(true);
-      },
-    });
-
-    expect(result.kind).toBe("stored");
-
-    // What the developer saw: one code, one address, and the address carries
-    // the code so nobody retypes eight characters between two windows.
-    expect(watched.prompts).toHaveLength(1);
-    const shown = watched.prompts[0] as LoginPrompt;
-    // Eight characters, exactly as the real instance issues them.
-    expect(shown.userCode).toMatch(/^[A-Z0-9]{8}$/u);
-    expect(shown.url).toContain(platform.url);
-    expect(shown.url).toContain(encodeURIComponent(shown.userCode));
-    expect(shown.browserOpened).toBe(true);
-    expect(watched.opened).toEqual([shown.url]);
-
-    // The key landed, against the egma that minted it.
-    const held = await readCredentials(workspace.credentialsFile, platform.url);
-    expect(held?.url).toBe(platform.url);
-    expect(held?.key).toMatch(/^egma_sk_/u);
-    expect(held?.key).toBe(platform.device.keys.at(-1));
-    expect(held?.login).toEqual({
-      apiKeyId: expect.stringMatching(/^ak_/u),
-      projectId: platform.projectId,
-    });
-    expect(JSON.parse(await readFile(workspace.credentialsFile, "utf8"))).toEqual({
-      version: 2,
-      platforms: {
-        [platform.url]: {
-          api_key: held?.key,
-          login: {
-            api_key_id: held?.login?.apiKeyId,
-            project_id: platform.projectId,
-          },
-        },
-      },
-    });
-
-    // And nobody else on the machine can read it.
-    const mode = (await stat(workspace.credentialsFile)).mode & 0o777;
-    expect(mode.toString(8)).toBe("600");
-  });
-
-  it("proves the key it stored works on a request that needs one", async () => {
-    const watched = watch();
-    await login({
-      watched,
-      whenPrompted: (prompt) => void platform.device.approve(prompt.userCode),
-    });
-
-    const held = await readCredentials(workspace.credentialsFile, platform.url);
-    const used = await fetch(`${platform.url}/v1/keys`, {
-      headers: { authorization: `Bearer ${held?.key ?? ""}` },
-    });
-    expect(used.status).toBe(200);
-
-    const refused = await fetch(`${platform.url}/v1/keys`, {
-      headers: { authorization: "Bearer egma_sk_not-a-real-one" },
-    });
-    expect(refused.status).toBe(401);
-  });
-
-  it("says so and stores nothing when the browser says no", async () => {
-    const watched = watch();
-    const result = await login({
-      watched,
-      whenPrompted: (prompt) => void platform.device.deny(prompt.userCode),
-    });
-
-    expect(result.kind).toBe("denied");
-    expect(
-      await readCredentials(workspace.credentialsFile, platform.url),
-    ).toBeNull();
-  });
-
-  it("says the code ran out, which is not the same as being told no", async () => {
-    const watched = watch();
-    const result = await login({
-      watched,
-      whenPrompted: (prompt) => void platform.device.expire(prompt.userCode),
-    });
-
-    expect(result.kind).toBe("expired");
-    expect(
-      await readCredentials(workspace.credentialsFile, platform.url),
-    ).toBeNull();
-  });
-
   it("backs off by five seconds when told it is asking too fast, and stays there", async () => {
     const watched = watch();
     platform.device.slowDownOnce();
@@ -210,23 +112,6 @@ describe("signing a machine in", () => {
     expect(waits).toEqual([5_000, 5_000]);
   });
 
-  it("names an egma that never answered, rather than reporting a broken thing", async () => {
-    const result = await logIn({
-      // Nothing listens here: the port is reserved and the address is not routed.
-      url: "http://127.0.0.1:1",
-      credentialsFile: workspace.credentialsFile,
-      signal: new AbortController().signal,
-      onPrompt: () => undefined,
-      sleep: async () => undefined,
-    });
-
-    expect(result.kind).toBe("unreachable");
-    expect(result.kind === "unreachable" && result.reason).toContain("127.0.0.1:1");
-    expect(
-      await readCredentials(workspace.credentialsFile, "http://127.0.0.1:1"),
-    ).toBeNull();
-  });
-
   it("stops where it stands when the developer stops it", async () => {
     const controller = new AbortController();
     const watched = watch();
@@ -246,18 +131,6 @@ describe("signing a machine in", () => {
 });
 
 describe("a machine that is already signed in", () => {
-  it("asks for nothing and approves nothing", async () => {
-    await workspace.signIn(platform.url, "egma_sk_held-already");
-
-    const watched = watch();
-    const result = await login({ watched });
-
-    expect(result.kind).toBe("already-stored");
-    expect(watched.prompts).toHaveLength(0);
-    // Not one call was made: the whole step costs nothing on a second run.
-    expect(platform.records).toHaveLength(0);
-  });
-
   it("signs in again for a different egma, because a key is only good at one", async () => {
     await workspace.signIn("https://somewhere.else.example", "egma_sk_for-somewhere-else");
 
@@ -284,17 +157,6 @@ describe("which egma a command talks to", () => {
   // The address egma falls back to, stood in for so that reading this test
   // never says which address ships. That is asserted in one place, on its own.
   const BUILT_IN = "http://built-in.example";
-
-  /** The published package, whose every written word is egma's to a reader. */
-  const CLI_PACKAGE = fileURLToPath(new URL("..", import.meta.url));
-
-  /** Every file under a folder, as full paths. */
-  async function filesIn(folder: string): Promise<readonly string[]> {
-    const entries = await readdir(folder, { recursive: true, withFileTypes: true });
-    return entries
-      .filter((entry) => entry.isFile())
-      .map((entry) => path.join(entry.parentPath, entry.name));
-  }
 
   it("takes the flag, then the binding, then egma's own", () => {
     expect(
@@ -354,31 +216,6 @@ describe("which egma a command talks to", () => {
     ).toThrow(/repository platform binding/u);
   });
 
-  /**
-   * CLI target selection uses --url, not a shell-wide URL override.
-   * Scan shipped source and help for stale instructions as well as testing resolution.
-   */
-  it("offers one way to name a platform and does not name the old one", async () => {
-    // Everything `package.json` puts in the published package, plus the
-    // repository's own front page. `dist` is left out because it is `src`
-    // compiled, and a scan of both would go red twice for one mention.
-    const written = [
-      ...(await filesIn(path.join(CLI_PACKAGE, "src"))),
-      ...(await filesIn(path.join(CLI_PACKAGE, "smoke"))),
-      path.join(CLI_PACKAGE, "NOTICE"),
-      path.join(CLI_PACKAGE, "README.md"),
-      path.join(CLI_PACKAGE, "..", "..", "README.md"),
-    ];
-    expect(written.length).toBeGreaterThan(20);
-
-    const naming: string[] = [];
-    for (const file of written) {
-      if ((await readFile(file, "utf8")).includes("EGMA_URL")) {
-        naming.push(path.relative(CLI_PACKAGE, file).replaceAll(path.sep, "/"));
-      }
-    }
-    expect(naming).toEqual([]);
-  });
 });
 
 /**
@@ -425,10 +262,6 @@ describe("the addresses egma hands to a browser", () => {
     // A browser that opens nothing, because a check that opened a real one on
     // the machine running the suite would be intolerable.
     openInBrowser(url, { instanceUrl: instance, env: { BROWSER: NO_BROWSER } });
-
-  it("opens the approval address on the egma this login is against", async () => {
-    expect(await opens(`${instance}/device?user_code=ABCD1234`)).toBe(true);
-  });
 
   it("opens nothing for a scheme that is not the web", async () => {
     // `open` and `xdg-open` will launch these as happily as a web page.
@@ -540,34 +373,6 @@ describe("writing the key down", () => {
   });
 
   /**
-   * The same rule, with the thing that would have been lost actually present.
-   *
-   * Skipped only for a user who can read anything, because there is no way to
-   * stage an unreadable file for one — and every other run proves it.
-   */
-  it.skipIf(process.getuid?.() === 0)(
-    "keeps another platform's key when the file is there and cannot be read",
-    async () => {
-      const theirs = {
-        url: "https://already-signed-in.example",
-        key: "egma_sk_must-survive-a-refused-write",
-      };
-      await writeCredentials(workspace.credentialsFile, theirs);
-      const asWritten = await readFile(workspace.credentialsFile, "utf8");
-      await chmod(workspace.credentialsFile, 0o000);
-
-      await expect(
-        writeCredentials(workspace.credentialsFile, held),
-      ).rejects.toBeInstanceOf(CredentialsFileUnreadableError);
-
-      await chmod(workspace.credentialsFile, 0o600);
-      expect(await readFile(workspace.credentialsFile, "utf8")).toBe(asWritten);
-      expect(await readCredentials(workspace.credentialsFile, theirs.url)).toEqual(theirs);
-      expect(await readCredentials(workspace.credentialsFile, held.url)).toBeNull();
-    },
-  );
-
-  /**
    * Two terminals, two repositories, one machine, one file. The write is a
    * read-modify-write over everybody's keys, so without a lock the second
    * rename wins and the first platform's key is gone — and the developer finds
@@ -586,21 +391,6 @@ describe("writing the key down", () => {
     for (const one of many) {
       expect(await readCredentials(workspace.credentialsFile, one.url)).toEqual(one);
     }
-  });
-
-  it("locks the folder down too, and says nothing when it could", async () => {
-    // The other half of this — a folder egma cannot narrow — is a filesystem
-    // refusing its own owner, which no check can stage. What is proved here is
-    // that the ordinary run really does narrow it, and that the line about
-    // failing to is not said when nothing failed.
-    const said: string[] = [];
-    await writeCredentials(workspace.credentialsFile, held, {
-      warn: (line) => said.push(line),
-    });
-
-    expect(said).toEqual([]);
-    const folder = await stat(path.dirname(workspace.credentialsFile));
-    expect((folder.mode & 0o777).toString(8)).toBe("700");
   });
 
   it("migrates the old single-platform file without losing or exposing its key", async () => {

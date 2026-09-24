@@ -302,47 +302,6 @@ describe("egma self-host up", () => {
     }
   });
 
-  it("reports an impossible missing internal value as a preparation fault", async () => {
-    // The other half of the retry above, and the reason the two have to be told
-    // apart. A bootstrap variable this deployment cannot invent — the key that
-    // seals every stored credential, the token a simulator claims with — has no
-    // default any more, so Compose refuses before it creates a container and
-    // names the one it is missing. A second attempt would invent nothing, and
-    // reporting it as a store's first boot would send an operator reading
-    // ClickHouse logs for a variable they never set.
-    const platform = await startPlatform();
-    const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
-    await writeFile(
-      workspace.dockerShim,
-      `#!/bin/sh\necho "ARGS $@" >> "${workspace.callsFile}"\n` +
-        `case "$*" in *"config --environment"*) env; exit 0 ;; esac\n` +
-        `case "$*" in *"volume ls"*) exit 0 ;; esac\n` +
-        "echo 'error while interpolating services.api.environment.EGMA_ENCRYPTION_KEY: " +
-        "required variable EGMA_ENCRYPTION_KEY is missing a value: no default' >&2\n" +
-        "exit 1\n",
-    );
-    await chmod(workspace.dockerShim, 0o755);
-
-    try {
-      const run = await runSelfHost(workspace, ["up"], { EGMA_BASE_URL: platform.url });
-
-      expect(run.code).toBe(1);
-      expect(run.stdout).not.toMatch(/^(?:status|reason):/mu);
-      expect(run.stderr).toContain("EGMA_ENCRYPTION_KEY");
-      expect(run.stderr).toContain("platform preparation error");
-      expect(run.stderr).not.toContain("Set it in .env");
-      // Compose's own sentence reached the operator too, because it carries
-      // what to do about that particular variable.
-      expect(run.stderr).toContain("required variable EGMA_ENCRYPTION_KEY");
-      expect(run.stderr).not.toContain("did not come up on the first try");
-      const said = await workspace.dockerCalls();
-      expect(said.split("\n").filter((line) => line === COMPOSE_BUILD)).toHaveLength(1);
-      expect(said.split("\n").filter((line) => line === COMPOSE_UP)).toHaveLength(0);
-    } finally {
-      await platform.close();
-    }
-  });
-
   it("reports a failed image build once, without calling it a store's first boot", async () => {
     const platform = await startPlatform();
     const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);

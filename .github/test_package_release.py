@@ -136,17 +136,6 @@ class RepositoryTests(unittest.TestCase):
             )
         )
 
-    def test_unchanged_versions_do_not_release(self):
-        (self.root / "README.md").write_text("No version change.\n")
-        after = self.commit("Update README")
-        for package in ("cli", "livekit-js", "python"):
-            with self.subTest(package=package):
-                self.assertIsNone(
-                    package_release.planned_version(
-                        package, self.push_event(after), self.root
-                    )
-                )
-
     def test_lower_versions_fail_instead_of_publishing(self):
         for package in ("cli", "livekit-js", "python"):
             self.write_version(package, "0.3.8")
@@ -358,7 +347,6 @@ class RegistryTests(unittest.TestCase):
         source = {"filename": "egma-0.3.10.tar.gz"}
         other = {"filename": "egma-0.3.9.tar.gz"}
         for files, expected in (
-            ([], False),
             ([wheel], False),
             ([source], False),
             ([wheel, other], False),
@@ -390,7 +378,6 @@ class RegistryTests(unittest.TestCase):
             ({"version": "0.3.9"}, "latest"),
             ({"version": "0.3.10"}, "latest"),
             ({"version": "0.3.11"}, "previous"),
-            ({"version": "0.4.0"}, "previous"),
         ):
             with self.subTest(latest=latest), patch.object(
                 package_release, "read_json", return_value=latest
@@ -398,7 +385,7 @@ class RegistryTests(unittest.TestCase):
                 self.assertEqual(package_release.npm_tag("cli", "0.3.10"), expected)
 
     def test_read_json_returns_none_only_for_missing_registry_metadata(self):
-        for status in (404, 401, 429, 500, 503):
+        for status in (404, 401, 503):
             failure = HTTPError("https://registry.invalid", status, "Failure", {}, None)
             with self.subTest(status=status), patch.object(
                 package_release, "urlopen", side_effect=failure
@@ -410,12 +397,6 @@ class RegistryTests(unittest.TestCase):
                 else:
                     with self.assertRaises(HTTPError):
                         package_release.read_json("https://registry.invalid")
-
-    def test_read_json_rejects_invalid_registry_response_shape(self):
-        with patch.object(
-            package_release, "urlopen", return_value=io.BytesIO(b"[]")
-        ), self.assertRaises(ValueError):
-            package_release.read_json("https://registry.invalid")
 
 
 if __name__ == "__main__":

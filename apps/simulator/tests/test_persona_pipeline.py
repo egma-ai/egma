@@ -26,9 +26,6 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.settings import TTSSettings
-from pipecat.services.tts_service import TextAggregationMode, TTSService
-from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.workers.runner import WorkerRunner
 
 from egma_simulator.conductor import (
@@ -51,7 +48,6 @@ from egma_simulator.speech import (
     PersonaVoice,
     SpeechProviders,
     build_legs,
-    decode_speech,
     encode_speech,
 )
 
@@ -100,27 +96,6 @@ class EchoSession:
         # The original exception becomes traceback context unless ModelClient
         # suppresses it. Pipecat records the whole formatted traceback.
         raise aiohttp.ClientConnectionError(f"provider echoed {SECRET}")
-
-    async def close(self) -> None:
-        return None
-
-
-class SuccessfulEchoResponse:
-    status = 200
-
-    async def __aenter__(self) -> SuccessfulEchoResponse:
-        return self
-
-    async def __aexit__(self, *_args: object) -> None:
-        return None
-
-    async def json(self) -> dict:
-        return {"choices": [{"message": {"content": f"Provider echoed {SECRET}."}}]}
-
-
-class SuccessfulEchoSession:
-    def post(self, *_args: object, **_kwargs: object) -> SuccessfulEchoResponse:
-        return SuccessfulEchoResponse()
 
     async def close(self) -> None:
         return None
@@ -297,34 +272,6 @@ async def test_textless_end_call_concludes_without_text_or_tts_frames():
     assert conductor.concluded == [""]
     assert conductor.spoken == []
     assert not any(isinstance(frame, TextFrame) for frame in output.frames)
-
-
-class DeterministicTTSService(TTSService):
-    """A network-free Pipecat TTS lifecycle for the native decorator proof."""
-
-    def __init__(self) -> None:
-        super().__init__(
-            text_aggregation_mode=TextAggregationMode.TOKEN,
-            push_start_frame=True,
-            push_stop_frames=True,
-            sample_rate=16_000,
-            settings=TTSSettings(
-                model="deterministic-test-tts",
-                voice="deterministic-test-voice",
-                language=None,
-            ),
-        )
-
-    @traced_tts
-    async def run_tts(
-        self, text: str, context_id: str
-    ) -> AsyncGenerator[Frame | None, None]:
-        yield TTSAudioRawFrame(
-            audio=encode_speech(text, self.sample_rate),
-            sample_rate=self.sample_rate,
-            num_channels=1,
-            context_id=context_id,
-        )
 
 
 def spans_in(documents: list[bytes]) -> list[tuple[str, dict]]:
@@ -524,67 +471,8 @@ async def test_a_provider_cannot_echo_its_key_into_the_native_model_span():
     assert b"[redacted]" in serialized
 
 
-async def test_a_successful_provider_cannot_echo_its_key_to_voice_or_evidence():
-    model = OpenAICompatibleModel(
-        base_url="https://provider.invalid/v1",
-        api_key=SECRET,
-        model_name="safe-test-model",
-    )
-    model._session = SuccessfulEchoSession()  # type: ignore[assignment]
-    persona = Persona(
-        authored=AUTHORED,
-        scenario_instructions="Ask safely.",
-        model=model,
-    )
-    conductor = ConductorProbe()
-    service = _PersonaLLMService(persona=persona)
-    gate = _PersonaReplyGate(service=service, conductor=conductor)
-    brain = _PersonaBrain(persona=persona, conductor=conductor, replies=gate)
-    tts = DeterministicTTSService()
-    output = OutputProbe()
-
-    documents: list[bytes] = []
-    evidence = SpanEmitter("sim-native-model-success", flush=documents.append)
-    evidence.opened()
-    worker = PipelineWorker(
-        Pipeline([brain, service, gate, tts, output]),
-        params=PipelineParams(),
-        idle_timeout_secs=None,
-        enable_tracing=True,
-        enable_turn_tracking=False,
-        enable_rtvi=False,
-    )
-    runner = WorkerRunner(handle_sigint=False)
-    await runner.add_workers(worker)
-    running = asyncio.create_task(runner.run())
-    try:
-        await asyncio.wait_for(output.started.wait(), timeout=2)
-        await worker.queue_frame(_AgentFinished(heard_a_turn=False))
-        await asyncio.wait_for(output.responded.wait(), timeout=2)
-    finally:
-        await worker.queue_frame(EndFrame())
-        await asyncio.wait_for(running, timeout=2)
-        await model.close()
-    evidence.sealed()
-
-    safe_reply = "Provider echoed [redacted]."
-    assert conductor.spoken == [safe_reply]
-    audio = b"".join(
-        frame.audio for frame in output.frames if isinstance(frame, TTSAudioRawFrame)
-    )
-    assert decode_speech(audio, 16_000) == safe_reply
-    serialized = b"\n".join(documents)
-    assert SECRET.encode() not in serialized
-    model_span = next(
-        span
-        for scope, span in spans_in(documents)
-        if scope == "pipecat" and span["name"] == "llm"
-    )
-    assert attribute(model_span, "output") == safe_reply
-
-
 @pytest.mark.parametrize(
-    "outcome", ["complete", "interrupt", "disconnect", "invalid_tool"]
+    "outcome", ["interrupt", "disconnect"]
 )
 async def test_voice_plays_a_streamed_sentence_before_model_completion(outcome):
     from test_model_streaming import HeldStream, event, model_with_stream

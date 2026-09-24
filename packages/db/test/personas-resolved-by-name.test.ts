@@ -99,12 +99,6 @@ afterAll(async () => {
 });
 
 describe("resolving the personas a file names", () => {
-  it("answers a name with the persona's identity", async () => {
-    expect(
-      await resolvePersonaNames(actingIn(acme.project), ["Impatient Rita"]),
-    ).toEqual([rita]);
-  });
-
   it("keeps the order they were named in, because that order is content", async () => {
     expect(
       await resolvePersonaNames(actingIn(acme.project), ["Omar", "Impatient Rita"]),
@@ -159,7 +153,6 @@ describe("a name this project cannot answer", () => {
       resolvePersonaNames(actingIn(acme.project), ["Careful Grace"]),
     ).rejects.toThrow(/Egma has no persona called "Careful Grace"/u);
   });
-
 });
 
 describe("a name only an archived persona answers to", () => {

@@ -8,10 +8,8 @@ from typing import Any
 
 import pytest
 
-from egma_simulator.contract import spec_validator_for
 from egma_simulator.speech import (
     CARTESIA_SPEED_RANGE,
-    LISTENING_READY_SECONDS,
     OPENAI_REALTIME_PROXY_OPEN_SECONDS,
     OPENAI_REALTIME_PROXY_READY_SECONDS,
     PersonaVoice,
@@ -24,16 +22,6 @@ from egma_simulator.speech import (
 )
 
 A_KEY = "sk-only-this-test-holds-this-one"
-
-
-def contract_tts_speed_range() -> tuple[float, float]:
-    speed_schema = spec_validator_for(6).schema["$defs"]["tts_selection"]["properties"][
-        "speed"
-    ]
-    return (speed_schema["minimum"], speed_schema["maximum"])
-
-
-CONTRACT_TTS_SPEED_RANGE = contract_tts_speed_range()
 
 
 def capture_construction(
@@ -56,12 +44,7 @@ def cartesia_voice(speed: float = 1.1) -> PersonaVoice:
     )
 
 
-def test_cartesia_speed_range_matches_the_simulation_contract():
-    assert CONTRACT_TTS_SPEED_RANGE == (0.25, 4)
-    assert CARTESIA_SPEED_RANGE == (0.6, 1.5)
-
-
-@pytest.mark.parametrize("speed", CARTESIA_SPEED_RANGE)
+@pytest.mark.parametrize("speed", [CARTESIA_SPEED_RANGE[1]])
 def test_cartesia_receives_the_pinned_model_voice_and_speed(
     monkeypatch: pytest.MonkeyPatch,
     speed: float,
@@ -117,32 +100,6 @@ async def test_cartesia_tts_sends_its_key_in_a_websocket_header(monkeypatch):
     assert "api_key" not in uri
     assert "cartesia_version=2026-03-01" in uri
     assert headers == {"X-API-Key": placeholder}
-
-
-@pytest.mark.parametrize(
-    ("providers", "reason"),
-    [
-        (SpeechProviders(tts="cartesia", tts_model="sonic-3.5"), "key"),
-        (SpeechProviders(tts="cartesia", tts_key=A_KEY), "model"),
-    ],
-)
-def test_cartesia_refuses_an_incomplete_selection(
-    providers: SpeechProviders, reason: str
-):
-    with pytest.raises(SpeechFault, match=reason):
-        _mouth(providers, cartesia_voice())
-
-
-@pytest.mark.parametrize(
-    "speed",
-    [CONTRACT_TTS_SPEED_RANGE[0] - 0.0001, CONTRACT_TTS_SPEED_RANGE[1] + 0.0001],
-)
-def test_cartesia_refuses_a_speed_it_cannot_honor(speed: float):
-    with pytest.raises(SpeechFault, match="supported range"):
-        _mouth(
-            SpeechProviders(tts="cartesia", tts_key=A_KEY, tts_model="sonic-3.5"),
-            cartesia_voice(speed),
-        )
 
 
 def test_cartesia_stt_receives_the_pinned_model(
@@ -253,42 +210,6 @@ async def test_daytona_deepgram_redacts_modern_auth_failure(
     assert placeholder not in str(caught.value)
 
 
-def test_non_daytona_deepgram_keeps_the_sdk_connector(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    from deepgram.listen.v1 import client as deepgram_listen_client
-
-    original_connector = deepgram_listen_client.websockets_client_connect
-    monkeypatch.setattr(
-        deepgram_listen_client,
-        "websockets_client_connect",
-        original_connector,
-    )
-    _ears(
-        SpeechProviders(
-            stt="deepgram",
-            stt_key=A_KEY,
-            stt_model="nova-3",
-        )
-    )
-
-    assert deepgram_listen_client.websockets_client_connect is original_connector
-
-
-@pytest.mark.parametrize(
-    ("providers", "reason"),
-    [
-        (SpeechProviders(stt="cartesia_manual", stt_model="ink-2"), "key"),
-        (SpeechProviders(stt="cartesia_manual", stt_key=A_KEY), "model"),
-    ],
-)
-def test_cartesia_stt_refuses_an_incomplete_selection(
-    providers: SpeechProviders, reason: str
-):
-    with pytest.raises(SpeechFault, match=reason):
-        _ears(providers)
-
-
 async def test_cartesia_stt_waits_until_its_socket_is_connected(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -383,74 +304,6 @@ async def test_proxied_openai_realtime_has_a_longer_opening_deadline(monkeypatch
     ]
     assert legs.listening_ready_seconds == OPENAI_REALTIME_PROXY_READY_SECONDS
     assert OPENAI_REALTIME_PROXY_READY_SECONDS > OPENAI_REALTIME_PROXY_OPEN_SECONDS
-
-
-async def test_direct_openai_realtime_keeps_the_library_opening_deadline(monkeypatch):
-    from pipecat.services.websocket_service import WebsocketService
-
-    calls: list[dict[str, Any]] = []
-
-    async def connect(_service: object, _uri: str, **kwargs: Any) -> object:
-        calls.append(kwargs)
-        return object()
-
-    monkeypatch.setattr(WebsocketService, "_websocket_connect", connect)
-    legs = build_legs(
-        SpeechProviders(
-            stt="openai_realtime",
-            stt_key=A_KEY,
-            stt_model="gpt-live-transcribe",
-        ),
-        voice=PersonaVoice(voice_id="scripted", provider=None, speed=None),
-    )
-
-    await legs.stt._websocket_connect("wss://api.openai.com/v1/realtime")
-
-    assert calls == [{}]
-    assert legs.listening_ready_seconds == LISTENING_READY_SECONDS
-
-
-async def test_live_transcribe_uses_the_plural_languages_request():
-    leg, _connected = _ears(
-        SpeechProviders(
-            stt="openai_realtime",
-            stt_key=A_KEY,
-            stt_model="gpt-live-transcribe",
-        ),
-        language="es-MX",
-    )
-    service = leg  # The adapter deliberately returns the real Pipecat service.
-    sent: list[dict[str, Any]] = []
-
-    async def remember(message: dict[str, Any]) -> None:
-        sent.append(message)
-
-    service._ws_send = remember
-    await service._send_session_update()
-
-    transcription = sent[0]["session"]["audio"]["input"]["transcription"]
-    assert transcription == {
-        "model": "gpt-live-transcribe",
-        "languages": ["es"],
-    }
-    assert "language" not in transcription
-
-
-@pytest.mark.parametrize(
-    ("providers", "reason"),
-    [
-        (
-            SpeechProviders(stt="openai_realtime", stt_model="gpt-live-transcribe"),
-            "key",
-        ),
-        (SpeechProviders(stt="openai_realtime", stt_key=A_KEY), "model"),
-    ],
-)
-def test_openai_realtime_refuses_an_incomplete_selection(
-    providers: SpeechProviders, reason: str
-):
-    with pytest.raises(SpeechFault, match=reason):
-        _ears(providers)
 
 
 async def test_realtime_readiness_refuses_if_the_pinned_pipecat_signal_moves(

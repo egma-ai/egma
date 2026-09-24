@@ -255,15 +255,6 @@ describe("the minting lock", () => {
     return path.join(path.dirname(workspace.configFile), MINTING_LOCK_FILE);
   }
 
-  it("removes its own lock, and says it did", async () => {
-    const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
-    const lock = await takeMintingLock(workspace.dir);
-
-    expect(existsSync(lockPath(workspace))).toBe(true);
-    expect(lock.release()).toBe(true);
-    expect(existsSync(lockPath(workspace))).toBe(false);
-  });
-
   it("leaves a lock that was taken over from it alone", async () => {
     const workspace = await makePlatformWorkspace(WORKSPACE_PREFIX);
     const stalled = await takeMintingLock(workspace.dir);

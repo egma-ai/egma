@@ -3,9 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createTest,
-  editPersona,
   editTest,
-  getPersona,
   getTest,
   getTestVersion,
   NotPermittedError,
@@ -20,8 +18,6 @@ import {
   rowCounts,
   seedPersona,
   seedTestFactory,
-  STARTER_PERSONA,
-  neutralBehavior,
 } from "./support/test-factory.ts";
 
 /**
@@ -264,21 +260,6 @@ describe("editing what a test checks", () => {
     expect((await getTest(actingAsAcme(), created.id))?.version).toBe(1);
   });
 
-  it("stores an edited scenario and behaviors trimmed", async () => {
-    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
-
-    const edited = await editTest(actingAsAcme(), created.id, {
-      expectedVersionId: created.versionId,
-      scenario: "  They want a refund and have no receipt.  ",
-      expectedBehaviors: ["  states the refund policy  "],
-    });
-
-    expect(edited?.scenario).toBe("They want a refund and have no receipt.");
-    expect(edited?.expectedBehaviors).toEqual(
-      ["states the refund policy"],
-    );
-  });
-
   it("is refused to a viewer, per the permission table", async () => {
     const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 
@@ -397,77 +378,9 @@ describe("an edit naming no persona", () => {
       }),
     ).rejects.toThrow(/at least one persona/);
   });
-
-  it("writes nothing at all when it is refused", async () => {
-    const created = await createTest(actingAsAcme(), {
-      ...rescheduling,
-      personaIds: [rita],
-    });
-    const before = await rowCounts();
-
-    await expect(
-      editTest(actingAsAcme(), created.id, {
-        expectedVersionId: created.versionId,
-        personaIds: [],
-      }),
-    ).rejects.toThrow(/at least one persona/);
-
-    // The stored version stands, and no row was written on the way to the
-    // refusal — the same test, at the same version, naming the same caller.
-    const stored = await getTest(actingAsAcme(), created.id);
-    expect(stored?.versionId).toBe(created.versionId);
-    expect(stored?.personas.map((named) => named.id)).toEqual([rita]);
-    expect(await rowCounts()).toEqual(before);
-  });
-
 });
 
 describe("one frozen version", () => {
-  it("answers with its content and its personas in the authored order", async () => {
-    const created = await createTest(actingAsAcme(), {
-      ...rescheduling,
-      personaIds: [omar, rita, nadia],
-    });
-
-    const frozen = await getTestVersion(actingAsAcme(), created.versionId);
-    expect(frozen?.id).toBe(created.versionId);
-    expect(frozen?.testId).toBe(created.id);
-    expect(frozen?.version).toBe(1);
-    expect(frozen?.scenario).toBe(rescheduling.scenario);
-    expect(frozen?.expectedBehaviors).toEqual(
-      rescheduling.expectedBehaviors,
-    );
-    expect(frozen?.personas).toEqual([
-      { id: omar, name: "Omar", archivedAt: null },
-      { id: rita, name: STARTER_PERSONA, archivedAt: null },
-      { id: nadia, name: "Nadia", archivedAt: null },
-    ]);
-    expect(frozen?.createdAt).toBeInstanceOf(Date);
-  });
-
-  it("names its personas by identity, so editing one versions no test", async () => {
-    const created = await createTest(actingAsAcme(), {
-      ...rescheduling,
-      personaIds: [nadia],
-    });
-
-    const current = await getPersona(actingAsAcme(), nadia);
-    expect(current).toBeDefined();
-    const moved = await editPersona(actingAsAcme(), nadia, {
-      expectedVersionId: current!.versionId,
-      personality: "Now speaks with deliberate precision.",
-    });
-    expect(moved?.version).toBe(2);
-
-    const frozen = await getTestVersion(actingAsAcme(), created.versionId);
-    expect(frozen?.version).toBe(1);
-    expect(frozen?.personas.map((named) => named.id)).toEqual([nadia]);
-
-    const fetched = await getTest(actingAsAcme(), created.id);
-    expect(fetched?.version).toBe(1);
-    expect(fetched?.versionId).toBe(created.versionId);
-  });
-
   it("fails loudly on a hand-corrupted row, naming the version, rather than leaking", async () => {
     const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
 

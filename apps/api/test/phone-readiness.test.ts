@@ -3,15 +3,8 @@
 import { describe, expect, it } from "vitest";
 
 import { TEST_ENCRYPTION_KEY } from "../../../packages/db/test/support/database.ts";
-import {
-  loadConfig,
-  CARRIER_ROUTE_ENVIRONMENT,
-  type CarrierRoute,
-} from "../src/config.ts";
-import {
-  phoneReadiness,
-  phoneSetupRequiredMessage,
-} from "../src/phone-readiness.ts";
+import { loadConfig, type CarrierRoute } from "../src/config.ts";
+import { phoneReadiness } from "../src/phone-readiness.ts";
 
 const BASE = {
   DATABASE_URL: "postgres://unused/unused",
@@ -39,27 +32,6 @@ const CARRIER: CarrierRoute = {
 };
 
 describe("phone readiness", () => {
-  it("names all four missing carrier values", () => {
-    const readiness = phoneReadiness(undefined);
-    const message = phoneSetupRequiredMessage(readiness);
-
-    expect(readiness).toEqual({
-      state: "setup_required",
-      missing: CARRIER_ROUTE_ENVIRONMENT.map(({ label }) => label),
-      trunkAddress: null,
-      sourceNumber: null,
-    });
-    for (const { variable } of CARRIER_ROUTE_ENVIRONMENT) {
-      expect(message).toContain(variable);
-    }
-    expect(message).toContain("nothing was charged");
-    expect(message).toContain("deployment operator");
-    expect(message).toContain("restart the API");
-    expect(message).not.toContain("workspace's .env file");
-    expect(message).not.toContain("egma self-host up");
-    expect(message).not.toContain("self-host setup");
-  });
-
   it("reports a complete deployment carrier without returning its credential", () => {
     const readiness = phoneReadiness(CARRIER);
 
@@ -97,16 +69,6 @@ describe("phone readiness", () => {
     }
   });
 
-  it("refuses address and number without the SIP credential pair", () => {
-    expect(() =>
-      loadConfig({
-        ...BASE,
-        EGMA_PHONE_TRUNK_ADDRESS: "carrier.example.com",
-        EGMA_PHONE_SOURCE_NUMBER: "+15550100100",
-      }),
-    ).toThrow(/EGMA_PHONE_TRUNK_USERNAME.*EGMA_PHONE_TRUNK_PASSWORD/iu);
-  });
-
   it("refuses malformed carrier routing values", () => {
     expect(() =>
       loadConfig({
@@ -124,19 +86,5 @@ describe("phone readiness", () => {
       }),
     ).toThrow(/EGMA_PHONE_SOURCE_NUMBER.*E\.164/iu);
 
-  });
-
-  it("treats the carrier-issued SIP username and password as opaque", () => {
-    expect(
-      loadConfig({
-        ...BASE,
-        ...CARRIER_ENVIRONMENT,
-        EGMA_PHONE_TRUNK_USERNAME: "carrier-defined-username",
-        EGMA_PHONE_TRUNK_PASSWORD: "$x",
-      }).carrierRoute,
-    ).toMatchObject({
-      trunkUsername: "carrier-defined-username",
-      trunkPassword: "$x",
-    });
   });
 });

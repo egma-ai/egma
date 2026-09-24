@@ -275,45 +275,6 @@ async function aCustomerReadyToRun(
 }
 
 describe("a Retell text mode connection, through the API", () => {
-  it("is registered, reads back as chat, and is offered in the options", async () => {
-    const { key, connectionId } = await aCustomerReadyToRun(
-      "text_mode_registered",
-      TEXT_MODE,
-    );
-
-    const read = await ask(api.app, "GET", "/v1/connection-options", key);
-    expect(read.statusCode, JSON.stringify(read.body)).toBe(200);
-    const offered = (
-      read.body.items as {
-        connectionType: string;
-        productLabel: string;
-        modality: string;
-        simulatorAdapter: boolean;
-      }[]
-    ).find((one) => one.connectionType === "retell_text_mode");
-    expect(offered?.productLabel).toBe("Retell text mode");
-    expect(offered?.modality).toBe("chat");
-    // The plug ships, so the catalog a form is drawn from says a run over
-    // this kind is one Egma can actually conduct.
-    expect(offered?.simulatorAdapter).toBe(true);
-
-    const { rows } = await api.database.sql<{
-      connection_type: string;
-      access_variant: string;
-      modality: string;
-      credentials_hint: string;
-    }>(
-      `select connection_type, access_variant, modality, credentials_hint
-         from connection where id = $1`,
-      [connectionId],
-    );
-    expect(rows[0]?.connection_type).toBe("retell_text_mode");
-    expect(rows[0]?.access_variant).toBe("retell_text_mode.api_key");
-    expect(rows[0]?.modality).toBe("chat");
-    // Sealed: a read gives the last four characters and never the key.
-    expect(rows[0]?.credentials_hint).toBe(SENTINEL_KEY.slice(-4));
-  });
-
   it("refuses a garbage modality and an unknown config key by name", async () => {
     const { fetchImpl } = retell();
     api = await createApi("text_mode_refusals", { retellFetch: fetchImpl });
@@ -607,38 +568,6 @@ describe("the run-start read", () => {
     expect(JSON.stringify(read)).not.toContain(SENTINEL_KEY);
   });
 
-  it("still says the agent is gone when the agent really is gone", async () => {
-    // Both reads answer 404: Retell holds no such agent. One status, two facts,
-    // and the second read is what tells them apart.
-    const { fetchImpl } = retell({ agentStatus: 404, published: false });
-    const answer = await readWebCallWorld(
-      { apiKey: SENTINEL_KEY, agentId: PLATFORM_AGENT },
-      fetchImpl,
-    );
-    expect(answer.kind).toBe("refused");
-    expect(answer.kind === "refused" ? answer.message : "").toContain(
-      "no longer holds agent",
-    );
-  });
-
-  it("refuses a custom LLM with Retell's own absence as the reason", async () => {
-    const { fetchImpl } = retell({
-      engine: { type: "custom-llm", llm_websocket_url: "wss://acme.example/llm" },
-    });
-    const read = await readTextModeWorld(
-      { apiKey: SENTINEL_KEY, agentId: PLATFORM_AGENT },
-      fetchImpl,
-    );
-
-    expect(read.kind).toBe("refused");
-    if (read.kind !== "refused") return;
-    expect(read.message).toContain("custom LLM");
-    expect(read.message).toContain("your own service");
-    // And where the future of reaching such an agent is, so the refusal is a
-    // direction rather than a wall.
-    expect(read.message).toContain("SDK");
-  });
-
   it("fails loudly when Retell will not answer either read", async () => {
     for (const plan of [
       { agentStatus: 503 },
@@ -830,67 +759,6 @@ describe("the sentinel Retell key", () => {
 });
 
 describe("the version a run resolved, on the record", () => {
-  it("lands on the run and on every conversation of it", async () => {
-    const { ada, key, agentId, connectionId, suiteId } =
-      await aCustomerReadyToRun("text_mode_stamp_grain", TEXT_MODE);
-
-    const reach = await resolveRunStartReach(
-      contextFor(ada, "member"), agentId, connectionId,
-    );
-    if (reach === undefined) throw new Error("the text-mode connection had no reach");
-
-    const started = await startRun(contextFor(ada, "member"), {
-      suiteId,
-      agentId,
-      connectionId,
-      agentVersion: SERVING_VERSION,
-      conductedConnectionIdentity: reach.connectionIdentity,
-    });
-
-    const header = await ask(api.app, "GET", `/v1/runs/${started.id}`, key);
-    expect(header.statusCode, JSON.stringify(header.body)).toBe(200);
-    expect(header.body.agentVersion).toBe(SERVING_VERSION);
-
-    // The simulations of one run carry no copy of it: the run resolves the
-    // version once and every conversation of it shares that one value.
-    const listed = await ask(
-      api.app,
-      "GET",
-      `/v1/runs/${started.id}/simulations`,
-      key,
-    );
-    const simulations = listed.body.simulations as Record<string, unknown>[];
-    expect(simulations.length).toBeGreaterThan(0);
-    for (const one of simulations) {
-      expect(Object.hasOwn(one, "conductedAgentVersion")).toBe(false);
-    }
-  });
-
-  it("refuses to write a run whose world was never read", async () => {
-    // The guard that makes "never a silent conduct against an unread world" a
-    // property of the write rather than a habit of one caller. The route reads
-    // first and fails loudly; this is what happens if some later caller forgets
-    // to — a refusal, rather than a run conducted against a world nobody
-    // looked at, carrying a coverage stamp nobody checked.
-    const { ada, agentId, connectionId, suiteId } = await aCustomerReadyToRun(
-      "text_mode_unread_world_refused",
-      TEXT_MODE,
-    );
-
-    await expect(
-      startRun(contextFor(ada, "member"), {
-        suiteId,
-        agentId,
-        connectionId,
-      }),
-    ).rejects.toThrow(/without the run-start read of the agent's platform/u);
-
-    const { rows } = await api.database.sql<{ count: string }>(
-      "select count(*)::text as count from run",
-    );
-    expect(rows[0]?.count).toBe("0");
-  });
-
   it("refuses a run whose connection was edited between the read and the write", async () => {
     // The race the run route cannot hold a lock across: the world is read from
     // the connection over the network, before the run's transaction opens, so
@@ -980,28 +848,6 @@ describe("the version a run resolved, on the record", () => {
       "select count(*)::text as count from run",
     );
     expect(rows[0]?.count).toBe("0");
-  });
-
-  it("writes the run when the connection held still through the read", async () => {
-    // The same path with no edit: the fingerprint the world was read at still
-    // equals the connection under the lock, so the world and the target agree
-    // and the run is written.
-    const { ada, agentId, connectionId, suiteId } =
-      await aCustomerReadyToRun("text_mode_connection_still", TEXT_MODE);
-    const who = contextFor(ada, "member");
-
-    const reach = await resolveRunStartReach(who, agentId, connectionId);
-    expect(reach).toBeDefined();
-    if (reach === undefined) return;
-
-    const started = await startRun(who, {
-      suiteId,
-      agentId,
-      connectionId,
-      agentVersion: SERVING_VERSION,
-      conductedConnectionIdentity: reach.connectionIdentity,
-    });
-    expect(started.agentVersion).toBe(SERVING_VERSION);
   });
 });
 

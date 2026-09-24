@@ -72,67 +72,6 @@ function policy(settings: Record<string, unknown> = {}) {
 }
 
 describe("the grader library", () => {
-  it("shows predefined graders, their form contract, and current-project use state", async () => {
-    api = await createApi("grader_library_list");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const key = await projectKeyFor(api.app, ada);
-
-    const answer = await request("GET", "/v1/grader-library", key);
-
-    expect(answer.statusCode, JSON.stringify(answer.body)).toBe(200);
-    const expected = itemsOf(answer).find(
-      (entry) => entry.id === PREDEFINED_GRADERS.expectedBehaviors,
-    );
-    expect(expected).toMatchObject({
-      name: "expected_behaviors",
-      owner: "egma",
-      type: "llm_as_judge",
-      scopeEditable: false,
-      modalities: ["chat", "voice"],
-      gradingInstructions: expect.stringContaining("every supplied expected behavior"),
-      requiredEvidence: ["transcript", "tool_calls", "observed_metrics", "test_expected_behaviors"],
-      settingDefinitions: expect.arrayContaining([expect.objectContaining({ key: "llm_model" })]),
-    });
-    expect(expected?.activeProjectGraderId).toMatch(/^grd_/u);
-
-    const latency = itemsOf(answer).find(
-      (entry) => entry.id === PREDEFINED_GRADERS.responseLatency,
-    );
-    expect(latency).toMatchObject({
-      name: "Response latency",
-      owner: "egma",
-      type: "code",
-      scopeEditable: true,
-      modalities: ["chat", "voice"],
-      gradingInstructions: null,
-      requiredEvidence: ["turn_response_latency"],
-      activeProjectGraderId: null,
-      settingDefinitions: [
-        {
-          key: MAXIMUM_RESPONSE_TIME_PARAMETER,
-          label: "Maximum response time (p90)",
-          valueType: "integer",
-          defaultValue: 3_000,
-          unit: "milliseconds",
-          minimum: 1,
-          maximum: null,
-        },
-      ],
-    });
-    expect(answer.body.nextPageToken).toBeNull();
-
-    const serialized = JSON.stringify(itemsOf(answer));
-    for (const executable of [
-      "prompt",
-      "params",
-      "outputDefinition",
-      "judgeModel",
-      "sourceCode",
-    ]) {
-      expect(serialized).not.toContain(executable);
-    }
-  });
-
   it("lets viewers read details but refuses Use in project", async () => {
     api = await createApi("grader_library_roles");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");

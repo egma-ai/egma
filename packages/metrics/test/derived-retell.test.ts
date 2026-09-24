@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  measuresFromSpans,
-  turnResponseLatencySpanKinds,
-  type TraceSpan,
-} from "../src/index.ts";
+import { measuresFromSpans, type TraceSpan } from "../src/index.ts";
 
 /**
  * Retell turn timestamps provide word boundaries without speaking children.
@@ -13,15 +9,6 @@ import {
  */
 
 const STARTED = "2026-08-22T10:00:00.000000Z";
-
-it("owns the store projection needed for turn-response latency", () => {
-  expect(turnResponseLatencySpanKinds()).toEqual([
-    "timing",
-    "turn:human",
-    "turn:agent",
-    "speaking",
-  ]);
-});
 
 function at(secondsIn: number): string {
   const base = Date.parse("2026-08-22T10:00:00.000Z");

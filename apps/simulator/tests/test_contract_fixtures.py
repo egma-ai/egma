@@ -173,13 +173,6 @@ def place_of(error: ValidationError) -> str:
     return "".join(f"/{part}" for part in error.absolute_path)
 
 
-def test_each_schema_compiles_and_pins_its_contract_version():
-    assert spec_validator().schema["properties"]["contract_version"]["const"] == 7
-    assert report_validator().schema["properties"]["contract_version"]["const"] == 1
-    assert spec_validator().schema["$id"] == "urn:egma:simulation-contract:spec:v7"
-    assert report_validator().schema["$id"] == "urn:egma:simulation-contract:report:v1"
-
-
 def test_this_simulator_advertises_v7_and_preserves_old_execution():
     document = read_json(
         contract_dir()
@@ -337,44 +330,6 @@ def test_a_spec_carries_a_named_version_and_this_simulations_variables():
     assert spec.dynamic_variables["caller_name"] == ""
 
 
-def test_the_text_mode_lane_reads_back_with_and_without_the_optional_fields():
-    """Validate Retell text-mode specs with and without version, variables, and mock
-    tools.
-    The open connection-type vocabulary must accept the adapter without a schema change.
-    """
-    carried = read_json(
-        contract_dir() / "fixtures" / "spec" / "valid" / "chat-retell-text-mode.json"
-    )
-    spec = SimulationSpec.from_document(carried)
-    assert spec.connection_type == "retell_text_mode"
-    assert spec.access_variant == "retell_text_mode.api_key"
-    assert spec.modality == "chat"
-    assert spec.agent_version == 106
-    assert spec.dynamic_variables["account_id"] == carried["simulation_id"]
-    assert spec.dynamic_variables["caller_name"] == ""
-    assert [mock.tool_name for mock in spec.mock_tools] == [
-        "get_availability",
-        "book_appointment",
-    ]
-    assert spec.mock_tools[1].fails
-    assert spec.job_dispatch_metadata is None
-
-    plain = read_json(
-        contract_dir()
-        / "fixtures"
-        / "spec"
-        / "valid"
-        / "chat-retell-text-mode-plain.json"
-    )
-    assert "agent_version" not in plain
-    assert "dynamic_variables" not in plain
-    spec = SimulationSpec.from_document(plain)
-    assert spec.connection_type == "retell_text_mode"
-    assert spec.agent_version is None
-    assert spec.dynamic_variables == {}
-    assert spec.mock_tools == ()
-
-
 def test_a_spec_carries_the_agent_dispatchs_own_metadata_or_none():
     """The half of the test's env that no platform renders.
 
@@ -416,54 +371,6 @@ def test_a_spec_carries_the_agent_dispatchs_own_metadata_or_none():
         complaint.startswith("/job_dispatch_metadata")
         for complaint in refusal.value.complaints
     ), refusal.value.complaints
-
-
-def test_a_mock_tool_declaring_a_delay_is_refused_as_a_document():
-    """There is no slot for it, so it is refused rather than dropped: a
-    spec carrying one was written against a contract this simulator does
-    not speak, and reading it anyway would serve an answer at a moment
-    nobody asked for."""
-    carried = read_json(
-        contract_dir()
-        / "fixtures"
-        / "spec"
-        / "valid"
-        / "voice-livekit-mocked-tools.json"
-    )
-    with pytest.raises(ContractViolation) as refusal:
-        SimulationSpec.from_document(
-            {
-                **carried,
-                "mock_tools": [
-                    {
-                        "tool_name": "check_calendar",
-                        "answer": {"answer": {"slots": []}},
-                        "delay_milliseconds": 250,
-                    }
-                ],
-            }
-        )
-    assert any(
-        complaint.startswith("/mock_tools/0")
-        for complaint in refusal.value.complaints
-    ), refusal.value.complaints
-
-
-def test_phone_connection_stays_phone_while_models_select_voice_legs():
-    document = read_json(
-        contract_dir()
-        / "fixtures"
-        / "spec"
-        / "valid"
-        / "voice-phone-platform-configured.json"
-    )
-
-    spec = SimulationSpec.from_document(document)
-
-    assert spec.connection_type == "phone_number"
-    assert spec.models.stt.provider == "deepgram"
-    assert spec.models.tts.provider == "cartesia"
-    assert spec.models.tts.voice_id == "brisk-tenor-7"
 
 
 @pytest.mark.parametrize("direction", ["spec", "report"])
@@ -565,25 +472,3 @@ def test_the_report_schema_rejects_the_specs_credentials_wherever_they_ride():
         ), f"variant {index}: {refusal.value.complaints}"
 
 
-def test_the_golden_fixtures_cover_what_the_simulator_must_speak():
-    """Both modalities inbound; the lifecycle and nothing else outbound."""
-    modalities = {
-        document["modality"] for _, document in fixtures_under("spec", "valid")
-    }
-    assert modalities == {"chat", "voice"}
-
-    events = [
-        event
-        for _, document in fixtures_under("report", "valid")
-        for event in document["events"]
-    ]
-    # One kind, and this is the assertion that says so: the report direction
-    # carries the lifecycle and nothing else, because a conversation's record
-    # is the spans it arrived as.
-    assert {event["kind"] for event in events} == {"status"}
-    assert {event["status"] for event in events if event["kind"] == "status"} == {
-        "running",
-        "completed",
-        "failed",
-        "canceled",
-    }

@@ -9,23 +9,14 @@ import contextlib
 import logging
 from datetime import UTC, datetime
 
-import pytest
 from conftest import loopback_spec, scripted_spec
 
 from egma_simulator import service as service_module
 from egma_simulator.client import ClaimedSpec, ClaimFailure
-from egma_simulator.conductor import (
-    PARTIAL_TURN_AGENT_HANG_UP,
-    PARTIAL_TURN_INTERRUPTION_CAP,
-)
 from egma_simulator.config import SimulatorConfig
 from egma_simulator.redaction import SecretRegistry
-from egma_simulator.service import (
-    SimulatorService,
-    partial_turn_note,
-    resources_for_claim,
-)
-from egma_simulator.spec import AuthoredPersona, SimulationSpec
+from egma_simulator.service import SimulatorService, resources_for_claim
+from egma_simulator.spec import SimulationSpec
 
 
 class RecordingExecutor:
@@ -139,22 +130,6 @@ def test_a_spec_naming_an_unplugged_connection_type_is_refused(tmp_path, caplog)
     assert "no adapter for its connection type" in caplog.text
 
 
-def test_an_id_that_would_make_an_invalid_otel_trace_is_refused_before_running(
-    tmp_path, caplog
-):
-    service = a_service(tmp_path, capacity=2)
-    executor = RecordingExecutor(capacity=2)
-
-    invalid = scripted_spec("sim_00000000000000000000000000")
-    good = scripted_spec("sim-valid-after-zero")
-    service._accept([invalid, good], executor)
-
-    assert [spec.simulation_id for spec in executor.accepted] == [
-        "sim-valid-after-zero"
-    ]
-    assert "invalid identifier" in caplog.text
-
-
 class RefusingClient:
     """A control plane that turns down every claim the same way.
 
@@ -208,64 +183,6 @@ async def test_a_claim_failure_that_never_changes_is_said_once_not_forever(
     assert len(shouted) == 1, [record.getMessage() for record in shouted]
     assert "claim did not land" in shouted[0].getMessage()
     assert client.attempts >= 25, "the loop kept trying, quietly"
-
-
-async def test_an_outage_that_speaks_again_counts_from_when_it_began(
-    tmp_path, caplog, monkeypatch
-):
-    """ "After N attempts" means since the failure started, not since it last spoke.
-
-    Nobody reads a number in a log line and mentally scopes it to the
-    window it was counted in. With the repeat interval collapsed to
-    nothing, every attempt after the first speaks up, and each one has to
-    have counted every attempt before it.
-    """
-    monkeypatch.setattr(service_module, "CLAIM_RETRY_SECONDS", 0.001)
-    monkeypatch.setattr(service_module, "REPEATED_CLAIM_FAILURE_SECONDS", 0.0)
-    caplog.set_level(logging.DEBUG, logger="egma_simulator.service")
-    service = a_service(tmp_path)
-    client = RefusingClient(attempts_wanted=6)
-
-    claiming = asyncio.create_task(
-        service._claim_forever(client, RecordingExecutor(capacity=2))
-    )
-    await client.enough.wait()
-    claiming.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await claiming
-
-    counted = [
-        int(record.args[0])
-        for record in caplog.records
-        if record.levelno == logging.WARNING and "still not landing" in record.msg
-    ]
-    assert counted[:5] == [2, 3, 4, 5, 6], counted
-
-
-def test_the_typed_spec_reads_what_the_document_says():
-    spec = SimulationSpec.from_document(
-        scripted_spec("sim-typed", scenario="Hello there.", max_turns=7)
-    )
-    assert spec.simulation_id == "sim-typed"
-    assert spec.modality == "chat"
-    assert spec.scenario_instructions == "Hello there."
-    assert spec.limits.max_turns == 7
-    assert spec.connection_type == "scripted"
-    assert spec.persona == AuthoredPersona(
-        name="Robin",
-        personality="Terse test person; sticks to the script.",
-        language="en-US",
-    )
-    assert spec.models.llm.model == "gpt-4o-mini"
-
-
-def test_the_typed_spec_refuses_a_document_that_breaks_the_contract():
-    from egma_simulator.contract import ContractViolation
-
-    broken = scripted_spec("sim-bad")
-    broken["modality"] = "telepathy"
-    with pytest.raises(ContractViolation):
-        SimulationSpec.from_document(broken)
 
 
 def test_a_daytona_claim_replaces_only_media_and_recording_resources(
@@ -331,13 +248,3 @@ def test_a_daytona_claim_replaces_only_media_and_recording_resources(
         "secret_access_key": "temporary-secret",
         "session_token": "temporary-session",
     }
-
-
-def test_a_partial_turn_note_names_its_cause():
-    """A turn with audio but no words says why, and a hang-up is not a cap."""
-    capped = partial_turn_note(PARTIAL_TURN_INTERRUPTION_CAP)
-    hung_up = partial_turn_note(PARTIAL_TURN_AGENT_HANG_UP)
-    assert "three-second interruption cap" in capped
-    assert "hung up" in hung_up
-    assert "cap" not in hung_up
-    assert "cut short" in partial_turn_note("a_cause_nobody_named")

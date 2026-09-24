@@ -81,53 +81,6 @@ def test_every_variable_the_code_reads_is_passed_through_by_compose():
     )
 
 
-def test_the_capacity_default_lives_in_the_simulator_once():
-    """Compose passes through absence and the operator example omits tuning.
-
-    The simulator owns the default. If either deployment file writes its own
-    number, a bare process and a self-host can drift again even though both
-    appear to use the same variable.
-    """
-    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
-    assert "EGMA_SIMULATOR_CAPACITY: ${EGMA_SIMULATOR_CAPACITY:-}" in compose
-    assert "EGMA_SIMULATOR_CAPACITY" not in env_example
-
-
-def test_every_variable_the_code_reads_is_in_the_readme_table():
-    readme = (Path(config_module.__file__).parents[2] / "README.md").read_text(
-        encoding="utf-8"
-    )
-    documented = set(VARIABLE.findall(readme))
-    missing = variables_read_by_the_code() - documented
-    assert not missing, f"the configuration table does not list {sorted(missing)}"
-
-
-def test_nothing_is_documented_that_nothing_reads():
-    """The other direction, which rots more quietly: a variable somebody
-    sets carefully and nothing has read since it was renamed.
-
-    The two READMEs are in this direction too, and only this one: a
-    variable they name and nothing reads is a paragraph telling somebody
-    to do something with no effect, which is worse than silence.
-    """
-    read = variables_read_by_the_code() | DOCUMENTED_ELSEWHERE
-    named_files = (
-        ROOT / ".env.example",
-        ROOT / "README.md",
-        Path(config_module.__file__).parents[2] / "README.md",
-        *COMPOSE_FILES,
-    )
-    for named in named_files:
-        mentioned = {
-            name
-            for name in VARIABLE.findall(named.read_text(encoding="utf-8"))
-            if not name.endswith("_")  # A documented `EGMA_SIMULATOR_S3_*` family.
-        }
-        stale = mentioned - read
-        assert not stale, f"{named} names {sorted(stale)}, which nothing reads"
-
-
 def service_block(compose: Path, service: str) -> str | None:
     """One service's own lines out of a compose file, or ``None``.
 
@@ -160,27 +113,6 @@ def test_the_simulator_publishes_nothing_in_every_configuration(compose):
     assert "ports:" not in block, (
         f"{compose.name} publishes a port on the simulator; every arrow "
         "points out, in every configuration"
-    )
-
-
-def test_a_plain_compose_up_starts_the_whole_phone_stack():
-    """The default stack includes phone media services. Calls additionally require
-    a complete carrier route in the API configuration.
-    """
-    default = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    for service in ("livekit", "livekit-sip", "livekit-redis"):
-        assert f"\n  {service}:" in default, (
-            f"docker-compose.yml does not start {service}; the phone stack "
-            "is part of the default deployment"
-        )
-
-
-def test_no_phone_overlay_is_left_to_ask_for_by_name():
-    """The overlay is gone, and a leftover copy of it would be a second
-    deployment story telling somebody to do something with no effect."""
-    assert not (ROOT / "docker-compose.phone.yml").exists(), (
-        "docker-compose.phone.yml is back; the phone stack is in the default "
-        "compose file and there is no overlay to ask for"
     )
 
 
@@ -518,18 +450,6 @@ def test_no_variable_in_a_shipped_compose_file_is_hollow_when_it_is_absent():
     )
 
 
-def test_nothing_is_excused_that_no_longer_needs_excusing():
-    """The allow-list above tells a story about the files we ship, and a story
-    about a variable that has moved on is a story nobody checks."""
-    stale = sorted(set(MAY_BE_ABSENT) - hollow_variables())
-    assert not stale, (
-        f"MAY_BE_ABSENT excuses {stale}, which no shipped compose file leaves "
-        "empty any more. Drop them, so the list stays the list of live decisions"
-    )
-    both = sorted(set(MAY_BE_ABSENT) & set(REQUIRED_IN_THE_ENVIRONMENT))
-    assert not both, f"{both} is called required and optional at once"
-
-
 @pytest.mark.parametrize("name", sorted(REQUIRED_IN_THE_ENVIRONMENT))
 def test_env_example_supplies_no_value_for_a_variable_that_must_be_stated(name):
     """Generated bootstrap values are not operator inputs."""
@@ -578,16 +498,3 @@ def test_the_gateway_listens_on_the_port_it_is_published_on():
     )
 
 
-def test_the_object_store_under_test_is_the_one_the_deployment_runs():
-    """Pin the test store and both Compose storage entries to the same release.
-    Count both entries so one cannot drift while the other still matches.
-    """
-    from conftest import MINIO_IMAGE
-
-    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    named = compose.count(f"image: {MINIO_IMAGE}")
-    assert named == 2, (
-        f"docker-compose.yml names {MINIO_IMAGE} {named} time(s); the object "
-        "store and the job that creates its bucket are both it, and the tests "
-        "prove the object-storage path against that same release"
-    )

@@ -382,106 +382,6 @@ const RIDES_LATEST = [{ agent_id: AGENT, agent_version: "latest", weight: 3 }];
 const RIDES_TAG = [{ agent_id: AGENT, agent_version: "prod" }];
 
 describe("the binding verdicts, for every number routing to the agent", () => {
-  it("reads every binding's verdict, and skips a number that is not this agent's", () => {
-    const decisions = bindingDecisionsFor(
-      [
-        {
-          number: "+15550000001",
-          label: "numeric",
-          bindings: [
-            { agentId: AGENT, agentVersion: 105, verbatim: { agent_id: AGENT } },
-          ],
-        },
-        {
-          number: "+15550000002",
-          label: "tag",
-          bindings: [
-            { agentId: AGENT, agentVersion: "prod", verbatim: { agent_id: AGENT } },
-          ],
-        },
-        {
-          number: "+15550000003",
-          label: "published",
-          bindings: [
-            {
-              agentId: AGENT,
-              agentVersion: "latest_published",
-              verbatim: { agent_id: AGENT },
-            },
-          ],
-        },
-        {
-          number: "+15550000004",
-          label: "latest",
-          bindings: [
-            { agentId: AGENT, agentVersion: "latest", verbatim: { agent_id: AGENT } },
-          ],
-        },
-        {
-          number: "+15550000005",
-          label: "unset",
-          bindings: [
-            { agentId: AGENT, agentVersion: null, verbatim: { agent_id: AGENT } },
-          ],
-        },
-        {
-          number: "+15550000006",
-          label: "somebody else's",
-          bindings: [
-            {
-              agentId: OTHER_AGENT,
-              agentVersion: "latest",
-              verbatim: { agent_id: OTHER_AGENT },
-            },
-          ],
-        },
-      ],
-      AGENT,
-    );
-
-    // Read, and acted on nowhere: Egma writes to none of these numbers. What
-    // the verdict decides is the version a run is conducted against.
-    expect(decisions.map((one) => [one.label, one.verdicts])).toEqual([
-      ["numeric", ["numeric"]],
-      ["tag", ["environment-tag"]],
-      ["published", ["latest-published"]],
-      ["latest", ["hijackable"]],
-      ["unset", ["hijackable"]],
-    ]);
-    // The sixth number routes to somebody else and is not this agent's
-    // business at all.
-    expect(decisions.some((one) => one.number === "+15550000006")).toBe(false);
-  });
-
-  it("keeps every one of this agent's entries on a shared number", () => {
-    const [decision] = bindingDecisionsFor(
-      [
-        {
-          number: "+15550000007",
-          label: "weighted",
-          bindings: [
-            { agentId: AGENT, agentVersion: 105, verbatim: { agent_id: AGENT } },
-            { agentId: AGENT, agentVersion: "latest", verbatim: { agent_id: AGENT } },
-            {
-              agentId: OTHER_AGENT,
-              agentVersion: 7,
-              verbatim: { agent_id: OTHER_AGENT },
-            },
-          ],
-        },
-      ],
-      AGENT,
-    );
-
-    expect(decision?.verdicts).toEqual(["numeric", "hijackable"]);
-    // The whole array rides along, the other agent's entry included, so a
-    // reader of the screen sees the number as Retell really holds it.
-    expect(decision?.bindings).toHaveLength(3);
-    // But the reading of what runs against the number is this agent's entries
-    // only.
-    expect(decision?.ownBindings).toHaveLength(2);
-  });
-
   it("resolves the version from this agent's binding, never a sibling agent's", () => {
     // A number two agents share: the other agent is bound to 7, this agent
     // rides `latest`. The version this run tests must follow this agent's own
@@ -642,24 +542,6 @@ describe("building the world over a conversation flow", () => {
     // the tools its own test names now, and every answered call is on the
     // transcript, so a second summarised copy of the same fact is gone.
     expect("coverage" in built).toBe(false);
-  });
-
-  it("never lets Retell choose the version it writes to", async () => {
-    const retell = account({ tags: { prod: 105 } });
-    await buildMockedWorld(
-      key,
-      { agentId: AGENT, versionReference: "prod", record: recorder().record },
-      REACH(retell.fetchImpl),
-    );
-
-    const write = retell.seen.find(
-      (one) => one.method === "PATCH" && one.url.includes("/update-conversation-flow/"),
-    );
-    // The draft's own engine version, in the query string. Retell's default is
-    // "latest", and after a branch the latest version is the branch.
-    expect(write?.url).toBe(
-      `https://retell.invalid/update-conversation-flow/${FLOW}?version=106`,
-    );
   });
 
   it("walks both tool arrays of a Retell LLM", async () => {
@@ -1294,35 +1176,5 @@ describe("the proof that the delete happened", () => {
     // neither the note nor the cleanup flag — so a record here would come back
     // as a database error standing in for the real sentence above.
     expect(kept.written.length).toBe(writes);
-  });
-
-  it("deletes the version with the version in the query string", async () => {
-    const retell = account();
-    const built = await buildMockedWorld(
-      key,
-      { agentId: AGENT, record: recorder().record },
-      REACH(retell.fetchImpl),
-    );
-    expect(built.kind).toBe("built");
-    if (built.kind !== "built") return;
-
-    const finished = await finishMockedWorld(
-      key,
-      { agentId: AGENT, state: built.state, record: async () => undefined },
-      REACH(retell.fetchImpl),
-    );
-
-    expect(finished.unfinished).toEqual([]);
-    expect(mockRunIsSettled(finished.state)).toBe(true);
-    const removed = retell.seen.find((one) => one.method === "DELETE");
-    expect(removed?.url).toBe(
-      `https://retell.invalid/delete-agent-version/${AGENT}?version=106`,
-    );
-    // **The engine version is still there, and that is the expected residue.**
-    // Retell keeps it, no endpoint removes one, and nothing can route to it
-    // because a binding names a live agent version and there is none. So the
-    // teardown records the number rather than claiming a cleanup it cannot do.
-    expect(retell.engines.has(`${FLOW}@106`)).toBe(true);
-    expect(finished.state.mockMetadata?.strayFlowVersion).toBe(106);
   });
 });

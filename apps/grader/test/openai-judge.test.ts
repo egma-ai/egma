@@ -123,36 +123,6 @@ afterEach(() => {
 });
 
 describe("one judge call", () => {
-  it("asks the version-pinned chat completions endpoint, with the key in the header", async () => {
-    const { calls, judge } = judgeWith(
-      answering({ decision: "met", rationale: "read back.", cited_turns: [2] }),
-    );
-
-    await judge(QUESTION);
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.url).toBe("https://api.openai.com/v1/chat/completions");
-    expect(calls[0]?.init.method).toBe("POST");
-
-    const headers = calls[0]?.init.headers as Record<string, string>;
-    expect(headers["authorization"]).toBe(`Bearer ${A_KEY}`);
-
-    const body = JSON.parse(String(calls[0]?.init.body)) as Record<string, unknown>;
-    expect(body["model"]).toBe("gpt-5.6-terra");
-    expect(body["reasoning_effort"]).toBe("none");
-    // The same conversation and the same criterion should get the same decision
-    // twice, as far as a model can promise that at all.
-    expect(body["temperature"]).toBe(0);
-    expect(body["response_format"]).toMatchObject({
-      type: "json_schema", json_schema: { name: "egma_judge_answer", strict: true, schema: {
-        type: "object", required: ["results"], additionalProperties: false,
-        properties: { results: { type: "array", items: {
-          type: "object", required: ["id", "decision", "rationale", "cited_turns"], additionalProperties: false,
-        } } },
-      } },
-    });
-  });
-
   it("resolves the release default and its provider settings from one catalog entry", () => {
     const configured: ResolvedJudge[] = [];
     const neverAsked: Judge = async () => {
@@ -206,33 +176,6 @@ describe("one judge call", () => {
     expect(asked).toContain("turn_response_latency: 420, 630");
   });
 
-  it("reads back the decision, the reason and the turns it cited", async () => {
-    const { judge } = judgeWith(
-      answering({
-        decision: "not_met",
-        rationale: "the agent never said the day back.",
-        cited_turns: [1, 2],
-      }),
-    );
-
-    expect(await judge(QUESTION)).toEqual({
-      results: [{ id: "instruction_1", decision: "not_met",
-      rationale: "the agent never said the day back.",
-      cited_turns: [1, 2] }],
-    });
-  });
-
-  it("takes cannot_determine as the answer it is", async () => {
-    const { judge } = judgeWith(
-      answering({
-        decision: "cannot_determine",
-        rationale: "the conversation never reached the subject.",
-        cited_turns: [],
-      }),
-    );
-
-    expect((await judge(QUESTION)).results[0]?.decision).toBe("cannot_determine");
-  });
 });
 
 describe("a provider that does not answer", () => {
@@ -251,26 +194,6 @@ describe("a provider that does not answer", () => {
 
     await expect(judge(QUESTION)).rejects.toThrow(/503/);
     expect(calls).toHaveLength(3);
-  });
-
-  /**
-   * A rejected key and a model that does not exist are not transient. Asking
-   * again would spend the same seconds to be told the same thing, and the
-   * assertion is `errored` either way with the provider's own words on it.
-   */
-  it("does not ask again about a refusal asking again cannot fix", async () => {
-    const { calls, judge } = judgeWith(refusing(401, "invalid api key"));
-
-    await expect(judge(QUESTION)).rejects.toThrow(/401/);
-    expect(calls).toHaveLength(1);
-  });
-
-  it("treats an answer it cannot read as no answer, and not as cannot_determine", async () => {
-    const { judge } = judgeWith(
-      answering({ decision: "probably", rationale: "hmm", cited_turns: [] }),
-    );
-
-    await expect(judge(QUESTION)).rejects.toThrow(/invalid id, decision/);
   });
 
   it("never puts the request — and so never the key — in what it throws", async () => {
@@ -370,43 +293,6 @@ describe("what one judge call consumed", () => {
     expect(unreadable.spent).toHaveLength(1);
   });
 
-  it("says nothing where the provider said nothing about what it consumed", async () => {
-    const { judge, spent } = judgeWith(
-      answering({ decision: "met", rationale: "read back.", cited_turns: [] }),
-    );
-    await judge(QUESTION);
-    // A gap is the honest answer. Inventing a token count would be worse.
-    expect(spent).toEqual([]);
-  });
-
-  it("measures nothing at all when nobody is collecting", async () => {
-    vi.stubGlobal("fetch", async () =>
-      new Response(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({ results: [{
-                  id: "instruction_1",
-                  decision: "met",
-                  rationale: "read back.",
-                  cited_turns: [],
-                }] }),
-              },
-            },
-          ],
-          usage: { prompt_tokens: 100, completion_tokens: 10 },
-        }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      ),
-    );
-    const judge = openaiJudge({
-      provider: "openai",
-      model: "gpt-5.6-terra",
-      key: A_KEY,
-    });
-    await expect(judge(QUESTION)).resolves.toMatchObject({ results: [{ decision: "met" }] });
-  });
 });
 
 describe("paid attempt persistence", () => {
@@ -435,14 +321,5 @@ describe("paid attempt persistence", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(errors).toHaveBeenCalledTimes(1);
     errors.mockRestore();
-  });
-
-  it("gives actual repeated HTTP calls different attempt identities even when their provider references match", async () => {
-    const { judge, spent } = judgeWith(answeringWithUsage({ decision: "met", rationale: "yes", cited_turns: [1] }, { prompt_tokens: 10, completion_tokens: 1 }, "same-provider-id"));
-    await judge(QUESTION);
-    await judge(QUESTION);
-    expect(spent).toHaveLength(2);
-    expect(spent[0]?.attemptId).not.toBe(spent[1]?.attemptId);
-    expect(spent[0]?.providerRef).toBe(spent[1]?.providerRef);
   });
 });

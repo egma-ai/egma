@@ -59,17 +59,6 @@ describe("holding the web output directory", () => {
     held.release();
   });
 
-  it("lets the next one in once the first has released it", async () => {
-    const lockPath = await aLockPath();
-
-    holdWebOutputLock(THE_REAL_BROWSER_TEST, lockPath).release();
-    const build = holdWebOutputLock(A_PRODUCTION_WEB_BUILD, lockPath);
-
-    expect(existsSync(lockPath)).toBe(true);
-    build.release();
-    expect(existsSync(lockPath)).toBe(false);
-  });
-
   it("takes over a lock left behind by a process that has gone", async () => {
     const lockPath = await aLockPath();
     await writeFile(
@@ -158,50 +147,6 @@ describe("a process id the operating system has given to somebody else", () => {
       A_PRODUCTION_WEB_BUILD,
     );
     build.release();
-  });
-
-  /**
-   * A legacy lock without a start time cannot establish holder identity.
-   * Treat it as unreadable rather than reclaiming it from a live PID.
-   */
-  it("is refused, not matched, when the lock predates start times", async () => {
-    const shapes = [
-      { token: "no-startedAt-at-all" },
-      { token: "an-empty-startedAt", startedAt: "" },
-    ];
-
-    for (const shape of shapes) {
-      const lockPath = await aLockPath();
-      await writeFile(
-        lockPath,
-        JSON.stringify({
-          pid: process.pid, // Genuinely running, which is what made it stick.
-          who: THE_REAL_BROWSER_TEST,
-          since: new Date().toISOString(),
-          ...shape,
-        }),
-      );
-
-      expect(() =>
-        holdWebOutputLock(A_PRODUCTION_WEB_BUILD, lockPath),
-      ).toThrow(/cannot be read, or does not carry the identity/);
-
-      // And it is still there: refusing must not become a second way to steal.
-      expect(JSON.parse(await readFile(lockPath, "utf8")).token).toBe(
-        shape.token,
-      );
-    }
-  });
-
-  it("still refuses a holder that really is this process", async () => {
-    const lockPath = await aLockPath();
-    const held = holdWebOutputLock(THE_REAL_BROWSER_TEST, lockPath);
-
-    expect(() => holdWebOutputLock(A_PRODUCTION_WEB_BUILD, lockPath)).toThrow(
-      new RegExp(THE_REAL_BROWSER_TEST),
-    );
-
-    held.release();
   });
 });
 

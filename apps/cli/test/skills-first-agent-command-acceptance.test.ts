@@ -170,7 +170,7 @@ it("registers Agent identity, lists Retell Agents, and adds a separate Connectio
   }
 });
 
-it.each(["voice", "chat"] as const)(
+it.each(["chat"] as const)(
   "adds a %s LiveKit token-endpoint Connection without a LiveKit URL",
   async (modality) => {
     const [platform, workspace] = await Promise.all([

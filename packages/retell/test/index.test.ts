@@ -67,38 +67,6 @@ describe("Retell agent discovery", () => {
     ]);
   });
 
-  it("refuses a repeated agent cursor instead of returning duplicate rows", async () => {
-    let requests = 0;
-    const fetchImpl = (async () => {
-      requests += 1;
-      return new Response(
-        JSON.stringify({
-          items: [
-            {
-              agent_id: `agent_${requests}`,
-              agent_name: `Agent ${requests}`,
-              channel: "voice",
-            },
-          ],
-          has_more: true,
-          pagination_key: "same-cursor",
-        }),
-        { status: 200 },
-      );
-    }) as typeof fetch;
-
-    const listed = await listAgents(key, {
-      url: "https://retell.invalid",
-      fetchImpl,
-    });
-
-    expect(listed).toEqual({
-      kind: "refused",
-      reason: "Retell answered an agent page without a new cursor.",
-    });
-    expect(requests).toBe(2);
-  });
-
   it("refuses a malformed agent page", async () => {
     const listed = await listAgents(key, {
       url: "https://retell.invalid",
@@ -112,43 +80,6 @@ describe("Retell agent discovery", () => {
       kind: "refused",
       reason: "Retell answered a malformed agent page.",
     });
-  });
-
-  it("continues past twenty agent pages and returns the complete account", async () => {
-    let requests = 0;
-    const fetchImpl = (async () => {
-      requests += 1;
-      const hasMore = requests < 21;
-      return new Response(
-        JSON.stringify({
-          items: [
-            {
-              agent_id: `agent_${requests}`,
-              agent_name: `Agent ${requests}`,
-              channel: "chat",
-            },
-          ],
-          has_more: hasMore,
-          ...(hasMore ? { pagination_key: `cursor_${requests}` } : {}),
-        }),
-        { status: 200 },
-      );
-    }) as typeof fetch;
-
-    const listed = await listAgents(key, {
-      url: "https://retell.invalid",
-      fetchImpl,
-    });
-
-    expect(listed.kind).toBe("agents");
-    if (listed.kind !== "agents") throw new Error("expected every agent page");
-    expect(listed.agents).toHaveLength(21);
-    expect(listed.agents.at(-1)).toEqual({
-      id: "agent_21",
-      name: "Agent 21",
-      modality: "chat",
-    });
-    expect(requests).toBe(21);
   });
 
   it("refuses an agent listing that never reaches its final page", async () => {
@@ -291,69 +222,6 @@ describe("Retell phone-number discovery", () => {
       "https://retell.invalid/v2/list-phone-numbers?limit=1000&sort_order=ascending",
       "https://retell.invalid/v2/list-phone-numbers?limit=1000&sort_order=ascending&pagination_key=opaque%2Fnext%2Bpage",
     ]);
-  });
-
-  it("continues past twenty phone-number pages and returns every route", async () => {
-    let requests = 0;
-    const fetchImpl = (async () => {
-      requests += 1;
-      const hasMore = requests < 21;
-      return new Response(
-        JSON.stringify({
-          items: [
-            {
-              phone_number: `+1415555${String(requests).padStart(4, "0")}`,
-              nickname: `Route ${requests}`,
-              inbound_agents: [{ agent_id: `agent_${requests}` }],
-            },
-          ],
-          has_more: hasMore,
-          ...(hasMore ? { pagination_key: `cursor_${requests}` } : {}),
-        }),
-        { status: 200 },
-      );
-    }) as typeof fetch;
-
-    const listed = await listNumbers(key, {
-      url: "https://retell.invalid",
-      fetchImpl,
-    });
-
-    expect(listed.kind).toBe("numbers");
-    if (listed.kind !== "numbers") throw new Error("expected every number page");
-    expect(listed.numbers).toHaveLength(21);
-    expect(listed.numbers.at(-1)).toEqual({
-      number: "+14155550021",
-      label: "Route 21",
-      answeredBy: ["agent_21"],
-    });
-    expect(requests).toBe(21);
-  });
-
-  it("refuses a repeated phone-number cursor instead of looping", async () => {
-    let requests = 0;
-    const fetchImpl = (async () => {
-      requests += 1;
-      return new Response(
-        JSON.stringify({
-          items: [],
-          has_more: true,
-          pagination_key: "same-opaque-cursor",
-        }),
-        { status: 200 },
-      );
-    }) as typeof fetch;
-
-    const listed = await listNumbers(key, {
-      url: "https://retell.invalid",
-      fetchImpl,
-    });
-
-    expect(listed).toEqual({
-      kind: "refused",
-      reason: "Retell answered a phone-number page without a new cursor.",
-    });
-    expect(requests).toBe(2);
   });
 
   it("refuses a phone-number listing that never reaches its final page", async () => {

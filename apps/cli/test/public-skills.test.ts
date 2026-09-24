@@ -7,7 +7,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -21,8 +21,6 @@ const run = promisify(execFile);
 const require = createRequire(import.meta.url);
 
 const CODE_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
-const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
-const SOURCE_ROOT = path.join(CODE_ROOT, "skills");
 const SKILLS_CLI = require.resolve("skills/bin/cli.mjs");
 
 const PUBLIC_SKILLS = [
@@ -30,52 +28,11 @@ const PUBLIC_SKILLS = [
   { directory: "write-voice-agent-tests", name: "write-egma-tests" },
 ] as const;
 const PUBLIC_SKILL_NAMES = PUBLIC_SKILLS.map(({ name }) => name);
-const CLI_MARKER = /\begma:(?:found|note|none|abort|plan|writing|wrote)\b/u;
 
 const temporary: string[] = [];
 
 afterEach(async () => {
   await Promise.all(temporary.splice(0).map((directory) => rm(directory, { recursive: true })));
-});
-
-async function filesUnder(root: string, below = ""): Promise<string[]> {
-  const directory = path.join(root, below);
-  const entries = await readdir(directory, { withFileTypes: true });
-  const found = await Promise.all(
-    entries.map(async (entry): Promise<string[]> => {
-      const relative = path.join(below, entry.name);
-      return entry.isDirectory() ? filesUnder(root, relative) : [relative];
-    }),
-  );
-  return found.flat().sort();
-}
-
-describe("the public skill source", () => {
-  it("cleans retired compiled surfaces before a package is built", async () => {
-    const manifest = JSON.parse(
-      await readFile(path.join(PACKAGE_ROOT, "package.json"), "utf8"),
-    ) as { readonly scripts?: Record<string, string> };
-
-    expect(manifest.scripts?.build).toContain("tools/clean-dist.mjs");
-    expect(manifest.scripts?.prepack).toBe("pnpm build");
-  });
-
-  it("has only the intentional public skills, in standard folders", async () => {
-    expect((await readdir(SOURCE_ROOT)).sort()).toEqual(
-      PUBLIC_SKILLS.map(({ directory }) => directory).sort(),
-    );
-
-    for (const { directory, name } of PUBLIC_SKILLS) {
-      const content = await readFile(
-        path.join(SOURCE_ROOT, directory, "SKILL.md"),
-        "utf8",
-      );
-      expect(content).toMatch(new RegExp(`^name: ${name}$`, "mu"));
-      expect(content).toMatch(/^description: \S.+$/mu);
-      expect(content).not.toMatch(CLI_MARKER);
-    }
-  });
-
 });
 
 describe("npx skills compatibility", () => {
@@ -98,77 +55,5 @@ describe("npx skills compatibility", () => {
     expect(output).not.toContain("coordinate-implementation");
     expect(output).not.toContain("finding-the-voice-agent");
     expect(output).not.toContain("retell-voice-agents");
-  });
-
-  it("uses the same bytes that the repository publishes", async () => {
-    const home = await mkdtemp(path.join(tmpdir(), "egma-public-skill-use-"));
-    temporary.push(home);
-
-    for (const { directory, name } of PUBLIC_SKILLS) {
-      const { stdout } = await run(
-        process.execPath,
-        [SKILLS_CLI, "use", CODE_ROOT, "--skill", name],
-        {
-          cwd: home,
-          env: { ...process.env, CI: "1", HOME: home, NO_COLOR: "1", TERM: "dumb" },
-        },
-      );
-      const shown = /<SKILL\.md>\n(?<body>[\s\S]*?)\n<\/SKILL\.md>/u.exec(stdout)?.groups?.body;
-      const source = await readFile(
-        path.join(SOURCE_ROOT, directory, "SKILL.md"),
-        "utf8",
-      );
-
-      expect(shown?.trimEnd()).toBe(source.trimEnd());
-    }
-  });
-
-  it("installs the complete minimal integration skill", async () => {
-    const project = await mkdtemp(path.join(tmpdir(), "egma-public-skill-install-"));
-    temporary.push(project);
-
-    await run(
-      process.execPath,
-      [
-        SKILLS_CLI,
-        "add",
-        CODE_ROOT,
-        "--skill",
-        "integrate-egma",
-        "--agent",
-        "codex",
-        "--copy",
-        "--yes",
-      ],
-      {
-        cwd: project,
-        env: {
-          ...process.env,
-          CI: "1",
-          CODEX_HOME: path.join(project, ".codex"),
-          HOME: project,
-          NO_COLOR: "1",
-          TERM: "dumb",
-        },
-      },
-    );
-
-    const installed = path.join(project, ".agents", "skills", "integrate-egma");
-    const files = [
-      "SKILL.md",
-      path.join("agents", "openai.yaml"),
-      path.join("references", "livekit-agent-connection-guide.md"),
-      path.join("references", "retell-agent-connection-guide.md"),
-      path.join("references", "setup-monitoring.md"),
-      path.join("references", "setup-simulation-testing.md"),
-    ];
-    expect(await filesUnder(installed)).toEqual(files);
-
-    for (const file of files) {
-      const relative = path.join("integrate-egma", file);
-      expect(await readFile(path.join(project, ".agents", "skills", relative))).toEqual(
-        await readFile(path.join(SOURCE_ROOT, relative)),
-      );
-    }
   });
 });

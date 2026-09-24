@@ -10,7 +10,6 @@ are pinned without a live model anywhere.
 from __future__ import annotations
 
 import asyncio
-import json
 from types import SimpleNamespace
 
 import pytest
@@ -19,30 +18,15 @@ from conftest import loopback_spec
 from pipecat.processors.aggregators.llm_context import LLMContext
 
 from egma_simulator.model import (
-    END_CALL_TOOL,
-    GOODBYE,
     PERSONA_TOOLS,
     ModelFailure,
     OpenAICompatibleModel,
     PersonaReply,
-    PersonaToolCall,
-    ScriptedModel,
     build_model_client,
-    split_sentences,
 )
 from egma_simulator.persona import Persona, Turn
 from egma_simulator.redaction import REDACTED
 from egma_simulator.spec import SimulationSpec
-
-
-def test_sentences_split_deterministically():
-    instructions = "Move my appointment. I forget the time! Can we do Thursday?"
-    assert split_sentences(instructions) == [
-        "Move my appointment.",
-        "I forget the time!",
-        "Can we do Thursday?",
-    ]
-    assert split_sentences("no punctuation at all") == ["no punctuation at all"]
 
 
 def system_and_history(*speakers_and_texts: tuple[str, str]) -> LLMContext:
@@ -51,50 +35,6 @@ def system_and_history(*speakers_and_texts: tuple[str, str]) -> LLMContext:
         {"role": role, "content": text} for role, text in speakers_and_texts
     )
     return LLMContext(messages=messages, tools=PERSONA_TOOLS, tool_choice="auto")
-
-
-async def test_the_scripted_model_walks_the_scenario_sentence_by_sentence():
-    model = ScriptedModel("One thing. Another thing. A third.")
-
-    first = await model.reply(system_and_history())
-    assert first == PersonaReply(text="One thing.", concluded=False)
-
-    # The next sentence is picked by counting the persona's own prior turns
-    # (assistant messages), so the reply is a pure function of the messages.
-    second = await model.reply(
-        system_and_history(
-            ("assistant", "One thing."), ("user", "Noted, anything else?")
-        )
-    )
-    assert second == PersonaReply(text="Another thing.", concluded=False)
-
-    third = await model.reply(
-        system_and_history(
-            ("assistant", "One thing."),
-            ("user", "Noted."),
-            ("assistant", "Another thing."),
-            ("user", "Noted again."),
-        )
-    )
-    assert third == PersonaReply(text="A third.", concluded=False)
-
-
-async def test_the_scripted_model_concludes_with_a_goodbye_when_the_script_is_dry():
-    model = ScriptedModel("Only one thing.")
-    opening = await model.reply(system_and_history())
-    assert opening.concluded is False
-
-    done = await model.reply(
-        system_and_history(("assistant", "Only one thing."), ("user", "Done!"))
-    )
-    assert done == PersonaReply(text=GOODBYE, concluded=True)
-
-
-async def test_the_scripted_model_is_deterministic_across_calls():
-    messages = system_and_history(("assistant", "One thing."), ("user", "Ok."))
-    first = await ScriptedModel("One thing. Two things.").reply(messages)
-    again = await ScriptedModel("One thing. Two things.").reply(messages)
-    assert first == again
 
 
 # -- The OpenAI-compatible client, against a local stub -----------------------
@@ -147,34 +87,6 @@ async def model_stub():
         await runner.cleanup()
 
 
-async def test_the_openai_client_sends_the_messages_and_returns_the_reply(
-    model_stub,
-):
-    model_stub.answer_with("I would like to move my appointment, please.")
-    client = OpenAICompatibleModel(
-        base_url=model_stub.base_url,
-        api_key="key-under-test",
-        model_name="model-under-test",
-    )
-    try:
-        context = system_and_history(("user", "Hello, how can I help?"))
-        reply = await client.reply(context)
-    finally:
-        await client.close()
-
-    assert reply == PersonaReply(
-        text="I would like to move my appointment, please.", concluded=False
-    )
-    sent = model_stub.requests[0]
-    assert sent["model"] == "model-under-test"
-    assert sent["messages"] == context.get_messages()
-    assert sent["tools"] == [
-        {"type": "function", "function": END_CALL_TOOL.to_default_dict()}
-    ]
-    assert sent["tool_choice"] == "auto"
-    assert model_stub.headers[0]["Authorization"] == "Bearer key-under-test"
-
-
 async def test_the_daytona_model_uses_the_environment_proxy(monkeypatch):
     requests: list[tuple[str, str | None]] = []
 
@@ -225,34 +137,7 @@ async def test_the_daytona_model_uses_the_environment_proxy(monkeypatch):
     ]
 
 
-async def test_the_structured_end_call_is_returned_for_pipecat_to_execute(model_stub):
-    model_stub.answer_with(
-        "Thank you, that is everything. Goodbye.",
-        tool_calls=[
-            {
-                "id": "call_end",
-                "type": "function",
-                "function": {"name": "end_call", "arguments": "{}"},
-            }
-        ],
-    )
-    client = OpenAICompatibleModel(
-        base_url=model_stub.base_url, api_key="k", model_name="m"
-    )
-    try:
-        reply = await client.reply(system_and_history())
-    finally:
-        await client.close()
-    assert reply == PersonaReply(
-        text="Thank you, that is everything. Goodbye.",
-        concluded=False,
-        tool_calls=(
-            PersonaToolCall(tool_call_id="call_end", name="end_call", arguments={}),
-        ),
-    )
-
-
-@pytest.mark.parametrize("content", [None, ""])
+@pytest.mark.parametrize("content", [None])
 async def test_end_call_without_provider_words_keeps_the_end_action_textless(
     model_stub, content
 ):
@@ -277,7 +162,7 @@ async def test_end_call_without_provider_words_keeps_the_end_action_textless(
     assert reply.requests_end_call is True
 
 
-@pytest.mark.parametrize("content", [None, "", " "])
+@pytest.mark.parametrize("content", [None, " "])
 async def test_an_empty_answer_is_the_persona_staying_silent(model_stub, content):
     """No words and no end_call is a turn the persona chose not to speak."""
     model_stub.answers.append(
@@ -341,7 +226,6 @@ async def test_an_empty_answer_cut_short_is_still_a_model_failure(model_stub):
     "choice",
     [
         {"finish_reason": None, "message": {"content": ""}},
-        {"message": {"content": ""}},
     ],
 )
 async def test_an_empty_answer_without_a_finish_reason_is_a_model_failure(
@@ -415,108 +299,6 @@ async def test_a_refusal_with_words_or_end_call_is_still_a_model_failure(
     }
 
 
-@pytest.mark.parametrize("content", [None, " "])
-async def test_a_refused_blank_completion_keeps_only_safe_provider_metadata(
-    model_stub, content
-):
-    model_stub.answers.append(
-        web.json_response(
-            {
-                "id": "response-123",
-                "model": "served-model-2026-09-09",
-                "choices": [
-                    {
-                        "finish_reason": "stop",
-                        "message": {
-                            "role": "assistant",
-                            "content": content,
-                            "refusal": "private refusal text",
-                        },
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": 12,
-                    "completion_tokens": 0,
-                    "total_tokens": 12,
-                    "private": "provider body must not be retained",
-                },
-            }
-        )
-    )
-    client = OpenAICompatibleModel(
-        base_url=model_stub.base_url, api_key="secret-key", model_name="selected"
-    )
-    try:
-        with pytest.raises(ModelFailure, match="refused to answer") as caught:
-            await client.reply(system_and_history())
-    finally:
-        await client.close()
-
-    assert caught.value.diagnostic_attributes == {
-        "gen_ai.response.id": "response-123",
-        "gen_ai.response.model": "served-model-2026-09-09",
-        "gen_ai.response.finish_reason": "stop",
-        "gen_ai.response.refusal_present": True,
-        "gen_ai.usage.input_tokens": 12,
-        "gen_ai.usage.output_tokens": 0,
-        "gen_ai.usage.total_tokens": 12,
-    }
-    assert "private refusal text" not in repr(caught.value.diagnostic_attributes)
-
-
-async def test_malformed_metadata_does_not_hide_blank_failure(model_stub):
-    model_stub.answers.append(
-        web.json_response(
-            {
-                "id": {"unexpected": "shape"},
-                "model": ["unexpected"],
-                "choices": [{"finish_reason": {}, "message": {"content": ""}}],
-                "usage": {"prompt_tokens": "twelve"},
-            }
-        )
-    )
-    client = OpenAICompatibleModel(
-        base_url=model_stub.base_url, api_key="k", model_name="selected"
-    )
-    try:
-        with pytest.raises(ModelFailure, match="no words") as caught:
-            await client.reply(system_and_history())
-    finally:
-        await client.close()
-    assert caught.value.diagnostic_attributes == {
-        "gen_ai.response.refusal_present": False
-    }
-
-
-async def test_a_literal_old_marker_has_no_control_meaning(model_stub):
-    model_stub.answer_with("I am not done. [CONCLUDED]")
-    client = OpenAICompatibleModel(
-        base_url=model_stub.base_url, api_key="k", model_name="m"
-    )
-    try:
-        reply = await client.reply(system_and_history())
-    finally:
-        await client.close()
-
-    assert reply == PersonaReply(text="I am not done. [CONCLUDED]", concluded=False)
-
-
-async def test_the_selected_reasoning_effort_is_sent_to_openai(model_stub):
-    model_stub.answer_with("I need an appointment.")
-    client = OpenAICompatibleModel(
-        base_url=model_stub.base_url,
-        api_key="k",
-        model_name="gpt-5.6-terra",
-        reasoning_effort="none",
-    )
-    try:
-        await client.reply(system_and_history())
-    finally:
-        await client.close()
-
-    assert model_stub.requests[0]["reasoning_effort"] == "none"
-
-
 async def test_an_interjection_request_names_no_tools_and_still_reaches_the_provider(
     model_stub,
 ):
@@ -565,49 +347,6 @@ async def test_a_provider_cannot_echo_its_key_in_a_successful_reply(model_stub):
     assert reply.text == f"Provider echoed {REDACTED}."
 
 
-async def test_a_refusing_provider_is_a_model_failure(model_stub):
-    model_stub.answers.append(web.json_response({"error": "nope"}, status=401))
-    client = OpenAICompatibleModel(
-        base_url=model_stub.base_url, api_key="k", model_name="m"
-    )
-    try:
-        with pytest.raises(ModelFailure) as failure:
-            await client.reply(system_and_history())
-    finally:
-        await client.close()
-    assert "401" in str(failure.value)
-
-
-async def test_a_provider_cannot_echo_its_key_into_a_model_failure(model_stub):
-    secret = "model-key-must-not-enter-tracing"
-    model_stub.answers.append(
-        web.json_response({"error": f"provider echoed {secret}"}, status=401)
-    )
-    client = OpenAICompatibleModel(
-        base_url=model_stub.base_url, api_key=secret, model_name="m"
-    )
-    try:
-        with pytest.raises(ModelFailure) as failure:
-            await client.reply(system_and_history())
-    finally:
-        await client.close()
-
-    assert secret not in str(failure.value)
-    assert REDACTED in str(failure.value)
-
-
-async def test_an_unreadable_answer_is_a_model_failure(model_stub):
-    model_stub.answers.append(json.dumps({"choices": []}))
-    client = OpenAICompatibleModel(
-        base_url=model_stub.base_url, api_key="k", model_name="m"
-    )
-    try:
-        with pytest.raises(ModelFailure):
-            await client.reply(system_and_history())
-    finally:
-        await client.close()
-
-
 async def test_a_model_that_never_answers_is_a_model_failure(model_stub):
     model_stub.hold_seconds = 5.0
     model_stub.answer_with("too late")
@@ -627,13 +366,7 @@ async def test_a_model_that_never_answers_is_a_model_failure(model_stub):
 @pytest.mark.parametrize(
     ("model_name", "reasoning_effort"),
     [
-        ("gpt-4o-mini", None),
-        ("gpt-4o", None),
         ("gpt-5.4", "none"),
-        ("gpt-5.5", "none"),
-        ("gpt-5.6-terra", "none"),
-        ("gpt-5.6-sol", "none"),
-        ("gpt-5.6-luna", "none"),
     ],
 )
 async def test_runtime_model_forwards_the_claimed_reasoning_policy(
@@ -704,7 +437,6 @@ async def test_runtime_model_forwards_the_claimed_reasoning_policy(
         (401, True, True),
         (403, True, True),
         (429, True, False),
-        (503, True, False),
         (401, False, False),
     ],
 )

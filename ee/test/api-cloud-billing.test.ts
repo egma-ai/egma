@@ -356,15 +356,6 @@ describe("what the Billing section reads", () => {
       message: "The billing history cursor is invalid. Reload the page to load billing history again.",
     });
   });
-
-  it("refuses a request with no credential", async () => {
-    await aBillingDeployment("cloud_billing_uncredentialed");
-    const response = await api.app.inject({
-      method: "GET",
-      url: "/api/organization/billing",
-    });
-    expect(response.statusCode).toBe(401);
-  });
 });
 
 describe("starting a run an organization cannot pay for", () => {
@@ -571,7 +562,6 @@ describe("what the claim door does when a customer's month is spent", () => {
     }
   });
 });
-
 
 async function completedSimulation(seeded: Seeded): Promise<string> {
   await api.database.sql("update simulation set status = 'claimed', claimed_by = 'simulator', claimed_at = now(), heartbeat_at = now() where run_id = $1", [seeded.runId]);

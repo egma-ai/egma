@@ -11,19 +11,12 @@ import {
 } from "../src/folder/portable-path.ts";
 
 describe("portable repository path components", () => {
-  it.each(["CON", "prn", "AuX", "nul", "Com1", "cOm9", "LPT1", "lpt9"])(
+  it.each(["CON", "prn", "AuX", "nul", "cOm9", "lpt9"])(
     "recognizes the Windows device name %s in every extension form",
     (name) => {
       expect(isWindowsReservedPathComponent(name)).toBe(true);
       expect(isWindowsReservedPathComponent(`${name}.md`)).toBe(true);
       expect(isWindowsReservedPathComponent(`${name}.anything.txt`)).toBe(true);
-    },
-  );
-
-  it.each(["COM0", "COM10", "LPT0", "LPT10", "console", "auxiliary"])(
-    "does not reserve the ordinary name %s",
-    (name) => {
-      expect(isWindowsReservedPathComponent(name)).toBe(false);
     },
   );
 

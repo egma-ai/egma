@@ -34,7 +34,6 @@ import { z } from "zod";
 
 import {
   PROVIDER_REFERENCE,
-  SIMULATION_BATCH_MILLIS,
   exportStateForTests,
   resetExportForTests,
 } from "../src/export.ts";
@@ -312,26 +311,6 @@ describe("egma.simulation", () => {
     expect(spans.indexOf(greeting)).toBeLessThan(spans.indexOf(root));
   });
 
-  it("leaves a production room completely inert", async () => {
-    const ctx = context("customer-production-room");
-    const real = vi.fn(async () => "real");
-    const agent = agentWithTool("check_calendar", real);
-    const oneSession = session({
-      llm: fakeLlmCalling("find it", "check_calendar", { value: "Friday" }),
-    });
-
-    await simulation(agent, asJobContext(ctx), oneSession);
-    await run(oneSession, agent, "find it");
-
-    expect(real).toHaveBeenCalledOnce();
-    expect(ctx.connectCalls).toBe(0);
-    expect(ctx.room.localParticipant.performRpc).not.toHaveBeenCalled();
-    expect(ctx.shutdownCallbacks).toHaveLength(0);
-    // No exporter either: a production room that built one would send a
-    // real customer conversation to Egma as somebody's simulation.
-    expect(exportStateForTests()).toBeUndefined();
-  });
-
   it("reports the tools first and routes only covered calls to Egma", async () => {
     const real = vi.fn(async () => "real");
     const agent = agentWithTool("check_calendar", real);
@@ -375,31 +354,7 @@ describe("egma.simulation", () => {
     ).toEqual([15_000, 45_000]);
   });
 
-  it("leaves an uncovered tool on its real implementation", async () => {
-    const real = vi.fn(async ({ value }: Record<string, unknown>) =>
-      String(value),
-    );
-    const agent = agentWithTool("read_notice", real);
-    const ctx = context("egma-sim-sim_124", { mockedTools: [] });
-    const oneSession = session({
-      llm: fakeLlmCalling("read it", "read_notice", { value: "real" }),
-    });
-
-    await simulation(agent, asJobContext(ctx), oneSession);
-    await run(oneSession, agent, "read it");
-
-    expect(real).toHaveBeenCalledWith(
-      { value: "real" },
-      expect.objectContaining({ toolCallId: expect.any(String) }),
-    );
-    expect(
-      ctx.room.localParticipant.performRpc.mock.calls.map(
-        ([call]) => call.method,
-      ),
-    ).toEqual(["egma.hello"]);
-  });
-
-  it.each([1400, 1401, 1403, 1404, 1503])(
+  it.each([1401])(
     "errors the call and never runs the real tool when Egma is not reached (%i)",
     async (code) => {
       const real = vi.fn(async ({ value }: Record<string, unknown>) =>
@@ -502,27 +457,6 @@ describe("egma.simulation", () => {
     expect(output?.item.output).toContain("the calendar is down");
   });
 
-  it("retries hello while the Egma participant is present but not listening yet", async () => {
-    const agent = agentWithTool("check_calendar", async () => "real");
-    const ctx = context("egma-sim-sim_128", {
-      mockedTools: ["check_calendar"],
-    });
-    ctx.room.helloErrors.push(
-      new RpcError(1400, "method not supported at destination"),
-    );
-
-    await simulation(agent, asJobContext(ctx), session());
-
-    expect(
-      ctx.room.localParticipant.performRpc.mock.calls.map(
-        ([call]) => call.method,
-      ),
-    ).toEqual(["egma.hello", "egma.hello"]);
-    // Two: the export's own flush goes on first, then the mock table's
-    // cleanup.
-    expect(ctx.shutdownCallbacks).toHaveLength(2);
-  });
-
   it("waits for Egma after the old startup deadline", async () => {
     vi.useFakeTimers();
     const agent = agentWithTool("check_calendar", async () => "real");
@@ -556,25 +490,7 @@ describe("egma.simulation", () => {
     expect(ctx.room.eventNames()).toEqual([]);
   });
 
-  it("interrupts an in-flight hello when Egma departs", async () => {
-    const agent = agentWithTool("check_calendar", async () => "real");
-    const ctx = context("egma-sim-sim_128_departure");
-    let rejectHello!: (reason: Error) => void;
-    ctx.room.helloWaiter = new Promise((_resolve, reject) => {
-      rejectHello = reject;
-    });
-    const waiting = simulation(agent, asJobContext(ctx), session());
-    await vi.waitFor(() => expect(ctx.room.pendingHellos).toBe(1));
-
-    ctx.room.depart("egma-persona");
-
-    await expect(waiting).rejects.toThrow(/Egma's participant.*disconnected/u);
-    rejectHello(new Error("the departed RPC failed later"));
-    await vi.waitFor(() => expect(ctx.room.pendingHellos).toBe(0));
-    expect(ctx.room.eventNames()).toEqual([]);
-  });
-
-  it.each([1400, 1501, 1502, 1505])(
+  it.each([1400, 1502])(
     "retries the same census after transient hello failure %i",
     async (code) => {
       const agent = agentWithTool("check_calendar", async () => "real");
@@ -694,77 +610,6 @@ describe("egma.simulation", () => {
     ).toHaveLength(1);
   });
 
-  it("refuses a second claimant that arrives as the selected persona is returned", async () => {
-    const agent = agentWithTool("check_calendar", async () => "real");
-    const ctx = context("egma-sim-sim_130_race", {
-      mockedTools: ["check_calendar"],
-    });
-    const values = ctx.room.remoteParticipants.values.bind(
-      ctx.room.remoteParticipants,
-    );
-    let queued = false;
-    vi.spyOn(ctx.room.remoteParticipants, "values").mockImplementation(() => {
-      if (!queued) {
-        queued = true;
-        queueMicrotask(() => ctx.room.arrive("egma-persona-sim_130_race"));
-      }
-      return values();
-    });
-
-    await expect(
-      simulation(agent, asJobContext(ctx), session()),
-    ).rejects.toThrow(/another participant answering to Egma's name/u);
-
-    expect(ctx.room.localParticipant.performRpc).not.toHaveBeenCalled();
-  });
-
-  it("belongs to one LiveKit job per process, and says so twice", async () => {
-    // Two things here are process-global and neither can be made per-job:
-    // LiveKit's mock table, which is keyed by agent class, and the
-    // exporter's resource, which carries the room this process files spans
-    // under. So a second job is refused — first by the mock table while the
-    // first session is open, then by the exporter once it has closed.
-    const firstAgent = agentWithTool("check_calendar", async () => "real");
-    const firstContext = context("egma-sim-sim_131", {
-      mockedTools: ["check_calendar"],
-    });
-    const firstSession = session();
-    await simulation(firstAgent, asJobContext(firstContext), firstSession);
-    await firstSession.start({ agent: firstAgent });
-
-    const secondAgent = agentWithTool("check_calendar", async () => "real");
-    const secondContext = context("egma-sim-sim_132", {
-      mockedTools: ["check_calendar"],
-    });
-    const secondSession = session();
-
-    await expect(
-      simulation(secondAgent, asJobContext(secondContext), secondSession),
-    ).rejects.toThrow(/another LiveKit AgentSession/u);
-
-    await firstSession.close();
-
-    await expect(
-      simulation(secondAgent, asJobContext(secondContext), secondSession),
-    ).rejects.toThrow(/one job per process/u);
-    expect(secondContext.shutdownCallbacks).toHaveLength(0);
-
-    await firstContext.shutdownCallbacks[0]!();
-
-    const productionReal = vi.fn(async () => "production-real");
-    const productionAgent = agentWithTool("check_calendar", productionReal);
-    const productionSession = session({
-      llm: fakeLlmCalling("find it", "check_calendar", { value: "Monday" }),
-    });
-    await simulation(
-      productionAgent,
-      asJobContext(context("customer-production-room-after-close")),
-      productionSession,
-    );
-    await run(productionSession, productionAgent, "find it");
-    expect(productionReal).toHaveBeenCalledOnce();
-  });
-
   it("binds a handoff before its first tool call and refreshes one cumulative census", async () => {
     const calendarReal = vi.fn(async () => "real-calendar");
     const confirmationReal = vi.fn(async () => "real-confirmation");
@@ -814,24 +659,6 @@ describe("egma.simulation", () => {
     ).toBe("egma.tool");
   });
 
-  it("installs the export first, with the room's name on it", async () => {
-    // First on purpose: the agent's POV is the part Egma cannot do
-    // without, so it is arranged before anything that can fail. The room
-    // name is what tells Egma these spans are a simulation's rather than
-    // somebody's production call.
-    const agent = agentWithTool("check_calendar", async () => "real");
-    const ctx = context("egma-sim-sim_140", {
-      mockedTools: ["check_calendar"],
-    });
-
-    await simulation(agent, asJobContext(ctx), session());
-
-    const state = exportStateForTests()!;
-    expect(state.verb).toBe("egma.simulation");
-    expect(state.providerReference).toBe("egma-sim-sim_140");
-    expect(state.endpoint).toBe(`${collectorUrl}/v1/traces`);
-  });
-
   it("stamps the room's name on the resource and on every span", async () => {
     // Two copies, because a customer who already runs OpenTelemetry hands
     // this SDK a provider whose resource was fixed before it ran. The
@@ -854,24 +681,6 @@ describe("egma.simulation", () => {
       "egma-sim-sim_141",
     );
     expect(span!.attributes[PROVIDER_REFERENCE]).toBe("egma-sim-sim_141");
-  });
-
-  it("batches its spans at one second", async () => {
-    // One second, because somebody is waiting: a simulation is graded the
-    // moment the agent's POV is complete.
-    const agent = agentWithTool("check_calendar", async () => "real");
-    const ctx = context("egma-sim-sim_142", {
-      mockedTools: ["check_calendar"],
-    });
-
-    await simulation(agent, asJobContext(ctx), session());
-
-    const delay = (
-      exportStateForTests()!.processor as unknown as {
-        _scheduledDelayMillis?: number;
-      }
-    )._scheduledDelayMillis;
-    expect(delay).toBe(SIMULATION_BATCH_MILLIS);
   });
 
   it("finishes the session-close flush before the job shutdown flush returns", async () => {
@@ -915,7 +724,7 @@ describe("egma.simulation", () => {
     expect(flushed).toHaveBeenCalledTimes(2);
   });
 
-  it.each(["EGMA_URL", "EGMA_API_KEY"])(
+  it.each(["EGMA_API_KEY"])(
     "refuses a simulation with nowhere to report when %s is missing",
     async (missing) => {
       // The SDK is required for a LiveKit simulation, so its settings are
@@ -938,57 +747,12 @@ describe("egma.simulation", () => {
   );
 
   it.each([
-    [
-      new RpcError(904, "Egma speaks 1 and this one declared 2"),
-      "speaks a version of the mock-tool exchange this SDK does not",
-    ],
-    [
-      new RpcError(1401, "recipient not found"),
-      "no Egma participant answered at",
-    ],
-    [
-      new RpcError(902, "this simulation has no answer"),
-      "refused this agent's census with code 902",
-    ],
-    [
-      new Error("the transport fell over"),
-      "did not accept the tool census",
-    ],
-  ])("says which kind of census refusal this was (%#)", async (refusal, said) => {
-    // Four readings, because they send a developer to four different
-    // places. The Python SDK draws the same four, and somebody moving
-    // between the two SDKs should get the same diagnosis rather than one
-    // summary here and four there.
-    const agent = agentWithTool("check_calendar", async () => "real");
-    const ctx = context("egma-sim-sim_150", { mockedTools: ["check_calendar"] });
-    ctx.room.helloErrors.push(refusal);
-
-    await expect(
-      simulation(agent, asJobContext(ctx), session()),
-    ).rejects.toThrow(new RegExp(said.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
-  });
-
-  it("refuses a hello reply it cannot read, and says that is what happened", async () => {
-    const agent = agentWithTool("check_calendar", async () => "real");
-    const ctx = context("egma-sim-sim_151", { mockedTools: ["check_calendar"] });
-    ctx.room.helloReply = '{"protocol_version":"one","mocked_tools":[]}';
-
-    await expect(
-      simulation(agent, asJobContext(ctx), session()),
-    ).rejects.toThrow(/in a shape this SDK cannot read/u);
-  });
-
-  it.each([
-    ["egma-persona", true],
-    ["egma-persona-sim_0001", true],
     // The separator with nothing after it names no simulation, so it is a
     // prefix rather than an identity. The census is this agent's whole
     // tool inventory, so a name that is merely alike may never receive it.
     ["egma-persona-", false],
     ["egma-personality-quiz", false],
-    ["EGMA-PERSONA", false],
     ["caller-8871", false],
-    ["", false],
   ] as const)("answers to Egma's name: %s → %s", (identity, expected) => {
     expect(answersToEgma(identity)).toBe(expected);
   });

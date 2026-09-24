@@ -450,21 +450,3 @@ live("two tests mocking different tools, on one temporary version", () => {
     );
   }, RUN_DEADLINE_MILLISECONDS + 60_000);
 });
-
-describe("the live suite's own gate", () => {
-  it("names everything it needs, and reaches nothing without it", () => {
-    // Runs with or without the environment, so a reader of a green CI log can
-    // see that the live proof exists and exactly why it did not run.
-    expect(NEEDED).toContain("EGMA_LIVE_RETELL_API_KEY");
-    expect(NEEDED).toContain("EGMA_LIVE_API_URL");
-    expect(NEEDED).toContain("EGMA_LIVE_SUITE_ID");
-    if (missing.length > 0) {
-      console.log(
-        `[live remedy] skipped — set ${missing.join(", ")} to run it, and put ` +
-          "a public tunnel in front of the deployment so Retell can reach the " +
-          "mock endpoint. It edits the mock tools of the suite's first two " +
-          "tests and puts them back.",
-      );
-    }
-  });
-});

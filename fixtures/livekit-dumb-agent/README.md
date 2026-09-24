@@ -63,8 +63,8 @@ begins `egma-sim-` — it reports both tools by name and stands Egma in
 front of whichever ones the simulation has answers for. That holds on both
 dispatch styles, including the unnamed one where this worker is in the
 room before Egma is. **In every other room it does nothing at all** — that
-is the SDK's whole safety story, and `tests/test_outside_egma.py` holds
-this agent to it rather than taking the SDK's word for it.
+is the SDK's whole safety story. `sdks/python/tests/test_inert.py` and the
+`production-inert` case of `fixtures/livekit-e2e` check it.
 
 The `egma` dependency here is the copy in `sdks/python`, not the published
 package, so this fixture always exercises the seam as it stands on this
@@ -125,8 +125,7 @@ output rather than grading it.
 
 **A production room carries the customer's own name**, never Egma's
 marked one, so `chat` is false there and the options are the stock ones. The voice path is untouched by
-construction rather than by care, which is the property
-`tests/test_outside_egma.py` holds this file to.
+construction rather than by care.
 
 ## Naming the worker
 
@@ -223,9 +222,8 @@ cd fixtures/livekit-dumb-agent
 uv run ruff check . && uv run pytest
 ```
 
-What they hold this file to: both tools attached before `simulation` runs,
-the integration line in the right place, and the whole thing untouched in
-a room with no Egma in it.
+What they check: the LiveKit version this fixture pins still exposes the
+tracer provider the SDK reuses.
 
 ## Sanity check without a server
 

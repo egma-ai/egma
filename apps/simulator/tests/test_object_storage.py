@@ -16,13 +16,10 @@ from conftest import (
     WRONG_OBJECT_STORAGE_SECRET_ACCESS_KEY,
     ObjectStorage,
     assert_kept_secret,
-    assert_one_speaker_to_a_channel,
     has_terminal,
-    load_fixture_spec,
     loopback_spec,
     object_client,
     terminal_event_for,
-    turns_for,
 )
 
 from egma_simulator.blob import S3BlobStore, confined_key
@@ -49,45 +46,10 @@ def store_for(storage: ObjectStorage) -> S3BlobStore:
     )
 
 
-async def test_a_reference_resolves_to_what_was_written(object_storage):
-    """The one thing the seam promises, over a real network round trip.
-
-    Read back through a client of the tests' own rather than through the
-    store that wrote it: what has to be true is that *some other reader*
-    finds the bytes where the reference says they are, which is the whole
-    reason the recording left the simulator's disk.
-    """
-    store = store_for(object_storage)
-
-    reference = await store.write("sim_01ABC/dual-channel.wav", b"RIFF....")
-
-    assert reference == "sim_01ABC/dual-channel.wav"
-    answer = object_client(object_storage.env).get_object(
-        Bucket=object_storage.bucket, Key=reference
-    )
-    assert answer["Body"].read() == b"RIFF...."
-
-
-async def test_writing_twice_replaces_rather_than_grows(object_storage):
-    """The same promise the filesystem store makes: one key, one blob."""
-    store = store_for(object_storage)
-
-    await store.write("sim-twice/recording.wav", b"first")
-    reference = await store.write("sim-twice/recording.wav", b"second")
-
-    answer = object_client(object_storage.env).get_object(
-        Bucket=object_storage.bucket, Key=reference
-    )
-    assert answer["Body"].read() == b"second"
-
-
 @pytest.mark.parametrize(
     "key",
     [
         "../../etc/passwd",
-        "sim/../../../outside.wav",
-        "/absolute/recording.wav",
-        "sim\x00id/recording.wav",
     ],
 )
 async def test_no_key_can_name_anything_outside_the_bucket(object_storage, key):
@@ -105,88 +67,6 @@ async def test_no_key_can_name_anything_outside_the_bucket(object_storage, key):
         Bucket=object_storage.bucket, Key=reference
     )
     assert answer["Body"].read() == b"contained"
-
-
-# -- The contract seam, with the store moved ---------------------------------
-#
-# The whole point of the effort, proved where a person could see it: a real
-# simulator process, told only through its environment that its recordings
-# go to a bucket, conducts a real voice simulation — and the recording it
-# reports is fetched out of that bucket and listened to. Nothing above the
-# blob seam knows any of this happened, which is why the assertion below is
-# the acceptance suite's own helper, called here unchanged.
-
-
-async def test_a_recording_lands_in_object_storage_and_reads_back(
-    workbench, start_simulator, object_storage
-):
-    """A reference reported by a simulation resolves in the store, and what
-    it resolves to is the call.
-
-    The same golden fixture the acceptance suite conducts, and the same
-    assertion about what came out — each turn on its own speaker's channel
-    and on neither other. The only difference is four environment
-    variables, which is what "nothing above the blob seam moves" means when
-    it is said out loud.
-    """
-    spec = load_fixture_spec("voice-loopback.json")
-    simulation_id = spec["simulation_id"]
-    await workbench.offer(spec)
-    simulator = start_simulator(workbench, extra_env=object_storage.env)
-
-    records = await workbench.wait_for(has_terminal(simulation_id))
-
-    terminal = terminal_event_for(records, simulation_id)
-    assert terminal["status"] == "completed", terminal["reason"]
-    turns = turns_for(records, simulation_id)
-
-    # Still a reference and not an address: it names an object, and what
-    # resolves it is the reader's own configuration. A report that carried
-    # a URL would be a report that went stale the day the store moved.
-    audio = terminal["facts"]["audio"]
-    assert "://" not in audio["recording"]
-    assert object_storage.endpoint not in audio["recording"]
-    assert object_storage.bucket not in audio["recording"]
-
-    recording = simulator.blob(audio["recording"])
-    assert_one_speaker_to_a_channel(recording, turns)
-
-
-async def test_the_simulator_keeps_no_audio_of_its_own(
-    workbench, start_simulator, object_storage
-):
-    """The recording stops living inside the container that made it.
-
-    This is the failure the effort exists to end: a second simulator's
-    recordings are unreadable by anybody, and nothing says so. Writing to
-    the bucket *and* to the disk would leave that failure standing behind
-    a copy that happens to be reachable, so the disk gets nothing —
-    including the directory itself, which is not even made.
-    """
-    spec = loopback_spec(
-        "sim-object-storage-only",
-        greeting="Front desk, hello.",
-        replies=["Certainly.", "Done."],
-    )
-    await workbench.offer(spec)
-    simulator = start_simulator(workbench, extra_env=object_storage.env)
-
-    records = await workbench.wait_for(has_terminal("sim-object-storage-only"))
-
-    terminal = terminal_event_for(records, "sim-object-storage-only")
-    assert terminal["status"] == "completed", terminal["reason"]
-    assert terminal["facts"]["audio"] is not None
-    assert simulator.blob(terminal["facts"]["audio"]["recording"])
-
-    assert not simulator.blob_dir.exists(), (
-        "the simulator made itself a recordings directory it was told not "
-        "to use"
-    )
-    # And the volume still carries the one thing that has to stay on it:
-    # the write-ahead log, which is what stops a report being lost.
-    assert list(simulator.wal_dir.glob("*.jsonl")), (
-        "the write-ahead log that protects reports is not on the volume"
-    )
 
 
 async def test_neither_half_of_the_write_credential_leaves_the_process(

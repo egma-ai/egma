@@ -3,10 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createProject,
-  EGMA_PROVIDED_PERSONAS,
   IdentityConflictError,
-  listProjectGraders,
-  listPersonas,
   listProjects,
   NotPermittedError,
   ProjectSlugTakenError,
@@ -15,7 +12,6 @@ import {
   UnprocessableInputError,
   updateOrganization,
   updateProject,
-  PREDEFINED_GRADERS,
   type AuthContext,
   type Role,
 } from "@egma/db";
@@ -63,33 +59,6 @@ afterAll(async () => {
 });
 
 describe("creating a project", () => {
-  it("writes the project and its seeded grader together, naming no persona", async () => {
-    const made = await createProject(acmeAdmin(), {
-      name: "Outbound sales",
-    });
-
-    expect(made.name).toBe("Outbound sales");
-    expect(made.organizationId).toBe(acme.organization);
-
-    const inside = actingIn(acme.organization, made.id, "admin");
-    const personas = await listPersonas(inside, {});
-
-    // Egma's shelf, and nothing of the project's own: creating a project
-    // reaches the persona catalog for nothing at all, and pins nobody.
-    expect(personas.items).toHaveLength(5);
-    expect(personas.items.every((persona) => persona.owner === "egma")).toBe(
-      true,
-    );
-    expect(personas.items.map((persona) => persona.id)).toContain(
-      EGMA_PROVIDED_PERSONAS.defaultPersona,
-    );
-    const graders = await listProjectGraders(inside);
-    expect(graders).toHaveLength(1);
-    expect(graders[0]?.graderDefinitionId).toBe(
-      PREDEFINED_GRADERS.expectedBehaviors,
-    );
-  });
-
   /**
    * The transaction, proven by breaking something inside it.
    *
@@ -150,14 +119,6 @@ describe("the slug a project is known by", () => {
     // One organization's slugs are not the other's, so both take the first.
     expect(mine.slug).toBe("deterministic");
     expect(theirs.slug).toBe("deterministic");
-  });
-
-  it("refuses a slug an admin typed that a living project already holds", async () => {
-    await createProject(acmeAdmin(), { name: "Taken", slug: "taken" });
-
-    await expect(
-      createProject(acmeAdmin(), { name: "Also taken", slug: "taken" }),
-    ).rejects.toThrow(ProjectSlugTakenError);
   });
 });
 

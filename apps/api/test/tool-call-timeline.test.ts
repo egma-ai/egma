@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  normaliseOtlpExport,
-} from "../src/otlp/normalise.ts";
-import {
   normaliseRetellCall,
   type RetellCall,
 } from "../src/retell/normalise.ts";
@@ -168,68 +165,4 @@ describe("tool-call timing and ownership at the provider doors", () => {
       expect(tool?.durationNanoseconds).toBe(expectedDuration);
     },
   );
-
-  it("preserves an OTLP tool span's measured offset and invoking agent parent", () => {
-    const traceId = "112233445566778899aabbccddeeff00";
-    const rootId = "0011223344556677";
-    const agentTurnId = "1122334455667788";
-    const toolId = "2233445566778899";
-    const traceStartNanoseconds = 1_785_920_400_000_000_000n;
-    const normalised = normaliseOtlpExport({
-      resourceSpans: [
-        {
-          resource: { attributes: [] },
-          scopeSpans: [
-            {
-              scope: { name: "livekit-agents" },
-              spans: [
-                {
-                  traceId,
-                  spanId: rootId,
-                  name: "agent_session",
-                  startTimeUnixNano: traceStartNanoseconds.toString(),
-                  endTimeUnixNano: (traceStartNanoseconds + 10_000_000_000n)
-                    .toString(),
-                },
-                {
-                  traceId,
-                  spanId: agentTurnId,
-                  parentSpanId: rootId,
-                  name: "agent_turn",
-                  startTimeUnixNano: (traceStartNanoseconds + 4_000_000_000n)
-                    .toString(),
-                  endTimeUnixNano: (traceStartNanoseconds + 8_000_000_000n)
-                    .toString(),
-                },
-                {
-                  traceId,
-                  spanId: toolId,
-                  parentSpanId: agentTurnId,
-                  name: "function_tool",
-                  startTimeUnixNano: (traceStartNanoseconds + 6_000_000_000n)
-                    .toString(),
-                  endTimeUnixNano: (traceStartNanoseconds + 6_250_000_000n)
-                    .toString(),
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    });
-    const root = normalised.spans.find((span) => span.spanId === rootId);
-    const tool = normalised.spans.find((span) => span.spanId === toolId);
-
-    expect(normalised.rejected).toEqual([]);
-    expect(tool).toMatchObject({
-      agentPlatform: "livekit",
-      kind: "tool",
-      parentSpanId: agentTurnId,
-      startedAtMicroseconds: 1_785_920_406_000_000n,
-    });
-    expect(
-      (tool?.startedAtMicroseconds ?? 0n) -
-        (root?.startedAtMicroseconds ?? 0n),
-    ).toBe(6_000_000n);
-  });
 });

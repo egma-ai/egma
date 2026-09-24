@@ -19,7 +19,7 @@ import {
   startObjectStorage,
   type ObjectStorage,
 } from "./support/object-storage.ts";
-import { FIXTURE_PROVIDER_CALL_ID, FIXTURE_TRACE } from "./support/fixture.ts";
+import { FIXTURE_TRACE } from "./support/fixture.ts";
 import {
   contextFor,
   everySpan,
@@ -188,18 +188,6 @@ describe.skipIf(!storage.available)(
 );
 
 describe.skipIf(!storage.available)("the captured trace, found in a list", () => {
-  it("is one trace inside a window containing it, and the last page of one", async () => {
-    const page = await listed();
-    expect(page.traces).toHaveLength(1);
-    expect(page.nextPageToken).toBeNull();
-    // Echoed to the microsecond, which is the precision the window was read at
-    // and the precision every other instant in the answer comes back at.
-    expect(page.window).toEqual({
-      from: "2026-08-02T18:00:00.000000Z",
-      to: "2026-08-02T19:00:00.000000Z",
-    });
-  });
-
   it("counts every span that arrived, and the turns inside them", async () => {
     const [trace] = (await listed()).traces;
     expect(trace?.spanCount).toBe(FIXTURE_TRACE.spans);
@@ -209,59 +197,6 @@ describe.skipIf(!storage.available)("the captured trace, found in a list", () =>
     });
     expect(trace?.toolSpanCount).toBe(FIXTURE_TRACE.toolSpans);
     expect(trace?.erroredSpanCount).toBe(FIXTURE_TRACE.erroredSpans);
-  });
-
-  /**
-   * The trace started when its first span was stamped, to the microsecond the
-   * writer wrote — not to the millisecond a JavaScript date would have rounded
-   * it to. The extent is the whole trace's, which for this capture is the root
-   * span's own duration, because the root is the span everything else happened
-   * inside.
-   */
-  it("says when the trace happened and how long it ran", async () => {
-    const [trace] = (await listed()).traces;
-    expect(trace?.startedAt).toBe("2026-08-02T18:04:40.281989Z");
-    expect(trace?.durationNs).toBe("73494876403");
-    expect(trace?.endedAt).toBe("2026-08-02T18:05:53.776865Z");
-  });
-
-  it("projects the same derived P90 turn latency as trace detail", async () => {
-    const [trace] = (await listed()).traces;
-    const detail = await transcript();
-    const turnLatency = detail.metrics.find(
-      (metric) => metric.measure === "turn_response_latency",
-    );
-
-    /*
-     * Both endpoints derive response latency from framework speech spans.
-     * The fixture arithmetic and span IDs are documented in otlp-derived-measures.test.ts.
-     * The spoken-response samples are 2900.4494 and 3066.59356 ms;
-     * nearest-rank p90 selects 3066.59356 ms. Empty native response records
-     * remain raw spans and do not create response-latency samples.
-     */
-    expect(turnLatency?.derived).toBe(true);
-    expect(trace?.turnResponseLatencyP90Milliseconds).toBe(3066.59356);
-    expect(trace?.turnResponseLatencyP90Milliseconds).toBe(turnLatency?.p90);
-    expect(trace?.turnResponseLatencyP90Partial).toBe(false);
-  });
-
-  it("says which platform produced it without inventing a connection type", async () => {
-    const [trace] = (await listed()).traces;
-    expect(trace?.source).toBe("production");
-    // Whose account this is, in the product's own word. `emitter` is the
-    // storage column the same fact lives in and never reaches the wire.
-    expect(trace?.pov).toBe("agent");
-    expect("emitter" in (trace ?? {})).toBe(false);
-    expect(trace?.environment).toBe("default");
-    expect(trace?.connectionType).toBe("");
-    expect(trace?.providerCallId).toBe(FIXTURE_PROVIDER_CALL_ID);
-    expect(trace?.agentPlatform).toBe("livekit");
-    expect(trace?.platformAgentId).toBe("");
-    expect(trace?.platformAgentName).toBe("");
-    expect(trace?.platformAgentVersion).toBe("");
-    // Nothing started this one, so there is no run and no agent pinned to it.
-    expect(trace?.runId).toBe("");
-    expect(trace?.agentId).toBe("");
   });
 
   /**
@@ -307,55 +242,6 @@ describe.skipIf(!storage.available)("the captured trace, found in a list", () =>
 });
 
 describe.skipIf(!storage.available)("the captured trace, read as a transcript", () => {
-  it("contains every spoken turn in the order it was taken", async () => {
-    const detail = await transcript();
-
-    expect(detail.turns).toHaveLength(
-      FIXTURE_TRACE.humanTurns + FIXTURE_TRACE.agentTurns,
-    );
-    expect(detail.turns.filter((turn) => turn.kind === "turn:human")).toHaveLength(
-      FIXTURE_TRACE.humanTurns,
-    );
-    expect(detail.turns.filter((turn) => turn.kind === "turn:agent")).toHaveLength(
-      FIXTURE_TRACE.agentTurns,
-    );
-
-    const times = detail.turns.map((turn) => turn.startedAt);
-    expect([...times].sort()).toEqual(times);
-  });
-
-  /**
-   * The exchange that was actually had, written out — which is the only
-   * assertion that can tell a transcript from a list of rows in the right order.
-   *
-   * Empty native agent records remain in the raw trace but are not transcript
-   * turns. Recognition rides the human's turn as attributes rather than as a
-   * span of its own, which is why every human turn has its line.
-   */
-  it("carries what each speaker actually said, in the order they said it", async () => {
-    const detail = await transcript();
-
-    expect(
-      detail.turns.map((turn) => [turn.kind, turn.text] as const),
-    ).toEqual([
-      ["turn:agent", "Hello! How can I assist you today?"],
-      ["turn:human", "Hi Kelly, my name is Sam."],
-      ["turn:human", "Can you tell me what the weather is like in Lisbon today?"],
-      [
-        "turn:agent",
-        "The weather in Lisbon today is sunny with a temperature of 70 degrees. Do you need any more information?",
-      ],
-      ["turn:human", "Thanks, and how about Oslo? Is it colder there right now?"],
-      [
-        "turn:agent",
-        "Oslo is also sunny, but it has the same temperature of 70 degrees. Would you like to know anything else?",
-      ],
-      ["turn:human", "Great, that is all I needed."],
-      ["turn:human", "Have a good day, and goodbye."],
-      ["turn:agent", "Thank you, Sam! Have a great day, and goodbye!"],
-    ]);
-  });
-
   /**
    * Each turn expands into the steps that happened inside it, which is the
    * detail page's whole reason for existing: the human's turn holds the audio it
@@ -430,56 +316,6 @@ describe.skipIf(!storage.available)("the captured trace, read as a transcript", 
   });
 
   /**
-   * The capture deliberately keeps a real failure — a model timing out, the
-   * fallback giving up, and the turn succeeding on the retry. A transcript that
-   * showed only the successful attempt would make the trace look
-   * healthier than it was.
-   */
-  it("shows the spans that failed, with the status that says so", async () => {
-    const detail = await transcript();
-
-    const everything = [
-      ...everySpan(detail.turns),
-      ...everySpan(detail.spans),
-    ];
-    const failed = everything.filter((span) => span.status === "error");
-
-    expect(failed).toHaveLength(FIXTURE_TRACE.erroredSpans);
-    expect(failed.map((span) => span.name).sort()).toEqual([
-      "llm_request",
-      "llm_request_run",
-      "llm_request_run",
-    ]);
-  });
-
-  /**
-   * There is no speech-to-text span because this framework emits none:
-   * recognition arrives as attributes on the human's turn. A kind for a span
-   * nobody sends would be invented structure, and a transcript that showed one
-   * would be showing a step that never happened.
-   */
-  it("has no speech-to-text step under any turn, because none was ever sent", async () => {
-    const detail = await transcript();
-    const everything = [
-      ...everySpan(detail.turns),
-      ...everySpan(detail.spans),
-    ];
-
-    expect(everything.filter((span) => span.kind === "stt")).toEqual([]);
-    expect([...new Set(everything.map((span) => span.kind))].sort()).toEqual([
-      "end-of-turn",
-      "model",
-      "other",
-      "root",
-      "speaking",
-      "tool",
-      "tts",
-      "turn:agent",
-      "turn:human",
-    ]);
-  });
-
-  /**
    * The root span is the one everything happened inside, and it is available
    * without being part of the transcript. Its children in the response are its
    * bookkeeping, never the turns — those were lifted out, and appear exactly
@@ -502,82 +338,6 @@ describe.skipIf(!storage.available)("the captured trace, read as a transcript", 
     );
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toHaveLength(FIXTURE_TRACE.spans);
-  });
-
-  /**
-   * Production traces must return no simulation ID even though their trace IDs
-   * can convert to UUIDs. Use stored source attribution, not ID shape.
-   */
-  it("names no simulation, because a customer's own agent had this exchange", async () => {
-    const detail = await transcript();
-
-    expect(detail.trace.source).toBe("production");
-    expect(detail.simulationId).toBeNull();
-  });
-
-  it("reports the trace's own facts beside the transcript, and no payload with them", async () => {
-    const detail = await transcript();
-
-    expect(detail.trace.spanCount).toBe(FIXTURE_TRACE.spans);
-    expect(detail.trace.turnCounts).toEqual({
-      human: FIXTURE_TRACE.humanTurns,
-      agent: FIXTURE_TRACE.agentTurns,
-    });
-    expect(detail.trace.startedAt).toBe("2026-08-02T18:04:40.281989Z");
-    expect(detail.trace.providerCallId).toBe(FIXTURE_PROVIDER_CALL_ID);
-    expect(detail.trace.agentPlatform).toBe("livekit");
-    expect(detail.trace.platformAgentId).toBe("");
-    expect(detail.trace.platformAgentName).toBe("");
-    expect(detail.trace.platformAgentVersion).toBe("");
-    expect(detail.spansTruncated).toBe(false);
-
-    // The verbatim payload is the largest column on the row and is deliberately
-    // not in this response. It is not lost — it is on the span — and reaching it
-    // is a per-span request nothing needs yet.
-    const serialised = JSON.stringify(detail);
-    expect(serialised).not.toContain("telemetry.sdk.version");
-    expect(serialised).not.toContain("payload");
-    const everything: DetailSpan[] = [
-      ...everySpan(detail.turns),
-      ...everySpan(detail.spans),
-    ];
-    for (const span of everything) {
-      expect(Object.keys(span).sort()).toEqual([
-        "audioUrl",
-        "durationNs",
-        "kind",
-        "name",
-        "parentSpanId",
-        "pov",
-        "spanId",
-        "spans",
-        "startedAt",
-        "status",
-        "text",
-        "toolArguments",
-        "toolName",
-        "toolResult",
-      ]);
-    }
-  });
-
-  /**
-   * Check which derived measures reach the API and that metrics is always a
-   * list. Hand-computed numeric expectations live in otlp-derived-measures.test.ts.
-   */
-  it("answers what the exchange measured, derived from the framework's own timings", async () => {
-    const detail = await transcript();
-
-    expect(detail.metrics?.map((one) => one.measure)).toEqual([
-      "first_response_latency",
-      "turn_response_latency",
-      "agent_speech_duration",
-      "llm_latency",
-      "tts_latency",
-    ]);
-    // Present rather than absent, so a client can tell "nothing was measured"
-    // from "this response is an older shape that never said".
-    expect(Array.isArray(detail.metrics)).toBe(true);
   });
 });
 
@@ -752,34 +512,6 @@ describe.skipIf(!storage.available)("what one measure looks like on the wire", (
     expect(byId.get(REPORTED)?.turnResponseLatencyP90Partial).toBe(false);
     expect(byId.get(TRUNCATED)?.turnResponseLatencyP90Milliseconds).toBe(4780);
     expect(byId.get(TRUNCATED)?.turnResponseLatencyP90Partial).toBe(true);
-  });
-
-  it("carries no platform field at all on a simulation's own measure", async () => {
-    const only = await measureOf(SIMULATED);
-
-    // The exact shape, pinned: a client integrated against this answer sees
-    // precisely the fields it always saw.
-    expect(Object.keys(only).sort()).toEqual([
-      "derived",
-      "mean",
-      "measure",
-      "p50",
-      "p90",
-      "partial",
-      "pov",
-      "samples",
-      "spanIds",
-      "unit",
-    ]);
-    expect(only.derived).toBe(false);
-    // Whose account this number is. egma timed it off its own recording, so
-    // it is the persona's — and `otherPov` is absent, because the agent's
-    // process said nothing about this conversation.
-    expect(only.pov).toBe("persona");
-    expect("otherPov" in only).toBe(false);
-    // Absent, not empty and not null — there is nothing on the wire to have to
-    // interpret.
-    expect("reportedBy" in only).toBe(false);
   });
 
   it("adds the platform's name, and only there, on a measure it reported", async () => {

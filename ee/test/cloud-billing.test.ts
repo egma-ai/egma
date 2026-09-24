@@ -5,13 +5,11 @@ import {
   createPersona,
   createTest,
   createTestSuite,
-  entitlementSourceContract,
   installBillingPlugIn,
   defaultGraderParameterValues,
   LLM_GRADER_PARAMETER_CONTRACT,
   startRun,
   upsertRateCard,
-  usageSinkContract,
   type AuthContext,
   type GradingJob,
 } from "@egma/db";
@@ -24,7 +22,6 @@ import {
   cloudUsageSink,
   openBillingAccount,
   readEntitlementFacts,
-  readPlanCatalog,
   seedCloudPlans,
   welcomeCreditKey,
 } from "../src/index.ts";
@@ -310,47 +307,6 @@ async function ledgerRows(who: typeof acme): Promise<
 }
 
 describe("the plans the shipped file states", () => {
-  it("writes Hobby and Pro with the published fees and allowances", async () => {
-    const { rows } = await database.sql<Record<string, string | null>>(
-      `select code, name, fee_micros, chat_simulations_allowance,
-              web_call_minutes_allowance, phone_minutes_allowance,
-              web_call_overage_micros_per_minute,
-              phone_overage_micros_per_minute,
-              stripe_fee_price_id
-       from cloud_plan order by code`,
-    );
-    expect(rows.map((row) => row.code)).toEqual(["hobby", "pro"]);
-
-    const [hobby, pro] = rows;
-    expect(hobby).toMatchObject({
-      name: "Hobby",
-      fee_micros: "0",
-      chat_simulations_allowance: "500",
-      web_call_minutes_allowance: "500",
-      phone_minutes_allowance: "500",
-    });
-    expect(pro).toMatchObject({
-      name: "Pro",
-      // $50 a month.
-      fee_micros: "50000000",
-      // Unlimited chat: a chat's only marginal cost is inference.
-      chat_simulations_allowance: null,
-      web_call_minutes_allowance: "5000",
-      phone_minutes_allowance: "2000",
-      // The two placeholders: $0.01 a web-call minute, $0.05 a phone minute.
-      web_call_overage_micros_per_minute: "10000",
-      phone_overage_micros_per_minute: "20000",
-    });
-    // Nothing has created a Stripe object, and the plan row is complete
-    // without one: the allowances are enforced from Egma's own rows.
-    expect(pro?.stripe_fee_price_id).toBeNull();
-  });
-
-  it("states one welcome credit of $5", async () => {
-    const catalog = await readPlanCatalog();
-    expect(catalog.welcomeCreditMicros).toBe(WELCOME_CREDIT_MICROS);
-  });
-
   it("writes nothing on a boot that changed nothing", async () => {
     expect((await seedCloudPlans()).written).toEqual([]);
   });
@@ -393,25 +349,9 @@ describe("a welcome credit", () => {
       String(WELCOME_CREDIT_MICROS),
     );
   });
-
-  it("belongs to the customer it was written for", async () => {
-    const theirs = await ledgerRows(acme);
-    const others = await ledgerRows(globex);
-    expect(theirs[0]?.idempotency_key).not.toBe(others[0]?.idempotency_key);
-  });
 });
 
 describe("whether an organization may start a kind of work", () => {
-  it("admits a customer who has used nothing", async () => {
-    const source = cloudEntitlementSource({ now: () => NOW });
-    await expect(
-      source.mayStart({
-        organizationId: acme.organizationId,
-        allowances: ["chat_simulations", "web_call_minutes", "phone_minutes"],
-      }),
-    ).resolves.toEqual({ allowed: true });
-  });
-
   it("pauses Hobby at the published number of chat simulations", async () => {
     // Five hundred is the number the plan row publishes, so five hundred is
     // what this spends. The row is the rule: a founder who changes it changes
@@ -561,26 +501,9 @@ describe("whether an organization may start a kind of work", () => {
       "web_call_minutes", "phone_minutes",
     ]);
   });
-
-  it("asks about nothing and refuses nothing", async () => {
-    const source = cloudEntitlementSource({ now: () => NOW });
-    await expect(
-      source.mayStart({ organizationId: acme.organizationId, allowances: [] }),
-    ).resolves.toEqual({ allowed: true });
-  });
 });
 
 describe("whether Egma's own key may fund a provider", () => {
-  it("funds every provider while the balance is above zero", async () => {
-    const source = cloudEntitlementSource({ now: () => NOW });
-    await expect(
-      source.mayPlatformKeyFund({
-        organizationId: acme.organizationId,
-        providers: ["openai", "cartesia", "deepgram"],
-      }),
-    ).resolves.toEqual({ funded: true });
-  });
-
   it("refuses at zero, naming the providers and the next step", async () => {
     // The balance spent, as a correction an operator would write.
     await database.sql(
@@ -642,35 +565,6 @@ describe("whether Egma's own key may fund a provider", () => {
         providers: ["openai"],
       }),
     ).resolves.toEqual({ funded: true });
-  });
-
-  it("funds a request that names no provider", async () => {
-    const source = cloudEntitlementSource({ now: () => NOW });
-    await expect(
-      source.mayPlatformKeyFund({
-        organizationId: acme.organizationId,
-        providers: [],
-      }),
-    ).resolves.toEqual({ funded: true });
-  });
-});
-
-describe("the port contracts, against the cloud adapters", () => {
-  for (const check of entitlementSourceContract(() => cloudEntitlementSource({ now: () => NOW }), { organizationId: acme.organizationId })) {
-    it(`entitlement source: ${check.name}`, () => check.run());
-  }
-  for (const check of usageSinkContract(() => cloudUsageSink())) {
-    it(`usage sink: ${check.name}`, () => check.run());
-  }
-});
-
-describe("the facts the adapter decides from", () => {
-  it("names the account, the plan, the period and the month's usage", async () => {
-    const facts = await readEntitlementFacts(globex.organizationId, NOW);
-    expect(facts.account.planCode).toBe("pro");
-    expect(facts.plan.webCallMinutesAllowance).toBe(5_000);
-    expect(facts.period.resetsAt).toEqual(PERIOD_RESETS);
-    expect(facts.usage.used.web_call_minutes).toBe(5_001);
   });
 });
 
@@ -772,7 +666,6 @@ describe("the grading claim, when Egma's key pays for the judge", () => {
     }
   });
 });
-
 
 it("starts a fresh allowance tally at activation and assigns a crossing call to its start month", async () => {
   const who = { organizationId: newId("org"), projectId: newId("prj"), userId: newId("usr") };

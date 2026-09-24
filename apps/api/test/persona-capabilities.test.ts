@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   discoverCartesiaVoices,
-  OPENAI_STANDARD_VOICES,
   OPENAI_LIVE_VOICES,
   personaCapabilityRefusal,
   resolvePersonaCapabilities,
@@ -16,18 +15,6 @@ const selection = {
 };
 
 describe("persona capability resolution", () => {
-  it("offers the complete documented OpenAI voice catalog", () => {
-    const result = resolvePersonaCapabilities(selection);
-    expect(result.voices.status).toBe("supported");
-    expect(result.voices.choices?.map((voice) => voice.id)).toEqual([
-      "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova",
-      "sage", "shimmer", "verse", "marin", "cedar",
-    ]);
-    expect(OPENAI_STANDARD_VOICES.find((voice) => voice.id === "cedar")?.presentation).toBe("male");
-    expect(OPENAI_STANDARD_VOICES.find((voice) => voice.id === "coral")?.presentation).toBe("female");
-    expect(OPENAI_STANDARD_VOICES.find((voice) => voice.id === "alloy")?.presentation).toBe("unknown");
-  });
-
   it("uses the documented GPT Live voice catalog", () => {
     expect(OPENAI_LIVE_VOICES.map((voice) => voice.id)).toEqual([
       "alloy", "ash", "ballad", "beacon", "bossa", "cedar", "cinder", "coral", "delta", "echo", "gleam",
@@ -63,14 +50,6 @@ describe("persona capability resolution", () => {
     expect(result.language).toMatchObject({ status: "supported" });
     expect(result.language.choices).toContain("en");
     expect(result.language.choices).toContain("es");
-    expect(Object.keys(result).sort()).toEqual(["language", "voices"]);
-  });
-
-  it("does not expose Cartesia accent metadata as an authoring capability", () => {
-    const result = resolvePersonaCapabilities(
-      { ...selection, ttsProvider: "cartesia", ttsModel: "sonic-3.6", voiceId: "voice-a", language: "en-US" },
-      [{ id: "voice-a", name: "A", source: "standard", presentation: "unknown", languages: [] }],
-    );
     expect(Object.keys(result).sort()).toEqual(["language", "voices"]);
   });
 

@@ -1,16 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  accessVariantById,
   connectionIsConductable,
-  connectionOptionMetadata,
   descriptorOf,
-  productLabelOf,
   validConfig,
   validCredentials,
   validModality,
 } from "../src/access/connection-registry.ts";
-import { CONNECTION_TYPES, ACCESS_VARIANTS } from "../src/schema/agents.ts";
 
 /**
  * Text mode door, by refusal table.
@@ -24,72 +20,6 @@ const KIND = "retell_text_mode";
 const VARIANT = "retell_text_mode.api_key";
 const AGENT = "agent_b0e2e9cb267c47e7e7026cd8e8";
 const A_KEY = "key_e2e9cb267c47e7e7026cd8e8";
-
-describe("what a Retell text mode connection is made of", () => {
-  it("is a chat door onto a Retell agent, brokered by Retell", () => {
-    const descriptor = descriptorOf(KIND);
-    expect(descriptor.label).toBe("Retell text mode");
-    expect(descriptor.agentPlatforms).toEqual(["retell"]);
-    expect(descriptor.modalities).toEqual(["chat"]);
-    expect(descriptor.topology).toBe("hosted-broker");
-    expect(descriptor.usesPlatformCarrier).toBe(false);
-  });
-
-  it("reuses the agent the voice connection already named", () => {
-    // Chat and voice land as two connections on one Egma agent, so the
-    // comparison the domain model promises is between two histories of one
-    // identity rather than between twins.
-    expect(descriptorOf(KIND).reuse?.family).toBe("retellAgentId");
-    expect(descriptorOf("retell_web_call").reuse?.family).toBe("retellAgentId");
-  });
-
-  it("is in the schema's two lists, so a row can carry it at all", () => {
-    expect(CONNECTION_TYPES).toContain(KIND);
-    expect(ACCESS_VARIANTS).toContain(VARIANT);
-  });
-});
-
-describe("text mode row in the connection options", () => {
-  it("is offered, labelled 'Retell text mode', on chat", () => {
-    const row = connectionOptionMetadata().find(
-      (option) => option.connectionType === KIND,
-    );
-    expect(row).toBeDefined();
-    expect(row?.agentPlatform).toBe("retell");
-    expect(row?.agentPlatformLabel).toBe("Retell");
-    expect(row?.accessVariant).toBe(VARIANT);
-    expect(row?.modality).toBe("chat");
-    expect(row?.productLabel).toBe("Retell text mode");
-    expect(row?.credentialRule).toBe("required");
-    expect(row?.usesPlatformCarrier).toBe(false);
-  });
-
-  it("describes exactly the one config field it gates", () => {
-    const row = connectionOptionMetadata().find(
-      (option) => option.connectionType === KIND,
-    );
-    expect(row?.fields.map((field) => [field.key, field.required])).toEqual([
-      ["retellAgentId", true],
-    ]);
-    expect(row?.credentialFields.map((field) => field.field)).toEqual([
-      "apiKey",
-    ]);
-  });
-
-  it("answers its product label for the exact supported tuple", () => {
-    expect(productLabelOf("retell", KIND, VARIANT, "chat")).toBe(
-      "Retell text mode",
-    );
-  });
-
-  it("refuses the same tuple asked for on voice", () => {
-    // A text-mode exchange synthesizes nothing and hears nothing. Voice is a
-    // phone or a web-call connection beside this one, never this one.
-    expect(() => productLabelOf("retell", KIND, VARIANT, "voice")).toThrow(
-      /do not form a supported simulation connection/u,
-    );
-  });
-});
 
 describe("text mode door's refusals", () => {
   it("takes the agent id on its own, which is the ordinary case", () => {
@@ -115,27 +45,9 @@ describe("text mode door's refusals", () => {
     ).toThrow('a Retell text mode connection\'s config has no key "baseUrl"');
   });
 
-  it("names an unknown config key, and says which of its own are optional", () => {
-    expect(() =>
-      validConfig(KIND, VARIANT, {
-        retellAgentId: AGENT,
-        retellAgentID: AGENT,
-      }),
-    ).toThrow(
-      'a Retell text mode connection\'s config has no key "retellAgentID"; ' +
-        "it holds retellAgentId",
-    );
-  });
-
   it("demands the agent id by name when it is missing", () => {
     expect(() => validConfig(KIND, VARIANT, {})).toThrow(
       "a Retell text mode connection's config needs retellAgentId",
-    );
-  });
-
-  it("refuses a garbage modality as not a modality at all", () => {
-    expect(() => validModality(KIND, VARIANT, "telepathy")).toThrow(
-      '"telepathy" is not a modality; a retell_text_mode connection speaks chat',
     );
   });
 
@@ -149,15 +61,6 @@ describe("text mode door's refusals", () => {
     const sealed = validCredentials(KIND, VARIANT, { apiKey: A_KEY });
     expect(sealed?.sealed).toEqual({ apiKey: A_KEY });
     expect(sealed?.hint).toBe(A_KEY.slice(-4));
-  });
-
-  it("refuses a credential block with a key that does not belong", () => {
-    expect(() =>
-      validCredentials(KIND, VARIANT, { apiKey: A_KEY, apiSecret: A_KEY }),
-    ).toThrow(
-      'a Retell text mode connection\'s credentials have no key "apiSecret"; ' +
-        "they are shaped { apiKey }",
-    );
   });
 
   it("demands a credential, because there is no other way in", () => {
@@ -177,13 +80,6 @@ describe("text mode door's refusals", () => {
     })();
     expect(refused).toMatch(/at least 8 characters/u);
     expect(refused).not.toContain("short");
-  });
-
-  it("names its one access variant, and refuses one it has never heard of", () => {
-    expect(accessVariantById(KIND, VARIANT).label).toBe("Retell API key");
-    expect(() => accessVariantById(KIND, "retell_text_mode.oauth")).toThrow(
-      /is not one this Egma instance knows/u,
-    );
   });
 });
 

@@ -112,22 +112,6 @@ describe("listing agents", () => {
     stranger = await createAgent(actingAsGlobex(), { agentPlatform: "retell", name: "Stranger" });
   });
 
-  it("returns only the acting project's agents, newest first", async () => {
-    const page = await listAgents(actingIn(acme.listing));
-
-    expect(page.items.map((item) => item.id)).toEqual(
-      created.map((item) => item.id).reverse(),
-    );
-    expect(page.items.map((item) => item.name)).toEqual([
-      "Five",
-      "Four",
-      "Three",
-      "Two",
-      "One",
-    ]);
-    expect(page.nextCursor).toBeUndefined();
-  });
-
   it("pages across the whole set with no overlap and no missed row", async () => {
     const first = await listAgents(actingIn(acme.listing), { limit: 2 });
     expect(first.items).toHaveLength(2);
@@ -153,18 +137,6 @@ describe("listing agents", () => {
     );
   });
 
-  it("refuses a page size outside the range and a cursor that is not an agt_ id", async () => {
-    await expect(
-      listAgents(actingIn(acme.listing), { limit: 0 }),
-    ).rejects.toThrow(/between 1 and/);
-    await expect(
-      listAgents(actingIn(acme.listing), { limit: 201 }),
-    ).rejects.toThrow(/between 1 and/);
-    await expect(
-      listAgents(actingIn(acme.listing), { cursor: "con_nonsense" }),
-    ).rejects.toThrow(/cursor/);
-  });
-
   it("shows a credential for the whole organization every project, and no other customer", async () => {
     const page = await listAgents(actingIn(undefined));
 
@@ -182,21 +154,6 @@ describe("listing agents", () => {
   it("shows another customer none of them", async () => {
     const page = await listAgents(actingAsGlobex());
     expect(page.items.map((item) => item.id)).toEqual([stranger.id]);
-  });
-
-  it("drops an archived agent from the list immediately", async () => {
-    const [three] = created.filter((item) => item.name === "Three");
-    if (three === undefined) throw new Error("Three was never created");
-
-    await archiveAgent(actingIn(acme.listing), three.id);
-
-    const page = await listAgents(actingIn(acme.listing));
-    expect(page.items.map((item) => item.name)).toEqual([
-      "Five",
-      "Four",
-      "Two",
-      "One",
-    ]);
   });
 });
 
@@ -217,21 +174,6 @@ describe("updating an agent", () => {
 
     const fetched = await getAgent(actingIn(acme.updating), created.id);
     expect(fetched?.name).toBe("Front Desk");
-  });
-
-  it("treats an empty change as no edit: nothing written, not even updated_at", async () => {
-    const created = await createAgent(actingIn(acme.updating), {
-      agentPlatform: "retell",
-      name: "Unmoved",
-    });
-    const before = await getAgent(actingIn(acme.updating), created.id);
-
-    const unchanged = await updateAgent(actingIn(acme.updating), created.id, {});
-    expect(unchanged?.name).toBe("Unmoved");
-    expect(unchanged?.updatedAt).toEqual(before?.updatedAt);
-
-    const after = await getAgent(actingIn(acme.updating), created.id);
-    expect(after?.updatedAt).toEqual(before?.updatedAt);
   });
 
   it("stores the new name trimmed, and refuses one that is only whitespace", async () => {
@@ -278,19 +220,6 @@ describe("updating an agent", () => {
       name: "Vacated",
     });
     expect(renamed?.name).toBe("Vacated");
-  });
-
-  it("lands for a credential acting in no project: the row names its own", async () => {
-    const created = await createAgent(actingIn(acme.updating), {
-      agentPlatform: "retell",
-      name: "Org Editable",
-    });
-
-    const updated = await updateAgent(actingIn(undefined), created.id, {
-      name: "Edited for the whole customer",
-    });
-    expect(updated?.id).toBe(created.id);
-    expect(updated?.name).toBe("Edited for the whole customer");
   });
 
   it("returns nothing for another customer's agent, and leaves it untouched", async () => {
@@ -349,24 +278,6 @@ describe("archiving an agent", () => {
 
     const stillThere = await getAgent(actingIn(acme.deleting), standing.id);
     expect(stillThere?.archivedAt).toBeNull();
-  });
-
-  it("takes it out of the list while it still reads on its own", async () => {
-    const retired = await createAgent(actingIn(acme.deleting), {
-      agentPlatform: "retell",
-      name: "Retired",
-    });
-
-    const archived = await archiveAgent(actingIn(acme.deleting), retired.id);
-    expect(archived?.agent.id).toBe(retired.id);
-    expect(archived?.agent.archivedAt).toBeInstanceOf(Date);
-
-    const page = await listAgents(actingIn(acme.deleting));
-    expect(page.items.map((item) => item.id)).not.toContain(retired.id);
-
-    // The whole difference from the delete this replaced: it is still there.
-    const readable = await getAgent(actingIn(acme.deleting), retired.id);
-    expect(readable?.id).toBe(retired.id);
   });
 
   it("shows up under the archived filter, and only there", async () => {

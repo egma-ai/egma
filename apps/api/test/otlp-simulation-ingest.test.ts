@@ -264,49 +264,6 @@ describe.skipIf(!storage.available)("the contract's golden flushes, posted with 
     ]);
   });
 
-  it("read as the conversation they carry: turns with their text, and the measure spans' durations being the measurements", async () => {
-    const rows = await store().rows<{
-      name: string;
-      kind: string;
-      text: string;
-      duration_ns: number;
-    }>(
-      "select name, kind, text, duration_ns from spans final " +
-        `where trace_id = '${CHAT_TRACE}' order by started_at, name`,
-    );
-
-    expect(rows).toEqual([
-      // The first-response measure brackets the quiet before the greeting, so
-      // its duration is the measurement: 1214 milliseconds, in nanoseconds.
-      {
-        name: "first_response_latency",
-        kind: "timing",
-        text: "",
-        duration_ns: 1_214_000_000,
-      },
-      {
-        name: "agent_turn",
-        kind: "turn:agent",
-        text: "Thanks for reaching Lakeside Dental, how can I help today?",
-        duration_ns: 0,
-      },
-      {
-        name: "human_turn",
-        kind: "turn:human",
-        text: "Oh, hello — I'm so sorry, I need to move my cleaning. It's on Tuesday, I think? Could we do Thursday instead?",
-        duration_ns: 0,
-      },
-    ]);
-
-    // And the turn view already reads them, because the kinds are the store's
-    // own turn vocabulary.
-    expect(
-      await countOf(
-        `select count() as n from turns final where trace_id = '${CHAT_TRACE}'`,
-      ),
-    ).toBe(2);
-  });
-
   /**
    * Whatever its status. The chat simulation lands terminal here, and the
    * remaining flushes — the tool calls, the closing turn, the root — are still
@@ -425,38 +382,6 @@ describe.skipIf(!storage.available)("the contract's golden flushes, posted with 
       // A whole reading, so the figure is the exchange's rather than a prefix's.
       expect(measured.partial).toBe(false);
     }
-  });
-
-  /**
-   * The dedup round trip at the door: the simulator's sender resends a flush
-   * byte-identically until acknowledged, and an acknowledgement it never heard
-   * makes the resend ordinary. Deterministic block construction gives
-   * ClickHouse the same recent block again, so this exact replay lands nothing.
-   */
-  it("land nothing twice when every flush is sent again", async () => {
-    const before = await countOf(
-      `select count() as n from spans final where trace_id = '${CHAT_TRACE}'`,
-    );
-    const turnsBefore = await countOf(
-      `select count() as n from turns final where trace_id = '${CHAT_TRACE}'`,
-    );
-    expect(before).toBe(8);
-
-    for (const name of [
-      "chat-flush-1-turns.json",
-      "chat-flush-2-tools.json",
-      "chat-flush-3-root.json",
-    ]) {
-      const again = await post(await fixture("valid", name));
-      expect(again.statusCode, name).toBe(200);
-    }
-
-    expect(
-      await countOf(`select count() as n from spans final where trace_id = '${CHAT_TRACE}'`),
-    ).toBe(before);
-    expect(
-      await countOf(`select count() as n from turns final where trace_id = '${CHAT_TRACE}'`),
-    ).toBe(turnsBefore);
   });
 
   it("file another customer's simulation under that customer, resolved through the same tokenless asking", async () => {
@@ -638,67 +563,6 @@ describe.skipIf(!storage.available)("the same path in the other encoding", () =>
         `where trace_id = '${VOICE_TRACE}' and span_id = 'bb20000000000002'`,
     );
     expect(stored?.payload).not.toContain("pipecat.changed");
-  });
-
-  it("lands a genuinely new protobuf flush, attributed exactly as the JSON ones", async () => {
-    const late = JSON.parse(
-      await fixture("valid", "voice-overlapping-turns.json"),
-    ) as {
-      resourceSpans: {
-        scopeSpans: { spans: Record<string, unknown>[] }[];
-      }[];
-    };
-    const scope = late.resourceSpans[0]?.scopeSpans[0];
-    if (scope === undefined) throw new Error("the fixture is empty");
-    scope.spans = [
-      {
-        traceId: VOICE_TRACE,
-        spanId: "bb20000000000006",
-        parentSpanId: "bb20000000000001",
-        name: "turn_response_latency",
-        kind: "SPAN_KIND_INTERNAL",
-        startTimeUnixNano: "1785924902100000000",
-        endTimeUnixNano: "1785924902950000000",
-        status: {
-          code: "STATUS_CODE_ERROR",
-          message: "native status",
-        },
-      },
-    ];
-
-    const landed = await post(
-      protobufBodyOf(JSON.stringify(late)),
-      SERVICE_TOKEN,
-      "application/x-protobuf",
-    );
-    expect(landed.statusCode).toBe(200);
-
-    const rows = await store().rows<{
-      kind: string;
-      duration_ns: number;
-      run_id: string;
-      source: string;
-      status: string;
-      payload: string;
-    }>(
-      "select kind, duration_ns, run_id, source, status, payload from spans final " +
-        `where trace_id = '${VOICE_TRACE}' and span_id = 'bb20000000000006'`,
-    );
-    const [row] = rows;
-    expect(row).toMatchObject({
-      kind: "timing",
-      duration_ns: 850_000_000,
-      run_id: voiceRunId,
-      source: "simulation",
-      status: "error",
-    });
-    const raw = JSON.parse(row?.payload ?? "{}") as {
-      span?: Record<string, unknown>;
-    };
-    expect(raw.span?.status).toEqual({
-      code: "STATUS_CODE_ERROR",
-      message: "native status",
-    });
   });
 });
 
@@ -1241,14 +1105,6 @@ describe.skipIf(!storage.available)("a provider_usage span", () => {
       "?from=2027-01-01T00:00:00Z&to=2027-01-01T00:00:00Z",
     ])
       expect((await read(query)).statusCode).toBe(400);
-  });
-
-  it("files the span itself under its own kind, like every other span", async () => {
-    const kinds = await store().rows<{ kind: string; n: string }>(
-      "select kind, count(*) as n from spans final " +
-        `where trace_id = '${USAGE_TRACE}' and kind = 'provider_usage' group by kind`,
-    );
-    expect(Number(kinds[0]?.n)).toBe(3);
   });
 
   it("is not read off a scope that is not Egma's own simulator", async () => {

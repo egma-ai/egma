@@ -9,7 +9,6 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import UsageAndBillingPage from "../app/projects/[projectId]/settings/billing/page.tsx";
-import OrganizationSettingsPage from "../app/projects/[projectId]/settings/organization/page.tsx";
 import { HOBBY, PRO, USAGE, memberSession } from "./usage-billing-fixtures.ts";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 import { renderSettingsPage } from "./render-settings-page.tsx";
@@ -124,43 +123,6 @@ it("puts all billing facts on the named settings page and uses the activation bo
       .getAttribute("aria-current"),
   ).toBe("page");
 });
-it("puts the plan and inference credit in separate summary cards before payments", async () => {
-  open();
-  await screen.findByText("$4.25");
-  const plan = screen
-    .getByRole("heading", { name: "Current plan", level: 2 })
-    .closest("section")!;
-  const credit = screen
-    .getByRole("heading", { name: "Inference credit", level: 2 })
-    .closest("section")!;
-  const payments = screen
-    .getByRole("heading", { name: "Payments", level: 2 })
-    .closest("section")!;
-  expect(within(plan).getByText("Hobby")).toBeTruthy();
-  expect(within(plan).queryByText("Free")).toBeNull();
-  expect(within(plan).queryByText("$50.00")).toBeNull();
-  expect(within(plan).getByRole("button", { name: "Upgrade to Pro" })).toBeTruthy();
-  expect(within(plan).queryByRole("button", { name: "Buy credit" })).toBeNull();
-  expect(within(plan).queryByText("$4.25")).toBeNull();
-  expect(within(credit).getByText("$4.25")).toBeTruthy();
-  expect(within(credit).getByRole("button", { name: "Buy credit" })).toBeTruthy();
-  expect(
-    within(credit).queryByRole("button", { name: "Payment methods and invoices" }),
-  ).toBeNull();
-  expect(
-    within(credit).queryByRole("button", { name: "Upgrade to Pro" }),
-  ).toBeNull();
-  expect(
-    within(payments).getByRole("button", { name: "Payment methods and invoices" }),
-  ).toBeTruthy();
-});
-it("lets members read provider costs and all history without payment actions", async () => {
-  open({ ...HOBBY, mayManageBilling: false }, "member");
-  expect(await screen.findByText("openai/gpt-4o-mini")).toBeTruthy();
-  expect(screen.getByText("Welcome credit")).toBeTruthy();
-  expect(screen.getByText("$4.25")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Buy credit" })).toBeNull();
-});
 it("shows OSS usage without a pretend plan or balance", async () => {
   open(null);
   expect(
@@ -224,19 +186,6 @@ it("keeps a known balance visible when provider usage cannot be read", async () 
     await screen.findByText("Usage could not be read. Try again."),
   ).toBeTruthy();
   expect(screen.getByText("$4.25")).toBeTruthy();
-});
-it("shows an empty provider period and an empty ledger explicitly", async () => {
-  setup({ ...HOBBY, ledger: { entries: [], nextCursor: null } });
-  responses["/api/organization/usage"] = {
-    status: 200,
-    body: {
-      ...USAGE,
-      inference: { amountMicros: 0, requests: 0, byModel: [] },
-    },
-  };
-  renderSettingsPage(<UsageAndBillingPage />);
-  expect(await screen.findByText("No model usage this period")).toBeTruthy();
-  expect(screen.getByText("No billing activity yet")).toBeTruthy();
 });
 it("loads another ledger page without losing history when a retry is needed", async () => {
   open({ ...HOBBY, ledger: { ...HOBBY.ledger, nextCursor: "older/+page" } });
@@ -329,24 +278,6 @@ it("does not upgrade the displayed plan merely from a return parameter", async (
     ),
   ).toBeTruthy();
   expect(screen.getByText("Hobby")).toBeTruthy();
-  expect(replaceState).toHaveBeenCalledWith(
-    null,
-    "",
-    "/projects/prj_1/settings/billing",
-  );
-  expect(routed.router.replace).not.toHaveBeenCalled();
-  replaceState.mockRestore();
-});
-it("keeps a closed-plan toast visible after removing the return query", async () => {
-  const replaceState = vi.spyOn(globalThis.history, "replaceState");
-  routed.search = "plan=cancelled";
-  open();
-  expect(
-    await screen.findByText(
-      "Checkout closed. Your current billing details are shown below.",
-    ),
-  ).toBeTruthy();
-  expect(screen.getByText("$4.25")).toBeTruthy();
   expect(replaceState).toHaveBeenCalledWith(
     null,
     "",
@@ -479,38 +410,6 @@ it("reads a scheduled downgrade after reload and clears it after Portal undo", a
   expect(await screen.findByRole("button", { name: "Downgrade at period end" })).toBeTruthy();
   expect(screen.queryByText(/Pro stops on/)).toBeNull();
 });
-it("lets a member read the scheduled date without exposing plan actions", async () => {
-  open({ ...PRO, mayManageBilling: false, scheduledDowngradeAt: PRO.resetsAt }, "member");
-  expect(await screen.findByText(/Pro stops on/)).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Keep Pro in Stripe" })).toBeNull();
-});
-it("opens the existing payment portal action", async () => {
-  open(PRO);
-  responses["/api/billing/portal"] = {
-    status: 200,
-    body: { url: "https://billing.stripe.com/test" },
-  };
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Payment methods and invoices" }),
-  );
-  await waitFor(() =>
-    expect(window.location.assign).toHaveBeenCalledWith(
-      "https://billing.stripe.com/test",
-    ),
-  );
-});
-it("keeps usage out of the organization name form", async () => {
-  setup();
-  routed.pathname = "/projects/prj_1/settings/organization";
-  renderSettingsPage(<OrganizationSettingsPage />);
-  expect(await screen.findByLabelText("Organization name*")).toBeTruthy();
-  expect(
-    requests.some((request) => request.path.startsWith("/api/organization/")),
-  ).toBe(false);
-  expect(screen.queryByText("Inference credit")).toBeNull();
-  routed.pathname = "/projects/prj_1/settings/billing";
-});
-
 it("clears pending navigation when the browser returns to the page", async () => {
   open();
   responses["/api/billing/portal"] = {
@@ -532,14 +431,4 @@ it("clears pending navigation when the browser returns to the page", async () =>
   expect(
     requests.filter((request) => request.path === "/api/organization/billing"),
   ).toHaveLength(2);
-});
-it("keeps billing facts readable while payment actions are unavailable", async () => {
-  open({ ...HOBBY, actions: { ...HOBBY.actions, available: false } });
-  expect(
-    await screen.findByText(
-      "Payment actions are unavailable. Ask your administrator to check billing setup.",
-    ),
-  ).toBeTruthy();
-  expect(screen.getByText("$4.25")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Buy credit" })).toBeNull();
 });

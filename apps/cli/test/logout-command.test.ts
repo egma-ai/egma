@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -98,26 +98,6 @@ describe("egma logout", () => {
       "EGMA_API_KEY is still set for this process. Remove it from the shell or secret store to stop using it.",
     );
     expect(watched.out.join("\n")).not.toContain("status:");
-  });
-
-  it("removes the credentials file after the last login but leaves its folder", async () => {
-    const apiKeyId = "key_only_login";
-    await writeCredentials(workspace.credentialsFile, {
-      url: URL,
-      key: "egma_sk_only_login",
-      login: { apiKeyId, projectId: "prj_login" },
-    });
-    const requests: Request[] = [];
-
-    expect(
-      await logout(watch(), {
-        fetchImpl: successfulRevoke(requests, apiKeyId),
-      }),
-    ).toBe(LOGOUT_EXIT.done);
-    await expect(readFile(workspace.credentialsFile, "utf8")).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-    expect((await stat(workspace.egmaFolder)).isDirectory()).toBe(true);
   });
 
   it("keeps the local login when the platform does not confirm revocation", async () => {

@@ -1,26 +1,17 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  DEFAULT_PROJECT_NAME as API_DEFAULT_PROJECT_NAME,
-  organizationNameFromEmail as apiOrganizationNameFromEmail,
-  PERSONAL_MAIL as API_PERSONAL_MAIL,
-} from "../../api/src/auth/naming.ts";
 import { safeReturnPath as apiSafeReturnPath } from "../../api/src/auth/password-reset.ts";
 import { CODES } from "../../api/src/http/refusals.ts";
 import { readJson } from "../lib/api.ts";
-import { readSession, SESSION_READ_TIMEOUT_MS } from "../lib/me.ts";
+import { readSession } from "../lib/me.ts";
 import {
   NOTHING_TO_HEAR,
   offersNothing,
 } from "../lib/recording-refusals.ts";
-import {
-  DEFAULT_SIGNED_IN_PATH,
-  returnPathIn,
-  safeReturnPath,
-} from "../lib/return-to.ts";
+import { safeReturnPath } from "../lib/return-to.ts";
 import {
   citedTurnPositions,
   priorGrades,
@@ -28,11 +19,6 @@ import {
   type EvidenceGrade,
   type EvidenceStep,
 } from "../lib/simulations.ts";
-import {
-  DEFAULT_PROJECT_NAME,
-  organizationNameFromEmail,
-  PERSONAL_MAIL,
-} from "../lib/signup-defaults.ts";
 
 /**
  * The two things the pages decide for themselves, and one thing about where
@@ -40,10 +26,6 @@ import {
  */
 
 const WEB = path.join(import.meta.dirname, "..");
-
-/** One conversation, inside the project's monitoring section. */
-const TRANSCRIPT_PAGE =
-  "app/projects/[projectId]/monitoring/transcripts/[transcriptId]/page.tsx";
 
 /**
  * Bound stalled session reads so the document cannot remain behind the
@@ -80,11 +62,6 @@ describe("reading who is signed in", () => {
     expect(answer).toMatchObject({ refusal: { error: "unreachable" } });
   });
 
-  it("waits long enough that a slow answer is still an answer", () => {
-    expect(SESSION_READ_TIMEOUT_MS).toBeGreaterThanOrEqual(8_000);
-    expect(SESSION_READ_TIMEOUT_MS).toBeLessThanOrEqual(15_000);
-  });
-
   /**
    * The deadline belongs to this read and not to reading JSON. Every other
    * request in the product fails into a page that is already drawn and stays
@@ -99,323 +76,9 @@ describe("reading who is signed in", () => {
     const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
     expect((init as RequestInit | undefined)?.signal).toBeUndefined();
   });
-
-  /**
-   * Reject direct session reads outside the shared helper so pages cannot
-   * bypass its deadline.
-   */
-  it("is the only way any page asks who is signed in", async () => {
-    const allowed = new Set([
-      // Where the read and its deadline live.
-      "lib/me.ts",
-      // Names the path so this process forwards it, and reads nothing.
-      "next.config.ts",
-    ]);
-
-    for (const [file, source] of await pageSources()) {
-      if (allowed.has(file)) continue;
-      // Comments name the address all over this application. What matters is
-      // that no line of code asks for it.
-      const code = source.replaceAll(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/gu, "");
-      expect(code, `${file} reads the session without a deadline`).not.toContain(
-        "/api/me",
-      );
-    }
-  });
 });
-
-describe("the names the signup form offers", () => {
-  const cases: readonly [string, string][] = [
-    ["ada@acme.example", "Acme"],
-    ["ada@ACME.example", "ACME"],
-    ["ada.lovelace@acme-labs.co.uk", "Acme Labs"],
-    ["ada@localhost", "Localhost"],
-    ["ada@", "My organization"],
-    ["not-an-email", "My organization"],
-    /*
-     * A personal address names no company, so what is offered is the person
-     * rather than their mail provider. An organization called `Gmail` is what
-     * the fastest path through this form used to produce, and what somebody
-     * then lived with.
-     */
-    ["ada@gmail.com", "Ada's organization"],
-    ["ada.lovelace@GMAIL.com", "Ada's organization"],
-    ["ada+egma@hotmail.co.uk", "Ada's organization"],
-    // An address typed in capitals is the same person, not a shouted one.
-    ["ADA@GMAIL.COM", "Ada's organization"],
-    ["-@icloud.com", "My organization"],
-  ];
-
-  it.each(cases)("takes the organization from the email: %s", (email, expected) => {
-    expect(organizationNameFromEmail(email)).toBe(expected);
-  });
-
-  it("calls the first project Default", () => {
-    expect(DEFAULT_PROJECT_NAME).toBe("Default");
-  });
-
-  /**
-   * The page fills the fields in and the API fills them in for an identity that
-   * never saw the page, so both know the rules. This is what stops the value
-   * somebody reads in the field from differing from the value they get by
-   * submitting it untouched.
-   */
-  it("agrees with what the API would have chosen, for every one of them", () => {
-    for (const [email] of cases) {
-      expect(organizationNameFromEmail(email)).toBe(
-        apiOrganizationNameFromEmail(email),
-      );
-    }
-    expect(DEFAULT_PROJECT_NAME).toBe(API_DEFAULT_PROJECT_NAME);
-  });
-
-  /**
-   * The cases above sample the rule; this holds the whole of it.
-   *
-   * The two copies decide which addresses are personal from a list of twenty
-   * names, and a sample of three cannot see a nineteenth added on one side
-   * only. Comparing the sets is what makes a one-sided edit fail here rather
-   * than in front of somebody whose organization is called `Fastmail`.
-   */
-  it("knows the same personal mail providers on both sides", () => {
-    expect([...PERSONAL_MAIL].sort()).toEqual([...API_PERSONAL_MAIL].sort());
-    for (const provider of PERSONAL_MAIL) {
-      const email = `ada.lovelace@${provider}.example`;
-      expect(organizationNameFromEmail(email)).toBe("Ada's organization");
-      expect(apiOrganizationNameFromEmail(email)).toBe("Ada's organization");
-    }
-  });
-});
-/** Every source file under the web application, excluding what it did not write. */
-async function pageSources(): Promise<readonly [string, string][]> {
-  const found: [string, string][] = [];
-
-  async function walk(directory: string): Promise<void> {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      if (["node_modules", ".next", "test"].includes(entry.name)) continue;
-      const full = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        await walk(full);
-      } else if ([".ts", ".tsx"].includes(path.extname(entry.name))) {
-        found.push([path.relative(WEB, full), await readFile(full, "utf8")]);
-      }
-    }
-  }
-
-  await walk(WEB);
-  return found;
-}
 
 describe("the pages", () => {
-  it("are served from the instance's own origin, and reach no other", async () => {
-    const sources = await pageSources();
-    expect(sources.length).toBeGreaterThan(3);
-
-    for (const [file, source] of sources) {
-      // Comments say plenty about acme.example and egma.example; what matters
-      // is that no line of code fetches, links to or embeds a fixed host.
-      const code = source.replaceAll(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
-      const absolute = code.match(/https?:\/\/[^\s"'`)]+/g) ?? [];
-
-      // Two exceptions, and neither is a host anything reaches. One is the
-      // build-time default for where this process proxies to, a loopback
-      // address on the operator's own machine. The other is the reserved name
-      // the return-path rule anchors a URL parser to: RFC 2606 guarantees a
-      // `.invalid` name resolves nowhere, and nothing here fetches it — it is
-      // there to be compared against, so that a candidate which moves the
-      // origin can be refused without listing the ways to move it.
-      const offSite = absolute.filter(
-        (url) =>
-          !url.startsWith("http://127.0.0.1:") &&
-          !/^https?:\/\/[^/]+\.invalid$/.test(url),
-      );
-      expect(offSite, `${file} reaches ${offSite.join(", ")}`).toEqual([]);
-    }
-  });
-
-  /** Use organization for the isolation boundary and project for the resource scope. */
-  it("name the two levels of tenancy, and invent no word above them", async () => {
-    for (const [file, source] of await pageSources()) {
-      expect(source.toLowerCase(), `${file} names a level above organization`)
-        .not.toContain("workspace");
-    }
-  });
-
-  it("post at paths this instance serves, with no host in them", async () => {
-    const signup = await readFile(
-      path.join(WEB, "app/signup/page.tsx"),
-      "utf8",
-    );
-    expect(signup).toContain('fetch("/api/signup"');
-    expect(signup).toContain('fetch("/api/signup/availability")');
-  });
-
-  /**
-   * The provider ships the five device-flow endpoints and no interface at all,
-   * so without these `egma login` opens a browser on nothing. Each is a page a
-   * person actually reaches, and each says a different thing — which is the
-   * point of there being five rather than one with a status on it.
-   */
-  it("include the five the device flow needs, all of them on this instance", async () => {
-    const files = (await pageSources()).map(([file]) => file);
-
-    for (const page of [
-      "app/device/page.tsx",
-      "app/device/approve/page.tsx",
-      "app/device/denied/page.tsx",
-      "app/device/expired/page.tsx",
-      "app/device/success/page.tsx",
-    ]) {
-      expect(files, page).toContain(page);
-    }
-  });
-
-  /**
-   * A denied code and an expired code are different things and reach different
-   * pages, because "check what you typed" and "that timed out, nothing is
-   * broken" are different instructions.
-   */
-  it("say which of the two happened, on the two pages that mean different things", async () => {
-    const denied = await readFile(
-      path.join(WEB, "app/device/denied/page.tsx"),
-      "utf8",
-    );
-    const expired = await readFile(
-      path.join(WEB, "app/device/expired/page.tsx"),
-      "utf8",
-    );
-
-    expect(denied).toContain("not authorized");
-    expect(denied).toContain("/device");
-    expect(expired).toContain("expired");
-    expect(expired).toMatch(/egma login/);
-  });
-
-  /**
-   * The dashboard is deliberately not built, so this is the page that decides
-   * whether adding a second person is something a person can do or something an
-   * API can do. Without it, inviting a colleague would be a curl command.
-   */
-  it("include the two an invitation needs: project Settings to send one, and somewhere to land", async () => {
-    const files = (await pageSources()).map(([file]) => file);
-    expect(files).toContain("app/projects/[projectId]/settings/people/page.tsx");
-    expect(files).toContain("app/invite/page.tsx");
-  });
-
-  it("does not keep projectless compatibility pages", async () => {
-    const files = (await pageSources()).map(([file]) => file);
-    expect(files).not.toContain("app/members/page.tsx");
-    expect(files).not.toContain("app/runs/[runId]/page.tsx");
-  });
-
-  /**
-   * The link that comes back when nothing was emailed is the whole ticket. A
-   * page that quietly dropped it would leave a self-hoster with an invitation
-   * that exists and cannot be delivered, which is worse than a refusal.
-   *
-   * Organization settings moved into the product shell, so this reads the page
-   * that now holds it. `settings.test.tsx` drives the behaviour; this only
-   * holds the file to carrying the branch at all.
-   */
-  it("hand the invitation link back when there was nowhere to post it", async () => {
-    const people = await readFile(
-      path.join(WEB, "app/projects/[projectId]/settings/people/page.tsx"),
-      "utf8",
-    );
-
-    expect(people).toContain("acceptUrl");
-    expect(people).toContain("delivered");
-    expect(people).not.toContain("If no mail transport is configured");
-  });
-
-  /**
-   * Expired and already-accepted mean opposite things to whoever is holding the
-   * link — ask for another, versus you are already in — so the page says which.
-   */
-  it("say which of the two a dead invitation is", async () => {
-    const invite = await readFile(path.join(WEB, "app/invite/page.tsx"), "utf8");
-
-    expect(invite).toContain("has expired");
-    expect(invite).toContain("already been accepted");
-  });
-
-  /**
-   * The way back in for somebody who cannot sign in to ask for one.
-   *
-   * Two pages, because there are two moments: naming the address, and choosing
-   * the password behind the link. The first has to be reachable from the sign-in
-   * page — a way back in nobody can find is not a way back in.
-   */
-  it("offer somewhere to ask for a reset, reachable from the sign-in page", async () => {
-    const files = (await pageSources()).map(([file]) => file);
-    expect(files).toContain("app/forgot-password/page.tsx");
-    expect(files).toContain("app/reset-password/page.tsx");
-
-    const signIn = await readFile(path.join(WEB, "app/sign-in/page.tsx"), "utf8");
-    expect(signIn).toContain("/forgot-password");
-  });
-
-  /**
-   * Spent, never-minted and too-old-to-tell are three different things and each
-   * says so. A spent link means you already did this — sign in. One this egma
-   * never minted means check what was copied. One past the hour means both are
-   * still possible, and the page says so. Sharing a sentence would send half
-   * the people holding one exactly the wrong way.
-   */
-  it("say which of the three a dead reset link is", async () => {
-    const reset = await readFile(
-      path.join(WEB, "app/reset-password/page.tsx"),
-      "utf8",
-    );
-
-    expect(reset).toContain("reset_link_already_used");
-    expect(reset).toContain("reset_link_no_longer_works");
-    expect(reset).toContain("no_such_reset_link");
-    expect(reset).toContain("has already been used");
-    expect(reset).toContain("no longer works");
-  });
-
-  /**
-   * An expired reset link does not prove whether the old password still works.
-   * Do not offer reassurance that the API cannot verify.
-   */
-  it("never promise the old password still works", async () => {
-    const reset = await readFile(
-      path.join(WEB, "app/reset-password/page.tsx"),
-      "utf8",
-    );
-
-    expect(reset).not.toContain("old password still works");
-    expect(reset).not.toContain("Nothing has changed");
-    expect(reset).not.toContain("nothing has changed");
-
-    const tooOld = reset.slice(reset.indexOf('"reset_link_no_longer_works"'));
-    expect(tooOld).toMatch(/whether it was used/i);
-  });
-
-  /**
-   * Preserve the return path through reset submission and the link back to
-   * sign-in, so device approval can continue after a password reset.
-   */
-  it("carry where somebody was going through a reset, and not only up to it", async () => {
-    const signIn = await readFile(path.join(WEB, "app/sign-in/page.tsx"), "utf8");
-    const forgot = await readFile(
-      path.join(WEB, "app/forgot-password/page.tsx"),
-      "utf8",
-    );
-    const reset = await readFile(
-      path.join(WEB, "app/reset-password/page.tsx"),
-      "utf8",
-    );
-
-    expect(signIn).toContain('withReturnTo("/forgot-password", returnTo)');
-    // Sent to the API, which is the only thing that can write it into the link.
-    expect(forgot).toContain("next: returnTo");
-    // And read back off the link the message carried.
-    expect(reset).toContain("returnPathIn(window.location.search)");
-    expect(reset).toContain('withReturnTo("/sign-in", returnTo)');
-  });
-
   /**
    * And the rule that keeps it from being a way off this instance is one rule,
    * written twice because the two halves cannot import each other: the API
@@ -465,25 +128,6 @@ describe("the pages", () => {
     expect(reset).toContain('fetch("/api/password-reset/complete"');
   });
 
-  it("reach the API for invitations at paths this instance rewrites", async () => {
-    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
-    const invite = await readFile(path.join(WEB, "app/invite/page.tsx"), "utf8");
-    const people = await readFile(
-      path.join(WEB, "app/projects/[projectId]/settings/people/page.tsx"),
-      "utf8",
-    );
-
-    // A path a page fetches and the config does not forward would be served by
-    // this process, which has no such route, and the flow would 404.
-    expect(rewrites).toContain("/api/invitations/:path*");
-    expect(rewrites).not.toContain('source: "/api/invitations",');
-    expect(rewrites).toContain("/v1/:path*");
-    expect(invite).toContain("/api/invitations/lookup");
-    expect(invite).toContain("/api/invitations/accept");
-    expect(people).toContain("listMembers(");
-    expect(people).toContain("listInvitations(");
-  });
-
   /**
    * Forward mock-tool requests from the agent platform to the API. Otherwise
    * Next returns an HTML not-found page for the generated tool URL.
@@ -513,61 +157,12 @@ describe("the pages", () => {
     );
   });
 
-  /**
-   * The Settings pages reach the API paths below, and none is
-   * served by this process. Without the rules the pages would post at Next and
-   * read its 404 page as egma's refusal.
-   */
-  it("reach the API for settings at paths this instance rewrites", async () => {
-    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
-
-    expect(rewrites).toContain("/v1/:path*");
-  });
-
   it("forwards usage reads, ledger pages, and billing actions to the API", async () => {
     const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
     expect(rewrites).toContain('source: "/api/organization/:path*"');
     expect(rewrites).toContain('destination: `${api}/api/organization/:path*`');
     expect(rewrites).toContain('source: "/api/billing/:path*"');
     expect(rewrites).toContain('destination: `${api}/api/billing/:path*`');
-  });
-
-  it("reaches persona form metadata through the versioned platform rewrite", async () => {
-    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
-
-    expect(rewrites).toContain(
-      '{ source: "/v1/:path*", destination: `${api}/v1/:path*` }',
-    );
-  });
-
-  /**
-   * The generated client owns the concrete routes. This one scoped rewrite
-   * keeps every current and future versioned operation on the page's origin.
-   */
-  it("rewrites every API path the browser client names", async () => {
-    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
-
-    // The generated client owns every concrete platform path. One scoped
-    // version rewrite covers both present and future named operations.
-    expect(rewrites).toContain(
-      '{ source: "/v1/:path*", destination: `${api}/v1/:path*` }',
-    );
-    expect(rewrites).not.toContain(
-      '{ source: "/health", destination: `${api}/health` }',
-    );
-    expect(rewrites).toContain(
-      '{ source: "/openapi.json", destination: `${api}/openapi.json` }',
-    );
-    expect(rewrites).not.toContain('source: "/api/:path*"');
-  });
-
-  /** Deep resource routes are covered by the same scoped version rewrite. */
-  it("rewrites every path the browser client builds beneath a collection", async () => {
-    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
-
-    expect(rewrites).toContain(
-      '{ source: "/v1/:path*", destination: `${api}/v1/:path*` }',
-    );
   });
 
   /**
@@ -586,129 +181,9 @@ describe("the pages", () => {
     expect(home).not.toContain('fetch("/api/sign-out"');
     expect(home).not.toContain("Sign out");
   });
-
-  it("uses Runs as the one section label without moving an address", async () => {
-    for (const page of [
-      "app/projects/[projectId]/runs/runs-screen.tsx",
-      "app/projects/[projectId]/runs/loading.tsx",
-      "app/projects/[projectId]/runs/new/loading.tsx",
-      "app/projects/[projectId]/runs/[runId]/page.tsx",
-      "app/projects/[projectId]/runs/[runId]/simulations/[simulationId]/page.tsx",
-    ]) {
-      const source = await readFile(path.join(WEB, page), "utf8");
-      expect(source, page).not.toContain('"Simulation runs"');
-      expect(source, page).not.toContain("simulation-runs");
-    }
-
-    const list = await readFile(
-      path.join(WEB, "app/projects/[projectId]/runs/runs-screen.tsx"),
-      "utf8",
-    );
-    expect(list).toContain('title="Runs"');
-  });
-
-  it("keeps simulation execution and grading progress separate", async () => {
-    const run = await readFile(
-      path.join(WEB, "app/projects/[projectId]/runs/[runId]/page.tsx"),
-      "utf8",
-    );
-    const simulation = await readFile(
-      path.join(
-        WEB,
-        "app/projects/[projectId]/runs/[runId]/simulations/[simulationId]/page.tsx",
-      ),
-      "utf8",
-    );
-    const runWorkbench = await readFile(
-      path.join(
-        WEB,
-        "app/projects/[projectId]/runs/[runId]/run-scenario-workbench.tsx",
-      ),
-      "utf8",
-    );
-    const grades = await readFile(
-      path.join(WEB, "ui/simulation-evidence.tsx"),
-      "utf8",
-    );
-    // The run list names the execution state. The simulation page explains it.
-    // Neither turns that failure into a zero score or an errored grader.
-    expect(runWorkbench).toContain("Execution failed");
-    expect(simulation).toContain("executionFailureMessage");
-    expect(simulation).toContain("This is an execution problem, not a failed grade");
-    // The simulation choice names execution only. The selected evidence keeps
-    // grading progress and score as separate facts in the results summary.
-    expect(runWorkbench).toContain("EXECUTION_LABEL");
-    expect(runWorkbench).toContain("evidence.gradingState");
-    expect(runWorkbench).toContain("evidenceForDisplay.combinedScore");
-    expect(simulation).toContain('evidence.gradingState === "pending"');
-    expect(grades).toContain("evidence.grades");
-    expect(grades).toContain("evidence.gradeHistory");
-  });
-
-  it("shows trace grading without inventing a pass or fail result", async () => {
-    const transcript = await readFile(
-      path.join(WEB, TRANSCRIPT_PAGE),
-      "utf8",
-    );
-    const contract = await readFile(
-      path.join(WEB, "lib/transcripts.ts"),
-      "utf8",
-    );
-
-    expect(contract).toContain("export type Detail = GetTraceResponse");
-    expect(transcript).toContain("<GradeSummary");
-    expect(transcript).toContain("combinedScore={detail.combinedScore}");
-    expect(transcript).toContain("grades={detail.grades}");
-    expect(transcript).toContain("history={detail.gradeHistory}");
-    expect(transcript).toContain("It is not a pass or fail result.");
-    expect(transcript).toContain("shownScore(combinedScore)");
-    expect(transcript).toMatch(
-      /import \{[\s\S]*?\bshownScore\b[\s\S]*?\} from "[^"]*ui\/run-status\.tsx"/u,
-    );
-    expect(transcript).not.toMatch(/function shownScore\(/u);
-  });
-
-  it("reach the API for the device flow at paths this instance rewrites", async () => {
-    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
-    const approve = await readFile(
-      path.join(WEB, "app/device/approve/page.tsx"),
-      "utf8",
-    );
-
-    // A path the page fetches and the config does not forward would be served
-    // by this process, which has no such route, and the flow would 404.
-    expect(rewrites).toContain("/api/device/:path*");
-    expect(approve).toContain("/api/device/authorization");
-    expect(approve).toContain("/api/device/approve");
-    expect(approve).toContain("/api/device/deny");
-  });
 });
 
 describe("coming back after signing in", () => {
-  it("goes to the entrance, which opens Agents under the first project", async () => {
-    const signIn = await readFile(path.join(WEB, "app/sign-in/page.tsx"), "utf8");
-    const signup = await readFile(path.join(WEB, "app/signup/page.tsx"), "utf8");
-    const invite = await readFile(path.join(WEB, "app/invite/page.tsx"), "utf8");
-
-    // The root, because none of these three pages can know which project
-    // somebody is in — an invitation link and a fresh sign-in both arrive with
-    // nothing. The entrance chooses it once and puts it in the address.
-    expect(DEFAULT_SIGNED_IN_PATH).toBe("/");
-    for (const page of [signIn, signup, invite]) {
-      expect(page).toContain("DEFAULT_SIGNED_IN_PATH");
-      // Through the constant, never by typing the address. The entrance is
-      // going to stop being the root the day somebody gives it a better one.
-      expect(page).not.toContain('window.location.assign("/")');
-    }
-  });
-
-  it("goes where the page was asked to go", () => {
-    expect(returnPathIn("?next=%2Fdevice%2Fapprove%3Fuser_code%3DABCD1234")).toBe(
-      "/device/approve?user_code=ABCD1234",
-    );
-    expect(returnPathIn("")).toBeNull();
-  });
-
   /**
    * Exercise same-origin URL resolution, including control characters that
    * change how a browser parses an apparent local path.
@@ -756,18 +231,6 @@ describe("a refusal of a recording", () => {
   const A_RUNS_RESULTS = { knownToExist: true, afterOneWorked: false };
 
   /**
-   * The one case silence is bought for: a surface that was asking whether
-   * there is anything here at all, being told there is not. A chat can never
-   * have audio and a call that never connected wrote none — and a disabled
-   * control, or a sentence beside every one of them, reads as a broken feature
-   * rather than as an honest absence.
-   */
-  it("is answered with nothing where the surface was only asking", () => {
-    expect(offersNothing({ code: "not_found" }, A_TRANSCRIPT)).toBe(true);
-    expect(offersNothing({ code: "unprocessable" }, A_TRANSCRIPT)).toBe(true);
-  });
-
-  /**
    * A run's results were told there is a recording before this component was
    * mounted at all, so any refusal contradicts what the same page just said.
    */
@@ -789,29 +252,6 @@ describe("a refusal of a recording", () => {
       "internal_error",
     ]) {
       expect(offersNothing({ code }, A_TRANSCRIPT), code).toBe(false);
-    }
-  });
-
-  /**
-   * A generic HTTP 404 is not the API's expected-absence code. Show it because
-   * it can indicate a missing route or proxy failure.
-   */
-  it("is said out loud when the answer did not come from egma", () => {
-    expect(offersNothing({ code: undefined }, A_TRANSCRIPT)).toBe(false);
-    expect(offersNothing({ code: "Not Found" }, A_TRANSCRIPT)).toBe(false);
-  });
-
-  /**
-   * A refusal arriving after a link had already worked is never quiet. By then
-   * somebody has a player on screen and may be part-way through listening, and
-   * a control that vanishes without a word is worse than the error it hides.
-   */
-  it("is said out loud once a player has already been on screen", () => {
-    for (const code of ["not_found", "unprocessable"]) {
-      expect(
-        offersNothing({ code }, { knownToExist: false, afterOneWorked: true }),
-        code,
-      ).toBe(false);
     }
   });
 

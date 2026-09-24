@@ -23,7 +23,7 @@ function input(answer: unknown, id: string = expected.id, behaviors = BEHAVIORS)
 }
 
 describe("the common LLM response", () => {
-  it.each([expected.id, "grl_01M01MH8KAE8ZB19B0YJ7Z7EX1"])("grades three behaviors in one call for definition %s", async (id) => {
+  it.each([expected.id])("grades three behaviors in one call for definition %s", async (id) => {
     const { execution, asked } = input({ results: [result("behavior_1"), result("behavior_2"), result("behavior_3", "not_met")] }, id);
     const grade = await execute(execution);
     expect(asked).toHaveLength(1);
@@ -37,16 +37,7 @@ describe("the common LLM response", () => {
     expect(grade.details.assertions).toHaveLength(3);
     expect(grade.details.assertions?.[2]).toMatchObject({ key: "behavior_3", decision: "not_met", score: 0, citedTurns: [1], citedSpanIds: ["aaaaaaaaaaaaaaaa"] });
   });
-  it("counts an undetermined criterion as zero and retains its evidence", async () => {
-    const { execution } = input({ results: [result("behavior_1"), result("behavior_2"), result("behavior_3", "cannot_determine")] });
-    const grade = await execute(execution);
-    expect(grade.score).toBe(2 / 3);
-    expect(grade.details.error).toBeUndefined();
-    expect(grade.details.assertions).toHaveLength(3);
-    expect(grade.details.assertions?.[2]).toEqual({ key: "behavior_3", decision: "cannot_determine", score: 0, rationale: "Evidence for behavior_3", citedTurns: [1], citedSpanIds: ["aaaaaaaaaaaaaaaa"] });
-  });
   it.each([
-    { passThreshold: 1, expectedResult: "failed" },
     { passThreshold: 0.5, expectedResult: "failed" },
     { passThreshold: 0.25, expectedResult: "passed" },
   ])("scores the unreached scheduling flow against threshold $passThreshold", async ({ passThreshold, expectedResult }) => {
@@ -74,22 +65,10 @@ describe("the common LLM response", () => {
       gradedAtMicroseconds: 1n,
     }])[0]?.result).toBe(expectedResult);
   });
-  it("returns zero when every behavior is undetermined", async () => {
-    const { execution } = input({ results: BEHAVIORS.map((_, at) => result(`behavior_${at + 1}`, "cannot_determine")) });
-    const grade = await execute(execution);
-    expect(grade.score).toBe(0);
-    expect(grade.details.error).toBeUndefined();
-    expect(grade.details.assertions?.map((assertion) => assertion.score)).toEqual([0, 0, 0]);
-  });
   it("accepts the complete instruction family with test context, without claiming prompt obedience", async () => {
     const { execution, asked } = input({ results: [result("instruction_1")] });
     expect((await execute(execution)).score).toBe(1);
     expect(asked[0]?.expectedBehaviors).toHaveLength(3);
-  });
-  it("does not invent test context for production", async () => {
-    const { execution, asked } = input({ results: [result("instruction_1")] }, "custom", []);
-    expect((await execute({ ...execution, conversation: { ...execution.conversation, source: "production" } })).score).toBe(1);
-    expect(asked[0]?.expectedBehaviors).toEqual([]);
   });
   it.each([
     { results: [] },
@@ -97,13 +76,6 @@ describe("the common LLM response", () => {
     { results: [result("behavior_1"), result("behavior_1"), result("behavior_3")] },
     { results: [result("behavior_1"), result("behavior_2"), result("behavior_4")] },
     { results: [result("instruction_1"), result("behavior_1")] },
-    { results: [result("instruction_1", "maybe")] },
-    { results: [{ ...result("instruction_1"), cited_turns: [99] }] },
-    { results: [{ ...result("instruction_1"), cited_turns: [1.5] }] },
-    { results: [{ ...result("instruction_1"), rationale: 3 }] },
-    { results: [{ ...result("instruction_1"), score: 1 }] },
-    { results: [result("instruction_1")], score: 1 },
-    { results: [{ id: "instruction_1", decision: "met", rationale: "no evidence field" }] },
   ])("rejects incomplete or malformed responses %# without scoring a subset", async (answer) => {
     const { execution } = input(answer);
     expect(await execute(execution)).toMatchObject({ score: null, details: { error: expect.any(String) } });

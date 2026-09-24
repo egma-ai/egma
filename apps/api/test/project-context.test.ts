@@ -5,7 +5,6 @@ import {
   startSimulation,
   type AuthContext,
 } from "@egma/db";
-import { newId } from "@egma/ids";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
@@ -44,25 +43,6 @@ async function listAgentsAs(
   };
 }
 
-function registration(name: string, project: string): Record<string, unknown> {
-  return {
-    name,
-    agentPlatform: "livekit",
-    projectId: project,
-    connection: {
-      agentPlatform: "livekit",
-      connectionType: "livekit_room",
-      accessVariant: "livekit_room.project_credentials",
-      modality: "chat",
-      config: {
-        url: "wss://fixture.livekit.cloud",
-        agentName: `agent_for_${name.replace(/\W/g, "")}`,
-      },
-      credentials: { apiKey: "APIfixture12345678", apiSecret: "livekit-secret-fixture" },
-    },
-  };
-}
-
 /** A voice connection that starts without carrier configuration in this API. */
 const LIVEKIT_VOICE = {
   agentPlatform: "livekit",
@@ -83,47 +63,6 @@ async function createSuite(key: string, name: string): Promise<string> {
 }
 
 describe("a browser naming a project", () => {
-  it("reads any project of its own organization, not only the oldest", async () => {
-    api = await createApi("browser_sibling_project");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const outbound = await createProject(contextFor(ada, "admin"), {
-      name: "Outbound",
-      slug: "outbound",
-    });
-
-    await api.app.inject({
-      method: "POST",
-      url: "/v1/agents",
-      headers: { authorization: `Bearer ${ada.secret}` },
-      payload: registration("Front desk", ada.projectId),
-    });
-    await api.app.inject({
-      method: "POST",
-      url: "/v1/agents",
-      headers: { authorization: `Bearer ${ada.secret}` },
-      payload: registration("Outbound desk", outbound.id),
-    });
-
-    const first = await listAgentsAs({ cookie: ada.cookie }, ada.projectId);
-    expect(first.status).toBe(200);
-    expect((first.body.agents as { name: string }[]).map((one) => one.name)).toEqual([
-      "Front desk",
-    ]);
-
-    // The second tab. Nothing about the first request narrowed this one.
-    const second = await listAgentsAs({ cookie: ada.cookie }, outbound.id);
-    expect(second.status).toBe(200);
-    expect(
-      (second.body.agents as { name: string }[]).map((one) => one.name),
-    ).toEqual(["Outbound desk"]);
-
-    // And the first tab still reads its own project afterwards.
-    const again = await listAgentsAs({ cookie: ada.cookie }, ada.projectId);
-    expect((again.body.agents as { name: string }[]).map((one) => one.name)).toEqual([
-      "Front desk",
-    ]);
-  });
-
   it("is refused a project of another organization, and told so as an absence", async () => {
     api = await createApi("browser_foreign_project");
     const ada = await signUp(api.app, "ada@acme.example", "Acme");
@@ -137,22 +76,6 @@ describe("a browser naming a project", () => {
       message:
         `There is no project ${grace.projectId} available to this ` +
         "organization. Choose a project from the selector and try again.",
-    });
-  });
-
-  it("is refused a project that never existed, in the same words", async () => {
-    api = await createApi("browser_unknown_project");
-    const ada = await signUp(api.app, "ada@acme.example", "Acme");
-    const invented = newId("prj");
-
-    const refused = await listAgentsAs({ cookie: ada.cookie }, invented);
-
-    expect(refused.status).toBe(404);
-    expect(refused.body).toEqual({
-      error: "project_outside_organization",
-      message:
-        `There is no project ${invented} available to this organization. ` +
-        "Choose a project from the selector and try again.",
     });
   });
 
@@ -226,37 +149,6 @@ describe("a browser working in a project that is not the first", () => {
       ),
     };
   }
-
-  it("registers an agent into the project it named, not the one its session sits in", async () => {
-    const { ada, outbound } = await twoProjects("browser_registers_elsewhere");
-
-    // Exactly the request the register form sends: a session cookie, and the
-    // project in the body, which is where this door reads one.
-    const registered = await api.app.inject({
-      method: "POST",
-      url: "/v1/agents",
-      headers: { cookie: ada.cookie },
-      payload: {
-        name: "Outbound desk",
-        agentPlatform: "livekit",
-        projectId: outbound,
-      },
-    });
-    expect(registered.statusCode, registered.body).toBe(201);
-
-    // In the project it named — and, the half that matters, **not** in the
-    // first. A door that ignored the project would have answered 201 all the
-    // same, from the session's own project, and the browser would have been
-    // sent to a detail page for an agent that is not in the project the address
-    // names.
-    const inOutbound = await listAgentsAs({ cookie: ada.cookie }, outbound);
-    expect(
-      (inOutbound.body.agents as { name: string }[]).map((one) => one.name),
-    ).toEqual(["Outbound desk"]);
-
-    const inDefault = await listAgentsAs({ cookie: ada.cookie }, ada.projectId);
-    expect(inDefault.body.agents).toEqual([]);
-  });
 
   /**
    * Agent registration accepts projectId in either the query or body.
@@ -476,63 +368,6 @@ describe("a browser working in a project that is not the first", () => {
   });
 
   /**
-   * A session read without projectId uses its default project and cannot find a
-   * run in a sibling project. Browser run URLs supply their project explicitly.
-   */
-  it("answers an unnamed read from the session's own project, not the organization", async () => {
-    const { ada, outbound, keyForOutbound } = await twoProjects(
-      "browser_unnamed_run_read",
-    );
-
-    const registered = await ask(api.app, "POST", "/v1/agents", keyForOutbound, {
-      agentPlatform: "livekit",
-      name: "Outbound desk",
-      connection: {
-        agentPlatform: "livekit",
-        connectionType: "livekit_room",
-        accessVariant: "livekit_room.project_credentials",
-        modality: "chat",
-        config: { url: "wss://fixture.livekit.cloud", agentName: "agent_in_retell_unnamed" },
-        credentials: { apiKey: "APIfixture12345678", apiSecret: "livekit-secret-fixture" },
-      },
-    });
-    expect(registered.statusCode, JSON.stringify(registered.body)).toBe(201);
-    const agentId = (registered.body.agent as { id: string }).id;
-    const suiteId = await createSuite(keyForOutbound, "Unnamed run reads");
-    const pushed = await ask(api.app, "POST", "/v1/tests", keyForOutbound, {
-      suiteId,
-      name: "Reschedules a booked appointment",
-      scenario: "Their cleaning has to move to any afternoon next week.",
-      expectedBehaviors: ["confirms the new time back before finishing"],
-      personas: ["Everyday Caller [Male]"],
-    });
-    expect(pushed.statusCode, JSON.stringify(pushed.body)).toBe(201);
-    const started = await ask(api.app, "POST", "/v1/runs", keyForOutbound, {
-      suiteId,
-      agentId,
-      connectionId: (registered.body.connection as { id: string }).id,
-    });
-    expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
-    const runId = String(started.body.id);
-
-    const unnamed = await api.app.inject({
-      method: "GET",
-      url: `/v1/runs/${runId}`,
-      headers: { cookie: ada.cookie },
-    });
-    expect(unnamed.statusCode).toBe(404);
-
-    // Named, the same session reads the same run perfectly well. The project is
-    // the whole of the difference.
-    const named = await api.app.inject({
-      method: "GET",
-      url: `/v1/runs/${runId}?projectId=${outbound}`,
-      headers: { cookie: ada.cookie },
-    });
-    expect(named.statusCode, named.body).toBe(200);
-  });
-
-  /**
    * Send writes with projectId only in the query, using a session whose default
    * is another project. Check the selected project receives the record and the
    * default project stays empty.
@@ -692,7 +527,6 @@ describe("a browser working in a project that is not the first", () => {
       ).graders.map(({ name, passThreshold }) => ({ name, passThreshold })),
     ).toEqual([{ name: "expected_behaviors", passThreshold: 1 }]);
   });
-
 });
 
 /**

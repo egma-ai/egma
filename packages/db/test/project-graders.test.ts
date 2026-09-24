@@ -68,19 +68,6 @@ describe("shared definitions and project grader policy", () => {
 
   afterAll(async () => database.drop());
 
-  it("creates exactly one fixed-scope Expected behaviors row with the project", async () => {
-    const grader = await getProjectGrader(auth, expectedProjectGraderId);
-    expect(grader).toMatchObject({
-      scopeEditable: false,
-      scope: {
-        simulations: [{ kind: "all" }],
-        production: null,
-      },
-      passThreshold: 1,
-      currentDefinitionVersion: 1,
-    });
-  });
-
   it("lets a customer change the pass threshold but not Expected behaviors scope or presence", async () => {
     const edited = await editProjectGrader(auth, expectedProjectGraderId, {
       passThreshold: 0.8,

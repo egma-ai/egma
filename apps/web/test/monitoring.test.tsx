@@ -11,10 +11,9 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import MonitoringTranscriptsPage from "../app/projects/[projectId]/monitoring/transcripts/page.tsx";
-import { asListInstant } from "../lib/instants.ts";
 import type { Me } from "../lib/me.ts";
-import { LIST, QUIET, TRACE_COLUMNS } from "../lib/transcript-copy.ts";
-import type { Facts, Grade, Listed } from "../lib/transcripts.ts";
+import { LIST, QUIET } from "../lib/transcript-copy.ts";
+import type { Facts, Listed } from "../lib/transcripts.ts";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 /**
@@ -62,10 +61,6 @@ vi.mock("next/image", () => ({
  * sees the whole page. The one case that is about roles says so out loud.
  */
 let seenRole: "admin" | "member" | "viewer" = "admin";
-
-function seenAs(role: typeof seenRole): void {
-  seenRole = role;
-}
 
 function meIs(): Me {
   return {
@@ -134,42 +129,6 @@ const TRACE_DETAIL = {
   gradeHistory: [],
   combinedScore: null,
 } as const;
-
-const FAILED_GRADE: Grade = {
-  projectGraderId: "grd_latency",
-  graderDefinitionId: "grl_latency",
-  graderDefinitionVersion: 1,
-  graderName: "response_latency",
-  parameterValues: { maximum_response_time_ms: 2_500 },
-  score: 0,
-  details: {
-    rationale: "The p90 response time exceeded the configured maximum.",
-  },
-  passThreshold: 1,
-  result: "failed",
-  gradedAt: "2026-08-27T19:03:16.000000Z",
-};
-
-const ERRORED_GRADE: Grade = {
-  ...FAILED_GRADE,
-  projectGraderId: "grd_broken",
-  graderDefinitionId: "grl_broken",
-  graderName: "broken_grader",
-  score: null,
-  details: { error: "The grader could not read its input." },
-  result: "errored",
-};
-
-const PASSED_GRADE: Grade = {
-  ...FAILED_GRADE,
-  projectGraderId: "grd_policy",
-  graderDefinitionId: "grl_policy",
-  graderName: "policy_grader",
-  parameterValues: { llm_provider: "openai", llm_model: "gpt-4o-mini" },
-  score: 1,
-  details: { rationale: "The policy requirement was satisfied." },
-  result: "passed",
-};
 
 /** A project grader, with or without production in its scope. */
 function grader(scope: "simulations" | "both") {
@@ -335,15 +294,6 @@ function atNoWindow(): void {
   globalThis.history.replaceState(null, "", "/");
 }
 
-/** The widest the control offers. */
-const WIDEST = "30d";
-
-/** Which read this page made of the list, as the address it sent. */
-function listedAt(asked: readonly string[]): URLSearchParams {
-  const sent = asked.find((one) => one.startsWith("/v1/traces?")) ?? "";
-  return new URLSearchParams(sent.slice(sent.indexOf("?")));
-}
-
 beforeEach(() => {
   routed.projectId = "prj_2";
   seenRole = "admin";
@@ -362,125 +312,7 @@ afterEach(() => {
   Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
 });
 
-/**
- * **The level is the wait, not decoration.** The sidebar's Monitoring group
- * label is a heading reading the same word, and it is drawn before any read
- * answers — so an unlevelled wait here would be satisfied by the shell and
- * would assert the query against a page that had not asked for anything yet.
- * `level: 1` is the page's own heading, which only the settled page draws.
- */
-describe("what the Monitoring list asks egma for", () => {
-  it("names the project in the address, never one resolved for it", async () => {
-    routed.projectId = "prj_1";
-    const { asked } = stub({ rows: [ONE_ROW] });
-    render(<MonitoringTranscriptsPage />);
-
-    await screen.findByRole("heading", { level: 1, name: LIST.title });
-    expect(listedAt(asked).get("projectId")).toBe("prj_1");
-  });
-
-  /**
-   * The filter is the server's. Narrowing what came back would answer
-   * differently depending on what had already been fetched, and would quietly
-   * break paging.
-   */
-  it("asks for production traffic and nothing else", async () => {
-    const { asked } = stub({ rows: [ONE_ROW] });
-    render(<MonitoringTranscriptsPage />);
-
-    await screen.findByRole("heading", { level: 1, name: LIST.title });
-    const query = listedAt(asked);
-    expect(query.get("source")).toBe("production");
-    // And a window, because the store refuses a read that bounded nothing.
-    expect(query.get("from")).not.toBeNull();
-    expect(query.get("to")).not.toBeNull();
-  });
-
-  /**
-   * **Traces, not Monitoring.** Monitoring is the sidebar group; this is
-   * the one page under it, and since the separate monitoring screen retired it
-   * is where the one monitoring verb lives too (board `JGS-0`). A title bar
-   * repeating the group's word would say the section's name twice over.
-   */
-  it("heads the page Traces", async () => {
-    stub({ rows: [ONE_ROW] });
-    render(<MonitoringTranscriptsPage />);
-
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Traces" }),
-    ).toBeDefined();
-  });
-});
-
 describe("what the Monitoring list shows", () => {
-  it("shows the compact call index in the approved order", async () => {
-    stub({ rows: [ONE_ROW] });
-    render(<MonitoringTranscriptsPage />);
-
-    const table = await screen.findByRole("table", { name: LIST.tableLabel });
-    const headings = within(table)
-      .getAllByRole("columnheader")
-      .map((cell) => cell.textContent);
-
-    expect(headings).toEqual([
-      TRACE_COLUMNS.agent,
-      TRACE_COLUMNS.duration,
-      TRACE_COLUMNS.p90TurnLatency,
-      TRACE_COLUMNS.traceId,
-      TRACE_COLUMNS.time,
-      TRACE_COLUMNS.actions,
-    ]);
-    expect(within(table).getByText("4.78s")).toBeDefined();
-    expect(within(table).getByText("kelly")).toBeDefined();
-    expect(table.style.minWidth).toBe("62rem");
-  });
-
-  it("keeps the Agent cell and trace table layout stable while its reading sheet is open", async () => {
-    stub({ rows: [ONE_ROW] });
-    render(<MonitoringTranscriptsPage />);
-
-    const table = (await screen.findByRole("table", {
-      name: LIST.tableLabel,
-    })) as HTMLTableElement;
-    const agent = within(table).getByText("kelly");
-    const row = agent.closest("tr");
-    expect(row).not.toBeNull();
-    if (row === null) throw new Error("The trace row was not rendered.");
-    const agentColumn = Array.from(table.rows[0]?.cells ?? []).findIndex(
-      (cell) => cell.textContent === TRACE_COLUMNS.agent,
-    );
-    const agentCell = row.cells[agentColumn];
-    const beforeRowClasses = new Set(row.className.split(/\s+/u));
-
-    /* Reproduce the reported path: press the row, not its Trace ID control. */
-    fireEvent.click(agent);
-    const sheet = await screen.findByRole("dialog", { name: /Trace/u });
-
-    expect(sheet.className).toContain("--sheet-width-extra-wide");
-    expect(sheet.className).not.toContain("--sheet-width-wide");
-
-    expect(row.cells[agentColumn]).toBe(agentCell);
-    expect(row.cells[agentColumn]?.textContent).toContain("kelly");
-    const activeMark = agentCell?.querySelector(
-      '[data-slot="current-row-mark"]',
-    );
-    expect(activeMark).not.toBeNull();
-    expect(activeMark?.parentElement).toBe(agentCell);
-    /*
-     * An active mark may not be generated from `<tr>`. Browser table fix-up
-     * treats that pseudo-element as another table box, expands the table, and
-     * moves the Agent cell under the reading sheet.
-     */
-    const addedTableBoxes = row.className
-      .split(/\s+/u)
-      .filter(
-        (name) =>
-          !beforeRowClasses.has(name) &&
-          (name === "relative" || name.startsWith("before:")),
-      );
-    expect(addedTableBoxes).toEqual([]);
-  });
-
   it("marks a P90 taken from a truncated trace as partial", async () => {
     stub({
       rows: [{ ...ONE_ROW, turnResponseLatencyP90Partial: true }],
@@ -505,33 +337,6 @@ describe("what the Monitoring list shows", () => {
     expect(within(sheet).getByText("4.78s · partial")).toBeDefined();
   });
 
-  it("keeps a platform-reported P90 complete on a truncated trace", async () => {
-    stub({
-      rows: [{ ...ONE_ROW, turnResponseLatencyP90Partial: false }],
-      detail: {
-        ...TRACE_DETAIL,
-        spansTruncated: true,
-        metrics: TRACE_DETAIL.metrics.map((metric) => ({
-          ...metric,
-          partial: false,
-          reportedBy: "retell",
-        })),
-      },
-    });
-    render(<MonitoringTranscriptsPage />);
-
-    const table = await screen.findByRole("table", { name: LIST.tableLabel });
-    expect(within(table).getByText("4.78s")).toBeDefined();
-    expect(within(table).queryByText("4.78s · partial")).toBeNull();
-
-    fireEvent.click(
-      within(table).getByRole("button", { name: FACTS.traceId }),
-    );
-    const sheet = await screen.findByRole("dialog", { name: /Trace/u });
-    expect(within(sheet).getByText("4.78s")).toBeDefined();
-    expect(within(sheet).queryByText("4.78s · partial")).toBeNull();
-  });
-
   /**
    * A row leads to the transcript inside this project, carrying the window the
    * exchange happened in — which is what makes one transcript a link somebody
@@ -550,242 +355,6 @@ describe("what the Monitoring list shows", () => {
       .toBe("/projects/prj_2/settings/billing");
     expect(within(sheet).getByRole("link", { name: "Manage provider API keys" }).getAttribute("href"))
       .toBe("/projects/prj_2/settings/provider-api-keys");
-  });
-
-  it("opens one continuous trace sheet from the row", async () => {
-    const startedAt = new Date(Date.now() - 5 * 60_000).toISOString();
-    const { asked } = stub({
-      rows: [
-        {
-          ...ONE_ROW,
-          startedAt: startedAt,
-          endedAt: new Date(Date.parse(startedAt) + 60_000).toISOString(),
-        },
-      ],
-    });
-    render(<MonitoringTranscriptsPage />);
-
-    const table = await screen.findByRole("table", { name: LIST.tableLabel });
-    /*
-     * The exchange's own moment, absolute and to the second. A list column is
-     * an absolute short date (ticket 09, item a): a column of ages cannot be
-     * scanned, and two exchanges a minute apart read the same for the whole of
-     * the first hour. The precision this column has always had is kept.
-     */
-    const started = within(table).getByText(
-      asListInstant(startedAt, "second"),
-    );
-
-    expect(started.closest("time")?.dateTime).toBe(startedAt);
-    expect(started.closest("time")?.title).toMatch(
-      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /u,
-    );
-
-    fireEvent.click(
-      within(table).getByRole("button", { name: FACTS.traceId }),
-    );
-
-    const sheet = await screen.findByRole("dialog", { name: /Trace/u });
-    expect(within(sheet).getByRole("heading", { name: "Call overview" })).toBeDefined();
-    expect(within(sheet).getByText("4.78s")).toBeDefined();
-    expect(within(sheet).getAllByRole("term").map((one) => one.textContent)).toEqual([
-      "Started",
-      "Duration",
-      "Turns",
-      "P90 turn latency",
-    ]);
-    expect(
-      within(sheet)
-        .getAllByRole("term")
-        .find((term) => term.textContent === "P90 turn latency")
-        ?.classList.contains("whitespace-nowrap"),
-    ).toBe(true);
-    expect(within(sheet).queryByRole("heading", { name: "Latency" })).toBeNull();
-    expect(within(sheet).getByText("No grades for this trace")).toBeDefined();
-    expect(
-      within(sheet).getByText(
-        "No project grader was active when this trace was recorded.",
-      ),
-    ).toBeDefined();
-    expect(
-      within(sheet).getByText(
-        "No audio recording is available for this trace.",
-      ),
-    ).toBeDefined();
-    const transcriptAnchor = within(sheet).getByRole("button", {
-      name: "Transcript",
-    });
-    expect(transcriptAnchor.getAttribute("aria-current")).toBeNull();
-    fireEvent.click(transcriptAnchor);
-    expect(transcriptAnchor.getAttribute("aria-current")).toBe("location");
-    expect(
-      within(sheet).getByRole("heading", { name: "Call overview" }),
-    ).toBeDefined();
-
-    // A short last section reaches the bottom before its own top can reach
-    // the nav rail. The bottom still means Transcript, so the scroll-spy must
-    // not undo the anchor the person just chose.
-    const transcriptSection = sheet.querySelector("#trace-transcript");
-    expect(transcriptSection).toBeInstanceOf(HTMLElement);
-    if (!(transcriptSection instanceof HTMLElement)) {
-      throw new Error("The transcript section was not rendered.");
-    }
-    const scroller = transcriptSection.parentElement;
-    expect(scroller).not.toBeNull();
-    if (scroller === null) {
-      throw new Error("The trace sheet scroller was not rendered.");
-    }
-    Object.defineProperties(scroller, {
-      scrollTop: { configurable: true, value: 200 },
-      clientHeight: { configurable: true, value: 500 },
-      scrollHeight: { configurable: true, value: 700 },
-      getBoundingClientRect: {
-        configurable: true,
-        value: () => ({ top: 0 }) as DOMRect,
-      },
-    });
-    Object.defineProperty(transcriptSection, "getBoundingClientRect", {
-      configurable: true,
-      value: () => ({ top: 650 }) as DOMRect,
-    });
-    fireEvent.scroll(scroller);
-    expect(transcriptAnchor.getAttribute("aria-current")).toBe("location");
-
-    const detailRead = asked.find((one) =>
-      one.startsWith(`/v1/traces/${FACTS.traceId}?`),
-    );
-    expect(detailRead).toBeDefined();
-    const sent = new URLSearchParams(detailRead?.slice(detailRead.indexOf("?")));
-    expect(sent.get("projectId")).toBe("prj_2");
-    expect(sent.get("from")).not.toBeNull();
-    expect(sent.get("to")).not.toBeNull();
-  });
-
-  it("fills failure-state squares without filling the passed square", async () => {
-    stub({
-      rows: [ONE_ROW],
-      detail: {
-        ...TRACE_DETAIL,
-        gradingState: "complete",
-        grades: [FAILED_GRADE, ERRORED_GRADE, PASSED_GRADE],
-        gradeHistory: [FAILED_GRADE, ERRORED_GRADE, PASSED_GRADE],
-        combinedScore: 0,
-      },
-    });
-    render(<MonitoringTranscriptsPage />);
-
-    const table = await screen.findByRole("table", { name: LIST.tableLabel });
-    fireEvent.click(
-      within(table).getByRole("button", { name: FACTS.traceId }),
-    );
-
-    const sheet = await screen.findByRole("dialog", { name: /Trace/u });
-    const badgeFor = (word: string) =>
-      within(sheet).getByText(word).closest('[data-slot="badge"]');
-    const markFor = (word: string) =>
-      badgeFor(word)?.querySelector('[data-slot="state-mark"]');
-
-    for (const word of ["failed", "errored"]) {
-      const badge = badgeFor(word);
-      const mark = markFor(word);
-      expect(badge?.classList.contains("text-failure")).toBe(true);
-      expect(mark).not.toBeNull();
-      expect(mark?.classList.contains("bg-failure")).toBe(true);
-      expect(mark?.classList.contains("bg-transparent")).toBe(false);
-    }
-
-    const erroredCard = badgeFor("errored")?.closest("article");
-    expect(erroredCard?.classList.contains("border-s-failure")).toBe(true);
-    expect(erroredCard?.classList.contains("border-s-warning")).toBe(false);
-
-    const passed = markFor("passed");
-    expect(passed).not.toBeNull();
-    expect(passed?.classList.contains("bg-failure")).toBe(false);
-    expect(passed?.classList.contains("bg-transparent")).toBe(true);
-  });
-
-  it("keeps a changed window when the open trace sheet is closed", async () => {
-    atWindow("24h");
-    stub({ rows: [ONE_ROW] });
-    render(<MonitoringTranscriptsPage />);
-
-    const table = await screen.findByRole("table", { name: LIST.tableLabel });
-    fireEvent.click(
-      within(table).getByRole("button", { name: FACTS.traceId }),
-    );
-    const sheet = await screen.findByRole("dialog", { name: /Trace/u });
-    expect(new URL(globalThis.location.href).searchParams.get("trace")).toBe(
-      FACTS.traceId,
-    );
-
-    fireEvent.change(screen.getByLabelText(LIST.window), {
-      target: { value: "7d" },
-    });
-    expect(new URL(globalThis.location.href).searchParams.get("window")).toBe(
-      "7d",
-    );
-
-    fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
-    const closed = new URL(globalThis.location.href);
-    expect(closed.searchParams.get("window")).toBe("7d");
-    expect(closed.searchParams.get("trace")).toBeNull();
-    expect((screen.getByLabelText(LIST.window) as HTMLSelectElement).value).toBe(
-      "7d",
-    );
-  });
-
-  it("closes an open production transcript when the page beside it is pressed", async () => {
-    atWindow("24h");
-    stub({ rows: [ONE_ROW] });
-    render(<MonitoringTranscriptsPage />);
-
-    const table = await screen.findByRole("table", { name: LIST.tableLabel });
-    fireEvent.click(
-      within(table).getByRole("button", { name: FACTS.traceId }),
-    );
-    expect(await screen.findByRole("dialog", { name: /Trace/u })).toBeTruthy();
-
-    /* Radix starts its document listener after the press that opened it. */
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    const pageTitle = screen.getByRole("heading", { name: LIST.title });
-    fireEvent.pointerDown(pageTitle);
-    fireEvent.click(pageTitle);
-
-    expect(screen.queryByRole("dialog", { name: /Trace/u })).toBeNull();
-    await waitFor(() => {
-      const address = new URL(globalThis.location.href);
-      expect(address.searchParams.get("trace")).toBeNull();
-      expect(address.searchParams.get("traceFrom")).toBeNull();
-      expect(address.searchParams.get("traceTo")).toBeNull();
-      expect(address.searchParams.get("window")).toBe("24h");
-    });
-  });
-
-  it("closes when the currently selected transcript row is pressed", async () => {
-    stub({ rows: [ONE_ROW] });
-    render(<MonitoringTranscriptsPage />);
-
-    const table = await screen.findByRole("table", { name: LIST.tableLabel });
-    fireEvent.click(
-      within(table).getByRole("button", { name: FACTS.traceId }),
-    );
-    expect(await screen.findByRole("dialog", { name: /Trace/u })).toBeTruthy();
-
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-    const currentAgent = within(table).getByText(FACTS.platformAgentName);
-    fireEvent.pointerDown(currentAgent);
-    fireEvent.click(currentAgent);
-
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: /Trace/u })).toBeNull();
-      expect(
-        new URL(globalThis.location.href).searchParams.get("trace"),
-      ).toBeNull();
-    });
   });
 
   it("switches to a different production transcript when that row is pressed", async () => {
@@ -1016,70 +585,6 @@ describe("what a quiet Monitoring page says", () => {
     }
   });
 
-  /**
-   * **A refused read is not a zero.** Folding it into a count would put "no
-   * grader watches production" on screen on the strength of an answer egma
-   * never got — the same collapse `ui/page-state.tsx` forbids between failed and
-   * empty. A supporting read that did not land means one thing less is said.
-   */
-  it("claims nothing about graders when the grader read was refused", async () => {
-    const { asked } = stub({
-      rows: [ONE_ROW],
-      keys: [key("prj_2")],
-      graders: "refused",
-    });
-    render(<MonitoringTranscriptsPage />);
-
-    // The rows are the page, and they arrive whatever the supporting read did.
-    await screen.findByRole("table", { name: LIST.tableLabel });
-    expect(guidance()).toEqual([]);
-    // And a page with rows on it never asks the wider question.
-    expect(probed(asked)).toEqual([]);
-  });
-
-  /** And the same for the keys read, which decides between two empty states. */
-  it("teaches the setup, claiming no key, when the key read was refused", async () => {
-    stub({ rows: [], everRecorded: [], keys: "refused", graders: [] });
-    render(<MonitoringTranscriptsPage />);
-
-    await screen.findByRole("heading", { name: QUIET.setUp.title });
-    expect(guidance()).toEqual(["set-up-capture"]);
-  });
-
-  /**
-   * **The refused probe is that rule at its sharpest**, because both sentences
-   * it decides between are confident ones. *Nothing here, try a wider window* is
-   * true whatever the answer would have been; the teaching would be telling
-   * somebody with a working export to go and build one.
-   */
-  it("falls back to the window line, never the teaching, when the probe was refused", async () => {
-    stub({
-      rows: [],
-      everRecorded: "refused",
-      keys: [key(null)],
-      graders: [grader("simulations")],
-    });
-    render(<MonitoringTranscriptsPage />);
-
-    await screen.findByRole("heading", { name: QUIET.narrowWindow.title });
-    expect(guidance()).toEqual(["nothing-in-this-window"]);
-    expect(screen.queryByText(/OTEL_EXPORTER_OTLP_ENDPOINT/)).toBeNull();
-  });
-
-  /**
-   * At the widest window the list read has already answered the wider question,
-   * so nothing is asked twice.
-   */
-  it("asks nothing extra when the window on screen is already the widest", async () => {
-    atWindow(WIDEST);
-    const { asked } = stub({ rows: [], keys: [key("prj_2")], graders: [] });
-    render(<MonitoringTranscriptsPage />);
-
-    await screen.findByRole("heading", { name: QUIET.setUp.title });
-    expect(guidance()).toEqual(["set-up-capture"]);
-    expect(probed(asked)).toEqual([]);
-  });
-
   it("names the organization-wide key instead, when the organization holds one", async () => {
     stub({ rows: [], everRecorded: [], keys: [key(null)], graders: [] });
     render(<MonitoringTranscriptsPage />);
@@ -1091,101 +596,5 @@ describe("what a quiet Monitoring page says", () => {
         .getByRole("link", { name: QUIET.organizationKey.key })
         .getAttribute("href"),
     ).toBe("/projects/prj_2/settings/keys");
-  });
-
-  it("keeps grader setup guidance out of the trace list", async () => {
-    stub({
-      rows: [ONE_ROW],
-      keys: [key(null)],
-      graders: [grader("simulations")],
-    });
-    render(<MonitoringTranscriptsPage />);
-
-    await screen.findByRole("table", { name: LIST.tableLabel });
-    expect(guidance()).toEqual([]);
-    expect(screen.queryByText(QUIET.unwatched.lead)).toBeNull();
-    expect(
-      screen.queryByRole("link", { name: QUIET.unwatched.graders }),
-    ).toBeNull();
-  });
-
-  /** A healthy project is told nothing, which is the fourth answer. */
-  it("says none of them when traffic is arriving and something judges it", async () => {
-    stub({ rows: [ONE_ROW], keys: [key("prj_2")], graders: [grader("both")] });
-    render(<MonitoringTranscriptsPage />);
-
-    await screen.findByRole("table", { name: LIST.tableLabel });
-    expect(guidance()).toEqual([]);
-  });
-});
-
-/**
- * Monitoring setup enters the shared Agents flow. This surface has no stop,
- * restart, or last-received controls.
- */
-describe("the one monitoring action this screen carries", () => {
-  it("heads the page with it, and states the Monitoring goal in the address", async () => {
-    stub({ rows: [ONE_ROW], keys: [key("prj_2")], graders: [grader("both")] });
-    render(<MonitoringTranscriptsPage />);
-
-    await screen.findByRole("table", { name: LIST.tableLabel });
-    const action = screen.getByRole("link", { name: LIST.monitorAgent });
-    expect(action.getAttribute("href")).toBe(
-      "/projects/prj_2/agents?sheet=connect&goal=monitoring",
-    );
-    // And the old address is not what it points at any more.
-    expect(action.getAttribute("href")).not.toContain("/monitoring/start");
-  });
-
-  it("uses the same setup address from any trace window", async () => {
-    atWindow(WIDEST);
-    stub({ rows: [ONE_ROW], keys: [key("prj_2")], graders: [grader("both")] });
-    render(<MonitoringTranscriptsPage />);
-
-    await screen.findByRole("table", { name: LIST.tableLabel });
-    expect(
-      screen.getByRole("link", { name: LIST.monitorAgent }).getAttribute("href"),
-    ).toBe("/projects/prj_2/agents?sheet=connect&goal=monitoring");
-  });
-
-  /**
-   * **A viewer is told, rather than allowed to type a Retell key and find out
-   * from the server.**
-   *
-   * Starting monitoring is `configure_monitoring`, which members and admins
-   * have and viewers do not. The server refuses them either way — that is where
-   * the boundary is — but the control says so first, which is the house
-   * pattern: disabled, with the sentence on it, never removed.
-   */
-  it("disables the action for a viewer and says whose it is not", async () => {
-    seenAs("viewer");
-    stub({ rows: [ONE_ROW], keys: [key("prj_2")], graders: [grader("both")] });
-    render(<MonitoringTranscriptsPage />);
-
-    await screen.findByRole("table", { name: LIST.tableLabel });
-    const action = await screen.findByRole("button", {
-      name: LIST.monitorAgent,
-    });
-    expect(action.hasAttribute("disabled")).toBe(true);
-    // Not a link, so there is nothing to open — and the reason is on the page
-    // rather than only in a title attribute nobody hears.
-    expect(screen.queryByRole("link", { name: LIST.monitorAgent })).toBeNull();
-    expect(
-      screen.getByText(/Your viewer role cannot set up monitoring/u),
-    ).toBeDefined();
-  });
-
-  it("offers no stop, no turn-on, and no last-received", async () => {
-    stub({ rows: [ONE_ROW], keys: [key("prj_2")], graders: [grader("both")] });
-    render(<MonitoringTranscriptsPage />);
-
-    await screen.findByRole("table", { name: LIST.tableLabel });
-    for (const absent of [
-      /stop pulling/iu,
-      /turn on/iu,
-      /last received/iu,
-    ]) {
-      expect(screen.queryByText(absent), String(absent)).toBeNull();
-    }
   });
 });

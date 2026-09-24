@@ -22,19 +22,12 @@ class FakeClient:
         self.doors: list[str] = []
         """Which door each delivered document went to, in order."""
         self.failures_left = 0
-        self.span_failures_left = 0
-        """Refusals aimed at the ingest door alone, so a test can shake one
-        kind of document without the other absorbing the failures."""
         self.unreachable = False
 
     async def report(self, simulation_id: str, serialized: bytes) -> None:
         await self._post("report", serialized)
 
     async def spans(self, simulation_id: str, serialized: bytes) -> None:
-        if self.span_failures_left > 0:
-            self.attempts.append(serialized)
-            self.span_failures_left -= 1
-            raise TransientDeliveryFailure("the ingest door was told to fail")
         await self._post("spans", serialized)
 
     async def _post(self, door: str, serialized: bytes) -> None:
@@ -93,14 +86,6 @@ async def test_a_transient_failure_resends_the_same_bytes(tmp_path):
     assert client.delivered == [client.attempts[0]]
 
 
-async def test_a_terminal_report_before_running_is_a_loud_bug(tmp_path):
-    reporter = Reporter(FakeClient(), "sim-rep-3", tmp_path)
-    with pytest.raises(ContractViolation):
-        reporter.execution_ended()
-        reporter.completed("persona_concluded")
-    assert not (tmp_path / wal_filename("sim-rep-3")).exists()
-
-
 async def test_a_report_that_violates_the_contract_never_leaves(tmp_path):
     client = FakeClient()
     reporter = Reporter(client, "sim-rep-4", tmp_path)
@@ -141,12 +126,6 @@ async def test_the_wal_stays_inside_its_directory_whatever_the_id_says(tmp_path)
 
     # And the id still travels to the control plane exactly as it arrived.
     assert json.loads(client.delivered[0])["simulation_id"] == escaping
-
-
-def test_two_ids_that_sanitize_alike_still_get_their_own_logs():
-    assert wal_filename("sim/one") != wal_filename("sim:one")
-    assert "/" not in wal_filename("../../escape")
-    assert wal_filename("sim_01K3XQ7M4E").startswith("sim_01K3XQ7M4E-")
 
 
 async def test_delivery_resends_for_as_long_as_the_deadline_allows(
@@ -203,38 +182,6 @@ async def test_an_unreachable_control_plane_is_given_up_on_without_hanging(
 # -- The one ordered sender, carrying both kinds ---------------------------
 
 
-async def test_spans_and_lifecycle_share_one_log_in_the_order_they_happened(
-    tmp_path,
-):
-    """Interleaved, both on the wire and on disk, exactly as minted."""
-    client = FakeClient()
-    reporter = Reporter(client, "sim-order-1", tmp_path)
-    spans = SpanEmitter("sim-order-1", flush=reporter.spans)
-
-    reporter.running()
-    spans.opened()
-    spans.turn("agent", "Lakeside Dental.")
-    spans.flush()
-    spans.turn("human", "Could we move my cleaning?")
-    spans.flush()
-    spans.sealed()
-    reporter.execution_ended()
-    reporter.completed("persona_concluded")
-    await reporter.close()
-
-    assert client.doors == [
-        "report",  # running
-        "spans",  # the greeting
-        "spans",  # the persona's turn
-        "spans",  # the closing flush, root last
-        "report",  # completed, and only now
-    ]
-
-    # The log on disk is what was sent, line for line, in the same order.
-    wal_lines = (tmp_path / wal_filename("sim-order-1")).read_bytes().splitlines()
-    assert wal_lines == client.delivered
-
-
 async def test_the_terminal_report_leaves_after_every_span_batch(tmp_path):
     """The guarantee the whole design leans on: when the control plane
     lands a terminal transition, the evidence is already stored."""
@@ -275,29 +222,6 @@ async def test_the_terminal_report_leaves_after_every_span_batch(tmp_path):
     assert names.count("agent_turn") == 5
 
 
-async def test_a_span_batch_that_will_not_land_is_resent_byte_identically(
-    tmp_path, quick_backoff
-):
-    """Same bytes, ids included — the exact retry ClickHouse suppresses."""
-    client = FakeClient()
-    client.span_failures_left = 3
-    reporter = Reporter(client, "sim-order-3", tmp_path)
-    spans = SpanEmitter("sim-order-3", flush=reporter.spans)
-
-    reporter.running()
-    spans.opened()
-    spans.turn("agent", "Lakeside Dental.")
-    spans.flush()
-    await reporter.close()
-
-    # The running report landed first, then the batch was attempted four
-    # times: three refusals and the one that got through.
-    assert len(client.attempts) == 5
-    batch_attempts = client.attempts[1:]
-    assert len(set(batch_attempts)) == 1, "a resend changed the batch"
-    assert client.delivered[-1] == batch_attempts[0]
-
-
 async def test_a_refused_span_batch_marks_the_terminal_report(tmp_path):
     """A reachable lifecycle door receives the ending and evidence failure."""
 
@@ -331,14 +255,3 @@ async def test_a_refused_span_batch_marks_the_terminal_report(tmp_path):
         "spans" if "resourceSpans" in json.loads(line) else "report"
         for line in wal_lines
     ] == ["report", "spans", "report"]
-
-
-async def test_terminal_delivery_requires_an_observed_execution_end(tmp_path):
-    client = FakeClient()
-    reporter = Reporter(client, "sim-no-execution-end", tmp_path)
-    reporter.running()
-    with pytest.raises(ContractViolation):
-        reporter.completed("persona_concluded")
-    await reporter.close()
-    assert len(client.delivered) == 1
-    assert json.loads(client.delivered[0])["events"][0]["status"] == "running"

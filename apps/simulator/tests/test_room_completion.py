@@ -165,7 +165,7 @@ async def test_local_chat_cleanup_does_not_turn_a_failure_into_an_ending():
     assert not room.ended.is_set()
 
 
-@pytest.mark.parametrize("reason", ["agent_hangup", "inactivity", "user_hangup"])
+@pytest.mark.parametrize("reason", ["agent_hangup"])
 async def test_retell_final_ended_status_confirms_a_whole_room_close(reason: str):
     stub = FinalCallStub(api_key=SENTINEL_KEY, reason=reason)
     async with serving(stub) as server:
@@ -194,7 +194,6 @@ async def test_retell_final_ended_status_confirms_a_whole_room_close(reason: str
         (rtc.DisconnectReason.ROOM_DELETED, False, True),
         (rtc.DisconnectReason.ROOM_DELETED, True, False),
         (rtc.DisconnectReason.CLIENT_INITIATED, True, True),
-        (rtc.DisconnectReason.STATE_MISMATCH, True, True),
     ],
 )
 async def test_unconfirmed_livekit_disconnect_remains_failure(

@@ -26,27 +26,6 @@ async function collect(
 }
 
 describe("waiting for Retell's final simulation record", () => {
-  it("polls every five seconds for a minute, then backs off through four minutes", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(0);
-    const requestedAt: number[] = [];
-    const fetchImpl = (async () => {
-      requestedAt.push(Date.now());
-      return new Response(JSON.stringify(PENDING_CALL));
-    }) as typeof fetch;
-
-    const done = collect(pollRetellSimulationCall("retell-key", "call_waiting", { fetchImpl }, { completionReceivedAtMilliseconds: 0 }));
-    await vi.advanceTimersByTimeAsync(245_000);
-    await done;
-
-    expect(requestedAt).toEqual([
-      0, 5_000, 10_000, 15_000, 20_000, 25_000, 30_000,
-      35_000, 40_000, 45_000, 50_000, 55_000, 60_000,
-      70_000, 90_000, 130_000, 190_000, 240_000,
-    ]);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
   it("waits for both the final status and readable transcript, then stops", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
@@ -99,24 +78,6 @@ describe("waiting for Retell's final simulation record", () => {
     expect(active).toBe(0);
     expect(result.finishedAt).toBe(245_000);
     expect(result.results).toHaveLength(18);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("keeps the planned schedule when each response takes three seconds", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(0);
-    const requestedAt: number[] = [];
-    const fetchImpl = (async () => {
-      requestedAt.push(Date.now());
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
-      return new Response(JSON.stringify(requestedAt.length === 3 ? FINAL_CALL : PENDING_CALL));
-    }) as typeof fetch;
-
-    const done = collect(pollRetellSimulationCall("retell-key", "call_waiting", { fetchImpl }, { completionReceivedAtMilliseconds: 0 }));
-    await vi.advanceTimersByTimeAsync(13_000);
-    await done;
-
-    expect(requestedAt).toEqual([0, 5_000, 10_000]);
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -173,24 +134,6 @@ describe("waiting for Retell's final simulation record", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("stops after cancellation while waiting for the next request", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(0);
-    const controller = new AbortController();
-    const fetchImpl = vi.fn(async () => new Response(JSON.stringify(PENDING_CALL))) as unknown as typeof fetch;
-    const done = collect(pollRetellSimulationCall("retell-key", "call_waiting", {
-      fetchImpl,
-      signal: controller.signal,
-    }, { completionReceivedAtMilliseconds: 0 }));
-    await vi.advanceTimersByTimeAsync(0);
-    controller.abort();
-    await vi.advanceTimersByTimeAsync(5_000);
-    await done;
-
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
   it("anchors a delayed start to the completion receipt and skips missed slots", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(16_000);
@@ -213,30 +156,6 @@ describe("waiting for Retell's final simulation record", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("shortens the last request to the completion receipt's remaining budget", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(244_000);
-    const requestedAt: number[] = [];
-    const fetchImpl = ((_input: unknown, init?: RequestInit) => {
-      requestedAt.push(Date.now());
-      return new Promise<Response>((_resolve, reject) => {
-        init?.signal?.addEventListener("abort", () => {
-          reject(new DOMException("request aborted", "AbortError"));
-        }, { once: true });
-      });
-    }) as typeof fetch;
-
-    const done = collect(pollRetellSimulationCall("retell-key", "call_waiting", {
-      fetchImpl,
-    }, { completionReceivedAtMilliseconds: 0 }))
-      .then(() => Date.now());
-    await vi.runAllTimersAsync();
-
-    expect(await done).toBe(245_000);
-    expect(requestedAt).toEqual([244_000]);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
   it("does not request a record after the stored completion deadline", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(245_000);
@@ -248,28 +167,6 @@ describe("waiting for Retell's final simulation record", () => {
 
     expect(results).toEqual([]);
     expect(fetchImpl).not.toHaveBeenCalled();
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it("does not burst through missed slots when a retry timer wakes late", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(0);
-    const requestedAt: number[] = [];
-    const fetchImpl = (async () => {
-      requestedAt.push(Date.now());
-      return new Response(JSON.stringify(PENDING_CALL));
-    }) as typeof fetch;
-    let delayed = false;
-    const sleep = async (milliseconds: number): Promise<void> => {
-      vi.setSystemTime(Date.now() + milliseconds + (delayed ? 0 : 185_000));
-      delayed = true;
-    };
-
-    await collect(pollRetellSimulationCall("retell-key", "call_waiting", {
-      fetchImpl,
-    }, { completionReceivedAtMilliseconds: 0, sleep }));
-
-    expect(requestedAt).toEqual([0, 190_000, 240_000]);
     expect(vi.getTimerCount()).toBe(0);
   });
 

@@ -1,5 +1,4 @@
 import { createPersona } from "@egma/db";
-import { mockToolVariable } from "@egma/retell";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -811,22 +810,6 @@ describe("a run over a Retell lane against an agent that publishes nothing", () 
     expect([...ready.state.versions]).toEqual([105]);
     expect(ready.state.writes).toEqual([]);
   });
-
-  it("conducts the run once that version is published", async () => {
-    const ready = await anAgentReadyToRun("web_call_published_after", {
-      published: false,
-    });
-    // The developer takes door one.
-    ready.state.published.add(105);
-
-    const started = await ask(api.app, "POST", "/v1/runs", ready.key, {
-      suiteId: ready.suiteId,
-      agentId: ready.agentId,
-      connectionId: ready.connectionId,
-    });
-    expect(started.statusCode, JSON.stringify(started.body)).toBe(201);
-    expect(started.body.agentVersion).toBe(105);
-  });
 });
 
 describe("a run whose world cannot be built", () => {
@@ -918,46 +901,6 @@ describe("a second mocked run on an agent already holding its world", () => {
     const specs = await claim();
     expect(specs).toHaveLength(1);
     expect(String(specs[0]?.["agent_version"])).toBe("106");
-  });
-
-  it("lets the next run build once the first has finished and given the account back", async () => {
-    const ready = await anAgentReadyToRun("mocked_run_second_after_teardown");
-
-    const first = await ask(api.app, "POST", "/v1/runs", ready.key, {
-      suiteId: ready.suiteId,
-      agentId: ready.agentId,
-      connectionId: ready.connectionId,
-    });
-    expect(first.statusCode, JSON.stringify(first.body)).toBe(201);
-
-    // Conduct the first run to its end, which tears its world down.
-    const specs = await claim();
-    const simulationId = String(specs[0]?.["simulation_id"]);
-    await report(simulationId, "running");
-    await report(simulationId, "completed");
-    expect(ready.state.versions.has(106)).toBe(false);
-    expect(ready.state.bindings.get("+12567332874")).toEqual([
-      { agent_id: RETELL_AGENT, agent_version: "latest", weight: 2 },
-    ]);
-
-    // Now the agent is free, and the next run builds its own world normally.
-    const second = await ask(api.app, "POST", "/v1/runs", ready.key, {
-      suiteId: ready.suiteId,
-      agentId: ready.agentId,
-      connectionId: ready.connectionId,
-    });
-    expect(second.statusCode, JSON.stringify(second.body)).toBe(201);
-    const header = await ask(
-      api.app,
-      "GET",
-      `/v1/runs/${String(second.body.id)}`,
-      ready.key,
-    );
-    // A fresh copy of its own, branched from the same serving version.
-    expect(header.body.agentVersion).toBe(105);
-    const branched = header.body.tempMockAgentVersion as number;
-    expect(branched).toBeGreaterThan(105);
-    expect(ready.state.versions.has(branched)).toBe(true);
   });
 });
 

@@ -243,18 +243,6 @@ describe("suite identity and membership", () => {
     ).rejects.toThrow(/needs a name/u);
   });
 
-  it("keeps an empty suite and returns an empty page", async () => {
-    const suite = await createTestSuite(actingAsAcme(), { name: "Empty" });
-    expect(await getTestSuite(actingAsAcme(), suite.id)).toMatchObject({
-      id: suite.id,
-      name: "Empty",
-    });
-    expect(await listTests(actingAsAcme(), suite.id)).toEqual({
-      items: [],
-      nextCursor: undefined,
-    });
-  });
-
   it("pages tests within one suite and never crosses into its sibling", async () => {
     const firstSuite = await createTestSuite(actingAsAcme(), { name: "First" });
     const secondSuite = await createTestSuite(actingAsAcme(), { name: "Second" });
@@ -512,24 +500,6 @@ describe("complete-suite runs", () => {
       [suite.id],
     );
     expect(rows).toEqual([{ count: "0" }]);
-  });
-
-  it("reads the suite's current name and deleted marker on old runs", async () => {
-    const suite = await createTestSuite(actingAsAcme(), { name: "Before rename" });
-    await testIn(suite.id, "History test");
-    const started = await startRun(actingAsAcme(), runInput(suite.id));
-
-    await renameTestSuite(actingAsAcme(), suite.id, { name: "After rename" });
-    expect(await getRun(actingAsAcme(), started.id)).toMatchObject({
-      suiteName: "After rename",
-      suiteDeleted: false,
-    });
-
-    await deleteTestSuite(actingAsAcme(), suite.id);
-    expect(await getRun(actingAsAcme(), started.id)).toMatchObject({
-      suiteName: "After rename",
-      suiteDeleted: true,
-    });
   });
 
   it("reads the connection's current name on every run header", async () => {

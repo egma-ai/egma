@@ -67,10 +67,6 @@ class RetellStub:
     refuses_web_call: str | None = None
     """The platform's own words when it will not create the call at all."""
 
-    web_call_without_a_token: bool = False
-    """A creation the platform answers 2xx with nothing to join by — the
-    shape a plug must refuse rather than carry half an exchange on."""
-
     calls: list[dict] = field(default_factory=list)
     """Every request served, in order — the whole exchange on the record."""
 
@@ -266,8 +262,6 @@ class RetellStub:
         }
         if body.get("agent_version") is not None:
             answered["agent_version"] = body["agent_version"]
-        if self.web_call_without_a_token:
-            del answered["access_token"]
         return web.json_response(answered, status=201)
 
     async def _end_chat(self, request: web.Request) -> web.Response:

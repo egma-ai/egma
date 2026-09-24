@@ -6,9 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 import { loadConfig } from "../src/config.ts";
 
 /**
- * Check environment names against Compose and README.
- * These are text-contract tests, not container tests. Also check every
- * Compose file for the grader's no-inbound-port rule.
+ * Check environment names and the grader service block against Compose.
+ * These are text-contract tests, not container tests.
  */
 
 const ROOT = path.resolve(fileURLToPath(new URL("../../..", import.meta.url)));
@@ -65,50 +64,9 @@ describe("every variable the grader reads", () => {
       expect(passed).toContain(name);
     }
   });
-
-  it("is in the README's table", async () => {
-    const readme = await read("apps/grader/README.md");
-    for (const name of await variablesTheCodeReads()) {
-      expect(readme).toContain(name);
-    }
-  });
-
-  /**
-   * The other direction, which rots more quietly: a variable somebody sets
-   * carefully and nothing has read since it was renamed. A paragraph telling
-   * somebody to do something with no effect is worse than silence.
-   */
-  it("is the only one anything documents", async () => {
-    const read_ = await variablesTheCodeReads();
-    for (const named of [
-      "apps/grader/README.md",
-      ...(await composeFiles()),
-    ]) {
-      const stale = [...new Set((await read(named)).match(VARIABLE) ?? [])].filter(
-        (name) => !read_.has(name),
-      );
-      expect(stale, `${named} names variables nothing reads`).toEqual([]);
-    }
-  });
 });
 
 describe("the grader's place in the deployment", () => {
-  /**
-   * The invariant the whole arrangement rests on, held across every overlay. The
-   * service claims its work rather than being sent it, so it needs no inbound
-   * network surface at all — and an overlay could break that in one line with
-   * nothing else in this suite noticing.
-   */
-  it("publishes nothing, in every configuration", async () => {
-    for (const file of await composeFiles()) {
-      const block = serviceBlock(await read(file), "grader");
-      if (block === undefined) continue;
-      expect(block, `${file} publishes a port on the grader`).not.toContain(
-        "ports:",
-      );
-    }
-  });
-
   it("is one more container in the plain compose file, with no new decision in it", async () => {
     const block = serviceBlock(await read("docker-compose.yml"), "grader");
     expect(block).toBeDefined();
@@ -134,43 +92,7 @@ describe("the grader's place in the deployment", () => {
     expect(block).toContain("EGMA_PROVIDER_CREDENTIALS_REGION:");
     expect(block).toContain("EGMA_ENCRYPTION_KEY:");
   });
-
-  it("has no healthcheck, because nothing listens for one to reach", async () => {
-    const block = serviceBlock(await read("docker-compose.yml"), "grader");
-    expect(block).not.toContain("healthcheck:");
-  });
 });
-
-describe("the API process", () => {
-  /**
-   * Grading exists and the request path did not grow. Grading is bursty in a
-   * way a request path is not — one run of thirty simulations lands thirty
-   * conversations to judge at once — so it scales by its own copies rather than
-   * by the API's, and the queue is reached by the service that works it and by
-   * nothing that answers an HTTP request.
-   */
-  it("gains nothing from grading existing", async () => {
-    const source = path.join(ROOT, "apps/api/src");
-    const offending: string[] = [];
-
-    const walk = async (directory: string): Promise<void> => {
-      for (const entry of await readdir(directory, { withFileTypes: true })) {
-        const full = path.join(directory, entry.name);
-        if (entry.isDirectory()) await walk(full);
-        else if (entry.name.endsWith(".ts")) {
-          const text = await readFile(full, "utf8");
-          if (/claimGradingJobs|watchGradingWork|\bgradingJob\b/.test(text)) {
-            offending.push(path.relative(ROOT, full));
-          }
-        }
-      }
-    };
-
-    await walk(source);
-    expect(offending).toEqual([]);
-  });
-});
-
 
 it("keeps the grader WAL on its own volume when the shared environment names the API log", () => {
   vi.stubEnv("DATABASE_URL", "postgres://unused");

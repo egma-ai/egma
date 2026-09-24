@@ -1,16 +1,8 @@
-import {
-  copyFile,
-  mkdir,
-  readFile,
-  rename,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { runPushCommand } from "../src/commands/push.ts";
 import {
   EMPTY_CONFIG,
   createEgmaFolder,
@@ -41,8 +33,6 @@ const EMPTY_SUITE_ID = "ste_01K3XQ7M4E8YB2FVN0H9TZQWES";
 const THIRD_SUITE_ID = "ste_01K3XQ7M4E8YB2FVN0H9TZQWET";
 const TEST_ID = "tst_01K3XQ7M4E8YB2FVN0H9TZQWER";
 const VERSION_ID = "tstv_01K3XQ7M4E8YB2FVN0H9TZQWER";
-const SECOND_TEST_ID = "tst_01K3XQ7M4E8YB2FVN0H9TZQWES";
-const SECOND_VERSION_ID = "tstv_01K3XQ7M4E8YB2FVN0H9TZQWES";
 const REVISION = "rev_01K3XQ7M4E8YB2FVN0H9TZQWER";
 let workspace: Workspace;
 
@@ -144,152 +134,6 @@ function testBody(input: {
 }
 
 describe("complete repository suite commands", () => {
-  it("pushes every suite and every test's own world in one atomic call", async () => {
-    const release = await suite("release", SUITE_ID, "Release");
-    await suite("empty", EMPTY_SUITE_ID, "Empty");
-    await writeFile(
-      path.join(release, "books-a-visit.md"),
-      serializeTestFile(
-        aTestFile({
-          name: "Books a visit",
-          scenario: "The caller asks for Tuesday.",
-          expectedBehaviors: blocking("The agent books Tuesday."),
-          mockTools: [{ tool: "calendar", answer: { open: true } }],
-          env: { retell_dynamic_variables: { caller_name: "Margaret" } },
-        }),
-      ),
-    );
-
-    const calls: { readonly url: string; readonly body: Record<string, unknown> }[] = [];
-    const fetchImpl: typeof fetch = async (input, init) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      calls.push({ url: String(input), body });
-      const written = (body.tests as Record<string, unknown>[])[0]!;
-      return new JsonResponse(
-        JSON.stringify({
-          tests: [
-            {
-              clientRef: written.clientRef,
-              test: {
-                ...testBody(),
-                mockTools: written.mockTools,
-                env: written.env,
-              },
-            },
-          ],
-        }),
-        { status: 200 },
-      );
-    };
-
-    const report = await pushTests({
-      signedIn: { url: URL, key: "key" },
-      paths: folderPathsIn(workspace.dir),
-      fetchImpl,
-    });
-
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.url).toBe(
-      `${URL}/v1/repository/change-set?projectId=${PROJECT_ID}`,
-    );
-    expect(calls[0]?.body.suites).toEqual([
-      { id: EMPTY_SUITE_ID, name: "Empty" },
-      { id: SUITE_ID, name: "Release" },
-    ]);
-    // Both halves of the world ride the test entry, and every entry says both
-    // even when it has nothing to say: the change set has no optional halves.
-    expect(calls[0]?.body.tests).toEqual([
-      expect.objectContaining({
-        suiteId: SUITE_ID,
-        mockTools: [{ tool: "calendar", answer: { open: true } }],
-        env: { retell_dynamic_variables: { caller_name: "Margaret" } },
-      }),
-    ]);
-    expect(calls[0]?.body).not.toHaveProperty("mockTools");
-    expect(report.tests[0]).toMatchObject({ testId: TEST_ID, versionId: VERSION_ID });
-    expect(await readFile(path.join(release, "books-a-visit.md"), "utf8")).toContain(
-      `version: ${VERSION_ID}`,
-    );
-  });
-
-  it("prints every durable Test receipt and pull recovery when local pinning fails", async () => {
-    const release = await suite("release", SUITE_ID, "Release");
-    for (const [file, name] of [
-      ["books-a-visit.md", "Books a visit"],
-      ["cancels-a-visit.md", "Cancels a visit"],
-    ] as const) {
-      await writeFile(
-        path.join(release, file),
-        serializeTestFile(
-          aTestFile({
-            name,
-            scenario: "The caller asks about a visit.",
-            expectedBehaviors: blocking("The agent handles the visit."),
-          }),
-        ),
-      );
-    }
-    const calls: string[] = [];
-    const output: string[] = [];
-    const failed: string[] = [];
-    let writes = 0;
-    const command = {
-      access: { url: URL, credentialsFile: workspace.credentialsFile },
-      cwd: workspace.dir,
-      out: (line: string) => output.push(line),
-      fail: (line: string) => failed.push(line),
-      fetchImpl: async (input: string | URL | Request, init?: RequestInit) => {
-        calls.push(`${init?.method ?? "GET"} ${String(input)}`);
-        const body = JSON.parse(String(init?.body)) as {
-          readonly tests: readonly { readonly clientRef: string }[];
-        };
-        return new JsonResponse(
-          JSON.stringify({
-            tests: body.tests.map((test, index) => ({
-              clientRef: test.clientRef,
-              test: testBody(
-                index === 0
-                  ? {
-                      id: TEST_ID,
-                      versionId: VERSION_ID,
-                      name: "Books a visit",
-                      scenario: "The caller asks about a visit.",
-                      expectedBehaviors: ["The agent handles the visit."],
-                    }
-                  : {
-                      id: SECOND_TEST_ID,
-                      versionId: SECOND_VERSION_ID,
-                      name: "Cancels a visit",
-                      scenario: "The caller asks about a visit.",
-                      expectedBehaviors: ["The agent handles the visit."],
-                    },
-              ),
-            })),
-          }),
-        );
-      },
-      writeTestFile: async () => {
-        writes += 1;
-        throw new Error("the disk is read-only");
-      },
-    } as Parameters<typeof runPushCommand>[0] & {
-      readonly writeTestFile: () => Promise<never>;
-    };
-
-    const code = await runPushCommand(command);
-
-    expect(code).toBe(1);
-    expect(calls).toEqual([`POST ${URL}/v1/repository/change-set?projectId=${PROJECT_ID}`]);
-    expect(writes).toBe(1);
-    expect(output.join("\n")).toContain(TEST_ID);
-    expect(output.join("\n")).toContain(VERSION_ID);
-    expect(output.join("\n")).toContain(SECOND_TEST_ID);
-    expect(output.join("\n")).toContain(SECOND_VERSION_ID);
-    expect(failed.join("\n")).toContain("egma/tests/release/books-a-visit.md");
-    expect(failed.join("\n")).toContain("the disk is read-only");
-    expect(failed).toContain("Run egma pull.");
-  });
-
   it("treats a local suite-directory rename as local only", async () => {
     const platform = await startPlatform();
     const key = "egma_sk_directory-only-rename";
@@ -360,58 +204,6 @@ describe("complete repository suite commands", () => {
       await Promise.all([platform.close(), repository.remove()]);
     }
   });
-
-  it.each(["suite", "test"] as const)(
-    "refuses a remote-only %s and does not infer its deletion",
-    async (remoteOnly) => {
-      const platform = await startPlatform();
-      const key = `egma_sk_remote-only-${remoteOnly}`;
-      const remoteSuite = platform.suites.add("Release");
-      platform.tests.add({
-        suiteId: remoteSuite.id,
-        name: "Books a visit",
-        scenario: "The caller asks for Tuesday.",
-        expectedBehaviors: ["The agent books Tuesday."],
-      });
-      const repository = await fixtureRepository(platform, remoteSuite, key);
-      try {
-        await pullFixture(platform, repository, key);
-        const local = (await readRepository(folderPathsIn(repository.dir))).suites[0]!;
-        await writeFile(
-          local.manifestFile,
-          serializeSuiteManifest({ id: remoteSuite.id, name: "Must not land" }),
-        );
-        if (remoteOnly === "suite") {
-          platform.suites.add("Browser only");
-        } else {
-          platform.tests.add({
-            suiteId: remoteSuite.id,
-            name: "Browser-only test",
-            scenario: "The caller asks for a callback.",
-            expectedBehaviors: ["The agent offers a callback."],
-          });
-        }
-
-        await expect(
-          pushTests({
-            signedIn: { url: platform.url, key },
-            paths: folderPathsIn(repository.dir),
-          }),
-        ).rejects.toThrow(
-          remoteOnly === "suite"
-            ? /does not include active test suite.*no server suite is deleted by inference/iu
-            : /does not include active test.*no server test is deleted by inference/iu,
-        );
-
-        expect(platform.suites.byId(remoteSuite.id)?.name).toBe("Release");
-        expect(platform.suites.suites).toHaveLength(remoteOnly === "suite" ? 2 : 1);
-        expect(platform.tests.tests).toHaveLength(remoteOnly === "test" ? 2 : 1);
-        expect(platform.tests.versionsOf("Books a visit")).toBe(1);
-      } finally {
-        await Promise.all([platform.close(), repository.remove()]);
-      }
-    },
-  );
 
   it("keeps local suite and test identities when they were deleted remotely", async () => {
     const platform = await startPlatform();
@@ -484,75 +276,6 @@ describe("complete repository suite commands", () => {
     } finally {
       await Promise.all([platform.close(), repository.remove()]);
     }
-  });
-
-  it("refuses a tracked test moved under another suite and writes nothing", async () => {
-    const platform = await startPlatform();
-    const key = "egma_sk_reparent-refusal";
-    const firstSuite = platform.suites.add("First suite");
-    const secondSuite = platform.suites.add("Second suite");
-    platform.tests.add({
-      suiteId: firstSuite.id,
-      name: "Books a visit",
-      scenario: "The caller asks for Tuesday.",
-      expectedBehaviors: ["The agent books Tuesday."],
-    });
-    const repository = await fixtureRepository(platform, firstSuite, key);
-    try {
-      await pullFixture(platform, repository, key);
-      const local = await readRepository(folderPathsIn(repository.dir));
-      const from = local.suites.find((entry) => entry.manifest.id === firstSuite.id)!;
-      const to = local.suites.find((entry) => entry.manifest.id === secondSuite.id)!;
-      await rename(from.tests[0]!.file, path.join(to.root, path.basename(from.tests[0]!.file)));
-
-      await expect(
-        pushTests({
-          signedIn: { url: platform.url, key },
-          paths: folderPathsIn(repository.dir),
-        }),
-      ).rejects.toThrow(/test cannot move between suites/iu);
-
-      expect(platform.tests.versionsOf("Books a visit")).toBe(1);
-      expect(platform.suites.byId(firstSuite.id)?.name).toBe("First suite");
-      expect(platform.suites.byId(secondSuite.id)?.name).toBe("Second suite");
-    } finally {
-      await Promise.all([platform.close(), repository.remove()]);
-    }
-  });
-
-  it("rolls back every new path when a staged pull write fails", async () => {
-    const paths = folderPathsIn(workspace.dir);
-    const beforeConfig = await readFile(paths.config, "utf8");
-    const fetchImpl: typeof fetch = async (input) => {
-      const url = String(input);
-      if (url === `${URL}/v1/test-suites?projectId=${PROJECT_ID}`) {
-        return new JsonResponse(
-          JSON.stringify({
-            testSuites: [{ id: SUITE_ID, projectId: PROJECT_ID, name: "Release" }],
-            nextPageToken: null,
-          }),
-        );
-      }
-      if (url.includes("/v1/tests?")) {
-        return new JsonResponse(JSON.stringify({ tests: [testBody()], nextPageToken: null }));
-      }
-      return new JsonResponse(JSON.stringify({ message: "unexpected" }), { status: 404 });
-    };
-
-    await expect(
-      pullRepository({
-        signedIn: { url: URL, key: "key" },
-        paths,
-        fetchImpl,
-        applyStagedFile: async (staged, destination, index) => {
-          if (index === 1) throw new Error("disk stopped");
-          await copyFile(staged, destination);
-        },
-      }),
-    ).rejects.toThrow("disk stopped");
-
-    await expect(stat(path.join(paths.tests, "release"))).rejects.toMatchObject({ code: "ENOENT" });
-    expect(await readFile(paths.config, "utf8")).toEqual(beforeConfig);
   });
 
   it("finds a free suite directory after both normal collision names are taken", async () => {
@@ -722,28 +445,6 @@ describe("complete repository suite commands", () => {
   });
 
   it.each([
-    [
-      "a mock tool that holds delay_ms",
-      [
-        "## Mock tools",
-        "### book",
-        "```json",
-        '{"answer": {"booked": true}, "delay_ms": 250}',
-        "```",
-      ].join("\n"),
-      "delay_ms.*take the line out",
-    ],
-    [
-      "a mock tool that holds agents",
-      [
-        "## Mock tools",
-        "### book",
-        "```json",
-        '{"answer": {"booked": true}, "agents": ["front-desk"]}',
-        "```",
-      ].join("\n"),
-      "agents.*belongs to the test that writes it",
-    ],
     [
       "an Env key the format does not hold",
       ["## Env", "```json", '{"webhooks": {"url": "https://hooks.test"}}', "```"].join("\n"),

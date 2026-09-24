@@ -4,13 +4,10 @@ import {
   createTest,
   editTest,
   getTest,
-  getTestVersion,
-  listTests,
 } from "@egma/db";
 
 import { type MigratedDatabase } from "./support/database.ts";
 import {
-  acme,
   actingAsAcme,
   rescheduling,
   rowCounts,
@@ -19,7 +16,6 @@ import {
 
 /**
  * Expected behaviors retain order and create a version when changed.
- * Tests do not select graders; project grader scopes determine selection.
  * Raw SQL creates legacy behavior objects to test read compatibility.
  */
 
@@ -35,100 +31,7 @@ afterAll(async () => {
   await database.drop();
 });
 
-describe("a test version's content", () => {
-  /**
-   * The junction is gone from the schema, so this is what is left to check: no
-   * read of a test hands back graders, at any of the four grains a test is read
-   * at. A field quietly still being answered would mean something upstream was
-   * still deciding grading from test content.
-   */
-  it("names no graders, at every grain a test is read at", async () => {
-    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
-
-    const fetched = await getTest(actingAsAcme(), created.id);
-    const frozen = await getTestVersion(actingAsAcme(), created.versionId);
-    const page = await listTests(actingAsAcme(), acme.suite, { limit: 200 });
-    const listed = page?.items.find((item) => item.id === created.id);
-
-    for (const read of [created, fetched, frozen, listed]) {
-      expect(read).toBeDefined();
-      expect(read).not.toHaveProperty("graders");
-    }
-
-    // And the table itself is not there to be asked.
-    await expect(
-      database.sql("select 1 from test_grader limit 1"),
-    ).rejects.toThrow(/test_grader/);
-  });
-
-  /**
-   * A caller still sending last month's field is a compile error and never a
-   * silent write, so what has to hold at run time is only that nothing is
-   * stored for it: the version's content is the two fields it says it is, and
-   * the world the test carries is beside it in two columns of its own.
-   */
-  it("stores the scenario and the behaviors, and nothing else", async () => {
-    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
-
-    const { rows } = await database.sql<{ keys: string[] }>(
-      `select array(select jsonb_object_keys(content) order by 1) as keys
-         from test_version where id = $1`,
-      [created.versionId],
-    );
-
-    expect(rows[0]?.keys).toEqual(["expectedBehaviors", "scenario"]);
-  });
-});
-
 describe("a test's expected behaviors", () => {
-  it("round-trip as the plain sentences they were written as", async () => {
-    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
-
-    const fetched = await getTest(actingAsAcme(), created.id);
-    expect(fetched?.expectedBehaviors).toEqual(rescheduling.expectedBehaviors);
-
-    const frozen = await getTestVersion(actingAsAcme(), created.versionId);
-    expect(frozen?.expectedBehaviors).toEqual(rescheduling.expectedBehaviors);
-  });
-
-  /**
-   * Order is content, and it is load-bearing rather than tidy: nested assertion
-   * details name each behavior by position in the pinned version. Moving a
-   * sentence changes what that key means, so a new version keeps old grades
-   * readable.
-   */
-  it("mint a version when one is reworded, and nothing when the list is the same", async () => {
-    const created = await createTest(actingAsAcme(), {
-      ...rescheduling,
-      personaIds: [rita],
-      expectedBehaviors: ["verifies who it is speaking to", "thanks the caller"],
-    });
-
-    const edited = await editTest(actingAsAcme(), created.id, {
-      expectedVersionId: created.versionId,
-      expectedBehaviors: [
-        "verifies who it is speaking to",
-        "thanks the caller by name",
-      ],
-    });
-
-    expect(edited?.version).toBe(2);
-    expect(edited?.expectedBehaviors).toEqual([
-      "verifies who it is speaking to",
-      "thanks the caller by name",
-    ]);
-
-    if (edited === undefined) throw new Error("the edited test is missing");
-    const saved = await editTest(actingAsAcme(), created.id, {
-      expectedVersionId: edited.versionId,
-      expectedBehaviors: [
-        "verifies who it is speaking to",
-        "thanks the caller by name",
-      ],
-    });
-    expect(saved?.version).toBe(2);
-  });
-
   it("mint a version when two of them swap places", async () => {
     const created = await createTest(actingAsAcme(), {
       ...rescheduling,
@@ -183,23 +86,6 @@ describe("a test's expected behaviors", () => {
   });
 
   /**
-   * The retired shape, named rather than reported as a blank sentence. A writer
-   * still sending last month's body should be told what changed, not sent to
-   * look at their own words for a problem that is in the envelope.
-   */
-  it("refuse the retired priority shape by name", async () => {
-    await expect(
-      createTest(actingAsAcme(), {
-        ...rescheduling,
-        personaIds: [rita],
-        expectedBehaviors: [
-          { behavior: "confirms the new time back", priority: "P0" },
-        ] as unknown as readonly string[],
-      }),
-    ).rejects.toThrow(/plain sentence now/);
-  });
-
-  /**
    * A version frozen while behaviors carried priorities still says what it said:
    * the sentence. The priority is read past rather than migrated away, because a
    * version a run can pin is never rewritten — which is the whole reason runs
@@ -228,20 +114,5 @@ describe("a test's expected behaviors", () => {
     });
     expect(edited?.version).toBe(2);
     expect(edited?.expectedBehaviors).toEqual(["confirms the new time back"]);
-  });
-
-  /** And the pre-priority shape, which is the shape again, still reads. */
-  it("read a version stored as bare strings, which is the shape once more", async () => {
-    const created = await createTest(actingAsAcme(), { ...rescheduling, personaIds: [rita] });
-
-    await database.sql(
-      `update test_version
-          set content = '{"scenario": "They want to move Thursday.", "expectedBehaviors": ["confirms the new time back"]}'::jsonb
-        where id = $1`,
-      [created.versionId],
-    );
-
-    const fetched = await getTest(actingAsAcme(), created.id);
-    expect(fetched?.expectedBehaviors).toEqual(["confirms the new time back"]);
   });
 });

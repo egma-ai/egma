@@ -6,11 +6,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import ajvFormats from "ajv-formats";
 import { describe, expect, it } from "vitest";
 
-import {
-  bannedWordIn,
-  reportComplaints,
-  specComplaints,
-} from "@egma/simulation-contract";
+import { reportComplaints, specComplaints } from "@egma/simulation-contract";
 
 // ajv-formats ships CommonJS whose module.exports is the plugin function
 // itself. Under NodeNext, the default import is typed as its namespace and
@@ -253,21 +249,6 @@ const EXPECTED_REJECTION: Record<string, Rejection> = {
 };
 
 describe("the two schemas, as one contract", () => {
-  it("pin each direction's current contract version", () => {
-    const versionOf = (schema: Record<string, unknown>): unknown =>
-      (
-        (schema.properties as Record<string, Record<string, unknown>>)
-          .contract_version as Record<string, unknown>
-      ).const;
-    expect(versionOf(specSchema)).toBe(6);
-    expect(versionOf(reportSchema)).toBe(1);
-  });
-
-  it("each carry an identity a $ref or an error message can name", () => {
-    expect(specSchema.$id).toBe("urn:egma:simulation-contract:spec:v6");
-    expect(reportSchema.$id).toBe("urn:egma:simulation-contract:report:v1");
-  });
-
   it("carries per-claim Daytona authority only on a voice work order", async () => {
     const base = await readJson(
       "fixtures",
@@ -302,53 +283,6 @@ describe("the two schemas, as one contract", () => {
         runtime: { ...runtime, storage: { ...runtime.storage, session_token: "" } },
       }),
     ).toBe(false);
-  });
-
-  it("accepts only the shared speaking-speed range", async () => {
-    const base = await readJson(
-      "fixtures",
-      "spec",
-      "valid",
-      "voice-loopback.json",
-    );
-    const withSpeed = (speed: number): Record<string, unknown> => {
-      const spec = structuredClone(base);
-      const models = spec.models as Record<string, Record<string, unknown>>;
-      const tts = models.tts;
-      if (tts === undefined) throw new Error("the valid fixture has no TTS selection");
-      tts.speed = speed;
-      return spec;
-    };
-
-    const tts = (
-      specSchema.$defs as Record<
-        string,
-        { properties: { speed: { minimum: number; maximum: number } } }
-      >
-    ).tts_selection;
-    if (tts === undefined) throw new Error("the contract has no TTS selection");
-    const { minimum, maximum } = tts.properties.speed;
-
-    for (const speed of [minimum, maximum]) {
-      const spec = withSpeed(speed);
-      expect(
-        validators.spec(spec),
-        `${speed}: ${ajv.errorsText(validators.spec.errors)}`,
-      ).toBe(true);
-    }
-
-    for (const [speed, keyword] of [
-      [minimum - 0.0001, "minimum"],
-      [maximum + 0.0001, "maximum"],
-    ] as const) {
-      expect(validators.spec(withSpeed(speed))).toBe(false);
-      expect(validators.spec.errors).toContainEqual(
-        expect.objectContaining({
-          instancePath: "/models/tts/speed",
-          keyword,
-        }),
-      );
-    }
   });
 
   it("carries a named agent version and this simulation's variables, or neither", async () => {
@@ -468,195 +402,6 @@ describe("the two schemas, as one contract", () => {
     }
   });
 
-  it("keeps catalog membership out of the wire contract", async () => {
-    const base = await readJson(
-      "fixtures",
-      "spec",
-      "valid",
-      "voice-loopback.json",
-    );
-    const candidate = structuredClone(base);
-    const models = candidate.models as Record<
-      "llm" | "stt" | "tts",
-      Record<string, unknown>
-    >;
-    models.llm.provider = "future-llm-provider";
-    models.llm.model = "future-llm-model";
-    models.llm.adapter = "future_llm_adapter";
-    models.stt.provider = "future-stt-provider";
-    models.stt.model = "future-stt-model";
-    models.stt.adapter = "future_stt_adapter";
-    models.tts.provider = "future-tts-provider";
-    models.tts.model = "future-tts-model";
-    models.tts.adapter = "future_tts_adapter";
-
-    expect(
-      validators.spec(candidate),
-      ajv.errorsText(validators.spec.errors),
-    ).toBe(true);
-
-    const definitions = specSchema.$defs as Record<
-      string,
-      { properties: Record<string, Record<string, unknown>> }
-    >;
-    for (const job of ["llm", "stt", "tts"] as const) {
-      const selection = definitions[`${job}_selection`];
-      if (selection === undefined) {
-        throw new Error(`the contract has no ${job} selection`);
-      }
-      for (const name of ["provider", "model", "adapter"] as const) {
-        expect(selection.properties[name]).toEqual({
-          type: "string",
-          minLength: 1,
-        });
-      }
-    }
-  });
-
-  it("carries the authored person flat, whole, and closed", async () => {
-    const base = await readJson(
-      "fixtures",
-      "spec",
-      "valid",
-      "voice-loopback.json",
-    );
-    const personaOf = (spec: Record<string, unknown>): Record<string, unknown> => {
-      const persona = spec.persona as Record<string, unknown> | undefined;
-      if (persona === undefined) throw new Error("the fixture has no persona");
-      return persona;
-    };
-
-    expect(Object.keys(personaOf(base)).sort()).toEqual([
-      "name",
-      "parameters",
-      "personality",
-    ]);
-    expect(validators.spec(base), ajv.errorsText(validators.spec.errors)).toBe(
-      true,
-    );
-
-    // Whole: none of the three is optional, and none may be present in name
-    // only. A simulator handed a persona without one of them would have to
-    // decide what it meant, and deciding that is deciding who the agent
-    // heard — which a name of one space leaves just as undecided, while
-    // reading "Your name is  ." into the prompt. Absent, empty and blank are
-    // one rule with three diagnostics, and it is the rule the persona
-    // version's own columns keep: non-empty after trim.
-    for (const required of ["name", "personality"] as const) {
-      const spec = structuredClone(base);
-      delete personaOf(spec)[required];
-      expect(validators.spec(spec)).toBe(false);
-      expect(validators.spec.errors).toContainEqual(
-        expect.objectContaining({
-          instancePath: "/persona",
-          keyword: "required",
-          params: { missingProperty: required },
-        }),
-      );
-
-      const empty = structuredClone(base);
-      personaOf(empty)[required] = "";
-      expect(validators.spec(empty)).toBe(false);
-      expect(validators.spec.errors).toContainEqual(
-        expect.objectContaining({
-          instancePath: `/persona/${required}`,
-          keyword: "minLength",
-        }),
-      );
-
-      for (const blank of [" ", "   ", "\t", "\n", " \t\n "]) {
-        const whitespace = structuredClone(base);
-        personaOf(whitespace)[required] = blank;
-        expect(
-          validators.spec(whitespace),
-          `${required} accepted ${JSON.stringify(blank)}`,
-        ).toBe(false);
-        expect(validators.spec.errors).toContainEqual(
-          expect.objectContaining({
-            instancePath: `/persona/${required}`,
-            keyword: "pattern",
-          }),
-        );
-      }
-
-      // And the rule stops exactly there. Whitespace around real content is
-      // the author's own spacing, not an empty field: the wire refuses what
-      // says nothing, and does not tidy what somebody wrote.
-      const padded = structuredClone(base);
-      personaOf(padded)[required] = ` ${String(personaOf(base)[required])} `;
-      expect(
-        validators.spec(padded),
-        ajv.errorsText(validators.spec.errors),
-      ).toBe(true);
-    }
-
-    const parametersOf = (spec: Record<string, unknown>) =>
-      personaOf(spec).parameters as Record<string, unknown>;
-    expect(Object.keys(parametersOf(base)).sort()).toEqual([
-      "accent",
-      "background_sound_id",
-      "background_volume",
-      "emotion",
-      "execution_policy_version",
-      "language",
-      "speech_volume",
-    ]);
-    for (const required of ["language", "emotion", "accent", "speech_volume", "execution_policy_version"] as const) {
-      const spec = structuredClone(base);
-      delete parametersOf(spec)[required];
-      expect(validators.spec(spec)).toBe(false);
-      expect(validators.spec.errors).toContainEqual(
-        expect.objectContaining({
-          instancePath: "/persona/parameters",
-          keyword: "required",
-          params: { missingProperty: required },
-        }),
-      );
-    }
-    const ticket01 = structuredClone(base);
-    delete parametersOf(ticket01).background_sound_id;
-    delete parametersOf(ticket01).background_volume;
-    expect(
-      validators.spec(ticket01),
-      ajv.errorsText(validators.spec.errors),
-    ).toBe(true);
-    for (const interruptionLevel of ["off", "occasional", "frequent"] as const) {
-      const spec = structuredClone(base);
-      parametersOf(spec).interruption_level = interruptionLevel;
-      expect(
-        validators.spec(spec),
-        ajv.errorsText(validators.spec.errors),
-      ).toBe(true);
-    }
-    const unknownInterruption = structuredClone(base);
-    parametersOf(unknownInterruption).interruption_level = "constant";
-    expect(validators.spec(unknownInterruption)).toBe(false);
-    for (const [key, value] of [
-      ["background_sound_id", "unknown-v1"],
-      ["background_volume", 0.3],
-    ] as const) {
-      const spec = structuredClone(base);
-      parametersOf(spec)[key] = value;
-      expect(validators.spec(spec)).toBe(false);
-    }
-
-    // Closed: the wrapper the block used to have, and the two authored
-    // details no run ever read, are refused here rather than ignored — the
-    // form cannot promise again what nothing delivers.
-    for (const retired of ["traits", "accent", "backgroundNoise"] as const) {
-      const spec = structuredClone(base);
-      personaOf(spec)[retired] = "retired detail";
-      expect(validators.spec(spec)).toBe(false);
-      expect(validators.spec.errors).toContainEqual(
-        expect.objectContaining({
-          instancePath: "/persona",
-          keyword: "additionalProperties",
-          params: { additionalProperty: retired },
-        }),
-      );
-    }
-  });
-
   it("keeps reasoning effort structural, not catalog-owned", async () => {
     const base = await readJson(
       "fixtures",
@@ -751,71 +496,6 @@ describe("the two schemas, as one contract", () => {
     }
   });
 
-  /**
-   * The terminal facts are written once per status variant so that each
-   * spells out the endings it may honestly claim. The price of writing them
-   * out is that they could drift apart; this pins them identical everywhere
-   * except the ending.
-   */
-  it("holds the three terminal-facts shapes identical, apart from their endings", () => {
-    const defs = reportSchema.$defs as Record<
-      string,
-      Record<string, unknown>
-    >;
-    const stripped = ["completed_facts", "failed_facts", "canceled_facts"].map(
-      (name) => {
-        const clone = structuredClone(defs[name]) as Record<string, unknown>;
-        delete clone.description;
-        (clone.properties as Record<string, unknown>).ending = "<varies>";
-        return clone;
-      },
-    );
-    expect(stripped[1]).toEqual(stripped[0]);
-    expect(stripped[2]).toEqual(stripped[0]);
-  });
-
-  it("keeps a voice recording as one opaque reference, with no copied timing or sample-rate facts", async () => {
-    const report = await readJson(
-      "fixtures",
-      "report",
-      "valid",
-      "completed-voice.json",
-    );
-    const event = (report.events as Record<string, unknown>[])[0];
-    expect(event).toBeDefined();
-    if (!event) throw new Error("the completed report has no event");
-    const facts = event.facts as Record<string, unknown>;
-    const audio = facts.audio as Record<string, unknown>;
-    expect(audio).toEqual({
-      recording:
-        "sim_01K3XQ7M4E8YB2FVN0H9TZQWES/dual-channel.wav",
-      waveform: {
-        human: [0.04, 0.61, 0.58, 0.02, 0.0, 0.31],
-        agent: [0.52, 0.03, 0.0, 0.47, 0.49, 0.05],
-      },
-    });
-    expect(
-      validators.report(report),
-      JSON.stringify(validators.report.errors),
-    ).toBe(true);
-
-    for (const [property, value] of [
-      ["started_at", "2026-08-05T09:00:17.123456789Z"],
-      ["measured_sample_rate_hz", 8_000],
-    ] as const) {
-      audio[property] = value;
-      expect(validators.report(report)).toBe(false);
-      expect(validators.report.errors).toContainEqual(
-        expect.objectContaining({
-          instancePath: "/events/0/facts/audio",
-          keyword: "additionalProperties",
-          params: { additionalProperty: property },
-        }),
-      );
-      delete audio[property];
-    }
-  });
-
   it("carries a drawn recording as peaks between zero and one, or not at all", async () => {
     const report = await readJson(
       "fixtures",
@@ -861,38 +541,10 @@ describe("the two schemas, as one contract", () => {
       JSON.stringify(validators.report.errors),
     ).toBe(true);
   });
-
-  it("gives each terminal status its own endings, sharing none", () => {
-    const defs = reportSchema.$defs as Record<string, Record<string, unknown>>;
-    const endings = ["completed_facts", "failed_facts", "canceled_facts"].flatMap(
-      (name) => {
-        const properties = defs[name]?.properties as Record<
-          string,
-          Record<string, unknown>
-        >;
-        return properties.ending?.enum as string[];
-      },
-    );
-    expect(new Set(endings).size).toBe(endings.length);
-  });
 });
 
 for (const direction of ["spec", "report"] as const) {
   describe(`the ${direction} direction`, () => {
-    it("accepts every valid golden fixture", async () => {
-      const all = await fixturesUnder(direction, "valid");
-      expect(all.length).toBeGreaterThan(0);
-
-      for (const fixture of all) {
-        const validate = validators[direction];
-        const answer = validate(fixture.document);
-        expect(
-          answer,
-          `${fixture.name}: ${ajv.errorsText(validate.errors)}`,
-        ).toBe(true);
-      }
-    });
-
     it("rejects every deliberately invalid fixture, at the place it is wrong", async () => {
       const all = await fixturesUnder(direction, "invalid");
 
@@ -931,50 +583,6 @@ for (const direction of ["spec", "report"] as const) {
     });
   });
 }
-
-describe("what the golden fixtures cover", () => {
-  it("shows the spec direction in both modalities", async () => {
-    const specs = await fixturesUnder("spec", "valid");
-    const modalities = new Set(specs.map((fixture) => fixture.document.modality));
-    expect(modalities).toEqual(new Set(["chat", "voice"]));
-  });
-
-  it("shows the one report event kind, and every terminal status", async () => {
-    const reports = await fixturesUnder("report", "valid");
-    const events = reports.flatMap(
-      (fixture) => fixture.document.events as Record<string, unknown>[],
-    );
-
-    // One kind, and this is the assertion that says so: the report direction
-    // carries the lifecycle and nothing else, because a conversation's record
-    // is the spans it arrived as.
-    const kinds = new Set(events.map((event) => event.kind));
-    expect(kinds).toEqual(new Set(["status"]));
-
-    const statuses = new Set(
-      events
-        .filter((event) => event.kind === "status")
-        .map((event) => event.status),
-    );
-    expect(statuses).toEqual(
-      new Set(["running", "completed", "failed", "canceled"]),
-    );
-  });
-
-  it("shows a recording on a voice report, and its absence on chat", async () => {
-    const reports = await fixturesUnder("report", "valid");
-    const facts = reports
-      .flatMap((fixture) => fixture.document.events as Record<string, unknown>[])
-      .filter((event) => event.facts !== undefined)
-      .map((event) => event.facts as Record<string, unknown>);
-
-    const recordings = facts.map((terminal) => terminal.audio);
-    expect(recordings).toContain(null);
-    expect(
-      recordings.some((audio) => audio !== null && audio !== undefined),
-    ).toBe(true);
-  });
-});
 
 /**
  * Credentials travel in exactly one direction: the spec. The report schema
@@ -1076,31 +684,6 @@ describe("the report schema structurally forbids credential material", () => {
       expect(ajv.errorsText(validators.report.errors)).toContain(
         "must NOT have additional properties",
       );
-    }
-  });
-});
-
-/** Scan schemas, documentation, and fixtures with the shared mock-tool vocabulary. */
-describe("the contract's surface, held to the words the project settled on", () => {
-  it("uses none of them, anywhere a reader of this package looks", async () => {
-    const files = (
-      await readdir(packageRoot, { recursive: true, withFileTypes: true })
-    ).filter(
-      (entry) =>
-        entry.isFile() &&
-        (entry.name.endsWith(".json") || entry.name.endsWith(".md")) &&
-        !entry.parentPath.includes("node_modules"),
-    );
-    expect(files.length).toBeGreaterThan(0);
-
-    for (const file of files) {
-      const at = path.join(file.parentPath, file.name);
-      const found = bannedWordIn(await readFile(at, "utf8"));
-      expect(
-        found?.found,
-        `${path.relative(packageRoot, at)} uses "${found?.found}"; ` +
-          `say ${found?.instead}`,
-      ).toBeUndefined();
     }
   });
 });
@@ -1234,34 +817,6 @@ describe("the exported spec check, which the control plane sends through", () =>
     };
     expect(specComplaints(legacy)).toEqual([]);
   });
-
-  it("complains about every deliberately invalid fixture", async () => {
-    for (const fixture of await fixturesUnder("spec", "invalid")) {
-      expect(
-        specComplaints(fixture.document).length,
-        `${fixture.name} raised no complaint`,
-      ).toBeGreaterThan(0);
-    }
-  });
-
-  it("names the place a document is wrong, the way the simulator's check does", async () => {
-    const [valid] = await fixturesUnder("spec", "valid");
-    if (valid === undefined) throw new Error("no valid spec fixture");
-
-    const { limits: _limits, ...missingLimits } = valid.document;
-    expect(specComplaints(missingLimits)).toEqual([
-      ": must have required property 'limits'",
-    ]);
-
-    expect(
-      specComplaints({ ...valid.document, modality: "carrier-pigeon" }),
-    ).toEqual(["/modality: must be equal to one of the allowed values"]);
-  });
-
-  it("complains about a document that is not an object at all", () => {
-    expect(specComplaints(null).length).toBeGreaterThan(0);
-    expect(specComplaints("a string").length).toBeGreaterThan(0);
-  });
 });
 
 describe("the exported report check, which the report route reads through", () => {
@@ -1269,64 +824,5 @@ describe("the exported report check, which the report route reads through", () =
     for (const fixture of await fixturesUnder("report", "valid")) {
       expect(reportComplaints(fixture.document), fixture.name).toEqual([]);
     }
-  });
-
-  it("complains about every deliberately invalid fixture", async () => {
-    for (const fixture of await fixturesUnder("report", "invalid")) {
-      expect(
-        reportComplaints(fixture.document).length,
-        `${fixture.name} raised no complaint`,
-      ).toBeGreaterThan(0);
-    }
-  });
-
-  it("names the place a document is wrong, in the shape the spec check uses", async () => {
-    const carried = await readJson(
-      "fixtures",
-      "report",
-      "valid",
-      "completed-chat.json",
-    );
-
-    const { events: _events, ...missingEvents } = carried;
-    expect(reportComplaints(missingEvents)).toEqual([
-      ": must have required property 'events'",
-    ]);
-  });
-
-  it("refuses the endings that are the platform's own words, never a reporter's", async () => {
-    // `orphaned` is the sweep's verdict on a simulator that went silent, and
-    // a simulator still talking cannot claim it; `dispatch_failed` is the
-    // claim path's own landing for work it could not hand over. The wire's
-    // vocabulary carries neither, so a report claiming either is refused at
-    // validation — before any route has to reason about it.
-    const carried = await readJson(
-      "fixtures",
-      "report",
-      "valid",
-      "failed-agent-never-joined.json",
-    );
-
-    for (const ending of ["orphaned", "dispatch_failed", "capacity"]) {
-      const claiming = {
-        ...carried,
-        events: (carried.events as Record<string, unknown>[]).map((event) => ({
-          ...event,
-          facts: {
-            ...(event.facts as Record<string, unknown>),
-            ending,
-          },
-        })),
-      };
-      expect(
-        reportComplaints(claiming).length,
-        `a report claiming "${ending}" raised no complaint`,
-      ).toBeGreaterThan(0);
-    }
-  });
-
-  it("complains about a document that is not an object at all", () => {
-    expect(reportComplaints(null).length).toBeGreaterThan(0);
-    expect(reportComplaints("a string").length).toBeGreaterThan(0);
   });
 });

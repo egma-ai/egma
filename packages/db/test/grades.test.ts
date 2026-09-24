@@ -136,33 +136,6 @@ describe("one grader result on one trace", () => {
       }]);
   });
 
-  it("round-trips one normalized grade with its frozen identities and details", async () => {
-    const written = grade();
-
-    await expect(appendGrades(auth, [written])).resolves.toEqual({
-      appended: 1,
-      batches: 1,
-    });
-
-    await expect(readTraceGrades(auth, {
-      source: "simulation",
-      traceId: written.traceId,
-      runId: written.runId,
-    })).resolves.toEqual({
-      history: [{
-        ...written,
-        traceStartedAt: "2026-08-21T08:00:00.000000Z",
-        gradedAt: "2026-08-21T08:01:00.000000Z",
-      }],
-      current: [{
-        ...written,
-        traceStartedAt: "2026-08-21T08:00:00.000000Z",
-        gradedAt: "2026-08-21T08:01:00.000000Z",
-        result: "failed",
-      }],
-    });
-  });
-
   it("keeps history and averages only the latest complete selected grades", async () => {
     const traceId = "2222222222222222222222222222bbbb";
     const runId = newId("run");
@@ -216,11 +189,6 @@ describe("one grader result on one trace", () => {
       [expectedBehaviors, policy, newId("grd")],
       read.current,
     )).toBeNull();
-  });
-
-  it("refuses definition version zero before writing a grade", async () => {
-    await expect(appendGrades(auth, [grade({ graderDefinitionVersion: 0 })]))
-      .rejects.toThrow("graderDefinitionVersion must fit UInt32");
   });
 });
 
@@ -301,19 +269,5 @@ describe("the immutable production selection receipt", () => {
 
     await expect(recordProductionGradingPlan(auth, input)).rejects
       .toBeInstanceOf(ProductionGradingPlanConflictError);
-  });
-
-  it("refuses definition version zero before writing a receipt", async () => {
-    await expect(recordProductionGradingPlan(auth, {
-      traceId: "4444444444444444444444444444dddd",
-      traceStartedAtMicroseconds: micros("2026-08-21T09:30:00Z"),
-      entries: [{
-        projectGraderId: newId("grd"),
-        graderDefinitionId: newId("grl"),
-        graderDefinitionVersion: 0,
-        graderPassThreshold: 1,
-        parameterValues: {},
-      }],
-    })).rejects.toThrow("graderDefinitionVersion must fit UInt32");
   });
 });

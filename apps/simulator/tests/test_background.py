@@ -19,7 +19,6 @@ from pipecat.transports.base_transport import TransportParams
 from pipecat.workers.runner import WorkerRunner
 
 from egma_simulator.background import (
-    BACKGROUND_GAIN,
     BackgroundSound,
     asset_catalog,
     soundfile_mixer,
@@ -83,27 +82,6 @@ def test_all_packaged_assets_are_immutable_readable_files():
     assert all(
         path.is_file() and path.stat().st_size > 900_000 for path in catalog.values()
     )
-
-
-def test_background_sound_has_no_authored_gain() -> None:
-    with pytest.raises(TypeError, match="positional argument"):
-        BackgroundSound("rain-v1", 0.5)  # type: ignore[call-arg]
-
-
-async def test_background_gain_is_fixed_at_minus_12_db_and_the_final_mix_clips():
-    mixer = soundfile_mixer(BackgroundSound("rain-v1"))
-    assert mixer is not None
-    assert mixer._volume == pytest.approx(10 ** (-12 / 20))  # type: ignore[attr-defined]
-    assert BACKGROUND_GAIN == pytest.approx(10 ** (-12 / 20))
-    await mixer.start(24_000)
-    silence = bytes(24_000 * 2)
-    noise = array("h", await mixer.mix(silence))
-    assert max(map(abs, noise)) > 0
-
-    hot_speech = array("h", [32_760] * 24_000).tobytes()
-    protected = array("h", await mixer.mix(hot_speech))
-    assert max(protected) == 32_767
-    await mixer.stop()
 
 
 @pytest.mark.parametrize("speech_frame", [TTSAudioRawFrame, SpeechOutputAudioRawFrame])

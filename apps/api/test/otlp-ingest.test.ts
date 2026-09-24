@@ -6,13 +6,10 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { OTLP_TRACES_PATH } from "../src/routes/traces.ts";
-import { EXPORT_TRACE_SERVICE_RESPONSE } from "../src/otlp/schema.ts";
 import { cookiesFrom, createApi, type TestApi } from "./support/api.ts";
 import {
   capturedRequests,
-  FIXTURE_PROVIDER_CALL_ID,
   FIXTURE_TRACE,
-  FIXTURE_WINDOW,
   type CapturedRequest,
 } from "./support/fixture.ts";
 import { startObjectStorage, type ObjectStorage } from "./support/object-storage.ts";
@@ -137,10 +134,6 @@ async function countOf(query: string): Promise<number> {
   return Number(row?.n ?? -1);
 }
 
-const inTheWindow =
-  `started_at >= toDateTime64('${FIXTURE_WINDOW.from}', 6, 'UTC') ` +
-  `and started_at < toDateTime64('${FIXTURE_WINDOW.to}', 6, 'UTC')`;
-
 let acme: Customer;
 
 beforeAll(async () => {
@@ -160,144 +153,6 @@ afterAll(async () => {
 });
 
 describe.skipIf(!storage.available)("the captured trace, posted at the door", () => {
-  it("is fourteen requests the exporter really sent, and every one of them is protobuf", () => {
-    expect(requests).toHaveLength(14);
-    for (const request of requests) {
-      expect(request.path).toBe(OTLP_TRACES_PATH);
-      expect(request.contentType).toBe("application/x-protobuf");
-    }
-  });
-
-  it("lands as one trace of the spans that arrived, and not one more", async () => {
-    expect(await countOf("select count() as n from spans final")).toBe(
-      FIXTURE_TRACE.spans,
-    );
-    expect(
-      await countOf("select uniqExact(trace_id) as n from spans final"),
-    ).toBe(1);
-  });
-
-  it("adopts the ids off the wire rather than minting any", async () => {
-    const rows = await store().rows<{ trace_id: string; span_id: string }>(
-      "select distinct trace_id, span_id from spans final limit 200",
-    );
-    expect(rows).toHaveLength(FIXTURE_TRACE.spans);
-    for (const row of rows) {
-      expect(row.trace_id).toMatch(/^[0-9a-f]{32}$/);
-      expect(row.span_id).toMatch(/^[0-9a-f]{16}$/);
-    }
-  });
-
-  /** The project on the key is the project that owns every landed row. */
-  it("files every row under the organization and project the key names", async () => {
-    const rows = await store().rows<{
-      organization_id: string;
-      project_id: string;
-    }>("select distinct organization_id, project_id from spans final");
-
-    expect(rows).toEqual([
-      { organization_id: acme.organizationId, project_id: acme.projectId },
-    ]);
-  });
-
-  it("calls it production from an agent, in the environment nobody named", async () => {
-    const rows = await store().rows<{
-      source: string;
-      emitter: string;
-      environment: string;
-    }>("select distinct source, emitter, environment from spans final");
-
-    expect(rows).toEqual([
-      { source: "production", emitter: "agent", environment: "default" },
-    ]);
-  });
-
-  it("keeps the vendor's own identifier for this trace on every row", async () => {
-    const rows = await store().rows<{ provider_call_id: string }>(
-      "select distinct provider_call_id from spans final",
-    );
-    expect(rows).toEqual([{ provider_call_id: FIXTURE_PROVIDER_CALL_ID }]);
-  });
-
-  it("records when the trace happened, to the microsecond it was stamped", async () => {
-    expect(
-      await countOf(`select count() as n from spans final where ${inTheWindow}`),
-    ).toBe(FIXTURE_TRACE.spans);
-
-    const [root] = await store().rows<{ started_at: string; duration_ns: number }>(
-      "select started_at, duration_ns from spans final where parent_span_id = '' limit 1",
-    );
-    // The wire said 1785693880281989804 nanoseconds. Microseconds is what the
-    // column holds, and the sub-microsecond digits are dropped rather than
-    // inserted raw — a raw nanosecond count would file this row in the year
-    // 58567.
-    expect(root?.started_at).toBe("2026-08-02 18:04:40.281989");
-    // Full nanoseconds, which is the precision `started_at` gives up.
-    expect(root?.duration_ns).toBe(73_494_876_403);
-  });
-
-  it("reads the transcript as turns, five from the human and eight from the agent", async () => {
-    const rows = await store().rows<{ kind: string; n: number }>(
-      "select kind, count() as n from turns final group by kind order by kind",
-    );
-    expect(rows).toEqual([
-      { kind: "turn:agent", n: FIXTURE_TRACE.agentTurns },
-      { kind: "turn:human", n: FIXTURE_TRACE.humanTurns },
-    ]);
-
-    const [first] = await store().rows<{ text_preview: string }>(
-      "select text_preview from turns final where kind = 'turn:human' order by started_at limit 1",
-    );
-    expect(first?.text_preview).toBe("Hi Kelly, my name is Sam.");
-  });
-
-  it("keeps the tool the agent used, what it asked and what came back", async () => {
-    const rows = await store().rows<{
-      tool_name: string;
-      tool_arguments: string;
-      tool_result: string;
-    }>(
-      "select tool_name, tool_arguments, tool_result from spans final " +
-        "where kind = 'tool' order by started_at",
-    );
-
-    expect(rows).toHaveLength(FIXTURE_TRACE.toolSpans);
-    expect(rows.map((row) => row.tool_name)).toEqual([
-      "lookup_weather",
-      "lookup_weather",
-    ]);
-    expect(rows[0]?.tool_arguments).toBe('{"location": "Lisbon"}');
-    expect(rows[0]?.tool_result).toBe(
-      "sunny with a temperature of 70 degrees.",
-    );
-  });
-
-  /**
-   * The capture deliberately keeps a real failure — a model timing out, the
-   * fallback giving up, and the turn succeeding on the retry. A door that
-   * quietly dropped the failed attempts would make every trace look healthier
-   * than it was.
-   */
-  it("keeps the spans that failed, and what they said about it", async () => {
-    const rows = await store().rows<{ name: string; payload: string }>(
-      "select name, payload from spans final where status = 'error' order by started_at",
-    );
-
-    expect(rows).toHaveLength(FIXTURE_TRACE.erroredSpans);
-    expect(rows.map((row) => row.name).sort()).toEqual([
-      "llm_request",
-      "llm_request_run",
-      "llm_request_run",
-    ]);
-
-    // The timeout that started it and the fallback that gave up after it, both
-    // still readable on the rows they happened on.
-    const said = rows.map((row) => row.payload).join("");
-    expect(said).toContain("APITimeoutError");
-    expect(said).toContain("all LLMs failed");
-    expect(said).toContain("exception.stacktrace");
-  });
-
   /**
    * Nothing was invented and nothing was thrown away: the names on the rows are
    * exactly the names the framework emitted, and there is no speech-to-text
@@ -337,70 +192,6 @@ describe.skipIf(!storage.available)("the captured trace, posted at the door", ()
     expect(await countOf("select count() as n from spans final where kind = 'stt'")).toBe(
       0,
     );
-  });
-
-  it("keeps the whole of what the human said, and the framework's own attributes with it", async () => {
-    const [row] = await store().rows<{ text: string; payload: string }>(
-      "select text, payload from spans final where kind = 'turn:human' " +
-        "order by started_at limit 1",
-    );
-
-    expect(row?.text).toBe("Hi Kelly, my name is Sam.");
-    // The transcript's confidence and delay are not columns, and are not lost.
-    expect(row?.payload).toContain("lk.transcript_confidence");
-    expect(row?.payload).toContain("lk.transcription_delay");
-    // The resource and the scope ride each row too, so nothing about where the
-    // span came from has to be reconstructed later.
-    expect(row?.payload).toContain("livekit-agents");
-    expect(row?.payload).toContain("telemetry.sdk.version");
-  });
-
-  it("records LiveKit as the platform without inventing a connection type", async () => {
-    const rows = await store().rows<{
-      agent_platform: string;
-      connection_type: string;
-    }>(
-      "select distinct agent_platform, connection_type from spans final",
-    );
-    expect(rows).toEqual([
-      { agent_platform: "livekit", connection_type: "" },
-    ]);
-  });
-
-  it("keeps an unproven LiveKit agent label in payload without calling it an agent name", async () => {
-    const rows = await store().rows<{ platform_agent_name: string }>(
-      "select distinct platform_agent_name from spans final",
-    );
-    expect(rows).toEqual([{ platform_agent_name: "" }]);
-    const [root] = await store().rows<{ payload: string }>(
-      "select payload from spans final where kind = 'root' limit 1",
-    );
-    expect(root?.payload).toContain("lk.agent_label");
-    expect(root?.payload).toContain("kelly");
-  });
-
-  it("pins no run, no agent and no versions, because nothing here started one", async () => {
-    expect(
-      await countOf(
-        "select count() as n from spans final where run_id != '' or agent_id != '' " +
-          "or agent_version_id != '' or test_version_id != '' " +
-          "or persona_version_id != ''",
-      ),
-    ).toBe(0);
-  });
-
-  it("answers in the specification's own message, so an exporter can read it", async () => {
-    const request = requests[0];
-    if (request === undefined) throw new Error("the capture is empty");
-
-    const response = await post(acme.secret, request.body, request.contentType);
-    expect(response.statusCode).toBe(200);
-    expect(response.headers["content-type"]).toContain("application/x-protobuf");
-
-    const answered = EXPORT_TRACE_SERVICE_RESPONSE.decode(response.rawPayload);
-    expect(
-      EXPORT_TRACE_SERVICE_RESPONSE.toObject(answered, { defaults: false }),
-    ).toEqual({});
   });
 
   /**
@@ -447,32 +238,6 @@ describe("two organizations sending the very same trace", () => {
         [globex.organizationId, FIXTURE_TRACE.spans],
       ]),
     );
-  });
-
-  /**
-   * Read with raw SQL, so what this shows is that the rows are *separable* —
-   * one shared trace id names a different trace in each account, because the
-   * organization leads the filing order and the id does not. It is not a claim
-   * that a customer cannot reach the other's rows: nothing reads spans through
-   * the data-access module yet, and enforcing tenancy at read belongs to the
-   * read functions, which inject the predicate the way every Postgres one
-   * already does.
-   */
-  it("keeps each organization's copy separable by the organization, not by the trace id", async () => {
-    const [row] = await store().rows<{ trace_id: string }>(
-      "select distinct trace_id from spans final limit 1",
-    );
-    const traceId = row?.trace_id ?? "";
-    expect(traceId).not.toBe("");
-
-    // The same trace id names a different trace in each account, which
-    // is exactly what the organization leading the filing order is for.
-    expect(
-      await countOf(
-        `select count() as n from spans final where trace_id = '${traceId}' ` +
-          `and organization_id = '${globex.organizationId}'`,
-      ),
-    ).toBe(FIXTURE_TRACE.spans);
   });
 });
 

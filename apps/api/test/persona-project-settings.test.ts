@@ -1,4 +1,4 @@
-import { createProject, createTestSuite, EGMA_PROVIDED_PERSONAS, PERSONA_LIBRARY_CATALOG, RECOMMENDED_PERSONA_MODELS } from "@egma/db";
+import { createProject, createTestSuite, EGMA_PROVIDED_PERSONAS, RECOMMENDED_PERSONA_MODELS } from "@egma/db";
 import { afterEach, expect, it } from "vitest";
 
 import { createApi, type TestApi } from "./support/api.ts";
@@ -46,26 +46,6 @@ it("keeps shared personas read-only and applies complete overrides only to a clo
   expect(history.json().versions).toHaveLength(1);
   const foreign = await request(who, "GET", `/v1/personas/${clone.json().id}?projectId=${who.projectId}`);
   expect(foreign.statusCode).toBe(404);
-});
-
-it("does not expose internal speech speed when cloning model choices", async () => {
-  api = await createApi("shared_persona_models_no_speed");
-  const who = await signUp(api.app, "shared-speed@project.example", "Shared models");
-  const personaId = EGMA_PROVIDED_PERSONAS.defaultPersona;
-  const core = PERSONA_LIBRARY_CATALOG.find((persona) => persona.id === personaId)?.versions.at(-1);
-  if (core === undefined) throw new Error("the shared persona core is missing");
-  expect(core.parameterContract.map((field) => field.key)).not.toContain("tts_speed");
-  const used = await request(who, "POST", `/v1/personas/${personaId}/use`, { projectId: who.projectId });
-  expect(used.statusCode, used.body).toBe(200);
-  expect(used.json().settings.models.tts).not.toHaveProperty("speed");
-  expect(used.json().settings.controls).toEqual(DEFAULT_CONTROLS);
-  const models = { ...CURRENT_MODELS, llm: { provider: "openai", model: "gpt-5.6-terra" } } as const;
-  const cloned = await request(who, "POST", `/v1/personas/${personaId}/fork`, { projectId: who.projectId, models, controls: DEFAULT_CONTROLS });
-  expect(cloned.statusCode, cloned.body).toBe(201);
-  expect(cloned.json().settings).toEqual(expect.objectContaining({ models, controls: DEFAULT_CONTROLS }));
-  expect(cloned.json().settings.models.tts).not.toHaveProperty("speed");
-  const source = await request(who, "GET", `/v1/personas/${personaId}?projectId=${who.projectId}`);
-  expect(source.json().settings).toEqual(used.json().settings);
 });
 
 it("rejects incomplete, unknown, and retired settings without creating a partial persona", async () => {

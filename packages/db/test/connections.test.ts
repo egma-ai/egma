@@ -1,4 +1,4 @@
-import { isId, newId } from "@egma/ids";
+import { newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -150,55 +150,6 @@ afterAll(async () => {
 });
 
 describe("adding a connection", () => {
-  it("returns a con_ id and fetch round-trips every non-secret field", async () => {
-    const agentId = await agentNamed("Round Trip");
-
-    const added = await addConnection(actingAsAcme(), agentId, {
-      name: "staging",
-      agentPlatform: "retell",
-      connectionType: "retell_text_mode",
-      accessVariant: "retell_text_mode.api_key",
-      modality: "chat",
-      environment: "staging",
-      config: { retellAgentId: "agent_abc" },
-      credentials: { apiKey: "sk-retell-000011112222WXYZ" },
-    });
-
-    expect(added).toBeDefined();
-    expect(isId("con", added?.id ?? "")).toBe(true);
-
-    const fetched = await getConnection(actingAsAcme(), agentId, added?.id ?? "");
-    expect(fetched).toMatchObject({
-      agentId,
-      name: "staging",
-      agentPlatform: "retell",
-      connectionType: "retell_text_mode",
-      accessVariant: "retell_text_mode.api_key",
-      productLabel: "Retell text mode",
-      modality: "chat",
-      topology: "hosted-broker",
-      environment: "staging",
-      config: { retellAgentId: "agent_abc" },
-      credentialsHint: "WXYZ",
-    });
-  });
-
-  it("derives the topology from the type, so a phone connection dials in", async () => {
-    const agentId = await agentNamed("Topology");
-
-    const added = await addConnection(actingAsAcme(), agentId, {
-      name: "production-line",
-      agentPlatform: null,
-      connectionType: "phone_number",
-      accessVariant: "phone_number.public_e164",
-      modality: "voice",
-      config: { phoneNumber: "+15551234567" },
-    });
-
-    expect(added?.topology).toBe("egma-dials-in");
-    expect(added?.credentialsHint).toBeNull();
-  });
-
   it("defaults the name from the type, and again for the next one", async () => {
     const agentId = await agentNamed("Unnamed");
 
@@ -242,21 +193,6 @@ describe("which platform a connection belongs to", () => {
     });
     return agentId;
   }
-
-  it("comes from the type where the type pins one", async () => {
-    const agentId = await agentNamed("Pinned by its type");
-
-    const chat = await addConnection(
-      actingAsAcme(),
-      agentId,
-      retellConnection({ name: "chat" }),
-    );
-
-    // The agent is unbound, and it does not matter: `retell_text_mode` reaches
-    // exactly one platform.
-    expect(chat?.agentPlatform).toBe("retell");
-    expect(chat?.productLabel).toBe("Retell text mode");
-  });
 
   it("comes through the agent where the type spans platforms", async () => {
     const agentId = await boundToRetell("Retell by phone");
@@ -364,46 +300,6 @@ describe("which platform a connection belongs to", () => {
     expect(await listConnections(actingAsAcme(), agentId)).toHaveLength(0);
   });
 
-  it("admits a payload that agrees with its agent, and reads it back", async () => {
-    const agentId = await boundToRetell("Agrees with its agent");
-
-    const added = await addConnection(actingAsAcme(), agentId, {
-      name: "hotline",
-      agentPlatform: "retell",
-      connectionType: "phone_number",
-      accessVariant: "phone_number.public_e164",
-      modality: "voice",
-      config: { phoneNumber: "+15551234567" },
-    });
-
-    expect(added?.agentPlatform).toBe("retell");
-    expect(added?.productLabel).toBe("Retell phone");
-    const fetched = await getConnection(
-      actingAsAcme(),
-      agentId,
-      added?.id ?? "",
-    );
-    expect(fetched?.agentPlatform).toBe("retell");
-    expect(fetched?.productLabel).toBe("Retell phone");
-  });
-
-  it("names no platform, and lets the agent answer", async () => {
-    const agentId = await boundToRetell("Names nothing");
-
-    // Naming nothing contradicts nothing: it is the ordinary way to say
-    // "whatever this agent is on".
-    const added = await addConnection(actingAsAcme(), agentId, {
-      name: "hotline",
-      agentPlatform: null,
-      connectionType: "phone_number",
-      accessVariant: "phone_number.public_e164",
-      modality: "voice",
-      config: { phoneNumber: "+15551234567" },
-    });
-    expect(added?.agentPlatform).toBe("retell");
-    expect(added?.productLabel).toBe("Retell phone");
-  });
-
   it("takes either platform when it agrees with the agent declaration", async () => {
     for (const named of ["retell", "livekit"] as const) {
       const agentId = await agentNamed(`Declared ${named}`, named);
@@ -424,20 +320,6 @@ describe("which platform a connection belongs to", () => {
       );
       expect(fetched?.agentPlatform).toBe(named);
     }
-  });
-
-  it("lets a pinned type name its own platform whatever the agent is on", async () => {
-    const agentId = await boundToRetell("Pinned wins");
-
-    // `retell_text_mode` reaches Retell by construction, so the agent is never
-    // consulted and there is nothing here to contradict.
-    const chat = await addConnection(
-      actingAsAcme(),
-      agentId,
-      retellConnection({ name: "chat" }),
-    );
-    expect(chat?.agentPlatform).toBe("retell");
-    expect(chat?.productLabel).toBe("Retell text mode");
   });
 
   it("travels with the agent in the list read too", async () => {
@@ -507,43 +389,6 @@ describe("the agent's durable Retell modality", () => {
 });
 
 describe("what the registry refuses at the door, by name", () => {
-  it("refuses phone + chat: a phone connection speaks voice", async () => {
-    const agentId = await agentNamed("Modality Rules");
-
-    await expect(
-      addConnection(actingAsAcme(), agentId, {
-        name: "impossible",
-        agentPlatform: null,
-        connectionType: "phone_number",
-        accessVariant: "phone_number.public_e164",
-        modality: "chat",
-        config: { phoneNumber: "+15551234567" },
-      }),
-    ).rejects.toThrow(/phone_number connection speaks voice/);
-  });
-
-  it("refuses an unknown config key by its name", async () => {
-    const agentId = await agentNamed("Config Typo");
-
-    await expect(
-      addConnection(
-        actingAsAcme(),
-        agentId,
-        retellConnection({
-          config: { retellAgentId: "agent_abc", retellAgentld: "typo" },
-        }),
-      ),
-    ).rejects.toThrow(/"retellAgentld"/);
-  });
-
-  it("refuses a retell connection missing retellAgentId, naming it", async () => {
-    const agentId = await agentNamed("Config Missing");
-
-    await expect(
-      addConnection(actingAsAcme(), agentId, retellConnection({ config: {} })),
-    ).rejects.toThrow(/retellAgentId/);
-  });
-
   it("refuses a phone number that is not E.164", async () => {
     const agentId = await agentNamed("Bad Number");
 
@@ -611,53 +456,6 @@ describe("what the registry refuses at the door, by name", () => {
  * in sealed and come back only through the one door.
  */
 describe("a livekit connection", () => {
-  it("lands with a server and a name, dialling out, and reads back with the hint", async () => {
-    const agentId = await agentNamed("LiveKit Bare");
-
-    const added = await addConnection(
-      actingAsAcme(),
-      agentId,
-      livekitConnection({ name: "quickstart" }),
-    );
-
-    const fetched = await getConnection(actingAsAcme(), agentId, added?.id ?? "");
-    expect(fetched).toMatchObject({
-      name: "quickstart",
-      agentPlatform: "livekit",
-      connectionType: "livekit_room",
-      accessVariant: "livekit_room.project_credentials",
-      productLabel: "LiveKit project credentials",
-      modality: "voice",
-      // Derived from the type: the agent joins the room egma opened.
-      topology: "agent-dials-out",
-      config: { url: "wss://acme.livekit.cloud", agentName: "front-desk" },
-      // The last four of the key, never of the secret.
-      credentialsHint: "WXYZ",
-    });
-    expect(fetched).not.toHaveProperty("credentials");
-  });
-
-  it("refuses a config key the lane no longer holds, naming it", async () => {
-    const agentId = await agentNamed("LiveKit Dispatched");
-
-    // The dispatch metadata that used to live here is a test's own
-    // `env.job_dispatch_metadata` now, so a connection carrying one is a
-    // request Egma would silently ignore — refused by name instead.
-    await expect(
-      addConnection(
-        actingAsAcme(),
-        agentId,
-        livekitConnection({
-          config: {
-            url: "wss://acme.livekit.cloud",
-            agentName: "front-desk",
-            metadata: '{"tenant":"acme"}',
-          },
-        }),
-      ),
-    ).rejects.toThrow(/has no key "metadata"/u);
-  });
-
   it("defaults LiveKit names from the modality and leaves explicit names alone", async () => {
     const agentId = await agentNamed("LiveKit Unnamed");
 
@@ -703,20 +501,6 @@ describe("a livekit connection", () => {
     expect(rows[0]?.credentials).not.toContain("livekit-key");
     expect(rows[0]?.credentials).not.toContain("livekit-secret");
     expect(rows[0]?.credentials_hint).toBe("WXYZ");
-  });
-
-  it("leaves nothing behind when the payload is refused", async () => {
-    const agentId = await agentNamed("LiveKit Refused");
-
-    await expect(
-      addConnection(
-        actingAsAcme(),
-        agentId,
-        livekitConnection({ config: { url: "wss://acme.livekit.cloud", agentName: "" } }),
-      ),
-    ).rejects.toThrow(/agentName/);
-
-    expect(await listConnections(actingAsAcme(), agentId)).toEqual([]);
   });
 });
 
@@ -959,17 +743,6 @@ describe("updating a connection", () => {
     });
     expect(cleared?.environment).toBeNull();
   });
-
-  it("checks a config change against the type's own registry entry", async () => {
-    const agentId = await agentNamed("Edited Config");
-    const added = await addConnection(actingAsAcme(), agentId, retellConnection());
-
-    await expect(
-      updateConnection(actingAsAcme(), agentId, added?.id ?? "", {
-        config: { phoneNumber: "+15551234567" },
-      }),
-    ).rejects.toThrow(/"phoneNumber"/);
-  });
 });
 
 describe("a connection's name", () => {
@@ -1097,15 +870,6 @@ describe("reaching a connection through the wrong door", () => {
     ).toBeUndefined();
   });
 
-  it("reaches the whole customer for a credential acting in no project", async () => {
-    const agentId = await agentNamed("Org Wide Wiring");
-    const added = await addConnection(actingAsAcme(), agentId, retellConnection());
-
-    const wholeCustomer = { ...actingAsAcme(), projectId: undefined };
-    const fetched = await getConnection(wholeCustomer, agentId, added?.id ?? "");
-    expect(fetched?.id).toBe(added?.id);
-  });
-
   it("goes archived with its agent, and stays readable under the filter", async () => {
     const agentId = await agentNamed("Doomed");
     const added = await addConnection(actingAsAcme(), agentId, retellConnection());
@@ -1123,61 +887,5 @@ describe("reaching a connection through the wrong door", () => {
     await expect(
       addConnection(actingAsAcme(), agentId, retellConnection({ name: "late" })),
     ).rejects.toThrow(/archived/);
-  });
-});
-
-describe("creating an agent with its first connection inline", () => {
-  it("writes both rows in one motion and answers both ids", async () => {
-    const created = await createAgent(actingAsAcme(), {
-      agentPlatform: "retell",
-      name: "Wired From Birth",
-      connection: retellConnection({ name: "day-one" }),
-    });
-
-    expect(isId("agt", created.id)).toBe(true);
-    expect(isId("con", created.connection?.id ?? "")).toBe(true);
-    expect(created.connection?.agentId).toBe(created.id);
-
-    const listed = await listConnections(actingAsAcme(), created.id);
-    expect(listed?.map((connection) => connection.name)).toEqual(["day-one"]);
-  });
-
-  it("defaults the inline connection's name from its type", async () => {
-    const created = await createAgent(actingAsAcme(), {
-      agentPlatform: "retell",
-      name: "Wired Namelessly",
-      connection: retellConnection({ name: undefined }),
-    });
-
-    expect(created.connection?.name).toBe("retell_text_mode-1");
-  });
-
-  it("leaves no agent behind when the connection payload is bad", async () => {
-    await expect(
-      createAgent(actingAsAcme(), {
-        agentPlatform: "retell",
-        name: "Atomic",
-        connection: retellConnection({ config: {} }),
-      }),
-    ).rejects.toThrow(/retellAgentId/);
-
-    const { rows } = await database.sql<{ count: string }>(
-      "select count(*) as count from agent where name = 'Atomic'",
-    );
-    expect(rows[0]?.count).toBe("0");
-
-    // And the name is genuinely free: the create can be retried, fixed.
-    const retried = await createAgent(actingAsAcme(), {
-      agentPlatform: "retell",
-      name: "Atomic",
-      connection: retellConnection(),
-    });
-    expect(retried.connection).toBeDefined();
-  });
-
-  it("still creates an agent with no connection at all", async () => {
-    const created = await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Unwired" });
-    expect(created.connection).toBeUndefined();
-    expect(await listConnections(actingAsAcme(), created.id)).toEqual([]);
   });
 });

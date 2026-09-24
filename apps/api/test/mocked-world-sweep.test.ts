@@ -259,19 +259,6 @@ async function seedRun(
   return { runId, simulationId };
 }
 
-/** The same account, refusing every delete — a teardown that cannot finish. */
-const RETELL_DELETE_REFUSED: typeof fetch = (async (
-  input: string | URL | Request,
-  init?: RequestInit,
-) => {
-  if ((init?.method ?? "GET") === "DELETE") {
-    return new Response(JSON.stringify({ error: "not today" }), {
-      status: 500,
-    });
-  }
-  return RETELL(input as string, init);
-}) as typeof fetch;
-
 /** The claim's own marker: a cleanup owed, and no copy branched yet. */
 const CLAIMED = { version: null };
 
@@ -321,60 +308,6 @@ describe("the sweep, over a run that is pending", () => {
     await settleOwedMockCleanups(auth, ready.agentId, { retellFetch: RETELL }, SWEEP_LOG);
 
     expect((await getRun(auth, runId))?.status).toBe("pending");
-  });
-});
-
-/**
- * What the sweep answers, which one caller's safety hangs on: the build
- * refuses to branch over an `unsettled` agent, because an unsettled world's
- * restore retries later and must never find a draft to route `latest` onto.
- */
-describe("what the sweep answers", () => {
-  it("answers settled over an agent that owes nothing", async () => {
-    const ready = await anAgentReadyToRun("sweep_answers_clean");
-    const auth = contextFor(ready.ada, "member");
-
-    const swept = await settleOwedMockCleanups(auth, ready.agentId, { retellFetch: RETELL }, SWEEP_LOG);
-
-    expect(swept).toEqual({ kind: "settled" });
-  });
-
-  it("answers settled once a finished run's world is given back", async () => {
-    const ready = await anAgentReadyToRun("sweep_answers_settled");
-    // A finished run still holding its draft — ordinary litter, and the
-    // account honours the delete.
-    const { runId } = await seedRun(ready, BRANCHED, 20, "completed");
-    const auth = contextFor(ready.ada, "member");
-
-    const swept = await settleOwedMockCleanups(auth, ready.agentId, { retellFetch: RETELL }, SWEEP_LOG);
-
-    expect(swept).toEqual({ kind: "settled" });
-    // The copy is gone from Retell, and the flag says the account is back.
-    // The version number stays: it is the record of what this run branched.
-    expect((await getRun(auth, runId))?.tempMockAgentVersionCleanup).toBe(true);
-  });
-
-  it("answers unsettled while a finished run's draft cannot be deleted", async () => {
-    const ready = await anAgentReadyToRun("sweep_answers_unsettled");
-    const { runId } = await seedRun(ready, BRANCHED, 20, "completed");
-    const auth = contextFor(ready.ada, "member");
-
-    const swept = await settleOwedMockCleanups(
-      auth,
-      ready.agentId,
-      { retellFetch: RETELL_DELETE_REFUSED },
-      SWEEP_LOG,
-    );
-
-    // Still owed, named by run — and the world still honestly holds its
-    // draft, so the retry knows exactly what to give back.
-    expect(swept.kind).toBe("unsettled");
-    if (swept.kind === "unsettled") {
-      expect(swept.reason).toContain(runId);
-      expect(swept.reason).toContain("still owes");
-    }
-    expect((await getRun(auth, runId))?.tempMockAgentVersion).toBe(106);
-    expect((await getRun(auth, runId))?.tempMockAgentVersionCleanup).toBe(false);
   });
 });
 

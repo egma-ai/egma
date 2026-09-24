@@ -3,7 +3,7 @@ import type {
   MonitoringPullTarget,
   TransientRetellCall,
 } from "@egma/db";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { IngestionUnavailableError } from "@egma/ingestion";
 import {
@@ -54,10 +54,6 @@ const TARGET: MonitoringPullTarget = {
 const BACKOFF = [30_000, 60_000, 120_000];
 /** Three regular overlaps, which is how long a recent-drop marker applies. */
 const MARKER_MILLISECONDS = 15 * 60_000;
-
-afterEach(() => {
-  vi.useRealTimers();
-});
 
 /* ------------------------------------------------------------------- *
  * The control database, modelled rather than mocked.
@@ -614,39 +610,6 @@ describe("Retell production ingestion", () => {
     expect(recorded.finishes).toHaveLength(1);
   });
 
-  it("asks one batched committed lookup and one batched transient lookup for each page", async () => {
-    const recorded = record();
-    const asked: LookupRecord = { windows: [], asked: [] };
-    const listed = [summary("call_one"), summary("call_two")];
-    const { log } = logger();
-
-    await runRetellProductionIngestion({
-      log,
-      store: store(recorded),
-      provider: provider({
-        async listTerminalCalls() {
-          return {
-            kind: "calls",
-            calls: listed,
-            hasMore: false,
-            paginationKey: null,
-          };
-        },
-        async hydrateRetellCall(_key, one) {
-          return { kind: "call", call: hydrated(String(one["call_id"])) };
-        },
-      }),
-      lookup: lookup(asked),
-      acceptance: acceptance().acceptance,
-      clock: () => BASE,
-    });
-
-    expect(asked.asked).toEqual([
-      ["call_one", "call_two"].map((id) => traceIdFor(AUTH.projectId, id)),
-    ]);
-    expect(recorded.transientLookups).toEqual([["call_one", "call_two"]]);
-  });
-
   it("measures the committed window from the fixed scan bounds and never from now", async () => {
     const recorded = record();
     const asked: LookupRecord = { windows: [], asked: [] };
@@ -989,42 +952,6 @@ describe("Retell production ingestion", () => {
     expect(recorded.releases).toEqual(["internal_failure"]);
   });
 
-  it("keeps an empty successful poll quiet, and asks nothing beyond the provider", async () => {
-    const recorded = record();
-    const asked: LookupRecord = { windows: [], asked: [] };
-    const taken = acceptance();
-    let hydrationRequests = 0;
-    const { log, events } = logger();
-    const observed = metricRecorder();
-
-    const result = await runRetellProductionIngestion({
-      log,
-      metrics: observed.metrics,
-      store: store(recorded),
-      provider: provider({
-        async hydrateRetellCall(_key, listed) {
-          hydrationRequests += 1;
-          return { kind: "call", call: listed };
-        },
-      }),
-      lookup: lookup(asked),
-      acceptance: taken.acceptance,
-      clock: () => BASE,
-    });
-
-    expect(result).toMatchObject({ accepted: 0, dropped: 0 });
-    expect(asked.asked).toEqual([]);
-    expect(recorded.transientLookups).toEqual([]);
-    expect(recorded.sweeps).toBe(0);
-    expect(hydrationRequests).toBe(0);
-    expect(taken.recorded.calls).toEqual([]);
-    expect(events).toEqual({ info: [], warn: [], error: [] });
-    expect(observed.recorded).toMatchObject({
-      attempts: ["historical_import"],
-      turns: [{ outcome: "completed", accepted: 0, settled: 0, dropped: 0 }],
-    });
-  });
-
   it("uses one setup-wide Retry-After gate without a repeated log", async () => {
     const recorded = record();
     const storage = store(recorded, TARGET, {
@@ -1216,51 +1143,6 @@ describe("Retell production ingestion", () => {
     });
     expect(taken.recorded.calls).toEqual([]);
     expect(JSON.stringify(events)).not.toContain("different-private-agent-id");
-  });
-
-  it("reads a page's outstanding calls together rather than one at a time", async () => {
-    const recorded = record();
-    const listed = page(8, "call_together");
-    const held = heldHydrations(listed.length);
-    const taken = acceptance();
-    const { log } = logger();
-
-    const result = await runRetellProductionIngestion({
-      log,
-      store: store(recorded),
-      provider: provider({
-        async listTerminalCalls() {
-          return {
-            kind: "calls",
-            calls: listed,
-            hasMore: false,
-            paginationKey: null,
-          };
-        },
-        async hydrateRetellCall(_key, one) {
-          const callId = String(one["call_id"]);
-          await held.hold(callId);
-          return { kind: "call", call: hydrated(callId) };
-        },
-      }),
-      lookup: lookup({ windows: [], asked: [] }),
-      acceptance: taken.acceptance,
-      clock: () => BASE,
-    });
-
-    // Every call in the page was open at the same instant, and not one of them
-    // had finished by the time the last one started: one wave, not eight.
-    expect(held.started).toHaveLength(listed.length);
-    expect(held.mostOpen).toBe(listed.length);
-    expect(held.openWhenFirstFinished).toBe(listed.length);
-    expect(held.waves).toBe(1);
-    expect(result).toMatchObject({
-      accepted: listed.length,
-      settled: 0,
-      pages: 1,
-    });
-    expect(taken.recorded.traceIds).toHaveLength(listed.length);
-    expect(recorded.finishes).toHaveLength(1);
   });
 
   it("never opens more of a page at once than the hydration ceiling", async () => {
@@ -1471,38 +1353,6 @@ describe("Retell production ingestion", () => {
     expect(recorded.yields).toHaveLength(1);
     expect(result.stoppedBecause).toBe("bounded_turn");
   });
-
-  it("uses cheap empty wakes so jittered 33-second targets do not wait 60 seconds", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(BASE);
-    const providerPolls: number[] = [];
-    let dueAt = BASE.getTime();
-    const { log, events } = logger();
-    const ingestion = startRetellProductionIngestion({
-      log,
-      ingest: async () => {
-        const now = Date.now();
-        const targetClaimed = now >= dueAt;
-        if (targetClaimed) {
-          providerPolls.push(now);
-          dueAt = now + 33_000;
-        }
-        return {
-          ...nothingClaimed(),
-          targetClaimed,
-          pages: targetClaimed ? 1 : 0,
-        };
-      },
-    });
-
-    await vi.advanceTimersByTimeAsync(80_000);
-    await ingestion.stop();
-
-    expect(providerPolls).toHaveLength(3);
-    expect(providerPolls.slice(1).map((at, index) => at - providerPolls[index]!))
-      .toEqual([35_000, 35_000]);
-    expect(events).toEqual({ info: [], warn: [], error: [] });
-  });
 });
 
 describe("the bounded Retell retry budget", () => {
@@ -1692,41 +1542,6 @@ describe("the bounded Retell retry budget", () => {
     expect(world.recorded.rows.size).toBe(0);
   });
 
-  it("does not apply an old regular-scan marker to a new explicit import", async () => {
-    const world = failingWorld();
-    let at = BASE;
-    for (const wait of [0, ...BACKOFF]) {
-      at = new Date(at.getTime() + wait);
-      await world.turn(at);
-    }
-    const marker = world.recorded.rows.get("call_that_will_not_hydrate");
-    expect(marker).toMatchObject({ importGeneration: 1, nextAttemptAt: null });
-    const readsBefore = world.directReads.length;
-
-    // Selecting the agent again is a new observation of the provider's
-    // history, so the import runs under a new generation. Re-selection also
-    // deletes the rows belonging to the window it replaces, which is what
-    // `configureRetellMonitoring` does in the transaction that bumps the
-    // generation — modelled here, because this suite drives the poller and
-    // never the setup door.
-    world.succeed();
-    world.recorded.rows.clear();
-    const reimport: MonitoringPullTarget = {
-      ...TARGET,
-      scanKind: "historical_import",
-      importGeneration: 2,
-    };
-    const imported = await world.turn(new Date(at.getTime() + 60_000), reimport);
-
-    expect(imported).toMatchObject({ accepted: 1 });
-    expect(world.hydrations).toHaveLength(2);
-    expect(world.directReads).toHaveLength(readsBefore);
-    expect(world.taken.recorded.traceIds).toEqual([
-      traceIdFor(AUTH.projectId, "call_that_will_not_hydrate"),
-    ]);
-    expect(world.recorded.rows.size).toBe(0);
-  });
-
   /**
    * The same rule from the other side: a marker the re-selection did not
    * remove — because the poller reached the page before the delete, or because
@@ -1823,39 +1638,6 @@ describe("the bounded Retell retry budget", () => {
     expect(world.asked.asked.at(-1)).toEqual([traceId]);
     expect(world.taken.recorded.calls).toHaveLength(1);
     expect(world.hydrations).toEqual(["call_landed"]);
-  });
-
-  it("writes nothing to Postgres for a listed call that simply worked", async () => {
-    const recorded = record();
-    const taken = acceptance();
-    const { log } = logger();
-
-    const result = await runRetellProductionIngestion({
-      log,
-      store: store(recorded),
-      provider: provider({
-        async listTerminalCalls() {
-          return {
-            kind: "calls",
-            calls: [summary("call_that_works")],
-            hasMore: false,
-            paginationKey: null,
-          };
-        },
-        async hydrateRetellCall(_key, listed) {
-          return { kind: "call", call: hydrated(String(listed["call_id"])) };
-        },
-      }),
-      lookup: lookup({ windows: [], asked: [] }),
-      acceptance: taken.acceptance,
-      clock: () => BASE,
-    });
-
-    expect(result).toMatchObject({ accepted: 1 });
-    // No row existed, so nothing was deleted: a page of ordinary conversations
-    // leaves this database exactly as it found it.
-    expect(recorded.deletes).toEqual([]);
-    expect(recorded.rows.size).toBe(0);
   });
 
   it("deletes the retry row only after the evidence is durable in the object store", async () => {

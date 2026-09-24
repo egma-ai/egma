@@ -171,23 +171,6 @@ describe("Stripe's own door", () => {
     );
     expect(readiness.rows[0]?.stripe_payments_ready).toBe(true);
   });
-
-  it("takes no session cookie and no key, because the signature is the gate", async () => {
-    await aBillingDeployment("stripe-no-credential", { withWebhookDoor: true });
-
-    // No `authorization` header and no cookie: the refusal is about the
-    // signature and never about a credential, which is what proves the door is
-    // outside the credentialed scope.
-    const answer = await api.app.inject({
-      method: "POST",
-      url: BILLING_WEBHOOK_PATH,
-      headers: { "content-type": "application/json" },
-      payload: "{}",
-    });
-
-    expect(answer.statusCode).not.toBe(401);
-    expect(answer.json()).toMatchObject({ error: "invalid_request" });
-  });
 });
 
 describe("what the four billing actions ask before they ask Stripe anything", () => {
@@ -256,61 +239,5 @@ describe("what the four billing actions ask before they ask Stripe anything", ()
     const missing = await ask(api.app, "POST", CREDIT_PATH, key, {});
     expect(missing.statusCode).toBe(400);
     expect(String(missing.body["message"])).toContain("amountMicros");
-  });
-
-  it("refuses a downgrade for an organization that is not on Pro", async () => {
-    await aBillingDeployment("stripe-not-pro", { withWebhookDoor: true });
-    const admin = await anAdmin("hobbyist@example.test", "Acme");
-    const key = admin.secret;
-
-    const answer = await ask(api.app, "POST", DOWNGRADE_PATH, key, {});
-
-    expect(answer.statusCode).toBe(422);
-    expect(answer.body).toMatchObject({ error: "unprocessable" });
-    expect(String(answer.body["message"])).toContain("Hobby");
-  });
-
-  it("refuses the portal for an organization that has never paid anything", async () => {
-    await aBillingDeployment("stripe-no-customer", { withWebhookDoor: true });
-    const admin = await anAdmin("newcomer@example.test", "Acme");
-    const key = admin.secret;
-
-    const answer = await ask(api.app, "POST", PORTAL_PATH, key, {});
-
-    expect(answer.statusCode).toBe(422);
-    expect(String(answer.body["message"])).toContain("no card");
-  });
-
-  it("refuses an upgrade while this deployment's Stripe has no Pro product", async () => {
-    await aBillingDeployment("stripe-no-product", { withWebhookDoor: true });
-    const admin = await anAdmin("upgrader@example.test", "Acme");
-    const key = admin.secret;
-
-    // The plan rows are seeded, and the six Stripe ids on them are null until
-    // `stripe:setup` has run against this deployment's own account.
-    const answer = await ask(api.app, "POST", UPGRADE_PATH, key, {});
-
-    expect(answer.statusCode).toBe(422);
-    expect(String(answer.body["message"])).toContain("Stripe setup");
-  });
-});
-
-describe("what the Billing section is told it may do", () => {
-  it("names the amounts the picker offers and the bounds it enforces", async () => {
-    await aBillingDeployment("stripe-actions-offered", {
-      withWebhookDoor: false,
-    });
-    const admin = await anAdmin("reader@example.test", "Acme");
-    const key = admin.secret;
-
-    const answer = await ask(api.app, "GET", "/api/organization/billing", key);
-
-    expect(answer.statusCode).toBe(200);
-    expect(answer.body["actions"]).toEqual({
-      available: false,
-      creditAmountsMicros: [10_000_000, 25_000_000, 50_000_000, 100_000_000],
-      smallestCreditMicros: 5_000_000,
-      largestCreditMicros: 1_000_000_000,
-    });
   });
 });

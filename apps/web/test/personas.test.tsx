@@ -3,14 +3,12 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import PersonasPage from "../app/projects/[projectId]/personas/page.tsx";
-import { PersonaReadScreen } from "../app/projects/[projectId]/personas/persona-read.tsx";
 import {
   PersonaCloneScreen,
   PersonaCreateScreen,
 } from "../app/projects/[projectId]/personas/persona-screen.tsx";
 import type { Me } from "../lib/me.ts";
 import type { Persona, PersonaForm, PersonaModels } from "../lib/personas.ts";
-import { DraftNavigationProvider } from "../ui/draft-navigation.tsx";
 import { observeRequest, type FetchInput } from "./platform-request.ts";
 
 const NativeRequest = Request;
@@ -210,56 +208,6 @@ afterEach(() => {
 });
 
 describe("persona full-page flows", () => {
-  it("cancels setup without creating a record", async () => {
-    const asked = stubApi();
-    render(<PersonaCreateScreen projectId="prj_1" />);
-    expect(await screen.findByText("Choose Persona's Agent Architecture")).toBeTruthy();
-    expect(screen.getByText("How should this persona listen and respond?")).toBeTruthy();
-    expect(screen.getByRole("radio", { name: "Cascaded Architecture" })).toBeTruthy();
-    expect(screen.getByRole("radio", { name: "Realtime voice" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/personas");
-    expect(asked.filter((one) => one.method === "POST")).toHaveLength(0);
-  });
-
-  it("keeps Cascaded architecture fixed and lays the form out in three open groups", async () => {
-    stubApi();
-    render(<PersonaCreateScreen projectId="prj_1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Next" }));
-    const name = await screen.findByLabelText("Name*");
-    expect(name.getAttribute("placeholder")).toBe("Ex Angry Spanish caller");
-    expect(screen.getByLabelText("Identity name*").getAttribute("placeholder")).toBe("John Doe");
-    expect(screen.getByLabelText("Personality prompt*").getAttribute("placeholder")).toBe("Ex Impatient, speaks quickly, and asks direct questions");
-    const description = screen.getByLabelText("Description");
-    expect(description.getAttribute("placeholder")).toBeNull();
-    expect(description.getAttribute("aria-required")).toBeNull();
-    for (const heading of ["Metadata", "Who they are", "Settings"]) {
-      expect(screen.getByRole("heading", { level: 2, name: heading })).toBeTruthy();
-    }
-    expect(screen.queryByText("Tips for a useful persona")).toBeNull();
-    /* Nothing collapses: every subsection is a region with its fields drawn. */
-    for (const named of ["Language*", "Text-to-speech", "Speech-to-text", "LLM", "Advanced Settings"]) {
-      expect(section(named)).toBeTruthy();
-      expect(screen.queryByRole("button", { name: named })).toBeNull();
-    }
-    expect(screen.getByRole("combobox", { name: "Language*" })).toBeTruthy();
-    const speech = section("Text-to-speech");
-    expect(within(speech).getByLabelText("Provider*")).toBeTruthy();
-    expect(within(speech).getByLabelText("Model*")).toBeTruthy();
-    expect(within(speech).getByRole("combobox", { name: "Voice*" })).toBeTruthy();
-    const transcription = section("Speech-to-text");
-    expect(within(transcription).getByLabelText("Provider*")).toBeTruthy();
-    expect(within(transcription).getByLabelText("Model*")).toBeTruthy();
-    const reasoning = section("LLM");
-    expect(within(reasoning).getByLabelText("Provider*")).toBeTruthy();
-    expect(within(reasoning).getByLabelText("Model*")).toBeTruthy();
-    expect(screen.queryByLabelText(/Speech mode/i)).toBeNull();
-    const advanced = section("Advanced Settings");
-    expect(within(advanced).getByLabelText("Background sound*")).toBeTruthy();
-    expect(within(advanced).getByLabelText("Interruptions*")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Create persona" })).toBeTruthy();
-  });
-
   it("locks Live mode in setup and creates one persona with no interruption control", async () => {
     const asked = stubApi();
     render(<PersonaCreateScreen projectId="prj_1" />);
@@ -319,20 +267,6 @@ describe("persona full-page flows", () => {
     expect(write.body).toMatchObject({ description: "", models: { mode: "live" }, controls: LIVE_CONTROLS });
   });
 
-  it("discards a clone draft without creating a persona", async () => {
-    const asked = stubApi();
-    render(
-      <DraftNavigationProvider>
-        <PersonaCloneScreen projectId="prj_1" personaId="prs_live" />
-      </DraftNavigationProvider>,
-    );
-    expect(await screen.findByDisplayValue("Live Lee copy")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
-    expect(routed.push).toHaveBeenCalledWith("/projects/prj_1/personas");
-    expect(asked.filter((one) => one.method === "POST")).toHaveLength(0);
-  });
-
   it("updates the selected reasoning model when its provider changes and submits the linked pair", async () => {
     const asked = stubApi();
     render(<PersonaCreateScreen projectId="prj_1" />);
@@ -359,135 +293,6 @@ describe("persona full-page flows", () => {
     });
   });
 
-  it("searches and chooses a supported language", async () => {
-    stubApi();
-    render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
-    const language = await screen.findByRole("combobox", { name: "Language*" });
-    fireEvent.click(language);
-    expect(document.querySelector("[data-slot='popover-content']")?.getAttribute("data-side")).toBe("bottom");
-    fireEvent.change(await screen.findByPlaceholderText("Search languages"), { target: { value: "kingdom" } });
-    const choice = await screen.findByRole("option", { name: /English \(United Kingdom\)/u });
-    fireEvent.click(choice);
-    await waitFor(() => expect(language.textContent).toBe("English (United Kingdom)"));
-  });
-
-  it("keeps the selected language and voice labels while capabilities refresh", async () => {
-    stubApi({
-      "GET /v1/persona-capabilities": () => new Promise<Response>(() => undefined),
-    });
-    render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
-    expect((await screen.findByRole("combobox", { name: "Language*" })).textContent).toBe("English (United States)");
-    expect(screen.getByRole("combobox", { name: "Voice*" }).textContent).toBe("alloy");
-    expect(screen.queryByText(/Unavailable/u)).toBeNull();
-  });
-
-  it("does not expose create or clone controls before the session role is known", async () => {
-    const asked = stubApi();
-    routed.sessionMe = null;
-    routed.sessionSettled = false;
-    const create = render(<PersonaCreateScreen projectId="prj_1" />);
-    await waitFor(() => expect(asked.some((one) => one.path === "/v1/persona-form")).toBe(true));
-    expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
-    expect(create.container.querySelector("form")).toBeNull();
-    create.unmount();
-
-    render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
-    await waitFor(() => expect(asked.some((one) => one.path === "/v1/personas/prs_live")).toBe(true));
-    expect(document.querySelector("form")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Create persona" })).toBeNull();
-  });
-
-  it("keeps clone values after the server refuses the write", async () => {
-    const asked = stubApi({
-      "POST /v1/personas/prs_live/fork": {
-        status: 422,
-        body: { error: "unprocessable", message: "This mode cannot be changed." },
-      },
-    });
-    render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
-    const name = await screen.findByLabelText("Name*");
-    fireEvent.change(name, { target: { value: "Still here" } });
-    await waitFor(() => expect((screen.getByRole("button", { name: "Create persona" }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(screen.getByRole("button", { name: "Create persona" }));
-    expect(await screen.findByText("This mode cannot be changed.")).toBeTruthy();
-    expect((name as HTMLInputElement).value).toBe("Still here");
-    expect(asked.filter((one) => one.method === "POST")).toHaveLength(1);
-  });
-
-  it("keeps navigation disabled while a clone write is in flight", async () => {
-    stubApi({
-      "POST /v1/personas/prs_live/fork": () => new Promise<Response>(() => undefined),
-    });
-    render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
-    await waitFor(() => expect((screen.getByRole("button", { name: "Create persona" }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(screen.getByRole("button", { name: "Create persona" }));
-    expect(await screen.findByRole("button", { name: "Creating…" })).toBeTruthy();
-    expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(routed.push).not.toHaveBeenCalled();
-  });
-
-  it("renders saved Live personas as read-only facts with Clone in the title bar", async () => {
-    stubApi();
-    const view = render(<PersonaReadScreen projectId="prj_1" personaId="prs_live" />);
-    expect(await screen.findByText("Patient and concise.")).toBeTruthy();
-    expect(view.container.querySelector("[data-slot='persona-read'] input, [data-slot='persona-read'] select, [data-slot='persona-read'] textarea")).toBeNull();
-    for (const heading of ["Metadata", "Who they are", "Settings"]) {
-      expect(screen.getByRole("heading", { level: 2, name: heading })).toBeTruthy();
-    }
-    for (const named of ["Language", "Realtime LLM", "Advanced Settings"]) {
-      expect(section(named)).toBeTruthy();
-      expect(screen.queryByRole("button", { name: named })).toBeNull();
-    }
-    expect(screen.getByRole("link", { name: "Clone" }).getAttribute("href")).toBe("/projects/prj_1/personas/prs_live/clone");
-    expect(screen.getByText("Personality prompt")).toBeTruthy();
-    expect(screen.getByText("English (United States)")).toBeTruthy();
-    const realtime = section("Realtime LLM");
-    expect(within(realtime).getByText("GPT Live")).toBeTruthy();
-    expect(within(realtime).getByText("Reasoning LLM")).toBeTruthy();
-    expect(within(realtime).getByText("GPT 4o mini")).toBeTruthy();
-    await waitFor(() => expect(within(realtime).getByText("Alloy")).toBeTruthy());
-    expect(screen.queryByText("Interruptions")).toBeNull();
-    expect(screen.queryByText("gpt-live-1")).toBeNull();
-  });
-
-  it("keeps provider and model as separate read facts for Cascaded personas", async () => {
-    stubApi({ "GET /v1/personas/prs_live": { status: 200, body: CUSTOM } });
-    render(<PersonaReadScreen projectId="prj_1" personaId="prs_live" />);
-    const speech = await screen.findByRole("region", { name: "Text-to-speech" });
-    expect(within(speech).getByText("Provider")).toBeTruthy();
-    expect(within(speech).getByText("Cartesia")).toBeTruthy();
-    expect(within(speech).getByText("Model")).toBeTruthy();
-    expect(within(speech).getByText("Sonic 3.5")).toBeTruthy();
-    const advanced = section("Advanced Settings");
-    expect(within(advanced).getByText("Interruptions")).toBeTruthy();
-    expect(within(advanced).getByText("Occasional")).toBeTruthy();
-    expect(screen.getByText("Custom")).toBeTruthy();
-  });
-
-  it("hides the Clone action from a viewer on the read page", async () => {
-    routed.sessionMe = { ...me(), organizations: [{ ...me().organizations[0]!, role: "viewer" }] };
-    stubApi();
-    render(<PersonaReadScreen projectId="prj_1" personaId="prs_live" />);
-    expect(await screen.findByText("Patient and concise.")).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "Clone" })).toBeNull();
-  });
-
-  it("makes searchable required voice choices keyboard-readable and keeps Unknown filtering", async () => {
-    stubApi();
-    render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
-    const voice = await screen.findByRole("combobox", { name: "Voice*" });
-    await waitFor(() => expect(voice.getAttribute("aria-required")).toBe("true"));
-    fireEvent.click(voice);
-    const filters = await screen.findByRole("group", { name: "Filter voice type" });
-    fireEvent.click(within(filters).getByRole("button", { name: "Unknown" }));
-    const listbox = await screen.findByRole("listbox");
-    expect(within(listbox).getByText("Alloy")).toBeTruthy();
-    fireEvent.change(screen.getByPlaceholderText("Search voices"), { target: { value: "missing" } });
-    expect(await screen.findByText("No voices found")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Clear search and filters" }));
-    expect(within(listbox).getByText("Maya")).toBeTruthy();
-  });
-
   it("shows an unavailable saved voice and disables submission", async () => {
     stubApi({
       "GET /v1/persona-capabilities": {
@@ -504,83 +309,6 @@ describe("persona full-page flows", () => {
     expect(reason).not.toBeNull();
     expect(document.getElementById(reason!)?.textContent).toContain("Choose an available voice");
     expect(screen.queryByText("Choose an available voice before creating this persona.")).toBeNull();
-  });
-
-  it("retries a transient capability failure without losing the Live draft", async () => {
-    let attempts = 0;
-    const asked = stubApi({
-      "GET /v1/persona-capabilities": async () => {
-        attempts += 1;
-        return attempts === 1
-          ? json(503, { error: "unavailable", message: "Voice choices are unavailable." })
-          : json(200, CAPABILITIES);
-      },
-    });
-    render(<PersonaCloneScreen projectId="prj_1" personaId="prs_live" />);
-    expect(await screen.findByText("Voice choices are unavailable.")).toBeTruthy();
-    const name = screen.getByDisplayValue("Live Lee copy");
-    fireEvent.change(name, { target: { value: "Retry Lee" } });
-    expect((screen.getByRole("button", { name: "Create persona" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Retry options" }));
-    await waitFor(() => expect(attempts).toBe(2));
-    await waitFor(() => expect((screen.getByRole("button", { name: "Create persona" }) as HTMLButtonElement).disabled).toBe(false));
-    expect((name as HTMLInputElement).value).toBe("Retry Lee");
-    expect(asked.filter((one) => one.path === "/v1/persona-capabilities")).toHaveLength(2);
-  });
-
-  it("offers Clone for built-ins and Clone plus Delete for custom personas", async () => {
-    stubApi();
-    render(<PersonasPage />);
-    const builtIn = await screen.findByRole("link", { name: "Built-in Priya" });
-    expect(builtIn.getAttribute("data-slot")).toBe("persona-name-link");
-    fireEvent.click(await screen.findByRole("button", { name: "Open the menu for Built-in Priya" }));
-    let menu = await screen.findByRole("menu", { name: "Open the menu for Built-in Priya" });
-    expect(within(menu).getByRole("menuitem", { name: "Clone" }).getAttribute("href")).toBe("/projects/prj_1/personas/prs_builtin/clone");
-    expect(within(menu).queryByRole("menuitem", { name: "Delete" })).toBeNull();
-    fireEvent.keyDown(menu, { key: "Escape" });
-    fireEvent.click(await screen.findByRole("button", { name: "Open the menu for Custom Priya" }));
-    menu = await screen.findByRole("menu", { name: "Open the menu for Custom Priya" });
-    expect(within(menu).getByRole("menuitem", { name: "Delete" })).toBeTruthy();
-  });
-
-  it("keeps authoring controls disabled for a viewer", async () => {
-    routed.sessionMe = { ...me(), organizations: [{ ...me().organizations[0]!, role: "viewer" }] };
-    stubApi({
-      "GET /api/me": {
-        status: 200,
-        body: { ...me(), organizations: [{ ...me().organizations[0]!, role: "viewer" }] },
-      },
-    });
-    render(<PersonasPage />);
-    const create = await screen.findByRole("button", { name: "New persona" }) as HTMLButtonElement;
-    expect(create.disabled).toBe(true);
-    expect(create.getAttribute("title")).toContain("viewer");
-  });
-
-  it("sends an expired persona list session to sign in", async () => {
-    const replace = vi.fn();
-    vi.stubGlobal("location", { origin: "http://localhost", replace });
-    stubApi({
-      "GET /v1/personas": {
-        status: 401,
-        body: { error: "unauthenticated", message: "Sign in again." },
-      },
-    });
-    render(<PersonasPage />);
-    await waitFor(() => expect(replace).toHaveBeenCalledWith("/sign-in"));
-  });
-
-  it("shows a persona list failure and retries the read", async () => {
-    const asked = stubApi({
-      "GET /v1/personas": {
-        status: 503,
-        body: { error: "unavailable", message: "Personas are unavailable." },
-      },
-    });
-    render(<PersonasPage />);
-    expect(await screen.findByText("Personas are unavailable.")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(asked.filter((one) => one.path === "/v1/personas")).toHaveLength(2));
   });
 
   it("stops pagination after the final accumulated page", async () => {

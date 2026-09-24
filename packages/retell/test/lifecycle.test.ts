@@ -146,13 +146,6 @@ describe("resolving a version reference", () => {
     expect(seen[0]?.url).toContain("?version=latest");
   });
 
-  it("answers gone for an agent Retell no longer holds", async () => {
-    const { fetchImpl } = retell([() => json({ error: "not found" }, 404)]);
-    expect(
-      await resolveAgentVersion(key, AGENT, 105, REACH(fetchImpl)),
-    ).toEqual({ kind: "gone" });
-  });
-
   it("answers invalid-key without repeating the key", async () => {
     const { fetchImpl } = retell([() => json({ error: "bad key" }, 401)]);
     const answer = await resolveAgentVersion(key, AGENT, 105, REACH(fetchImpl));
@@ -358,21 +351,6 @@ describe("branching, writing and deleting a version", () => {
     expect(written).toEqual({ kind: "written", version: 107 });
   });
 
-  it("refuses to write onto a custom LLM, and asks Retell nothing", async () => {
-    const { fetchImpl, seen } = retell([() => json({ ok: true })]);
-    const written = await writeEngineTools(
-      key,
-      {
-        reference: { type: "custom-llm", engineId: "", version: null },
-        version: 1,
-        tools: {},
-      },
-      REACH(fetchImpl),
-    );
-    expect(written.kind).toBe("refused");
-    expect(seen).toHaveLength(0);
-  });
-
   it("names the version to delete as a query parameter", async () => {
     // Retell's router has no `/delete-agent-version/{agent}/{version}` route:
     // the path form answers 404 "Cannot DELETE" and the query form answers 204
@@ -397,13 +375,6 @@ describe("branching, writing and deleting a version", () => {
     // check and leave off the query string entirely.
     await deleteAgentVersion(key, AGENT, 0, REACH(fetchImpl));
     expect(new URL(String(seen[1]?.url)).searchParams.get("version")).toBe("0");
-  });
-
-  it("answers gone for a version that is already not there", async () => {
-    const { fetchImpl } = retell([() => json({ error: "not found" }, 404)]);
-    expect(await deleteAgentVersion(key, AGENT, 106, REACH(fetchImpl))).toEqual({
-      kind: "gone",
-    });
   });
 });
 

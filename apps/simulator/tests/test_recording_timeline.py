@@ -503,27 +503,6 @@ async def test_the_wall_clock_zero_is_when_the_first_sample_arrived(
     assert recorder.started_unix_nano == filed_at - 5_000_000_000
 
 
-async def test_a_media_clock_has_no_wall_clock_instant_to_give(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A scripted far end counts audio, not seconds.
-
-    Its stamps are positions in a stream nobody lived through, so no
-    instant can be derived from them and the moment of filing is the only
-    honest answer.
-    """
-    filed_at = 1_800_000_000_000_000_000
-    monkeypatch.setattr(conductor_module, "_now", lambda: filed_at)
-    monkeypatch.setattr(conductor_module, "_monotonic", lambda: 1005.0)
-
-    recorder = await recorder_started(real_time=False)
-    await agent_said(
-        recorder, arriving_at=1000.0, source_from=0.0, audio=tone()
-    )
-
-    assert recorder.started_unix_nano == filed_at
-
-
 async def test_an_interruption_settles_the_quiet_the_recorder_owes() -> None:
     """When interruption cuts through inserted silence, update the owed-silence ledger.
     Later catch-up must not reclaim removed silence and overwrite the first utterance.

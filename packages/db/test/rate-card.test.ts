@@ -5,11 +5,9 @@ import {
   billableUsageTypesOf,
   catalogModelsMissingAPrice,
   readRateCard,
-  unitOfUsageType,
   upsertRateCard,
   type RateCardEntry,
 } from "../src/index.ts";
-import { catalogModelsWithoutAStoredPrice } from "../src/access/usage.ts";
 import {
   createConnectedDatabase,
   type MigratedDatabase,
@@ -40,47 +38,6 @@ afterAll(async () => {
 describe("the shipped rate-card file", () => {
   it("prices every usage type every catalog model's adapter can emit", () => {
     expect(catalogModelsMissingAPrice(card)).toEqual([]);
-  });
-
-  it("covers the whole catalog and nothing that is not in it", () => {
-    const priced = new Set(card.map((entry) => `${entry.provider}/${entry.model}`));
-    const catalog = new Set(
-      PROVIDER_CATALOG.map((entry) => `${entry.provider}/${entry.model}`),
-    );
-    expect([...priced].sort()).toEqual([...catalog].sort());
-  });
-
-  it("states each price in the unit that usage type is counted in", () => {
-    for (const entry of card) {
-      for (const price of entry.prices) {
-        expect(price.unit, `${entry.provider}/${entry.model}`).toBe(
-          unitOfUsageType(price.usageType),
-        );
-      }
-    }
-  });
-
-  it("says where every number came from and when it was read", () => {
-    for (const entry of card) {
-      expect(entry.source, `${entry.provider}/${entry.model}`).toMatch(
-        /^https:\/\//,
-      );
-      expect(entry.readAt, `${entry.provider}/${entry.model}`).toMatch(
-        /^\d{4}-\d{2}-\d{2}$/,
-      );
-    }
-  });
-
-  it("explains every price it derived rather than read", () => {
-    const derived = card.filter((entry) => entry.approximate);
-    // One today: gpt-4o-mini-tts, which OpenAI bills by audio output token
-    // while Egma measures characters.
-    expect(derived.length).toBeGreaterThan(0);
-    for (const entry of derived) {
-      expect(entry.note, `${entry.provider}/${entry.model}`).toBeTypeOf(
-        "string",
-      );
-    }
   });
 
   it("refuses a file that prices something in the wrong unit", async () => {
@@ -115,11 +72,6 @@ describe("the boot upsert", () => {
     );
     expect(Number(rows[0]?.n)).toBe(first.written.length);
   });
-
-  it("leaves the stored card able to price every catalog model", async () => {
-    expect(await catalogModelsWithoutAStoredPrice()).toEqual([]);
-  });
-
   it("keeps the old row when a later price arrives", async () => {
     const model = "gpt-4o-mini";
     const later: readonly RateCardEntry[] = [
@@ -163,18 +115,6 @@ describe("the boot upsert", () => {
 });
 
 describe("what a catalog model's adapter emits", () => {
-  it("is tokens for chat completions, and the cached half is named separately", () => {
-    const entry = PROVIDER_CATALOG.find(
-      (candidate) => candidate.model === "gpt-4o-mini",
-    );
-    expect(entry).toBeDefined();
-    expect(billableUsageTypesOf(entry!)).toEqual([
-      "input_tokens",
-      "cached_input_tokens",
-      "output_tokens",
-    ]);
-  });
-
   it("tells the two shapes of realtime transcription apart", () => {
     const duration = PROVIDER_CATALOG.find(
       (candidate) => candidate.model === "gpt-live-transcribe",

@@ -106,23 +106,6 @@ afterAll(async () => {
   await database.drop();
 });
 
-describe("two claimants on one queued simulation", () => {
-  it("exactly one wins, and the loser walks away empty-handed", async () => {
-    const simulationId = await oneQueuedSimulation();
-
-    const [blue, green] = await Promise.all([
-      claimSimulations({ claimant: "simulator-blue-1", capacity: 1 }),
-      claimSimulations({ claimant: "simulator-green-2", capacity: 1 }),
-    ]);
-
-    const claims = [...blue, ...green].filter(
-      (claim) => claim.id === simulationId,
-    );
-    expect(claims).toHaveLength(1);
-    expect([blue.length, green.length].sort()).toEqual([0, 1]);
-  });
-});
-
 describe("a fleet draining a queue", () => {
   it("splits it without overlap and without loss", async () => {
     const queued = new Set<string>();

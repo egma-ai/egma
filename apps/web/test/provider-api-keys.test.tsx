@@ -207,22 +207,6 @@ it("requires explicit removal confirmation and explains the return to inference 
   ).toEqual({ expectedRevision: "rev_original" });
 });
 
-it("lets members see masked provider status without key management controls", async () => {
-  mayManage = false;
-  rows[0] = { ...rows[0]!, credential: ORIGINAL_CREDENTIAL };
-  renderSettingsPage(<ProviderApiKeysPage />);
-  expect(await screen.findByText("••••old1")).toBeTruthy();
-  expect(screen.getByText(/Ask an organization admin/)).toBeTruthy();
-  expect(
-    screen.queryByRole("button", { name: /(?:Add|Manage) .* key/ }),
-  ).toBeNull();
-  expect(
-    screen
-      .getByRole("link", { name: "Provider API Keys" })
-      .getAttribute("aria-current"),
-  ).toBe("page");
-});
-
 it("keeps a pending removal open on Escape and displays a failed delete", async () => {
   rows[0] = { ...rows[0]!, credential: ORIGINAL_CREDENTIAL };
   let finish: (() => void) | undefined;

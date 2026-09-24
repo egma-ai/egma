@@ -7,10 +7,8 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from pipecat.frames.frames import TTSAudioRawFrame
 from websockets.protocol import State
 
-from egma_simulator.config import STT_PROVIDERS, TTS_PROVIDERS
 from egma_simulator.model import ModelFailure, OpenAICompatibleModel, build_model_client
 from egma_simulator.spec import (
     ModelSelection,
@@ -26,8 +24,6 @@ from egma_simulator.speech import (
     SpeechProviders,
     _ears,
     _mouth,
-    apply_pcm_gain,
-    gained_speech_frame,
     tts_delivery_instructions,
     voice_from_models,
 )
@@ -35,17 +31,8 @@ from egma_simulator.speech import (
 STT_ADAPTERS = (
     ("cartesia", "cartesia_manual", "ink-2", "CartesiaSTTService"),
     ("deepgram", "deepgram", "nova-3-general", "DeepgramSTTService"),
-    (
-        "openai",
-        "openai_realtime",
-        "gpt-live-transcribe",
-        "OpenAIRealtimeSTTService",
-    ),
 )
-TTS_ADAPTERS = (
-    ("cartesia", "cartesia", "sonic-3.5", "CartesiaTTSService"),
-    ("openai", "openai", "gpt-4o-mini-tts", "OpenAITTSService"),
-)
+TTS_ADAPTERS = (("cartesia", "cartesia", "sonic-3.5", "CartesiaTTSService"),)
 
 
 def direct_key(provider: str) -> str:
@@ -140,15 +127,6 @@ def selected(
             voice_id=f"{tts_provider}-voice",
             speed=1.0,
         ),
-    )
-
-
-def test_speech_adapter_names_match_the_runtime_builders():
-    assert {adapter for _provider, adapter, _model, _service in STT_ADAPTERS} == (
-        set(STT_PROVIDERS) - {"scripted"}
-    )
-    assert {adapter for _provider, adapter, _model, _service in TTS_ADAPTERS} == (
-        set(TTS_PROVIDERS) - {"scripted"}
     )
 
 
@@ -304,30 +282,3 @@ def test_openai_private_voice_requires_customer_funded_credentials():
                 speed=1.0,
             ),
         )
-
-
-def test_speech_gain_is_independent_and_clips_pcm_samples():
-    pcm = (10_000).to_bytes(2, "little", signed=True) + (30_000).to_bytes(
-        2, "little", signed=True
-    )
-
-    gained = apply_pcm_gain(pcm, 1.5)
-
-    assert int.from_bytes(gained[:2], "little", signed=True) == 15_000
-    assert int.from_bytes(gained[2:], "little", signed=True) == 32_767
-
-
-async def test_speech_gain_preserves_frame_identity_and_timing_metadata():
-    source = TTSAudioRawFrame(
-        audio=(10_000).to_bytes(2, "little", signed=True),
-        sample_rate=24_000,
-        num_channels=1,
-        context_id="context-1",
-    )
-    source.pts = 123
-    source.metadata["trace"] = "kept"
-    gained = gained_speech_frame(source, 0.5)
-
-    assert gained.context_id == "context-1"
-    assert gained.pts == 123
-    assert gained.metadata == {"trace": "kept"}

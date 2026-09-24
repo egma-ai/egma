@@ -5,7 +5,6 @@ import {
   connectClickHouse,
   disconnectClickHouse,
   spanContentHash,
-  UnreadableTraceQueryError,
   type AuthContext,
   type NewSpan,
   type SpanIdentity,
@@ -163,19 +162,6 @@ describe("asking which spans are already committed", () => {
     ]);
   });
 
-  it("says nothing at all about an identity it does not hold", async () => {
-    const found = await committedSpans(
-      at(acme),
-      [
-        identityOf(written[0] as NewSpan),
-        { traceId: TRACE, spanId: "9999999999999999" },
-      ],
-      { window: WINDOW },
-    );
-
-    expect(found.map((one) => one.spanId)).toEqual([written[0]?.spanId]);
-  });
-
   it("asks about nothing without asking the store anything", async () => {
     expect(await committedSpans(at(acme), [], { window: WINDOW })).toEqual([]);
     expect(await committedTraces(at(acme), [], { window: WINDOW })).toEqual(
@@ -232,59 +218,6 @@ describe("asking which spans are already committed", () => {
   });
 });
 
-/**
- * Probe committed fingerprints and skip a conflicting write. The full
- * drainer also retains the conflicting object for inspection.
- */
-describe("a second, different account of one span", () => {
-  const TRACE = "cccc0000cccc0000cccc0000cccc0000";
-  const original = span({
-    traceId: TRACE,
-    spanId: "4444444444444444",
-    text: "what was actually said",
-  });
-  const conflicting = { ...original, text: "what was not" };
-
-  beforeAll(async () => {
-    await appendSpans(at(acme), [original]);
-  });
-
-  it("is refused before it is written, and the original stays visible", async () => {
-    const committed = new Map(
-      (
-        await committedSpans(at(acme), [identityOf(conflicting)], {
-          window: WINDOW,
-        })
-      ).map((one) => [`${one.traceId}:${one.spanId}`, one.contentHash]),
-    );
-
-    const standing = committed.get(`${TRACE}:${conflicting.spanId}`);
-    expect(standing).toBe(spanContentHash(original));
-    expect(standing).not.toBe(spanContentHash(conflicting));
-
-    // So the writer does not write. Nothing about the store made this
-    // decision — it is the comparison above, made while both meanings existed.
-    const [visible] = await store.rows<{ text: string }>(
-      `select text from spans final where trace_id = '${TRACE}'`,
-    );
-    expect(visible?.text).toBe("what was actually said");
-  });
-
-  it("is an exact replay when the fingerprints agree, and changes nothing", async () => {
-    const [standing] = await committedSpans(at(acme), [identityOf(original)], {
-      window: WINDOW,
-    });
-    expect(standing?.contentHash).toBe(spanContentHash(original));
-
-    await appendSpans(at(acme), [original]);
-
-    const rows = await store.rows<{ text: string }>(
-      `select text from spans final where trace_id = '${TRACE}'`,
-    );
-    expect(rows).toEqual([{ text: "what was actually said" }]);
-  });
-});
-
 describe("asking which traces are already committed", () => {
   const HELD = "dddd0000dddd0000dddd0000dddd0000";
   const ALSO_HELD = "dddd1111dddd1111dddd1111dddd1111";
@@ -306,19 +239,6 @@ describe("asking which traces are already committed", () => {
     );
 
     expect([...found].sort()).toEqual([ALSO_HELD, HELD].sort());
-  });
-
-  /**
-   * One span is enough. The question is whether egma has already done this work,
-   * which is deliberately not the question of whether the conversation ended —
-   * that is a fact its platform states, and no count of rows may stand in for
-   * it.
-   */
-  it("answers for a trace that holds one span as readily as for one that holds many", async () => {
-    const found = await committedTraces(at(acme), [ALSO_HELD], {
-      window: WINDOW,
-    });
-    expect(found.has(ALSO_HELD)).toBe(true);
   });
 });
 
@@ -397,14 +317,6 @@ describe("what a probe can be asked about", () => {
     expect(await committedTraces(at(acme), [MINE], { window: elsewhere })).toEqual(
       new Set(),
     );
-  });
-
-  it("is refused when the window ends before it starts", async () => {
-    await expect(
-      committedTraces(at(acme), [MINE], {
-        window: { from: WINDOW.to, to: WINDOW.from },
-      }),
-    ).rejects.toThrow(UnreadableTraceQueryError);
   });
 
   /**

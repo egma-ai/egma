@@ -1,7 +1,7 @@
 /**
  * Measure names, units, and span-level definitions used by @egma/metrics.
  * The catalog is code, not a database table. measure-catalog.md documents
- * the same definitions, and contract tests keep the two aligned.
+ * the same definitions.
  */
 
 /**

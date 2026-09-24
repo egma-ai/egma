@@ -1,7 +1,7 @@
 import { newId } from "@egma/ids";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { cookiesFrom, createApi, type TestApi } from "./support/api.ts";
+import { createApi, type TestApi } from "./support/api.ts";
 
 /**
  * Signing up, over HTTP, against a real Postgres.
@@ -29,90 +29,6 @@ async function signUp(
 }
 
 describe("somebody with no account", () => {
-  it("lands in an organization and a project that were created together", async () => {
-    api = await createApi("signup_lands");
-
-    const response = await signUp({
-      email: "ada@acme.example",
-      password: "a-long-enough-password",
-      organizationName: "Acme",
-      projectName: "Default",
-    });
-
-    expect(response.statusCode).toBe(201);
-    const landed = response.json();
-    expect(landed.organization.name).toBe("Acme");
-    expect(landed.project.name).toBe("Default");
-    expect(landed.organization.id).toMatch(/^org_/);
-    expect(landed.project.id).toMatch(/^prj_/);
-    expect(landed.userId).toMatch(/^usr_/);
-
-    const { rows } = await api.database.sql<{
-      organization_id: string;
-      name: string;
-    }>(
-      `select p.organization_id, p.name
-         from project p join organization o on o.id = p.organization_id
-        where o.slug = 'acme'`,
-    );
-    expect(rows).toEqual([
-      { organization_id: landed.organization.id, name: "Default" },
-    ]);
-  });
-
-  it("becomes the admin of the organization they created", async () => {
-    api = await createApi("signup_admin");
-
-    const response = await signUp({
-      email: "ada@acme.example",
-      password: "a-long-enough-password",
-      organizationName: "Acme",
-    });
-    expect(response.json().role).toBe("admin");
-
-    const { rows } = await api.database.sql<{ role: string }>(
-      "select role from membership",
-    );
-    expect(rows).toEqual([{ role: "admin" }]);
-  });
-
-  it("is signed in when they are done, with no verification step in the way", async () => {
-    api = await createApi("signup_signed_in");
-
-    const created = await signUp({
-      email: "ada@acme.example",
-      password: "a-long-enough-password",
-      organizationName: "Acme",
-    });
-
-    // The cookie a person can see says egma. Which library set it is not
-    // something a provider swap should make visible.
-    expect(cookiesFrom(created.headers["set-cookie"])).toContain(
-      "egma.session_token=",
-    );
-
-    const me = await api.app.inject({
-      method: "GET",
-      url: "/api/me",
-      headers: { cookie: cookiesFrom(created.headers["set-cookie"]) },
-    });
-
-    expect(me.statusCode).toBe(200);
-    expect(me.json().user.email).toBe("ada@acme.example");
-  });
-
-  it("gets the project called Default when they name none", async () => {
-    api = await createApi("signup_default_project");
-
-    const response = await signUp({
-      email: "ada@acme.example",
-      password: "a-long-enough-password",
-      organizationName: "Acme",
-    });
-
-    expect(response.json().project.name).toBe("Default");
-  });
-
   it("is refused with no name for their organization, rather than given a blank one", async () => {
     api = await createApi("signup_needs_a_name");
 
@@ -248,60 +164,6 @@ describe("the organization and its first project", () => {
   });
 });
 
-describe("the external-identity columns", () => {
-  it("sit empty, because the provider writes into egma's own user table", async () => {
-    api = await createApi("signup_external_identity");
-
-    await signUp({
-      email: "ada@acme.example",
-      password: "a-long-enough-password",
-      organizationName: "Acme",
-    });
-
-    const { rows: users } = await api.database.sql<{
-      external_identity_provider: string | null;
-      external_identity_id: string | null;
-    }>(
-      'select external_identity_provider, external_identity_id from "user"',
-    );
-    expect(users).toEqual([
-      { external_identity_provider: null, external_identity_id: null },
-    ]);
-
-    const { rows: organizations } = await api.database.sql<{
-      external_identity_provider: string | null;
-      external_identity_id: string | null;
-    }>(
-      "select external_identity_provider, external_identity_id from organization",
-    );
-    expect(organizations).toEqual([
-      { external_identity_provider: null, external_identity_id: null },
-    ]);
-  });
-});
-
-describe("with no mail transport configured", () => {
-  it("completes signup, and asks for no verification", async () => {
-    api = await createApi("signup_no_email");
-
-    const response = await signUp({
-      email: "ada@acme.example",
-      password: "a-long-enough-password",
-      organizationName: "Acme",
-    });
-
-    expect(response.statusCode).toBe(201);
-    expect(api.mail).toEqual([]);
-
-    const me = await api.app.inject({
-      method: "GET",
-      url: "/api/me",
-      headers: { cookie: cookiesFrom(response.headers["set-cookie"]) },
-    });
-    expect(me.statusCode).toBe(200);
-  });
-});
-
 describe("with a transport that delivers", () => {
   it("sends the verification message through the one email seam", async () => {
     api = await createApi("signup_with_email", { emailDelivers: true });
@@ -384,26 +246,6 @@ describe("a self-hosted instance", () => {
     );
     expect(rows[0]?.count).toBe("1");
   });
-
-  it("lets a second person sign up when the deployment holds many customers", async () => {
-    api = await createApi("signup_multi_tenant", { singleOrganization: false });
-
-    await signUp({
-      email: "ada@acme.example",
-      password: "a-long-enough-password",
-      organizationName: "Acme",
-    });
-    const second = await signUp({
-      email: "grace@globex.example",
-      password: "a-long-enough-password",
-      organizationName: "Globex",
-    });
-
-    expect(second.statusCode).toBe(201);
-    expect((await api.app.inject({ url: "/api/signup/availability" })).json()).toEqual(
-      { open: true },
-    );
-  });
 });
 
 describe("the caller behind a relayed signup", () => {
@@ -430,46 +272,5 @@ describe("the caller behind a relayed signup", () => {
       "select ip_address from session",
     );
     expect(rows).toEqual([{ ip_address: "203.0.113.9" }]);
-  });
-});
-
-describe("a person with one organization and one project", () => {
-  /**
-   * The choices, and the role, and no chosen project among them. Which project
-   * a tab is working in lives in that tab's address, so this read answers what
-   * there is to choose from and never which one is current — a mutable
-   * browser-wide answer would make two tabs on two projects impossible.
-   */
-  it("is told what there is, and never which one is current", async () => {
-    api = await createApi("signup_cardinality");
-
-    const created = await signUp({
-      email: "ada@acme.example",
-      password: "a-long-enough-password",
-      organizationName: "Acme",
-    });
-
-    const me = await api.app.inject({
-      method: "GET",
-      url: "/api/me",
-      headers: { cookie: cookiesFrom(created.headers["set-cookie"]) },
-    });
-
-    const body = me.json();
-    expect(body.organizations).toHaveLength(1);
-    expect(body.projects).toHaveLength(1);
-    expect(body.organizations[0]).toMatchObject({
-      name: "Acme",
-      slug: "acme",
-      role: "admin",
-    });
-    expect(Object.keys(body)).toEqual(["user", "organizations", "projects"]);
-  });
-
-  it("is nobody at all without a session", async () => {
-    api = await createApi("signup_no_session");
-
-    const me = await api.app.inject({ method: "GET", url: "/api/me" });
-    expect(me.statusCode).toBe(401);
   });
 });

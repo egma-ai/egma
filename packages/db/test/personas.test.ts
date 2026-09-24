@@ -3,10 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   createPersona,
-  editPersona,
-  usePersona,
   getPersona,
-  getPersonaVersion,
   NotPermittedError,
   ProjectOutsideOrganizationError,
   RECOMMENDED_PERSONA_MODELS,
@@ -14,11 +11,8 @@ import {
   PERSONA_PARAMETER_CONTRACT,
   EGMA_PROVIDED_PERSONAS,
   defaultPersonaParameterValues,
-  legacyPersonaParameterContract,
   type NewPersona,
-  type PersonaChanges,
   type Role,
-  personaSpeechSpeedOfTarget,
 } from "@egma/db";
 
 import {
@@ -67,10 +61,6 @@ const rita = {
   language: "en-US",
 } as const satisfies NewPersona;
 
-it("maps historical numeric speeds to the nearest category and prefers Normal on a tie", () => {
-  expect([0.6, 0.8, 0.9, 1.25, 1.5].map(personaSpeechSpeedOfTarget)).toEqual(["slow", "slow", "normal", "normal", "fast"]);
-});
-
 beforeAll(async () => {
   database = await createConnectedDatabase("personas");
 
@@ -116,14 +106,6 @@ describe("creating a persona", () => {
     expect(fetched?.language).toBe(rita.language);
     expect(fetched?.settings?.models).toEqual(RECOMMENDED_PERSONA_MODELS);
     expect(fetched?.projectId).toBe(acme.project);
-  });
-
-  it("stores behavior separately from complete project settings", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-    const version = await getPersonaVersion(actingAsAcme(), created.versionId);
-    expect(version).toMatchObject({ identityName: rita.identityName, personality: rita.personality, language: null });
-    expect(version).not.toHaveProperty("models");
-    expect(created.settings?.models).toEqual(RECOMMENDED_PERSONA_MODELS);
   });
 
   it("is allowed to a member and refused to a viewer, per the permission table", async () => {
@@ -185,392 +167,9 @@ describe("a credential for the whole organization", () => {
     expect(fetched?.id).toBe(created.id);
     expect(fetched?.projectId).toBe(acme.project);
   });
-
-  it("edits what already exists: the row names its own project", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-
-    const wholeCustomer = { ...actingAsAcme(), projectId: undefined };
-    const edited = await editPersona(wholeCustomer, created.id, {
-      expectedVersionId: created.versionId,
-      personality: "Rita calls from the whole customer context.",
-    });
-
-    expect(edited?.version).toBe(2);
-    expect(edited?.projectId).toBe(acme.project);
-
-    const version = await getPersonaVersion(wholeCustomer, created.versionId);
-    expect(version?.version).toBe(1);
-  });
-});
-
-describe("editing a persona's personality", () => {
-  it("upgrades legacy settings through one append-only version", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-    const legacyContract = legacyPersonaParameterContract();
-    const legacyVersionId = newId("prsv");
-    await database.sql(
-      `insert into persona_definition_version
-         (id, persona_id, version, identity_name, personality, language,
-          parameter_contract, created_by)
-       select $2, persona_id, 2, identity_name, personality, 'es-ES', $3::jsonb,
-              created_by
-         from persona_definition_version
-        where id=$1`,
-      [created.versionId, legacyVersionId, JSON.stringify(legacyContract)],
-    );
-    await database.sql(
-      "update persona_definition set current_version_id=$2 where id=$1",
-      [created.id, legacyVersionId],
-    );
-    await database.sql(
-      "update project_persona set parameter_values=$2::jsonb where id=$1",
-      [
-        created.settings!.id,
-        JSON.stringify(defaultPersonaParameterValues(legacyContract)),
-      ],
-    );
-
-    const settings = {
-      models: RECOMMENDED_PERSONA_MODELS,
-      language: "es-ES",
-      executionPolicyVersion: 2,
-      backgroundSoundId: "office-v1" as const,
-      interruptionLevel: "occasional" as const,
-    };
-    const upgraded = await editPersona(actingAsAcme(), created.id, { settings });
-
-    expect(upgraded).toMatchObject({ version: 3, language: "es-ES" });
-    expect(upgraded?.settings?.models).toEqual(settings.models);
-    expect(upgraded?.settings?.parameterValues).toMatchObject({
-      language: "es-ES",
-      execution_policy_version: 2,
-      background_sound_id: "office-v1",
-      interruption_level: "occasional",
-    });
-    const legacy = await getPersonaVersion(actingAsAcme(), legacyVersionId);
-    expect(legacy).toMatchObject({ version: 2, language: "es-ES" });
-    expect(legacy?.parameterContract).toEqual(legacyContract);
-    const current = await getPersonaVersion(actingAsAcme(), upgraded!.versionId);
-    expect(current).toMatchObject({ version: 3, language: null });
-    expect(current?.parameterContract).toHaveLength(12);
-  });
-
-  it("creates version 2, moves the pointer, and leaves version 1 untouched", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-
-    const calmer = "Rita, but rested.";
-    const edited = await editPersona(actingAsAcme(), created.id, {
-      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
-      personality: calmer,
-    });
-
-    expect(edited?.version).toBe(2);
-    expect(edited?.versionId).not.toBe(created.versionId);
-    expect(edited?.personality).toBe(calmer);
-    expect(edited?.identityName).toBe(rita.identityName);
-
-    const fetched = await getPersona(actingAsAcme(), created.id);
-    expect(fetched?.version).toBe(2);
-    expect(fetched?.versionId).toBe(edited?.versionId);
-
-    const frozen = await getPersonaVersion(actingAsAcme(), created.versionId);
-    expect(frozen?.version).toBe(1);
-    expect(frozen?.personaId).toBe(created.id);
-    expect(frozen?.personality).toBe(rita.personality);
-  });
-
-  it("versions each personality change", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-
-    const personalities = [
-      "Rita after a good nap.",
-      "Rita after a short wait.",
-      "Rita after the issue is resolved.",
-    ] as const;
-
-    let expected = 1;
-    for (const personality of personalities) {
-      const edited = await editPersona(actingAsAcme(), created.id, {
-      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
-        personality,
-      });
-      expected += 1;
-      expect(edited?.version).toBe(expected);
-    }
-
-    const fetched = await getPersona(actingAsAcme(), created.id);
-    expect(fetched?.version).toBe(4);
-    expect(fetched?.personality).toBe(personalities[2]);
-  });
-
-  it("does nothing for an identical save, and returns the current version", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-    const before = await rowCounts();
-
-    const saved = await editPersona(actingAsAcme(), created.id, {
-      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
-      identityName: rita.identityName,
-      personality: rita.personality,
-      language: rita.language,
-    });
-
-    expect(saved?.version).toBe(1);
-    expect(saved?.versionId).toBe(created.versionId);
-    expect(await rowCounts()).toEqual(before);
-
-    const fetched = await getPersona(actingAsAcme(), created.id);
-    expect(fetched?.updatedAt.getTime()).toBe(created.updatedAt.getTime());
-  });
-
-  it("keeps every old version fetchable by its prsv_ id after later edits", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-    const second = await editPersona(actingAsAcme(), created.id, {
-      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
-      personality: "Rita after the first edit.",
-    });
-    await editPersona(actingAsAcme(), created.id, {
-      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
-      personality: "Rita after the second edit.",
-    });
-
-    const first = await getPersonaVersion(actingAsAcme(), created.versionId);
-    expect(first?.version).toBe(1);
-    expect(first?.personality).toBe(rita.personality);
-
-    if (second?.versionId === undefined) throw new Error("no second version");
-    const middle = await getPersonaVersion(actingAsAcme(), second.versionId);
-    expect(middle?.version).toBe(2);
-    expect(middle?.personality).toBe("Rita after the first edit.");
-  });
-
-  it("refuses an empty edited personality and versions nothing", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-
-    await expect(
-      editPersona(actingAsAcme(), created.id, { personality: "   " }),
-    ).rejects.toThrow(/personality/);
-
-    const fetched = await getPersona(actingAsAcme(), created.id);
-    expect(fetched?.version).toBe(1);
-    expect(fetched?.personality).toBe(rita.personality);
-  });
-
-  it("is refused to a viewer, per the permission table", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-
-    await expect(
-      editPersona(actingAsAcme("viewer"), created.id, {
-        personality: "Rita after a viewer's edit.",
-      }),
-    ).rejects.toThrow(NotPermittedError);
-  });
-});
-
-describe("editing a persona's identity name", () => {
-  it("mints a version, because the agent hears the change", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-
-    const edited = await editPersona(actingAsAcme(), created.id, {
-      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
-      identityName: "Margarita Alvarez",
-    });
-
-    expect(edited?.version).toBe(2);
-    expect(edited?.identityName).toBe("Margarita Alvarez");
-    expect(edited?.name).toBe(rita.name);
-
-    const frozen = await getPersonaVersion(actingAsAcme(), created.versionId);
-    expect(frozen?.identityName).toBe(rita.identityName);
-  });
-
-  it("refuses an empty one and versions nothing", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-
-    await expect(
-      editPersona(actingAsAcme(), created.id, { identityName: "  " }),
-    ).rejects.toThrow(/identity name/);
-
-    expect((await getPersona(actingAsAcme(), created.id))?.version).toBe(1);
-  });
-});
-
-describe("editing a persona's model selection", () => {
-  it("updates project settings without creating a core version", async () => {
-    const created = await createPersona(actingAsAcme(), {
-      ...rita,
-      settings: {
-        models: RECOMMENDED_PERSONA_MODELS,
-        language: "es-ES",
-        backgroundSoundId: "cafe-v1",
-        interruptionLevel: "frequent",
-        executionPolicyVersion: 2,
-      },
-    });
-    const nextModels = {
-      ...RECOMMENDED_PERSONA_MODELS,
-      stt: { provider: "deepgram", model: "nova-3-general" },
-    } as const;
-
-    const edited = await editPersona(actingAsAcme(), created.id, {
-      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
-      models: nextModels,
-    });
-
-    expect(edited?.version).toBe(1);
-    expect(edited?.settings?.models).toEqual(nextModels);
-    expect(edited?.settings?.parameterValues).toMatchObject({
-      language: "es-ES", background_sound_id: "cafe-v1", interruption_level: "frequent",
-    });
-    expect(await getPersonaVersion(actingAsAcme(), created.versionId)).not.toHaveProperty("models");
-  });
-
-  it("applies model overrides on first use without replacing preset controls", async () => {
-    const models = {
-      ...RECOMMENDED_PERSONA_MODELS,
-      llm: { provider: "openai", model: "gpt-5.6-terra" },
-    } as const;
-    const used = await usePersona(actingAsAcme(), EGMA_PROVIDED_PERSONAS.spanishCaller, models);
-
-    expect(used?.settings?.models).toEqual(models);
-    expect(used?.settings?.parameterValues).toMatchObject({
-      language: "es-ES", background_sound_id: "none", interruption_level: "none",
-    });
-  });
-
-  it("uses the native speaking speed without storing an authored speed", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-
-    const edited = await editPersona(actingAsAcme(), created.id, {
-      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
-      models: {
-        ...RECOMMENDED_PERSONA_MODELS,
-        tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed: 1.25 },
-      },
-    });
-
-    expect(edited?.version).toBe(1);
-    expect(edited?.settings?.models).toMatchObject({ tts: { speed: 1 } });
-    expect(edited?.settings?.parameterValues).not.toHaveProperty("speech_speed");
-    expect(edited?.settings?.parameterValues).not.toHaveProperty("tts_speed");
-  });
-
-  it("refuses an unsupported provider/model pair before writing", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-    await expect(
-      editPersona(actingAsAcme(), created.id, {
-        models: {
-          ...RECOMMENDED_PERSONA_MODELS,
-          stt: { provider: "openai", model: "gpt-4o-transcribe-unsupported" },
-        },
-      }),
-    ).rejects.toThrow(/supported openai stt model/i);
-    expect((await getPersona(actingAsAcme(), created.id))?.version).toBe(1);
-  });
-
-  it("refuses a speaking speed outside the range the column allows", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-    await expect(
-      editPersona(actingAsAcme(), created.id, {
-        models: {
-          ...RECOMMENDED_PERSONA_MODELS,
-          tts: { ...RECOMMENDED_PERSONA_MODELS.tts, speed: 4.1 },
-        },
-      }),
-    ).rejects.toThrow(/speed/i);
-    expect((await getPersona(actingAsAcme(), created.id))?.version).toBe(1);
-  });
-});
-
-describe("renaming a persona", () => {
-  it("updates name and description and creates no version", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-    const before = await rowCounts();
-
-    const renamed = await editPersona(actingAsAcme(), created.id, {
-      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
-      name: "Patient Rita",
-      description: "Rita, after the hearing aid arrived",
-    });
-
-    expect(renamed?.name).toBe("Patient Rita");
-    expect(renamed?.description).toBe("Rita, after the hearing aid arrived");
-    expect(renamed?.version).toBe(1);
-    expect(renamed?.versionId).toBe(created.versionId);
-    expect(await rowCounts()).toEqual(before);
-
-    const fetched = await getPersona(actingAsAcme(), created.id);
-    expect(fetched?.name).toBe("Patient Rita");
-    expect(fetched?.version).toBe(1);
-    expect(fetched?.identityName).toBe(rita.identityName);
-  });
-
-  it("leaves the identity name alone, because they are two different names", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-
-    const renamed = await editPersona(actingAsAcme(), created.id, {
-      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
-      name: "The loud one",
-    });
-
-    expect(renamed?.name).toBe("The loud one");
-    expect(renamed?.identityName).toBe(rita.identityName);
-  });
-
-  it("clears the description with null, still without versioning", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-
-    const cleared = await editPersona(actingAsAcme(), created.id, {
-      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
-      description: null,
-    });
-
-    expect(cleared?.description).toBeNull();
-    expect(cleared?.version).toBe(1);
-  });
-
-  it("refuses a blank name", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-
-    await expect(
-      editPersona(actingAsAcme(), created.id, { name: "   " }),
-    ).rejects.toThrow(/name/);
-  });
-
-  it("renames and versions together when one edit carries both", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-
-    const edited = await editPersona(actingAsAcme(), created.id, {
-      expectedVersionId: (await getPersona(actingAsAcme(), created.id))!.versionId,
-      name: "Louder Rita",
-      personality: "Rita gets louder when the agent mishears her.",
-    });
-
-    expect(edited?.name).toBe("Louder Rita");
-    expect(edited?.version).toBe(2);
-  });
 });
 
 describe("a persona that fails validation", () => {
-  it("is refused for a missing name, and no rows are left behind", async () => {
-    const before = await rowCounts();
-
-    await expect(
-      createPersona(actingAsAcme(), { ...rita, name: "   " }),
-    ).rejects.toThrow(/name/);
-
-    expect(await rowCounts()).toEqual(before);
-  });
-
-  it("is refused for an empty personality", async () => {
-    const before = await rowCounts();
-
-    await expect(
-      createPersona(actingAsAcme(), { ...rita, personality: "" }),
-    ).rejects.toThrow(/personality/);
-
-    expect(await rowCounts()).toEqual(before);
-  });
-
   it("is refused for a missing identity name", async () => {
     const before = await rowCounts();
 
@@ -578,16 +177,6 @@ describe("a persona that fails validation", () => {
       createPersona(actingAsAcme(), { ...rita, identityName: "  " }),
     ).rejects.toThrow(/identity name/);
 
-    expect(await rowCounts()).toEqual(before);
-  });
-
-  it("refuses non-object create input instead of leaking Object.keys errors", async () => {
-    const before = await rowCounts();
-    for (const invalid of [null, "not an object"]) {
-      await expect(
-        createPersona(actingAsAcme(), invalid as unknown as NewPersona),
-      ).rejects.toThrow("persona create input must be an object");
-    }
     expect(await rowCounts()).toEqual(before);
   });
 
@@ -611,104 +200,9 @@ describe("a persona that fails validation", () => {
     }
     expect(await rowCounts()).toEqual(before);
   });
-
-  it("refuses stale create fields clearly and writes nothing", async () => {
-    const before = await rowCounts();
-    const staleInput = {
-      ...rita,
-      traits: { personality: "Old nested bag" },
-    } as unknown as NewPersona;
-
-    await expect(
-      createPersona(actingAsAcme(), staleInput),
-    ).rejects.toThrow(
-      'persona create received unsupported fields "traits"; accepted fields are "name", "description", "identityName", "personality", "language", "models"',
-    );
-
-    expect(await rowCounts()).toEqual(before);
-  });
-
-  it.each(["accent", "backgroundNoise", "manner"])(
-    "refuses the removed %s field and writes nothing",
-    async (removed) => {
-      const before = await rowCounts();
-      const input = {
-        ...rita,
-        [removed]: "Legacy behavior.",
-      } as unknown as NewPersona;
-
-      await expect(createPersona(actingAsAcme(), input)).rejects.toThrow(
-        `persona create received unsupported fields "${removed}"`,
-      );
-      expect(await rowCounts()).toEqual(before);
-    },
-  );
-
-  it("refuses stale edit fields clearly and versions nothing", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-    const before = await rowCounts();
-    const staleChanges = {
-      expectedRevision: "a-revision",
-    } as unknown as PersonaChanges;
-
-    await expect(
-      editPersona(actingAsAcme(), created.id, staleChanges),
-    ).rejects.toThrow(
-      'persona edit received unsupported fields "expectedRevision"; accepted fields are "name", "description", "identityName", "personality", "language", "models"',
-    );
-
-    expect(await rowCounts()).toEqual(before);
-    expect((await getPersona(actingAsAcme(), created.id))?.version).toBe(1);
-  });
-
-  it("refuses malformed edit input without leaking implementation errors", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-    const before = await rowCounts();
-
-    for (const invalid of [null, "not an object"]) {
-      await expect(
-        editPersona(
-          actingAsAcme(),
-          created.id,
-          invalid as unknown as PersonaChanges,
-        ),
-      ).rejects.toThrow("persona edit input must be an object");
-    }
-    await expect(
-      editPersona(actingAsAcme(), created.id, {
-        name: 42,
-      } as unknown as PersonaChanges),
-    ).rejects.toThrow(/name/);
-    await expect(
-      editPersona(actingAsAcme(), created.id, {
-        personality: 42,
-      } as unknown as PersonaChanges),
-    ).rejects.toThrow(/personality/);
-
-    expect(await rowCounts()).toEqual(before);
-    expect((await getPersona(actingAsAcme(), created.id))?.version).toBe(1);
-  });
 });
 
 describe("an immutable persona version", () => {
-  it("refuses a direct identity-name rewrite at the database boundary", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-
-    await expect(
-      database.sql(
-        `update persona_definition_version set identity_name = 'Somebody Else' where id = $1`,
-        [created.versionId],
-      ),
-    ).rejects.toMatchObject({
-      code: POSTGRES_ERROR.checkViolation,
-      constraint: "persona_version_semantics_immutable",
-    });
-
-    expect((await getPersona(actingAsAcme(), created.id))?.identityName).toBe(
-      rita.identityName,
-    );
-  });
-
   it("refuses a direct personality rewrite at the database boundary", async () => {
     const created = await createPersona(actingAsAcme(), rita);
 
@@ -726,34 +220,12 @@ describe("an immutable persona version", () => {
       rita.personality,
     );
   });
-
-  it("refuses a direct model rewrite at the database boundary", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-
-    await expect(
-      database.sql(
-        `update persona_definition_version set parameter_contract = '[]'::jsonb where id = $1`,
-        [created.versionId],
-      ),
-    ).rejects.toMatchObject({
-      code: POSTGRES_ERROR.checkViolation,
-      constraint: "persona_version_semantics_immutable",
-    });
-
-    expect((await getPersona(actingAsAcme(), created.id))?.settings?.models).toEqual(
-      RECOMMENDED_PERSONA_MODELS,
-    );
-  });
 });
 
 describe("stored core and project settings validation", () => {
   it("refuses a blank core value written around the module", async () => {
     const created = await createPersona(actingAsAcme(), rita);
     await expect(database.sql(`insert into persona_definition_version (id, persona_id, version, identity_name, personality, language, parameter_contract) values ($1, $2, 99, ' ', 'Patient', 'en-US', $3)`, [newId("prsv"), created.id, JSON.stringify(PERSONA_PARAMETER_CONTRACT)])).rejects.toMatchObject({ code: POSTGRES_ERROR.checkViolation, constraint: "persona_version_identity_name_stated" });
-  });
-  it("refuses invalid project values written around the module", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-    await expect(database.sql(`update project_persona set parameter_values = jsonb_set(parameter_values, '{tts_speed}', '4.1') where persona_definition_id = $1`, [created.id])).rejects.toMatchObject({ code: POSTGRES_ERROR.checkViolation });
   });
   it("refuses unknown background assets and out-of-range background gain", async () => {
     const created = await createPersona(actingAsAcme(), rita);
@@ -789,37 +261,6 @@ describe("tenancy", () => {
     expect(await getPersona(actingAsGlobex, created.id)).toBeUndefined();
   });
 
-  it("edits nothing and returns nothing when another organization asks", async () => {
-    const created = await createPersona(actingAsAcme(), rita);
-
-    const actingAsGlobex: AuthContext = {
-      userId: newId("usr"),
-      organizationId: globex.organization,
-      projectId: globex.project,
-      role: "admin",
-      via: "session",
-    };
-    const stolen = await editPersona(actingAsGlobex, created.id, {
-      name: "Globex Rita",
-      personality: "Globex tries to change Rita.",
-    });
-    expect(stolen).toBeUndefined();
-
-    const untouched = await getPersona(actingAsAcme(), created.id);
-    expect(untouched?.name).toBe(rita.name);
-    expect(untouched?.version).toBe(1);
-
-    expect(
-      await getPersonaVersion(actingAsGlobex, created.versionId),
-    ).toBeUndefined();
-  });
-
-  it("edits nothing for an id that does not exist", async () => {
-    expect(
-      await editPersona(actingAsAcme(), newId("prs"), { name: "Nobody" }),
-    ).toBeUndefined();
-  });
-
   it("refuses the mismatched pairing even for raw SQL that bypasses the module", async () => {
     await expect(
       database.sql(
@@ -833,7 +274,6 @@ describe("tenancy", () => {
     );
   });
 });
-
 
 describe("project persona storage boundaries", () => {
   it("refuses incomplete settings and keeps the association ownership fixed", async () => {

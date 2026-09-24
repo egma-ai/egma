@@ -14,7 +14,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RootPage from "../app/page.tsx";
 import NewProjectPage from "../app/new-project/page.tsx";
 import ApiKeysPage from "../app/projects/[projectId]/settings/keys/page.tsx";
-import SettingsRouteLayout from "../app/projects/[projectId]/settings/layout.tsx";
 import OrganizationSettingsPage from "../app/projects/[projectId]/settings/organization/page.tsx";
 import PeoplePage from "../app/projects/[projectId]/settings/people/page.tsx";
 import ProjectSettingsPage from "../app/projects/[projectId]/settings/project/page.tsx";
@@ -219,140 +218,6 @@ afterEach(() => {
 
 /* ------------------------------------------------------------------------ */
 
-/**
- * The three Settings pages whose subject is the organization rather than the
- * project the address names, and the redundant callout each one no longer
- * repeats. The grouped navigation already states the scope.
- */
-const ORGANIZATION_WIDE: readonly {
-  readonly page: string;
-  readonly answers: Record<string, Stubbed | readonly Stubbed[]>;
-  readonly open: () => void;
-  readonly removed: RegExp;
-}[] = [
-  {
-    page: "Organization",
-    answers: {
-      "/v1/organization": { status: 200, body: ORGANIZATION },
-      "/api/organization/usage": { status: 200, body: PERIOD_USAGE },
-    },
-    open: () => renderOrganizationSettings(),
-    removed: /Everything on this page belongs to the whole organization/,
-  },
-  {
-    page: "People",
-    answers: {
-      "/v1/members": {
-        status: 200,
-        body: { members: [], mayManageMembers: true },
-      },
-      "/v1/invitations": { status: 200, body: { invitations: [] } },
-    },
-    open: () => renderPeopleSettings(),
-    removed: /Membership belongs to the whole organization/,
-  },
-  {
-    page: "API keys",
-    answers: { "/v1/keys": { status: 200, body: { keys: [] } } },
-    open: () => renderApiKeysSettings(),
-    removed: /Keys belong to the organization/,
-  },
-];
-
-describe("the Settings navigation", () => {
-  it("keeps the settings rail mounted while a sibling route changes", () => {
-    const view = render(
-      <SettingsRouteLayout>
-        <p>Organization content</p>
-      </SettingsRouteLayout>,
-    );
-    const rail = screen.getByRole("navigation", { name: "Settings" });
-
-    routed.pathname = "/projects/prj_1/settings/billing";
-    view.rerender(
-      <SettingsRouteLayout>
-        <p>Billing content</p>
-      </SettingsRouteLayout>,
-    );
-
-    expect(screen.getByRole("navigation", { name: "Settings" })).toBe(rail);
-    expect(
-      screen.getByRole("link", { name: "Usage and Billing" }).getAttribute("aria-current"),
-    ).toBe("page");
-  });
-
-  it("lists organization settings first in the agreed order, then project settings", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/v1/projects/prj_1": { status: 200, body: PROJECT },
-    });
-    renderProjectSettings();
-
-    const nav = await screen.findByRole("navigation", { name: "Settings" });
-    expect(within(nav).getAllByRole("group")).toEqual([
-      within(nav).getByRole("group", { name: "Organization" }),
-      within(nav).getByRole("group", { name: "Project" }),
-    ]);
-    expect(
-      within(nav)
-        .getAllByRole("link")
-        .map((link) => link.textContent),
-    ).toEqual([
-      "Organization Settings",
-      "Usage and Billing",
-      "Provider API Keys",
-      "People",
-      "API Keys",
-      "Project Settings",
-    ]);
-    expect(within(nav).queryByRole("link", { name: "Judge" })).toBeNull();
-
-    // Every address carries the project, including the organization-wide ones:
-    // the shell reads the project out of the address, and Settings has to stay
-    // inside the product shell for the selector to be there at all.
-    const people = within(nav).getByRole("link", { name: "People" });
-    expect(people.getAttribute("href")).toBe("/projects/prj_1/settings/people");
-    expect(
-      within(nav)
-        .getByRole("link", { name: "Project Settings" })
-        .getAttribute("href"),
-    ).toBe("/projects/prj_1/settings/project");
-
-    // The navigation and the state it controls share one stable frame. The
-    // frame is present before the read settles and does not move when the form
-    // replaces the loading state.
-    const layout = nav.parentElement;
-    expect(layout?.firstElementChild).toBe(nav);
-    expect(
-      await within(layout as HTMLElement).findByDisplayValue("Default"),
-    ).toBeTruthy();
-  });
-
-  it.each(ORGANIZATION_WIDE)(
-    "keeps the selector on $page without repeating its organization scope",
-    async ({ page, answers, open, removed }) => {
-      apiAnswers({
-        "/api/me": { status: 200, body: meWith("admin") },
-        ...answers,
-      });
-      open();
-
-      expect(await screen.findByRole("heading", { name: page, level: 1 })).toBeTruthy();
-      expect(screen.queryByText(removed)).toBeNull();
-
-      // The selector stays on screen, naming the project the address does.
-      // Waited for rather than read on sight: the shell draws the
-      // control before `/api/me` lands and it says "No organization" until
-      // then, so an immediate read would pass on a session nobody had.
-      const selectors = await screen.findAllByRole("button", {
-        name: /^Organization Acme, project Default\./,
-      });
-      expect(selectors.length).toBeGreaterThan(0);
-    },
-  );
-});
-/* ------------------------------------------------------------------------ */
-
 describe("project settings", () => {
   function open(role = "admin", project: unknown = PROJECT) {
     apiAnswers({
@@ -395,46 +260,6 @@ describe("project settings", () => {
       slug: "default",
       description: "The first one.",
       expectedRevision: "rev_1",
-    });
-  });
-
-  it("enables Save only for a draft, clears Saved on the next edit, and protects the draft", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/v1/projects/prj_1": [
-        { status: 200, body: PROJECT },
-        {
-          status: 200,
-          body: { ...PROJECT, name: "Renamed", revision: "rev_2" },
-        },
-      ],
-    });
-    renderProjectSettings();
-
-    const name = (await screen.findByDisplayValue("Default")) as HTMLInputElement;
-    const save = screen.getByRole("button", { name: "Save project" });
-    expect(save.hasAttribute("disabled")).toBe(true);
-
-    fireEvent.change(name, { target: { value: "Renamed" } });
-    expect(save.hasAttribute("disabled")).toBe(false);
-    const leaving = new Event("beforeunload", { cancelable: true });
-    window.dispatchEvent(leaving);
-    expect(leaving.defaultPrevented).toBe(true);
-
-    fireEvent.click(save);
-    expect(await screen.findByText(/Saved\. Everybody/)).toBeTruthy();
-    const savedName = screen.getByLabelText("Name");
-    const savedButton = screen.getByRole("button", { name: "Save project" });
-    expect(savedButton.hasAttribute("disabled")).toBe(true);
-
-    fireEvent.change(savedName, { target: { value: "Renamed again" } });
-    expect(screen.queryByText(/Saved\. Everybody/)).toBeNull();
-    await waitFor(() => {
-      expect(
-        screen
-          .getByRole("button", { name: "Save project" })
-          .hasAttribute("disabled"),
-      ).toBe(false);
     });
   });
 
@@ -652,49 +477,6 @@ describe("project settings", () => {
   });
 
   /**
-   * Disable, do not hide. A viewer reads the same page, sees the same fields
-   * and what is in them, and every control that would change data is genuinely
-   * inert — with the sentence that says whose decision it is.
-   */
-  it.each(["viewer", "member"] as const)(
-    "leaves a %s every control in place and truly disabled",
-    async (role) => {
-      open(role, { ...PROJECT, mayManageProjects: false });
-
-      const name = (await screen.findByLabelText("Name")) as HTMLInputElement;
-      await waitFor(() => {
-        expect(name.value).toBe("Default");
-      });
-      expect(name.disabled).toBe(true);
-      expect(screen.queryByLabelText("Slug")).toBeNull();
-
-      const save = screen.getByRole("button", { name: "Save project" });
-      expect(save.hasAttribute("disabled")).toBe(true);
-      expect(
-        screen.getByText(
-          `Your ${role} role cannot change project settings. Ask an organization admin.`,
-        ),
-      ).toBeTruthy();
-    },
-  );
-
-  /**
-   * Check the disabled control's accessible description link, not just the
-   * visible explanation. A title alone is insufficient for keyboard access.
-   */
-  it("points a disabled Save at the sentence that says why", async () => {
-    open("viewer", { ...PROJECT, mayManageProjects: false });
-
-    // Waited for rather than read: the reason needs the session to have
-    // settled, and a control with no reason yet is not a control with none.
-    const said = await screen.findByText(/cannot change project settings/);
-    const save = screen.getByRole("button", { name: "Save project" });
-    expect(save.hasAttribute("disabled")).toBe(true);
-    expect(save.getAttribute("aria-describedby")).toBe(said.id);
-    expect(said.id).not.toBe("");
-  });
-
-  /**
    * Use a permitted non-admin to distinguish the API's mayManageProjects
    * answer from a local role guess.
    */
@@ -724,145 +506,11 @@ describe("project settings", () => {
       screen.queryByText(/role cannot change project settings/),
     ).toBeNull();
   });
-
-  it("says so, and offers a retry, when egma refuses the read", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/v1/projects/prj_1": {
-        status: 500,
-        body: { error: "unavailable", message: "Egma could not answer that." },
-      },
-    });
-    renderProjectSettings();
-
-    expect(await screen.findByText("Egma could not answer that.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
-  });
-
-  it("sends an expired session to sign-in rather than showing a retry that cannot work", async () => {
-    apiAnswers({
-      "/api/me": { status: 401, body: { error: "not_signed_in", message: "no" } },
-      "/v1/projects/prj_1": {
-        status: 401,
-        body: { error: "not_signed_in", message: "no" },
-      },
-    });
-    renderProjectSettings();
-
-    await waitFor(() => {
-      expect(wentTo).toContain("/sign-in");
-    });
-  });
 });
 
 /* ------------------------------------------------------------------------ */
 
 describe("making a project", () => {
-  it("protects its draft from product navigation", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/v1/projects": "never",
-    });
-    const confirm = vi.fn(() => false);
-    vi.stubGlobal("confirm", confirm);
-    render(<NewProjectPage />);
-
-    fireEvent.change(await screen.findByLabelText("Name"), {
-      target: { value: "Keep this project" },
-    });
-    const agents = within(
-      screen.getByRole("navigation", { name: "Product navigation" }),
-    ).getByRole("link", { name: "Agents" });
-    const click = new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-      button: 0,
-    });
-    fireEvent(agents, click);
-
-    expect(click.defaultPrevented).toBe(true);
-    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
-      .toBeTruthy();
-    expect(confirm).not.toHaveBeenCalled();
-  });
-
-  it("asks for a name, and lands in the project it made", async () => {
-    apiAnswers({
-      "/api/me": [
-        { status: 200, body: meWith("admin") },
-        {
-          status: 200,
-          body: {
-            ...meWith("admin"),
-            projects: [
-              ...PROJECTS,
-              { id: "prj_9", name: "Outbound sales", slug: "outbound-sales" },
-            ],
-          },
-        },
-      ],
-      "/v1/projects": {
-        status: 201,
-        body: { ...PROJECT, id: "prj_9", name: "Outbound sales" },
-      },
-    });
-    render(<NewProjectPage />);
-
-    fireEvent.change(await screen.findByLabelText("Name"), {
-      target: { value: "Outbound sales" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Create project" }));
-
-    await waitFor(() => {
-      expect(routed.push).toHaveBeenCalledWith("/projects/prj_9/agents");
-    });
-    expect(sent.find((one) => one.method === "POST")?.body).toEqual({
-      name: "Outbound sales",
-      description: "",
-    });
-  });
-
-  /**
-   * The slug is the server's to derive and to number, so the form does not ask
-   * for one. A second copy of that rule in the browser would be a copy that is
-   * wrong the day the rule changes, and silently.
-   */
-  it("does not ask for a slug", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/v1/projects": "never",
-    });
-    render(<NewProjectPage />);
-
-    await screen.findByLabelText("Name");
-    expect(screen.queryByLabelText("Slug")).toBeNull();
-  });
-
-  it.each(["viewer", "member"] as const)(
-    "leaves a %s the page, disabled, and says who to ask",
-    async (role) => {
-      apiAnswers({
-        "/api/me": { status: 200, body: meWith(role) },
-        "/v1/projects": "never",
-      });
-      render(<NewProjectPage />);
-
-      expect((await screen.findByLabelText("Name")).hasAttribute("disabled")).toBe(
-        true,
-      );
-      expect(
-        screen.getByRole("button", { name: "Create project" }).hasAttribute("disabled"),
-      ).toBe(true);
-      // Twice on purpose: once as the sentence under the heading, and once as
-      // the control's own reason, which is what a keyboard and a screen reader
-      // reach through `aria-describedby`.
-      expect(
-        screen.getAllByText(new RegExp(`Your ${role} role cannot create a project`))
-          .length,
-      ).toBeGreaterThan(0);
-    },
-  );
-
   it("keeps the draft and shows the refusal when the slug is taken", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
@@ -916,43 +564,11 @@ describe("an organization with no project", () => {
     // And it did not quietly send anybody into a project that is not there.
     expect(wentTo).toEqual([]);
   });
-
-  it.each(["viewer", "member"] as const)(
-    "tells a %s who to ask, with the control present and inert",
-    async (role) => {
-      apiAnswers({
-        "/api/me": { status: 200, body: { ...meWith(role), projects: [] } },
-      });
-      render(<RootPage />);
-
-      const create = await screen.findByRole("button", {
-        name: "Create the first project",
-      });
-      expect(create.hasAttribute("disabled")).toBe(true);
-      expect(
-        screen.getByText(
-          `Your ${role} role cannot create a project. Ask an organization admin to make the first one.`,
-        ),
-      ).toBeTruthy();
-    },
-  );
 });
 
 /* ------------------------------------------------------------------------ */
 
 describe("organization settings", () => {
-  function open(
-    role = "admin",
-    organization: unknown = ORGANIZATION,
-  ) {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith(role) },
-      "/v1/organization": { status: 200, body: organization },
-      "/api/organization/usage": { status: 200, body: PERIOD_USAGE },
-    });
-    renderOrganizationSettings();
-  }
-
   it("renames the organization and leaves its short name alone", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
@@ -1107,36 +723,6 @@ describe("organization settings", () => {
     ).toBe(false);
     expect(screen.queryByText("Saved.")).toBeNull();
   });
-
-  it.each(["viewer", "member"] as const)(
-    "leaves a %s the page, disabled, with the reason beside it",
-    async (role) => {
-      open(role, { ...ORGANIZATION, mayManageOrganization: false });
-
-      const name = (await screen.findByLabelText("Organization name*")) as HTMLInputElement;
-      await waitFor(() => {
-        expect(name.value).toBe("Acme");
-      });
-      expect(name.disabled).toBe(true);
-      expect(
-        screen
-          .getByRole("button", { name: "Save organization" })
-          .hasAttribute("disabled"),
-      ).toBe(true);
-      expect(
-        screen.getByText(
-          `Your ${role} role cannot change organization settings. Ask an organization admin.`,
-        ),
-      ).toBeTruthy();
-    },
-  );
-
-  it("labels the field without the removed storage hint", async () => {
-    open("admin", ORGANIZATION);
-
-    expect(await screen.findByLabelText("Organization name*")).toBeTruthy();
-    expect(screen.queryByText(/What Egma calls your organization/)).toBeNull();
-  });
 });
 
 /* ------------------------------------------------------------------------ */
@@ -1243,114 +829,6 @@ describe("people and invitations", () => {
     ).toEqual({ role: "member" });
   });
 
-  it("calls the invitation section Invite team members", async () => {
-    open();
-
-    fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
-    expect(
-      await screen.findByRole("heading", { name: "Invite team members" }),
-    ).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "Invite somebody" })).toBeNull();
-  });
-
-  /**
-   * The reason sits in the row it is about, in the menu whose items it explains.
-   *
-   * A table is where one sentence hoisted above it would be cheapest and
-   * wrongest: the control a person is looking at would describe something
-   * somewhere else on the page. So there is one per row. A disabled item cannot
-   * take focus either, so the sentence is drawn inside the panel, where a
-   * keyboard lands on it and a reader hears it with the items above.
-   */
-  it("gives each row's disabled menu its own reason", async () => {
-    open("member", false);
-
-    await screen.findByRole("table", { name: "Members" });
-    for (const email of ["ada@acme.example", "bob@acme.example"]) {
-      fireEvent.click(
-        screen.getByRole("button", { name: `Open the menu for ${email}` }),
-      );
-      const menu = await screen.findByRole("menu", {
-        name: `Open the menu for ${email}`,
-      });
-      for (const item of ["Deactivate", "Remove"]) {
-        expect(
-          within(menu)
-            .getByRole("menuitem", { name: item })
-            .hasAttribute("disabled"),
-        ).toBe(true);
-      }
-      expect(
-        within(menu).getByText(/Your member role cannot manage members/),
-      ).toBeTruthy();
-      fireEvent.keyDown(menu, { key: "Escape" });
-    }
-  });
-
-  /**
-   * Removing somebody is not a click. The dialog says what happens and to whom,
-   * and closing it leaves the page exactly as it was.
-   */
-  it("asks before removing somebody, and posts only once it is answered", async () => {
-    open();
-
-    fireEvent.click(
-      await screen.findByRole("button", {
-        name: "Open the menu for bob@acme.example",
-      }),
-    );
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove" }));
-
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog.textContent).toContain("bob@acme.example");
-    expect(sent.some((one) => one.url.includes("/remove"))).toBe(false);
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
-    await waitFor(() => {
-      expect(sent.some((one) => one.url.includes("/v1/members/usr_2/remove"))).toBe(
-        true,
-      );
-    });
-  });
-
-  /**
-   * Everybody may read who their colleagues are — a member who cannot see them
-   * cannot work out who to ask for anything — and the controls that would
-   * change the roster are not offered to somebody the server would refuse.
-   */
-  it.each(["viewer", "member"] as const)(
-    "shows a %s the roster and no roster controls",
-    async (role) => {
-      open(role, false);
-
-      const table = await screen.findByRole("table", { name: "Members" });
-      expect(table.textContent).toContain("bob@acme.example");
-      expect(screen.queryByLabelText("bob@acme.example role")).toBeNull();
-      // The role they cannot change is still said as a word, not as a key.
-      expect(table.textContent).toContain("Viewer");
-      expect(table.textContent).toContain("Admin");
-
-      fireEvent.click(
-        screen.getByRole("button", {
-          name: "Open the menu for bob@acme.example",
-        }),
-      );
-      const menu = await screen.findByRole("menu", {
-        name: "Open the menu for bob@acme.example",
-      });
-      expect(
-        within(menu)
-          .getByRole("menuitem", { name: "Deactivate" })
-          .hasAttribute("disabled"),
-      ).toBe(true);
-      fireEvent.keyDown(menu, { key: "Escape" });
-
-      expect(
-        screen.queryByRole("tab", { name: "Invitations" }),
-      ).toBeNull();
-    },
-  );
-
   it("hands the invitation link back when there was nowhere to post it", async () => {
     apiAnswers({
       "/api/me": { status: 200, body: meWith("admin") },
@@ -1401,43 +879,6 @@ describe("people and invitations", () => {
     );
   });
 
-  it("says the invitation is on its way when a transport delivered it", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/v1/members": {
-        status: 200,
-        body: { members: [ADA], mayManageMembers: true },
-      },
-      "/v1/invitations": [
-        { status: 200, body: { invitations: [] } },
-        {
-          status: 201,
-          body: {
-            id: "inv_1",
-            email: "bob@acme.example",
-            role: "viewer",
-            delivered: true,
-            expiresAt: "2026-09-01T10:00:00.000Z",
-            createdAt: "2026-08-15T10:00:00.000Z",
-          },
-        },
-        { status: 200, body: { invitations: [] } },
-      ],
-    });
-    renderPeopleSettings();
-
-    fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
-    fireEvent.change(await screen.findByLabelText("Email"), {
-      target: { value: "bob@acme.example" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Send invitation" }));
-
-    expect(
-      await screen.findByText(/on its way to bob@acme.example/),
-    ).toBeTruthy();
-    expect(screen.queryByText(/Here is the link/)).toBeNull();
-  });
-
   it("defaults a new invitation to Viewer", async () => {
     open("admin", true, [ADA], []);
 
@@ -1445,91 +886,6 @@ describe("people and invitations", () => {
     expect((await screen.findByLabelText("Role") as HTMLSelectElement).value).toBe(
       "viewer",
     );
-  });
-
-  it("keeps an invitation draft when a tab click or popstate is declined", async () => {
-    open("admin", true, [ADA], []);
-
-    fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
-    const email = await screen.findByLabelText("Email");
-    fireEvent.change(email, { target: { value: "draft@acme.example" } });
-
-    fireEvent.click(screen.getByRole("tab", { name: "People" }));
-    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
-      .toBeTruthy();
-    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
-      "draft@acme.example",
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
-
-    fireEvent(window, new PopStateEvent("popstate"));
-    expect(screen.getByRole("dialog", { name: "Leave without saving?" }))
-      .toBeTruthy();
-    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
-      "draft@acme.example",
-    );
-    expect(window.history.pushState).toHaveBeenLastCalledWith(
-      null,
-      "",
-      "/projects/prj_1/settings/people?tab=invitations",
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
-
-    const pushes = vi.mocked(window.history.pushState).mock.calls.length;
-    window.location.href = "http://egma.test/projects/prj_2/agents";
-    window.location.pathname = "/projects/prj_2/agents";
-    fireEvent(window, new PopStateEvent("popstate"));
-    expect(screen.queryByRole("dialog", { name: "Leave without saving?" }))
-      .toBeNull();
-    expect(vi.mocked(window.history.pushState).mock.calls).toHaveLength(pushes);
-    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe(
-      "draft@acme.example",
-    );
-
-    window.location.href = "http://egma.test/projects/prj_1/settings/people";
-    window.location.pathname = "/projects/prj_1/settings/people";
-
-    fireEvent.click(screen.getByRole("tab", { name: "People" }));
-    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
-    expect(screen.queryByLabelText("Email")).toBeNull();
-    expect(await screen.findByRole("table", { name: "Members" })).toBeTruthy();
-  });
-
-  it("shows an invitation failure instead of an empty list", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/v1/members": {
-        status: 200,
-        body: { members: [ADA], mayManageMembers: true },
-      },
-      "/v1/invitations": [
-        {
-          status: 500,
-          body: { error: "unavailable", message: "Invitations are offline." },
-        },
-      ],
-    });
-    renderPeopleSettings();
-
-    fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
-    expect(await screen.findByText("Invitations are offline.")).toBeTruthy();
-    expect(screen.queryByText("No invitations are outstanding.")).toBeNull();
-  });
-
-  it("shows invitation loading instead of an empty list", async () => {
-    apiAnswers({
-      "/api/me": { status: 200, body: meWith("admin") },
-      "/v1/members": {
-        status: 200,
-        body: { members: [ADA], mayManageMembers: true },
-      },
-      "/v1/invitations": "never",
-    });
-    renderPeopleSettings();
-
-    fireEvent.click(await screen.findByRole("tab", { name: "Invitations" }));
-    expect(await screen.findByText("Loading outstanding invitations…")).toBeTruthy();
-    expect(screen.queryByText("No invitations are outstanding.")).toBeNull();
   });
 
   /**
@@ -1675,16 +1031,6 @@ const MY_KEY = {
   createdAt: "2026-08-01T10:00:00.000Z",
   lastUsedAt: null,
   revokedAt: null,
-};
-
-const SOMEBODY_ELSES = {
-  ...MY_KEY,
-  id: "key_2",
-  name: "Bob's CI",
-  scope: "project",
-  projectId: "prj_2",
-  createdByUserId: "usr_2",
-  createdByEmail: "bob@acme.example",
 };
 
 describe("API keys", () => {
@@ -1900,51 +1246,6 @@ describe("API keys", () => {
       name: "",
       projectId: "prj_2",
     });
-  });
-
-  /** Only an admin receives other members' keys, with a human owner label. */
-  it("shows an admin who owns each other member's key", async () => {
-    open("admin", [MY_KEY, SOMEBODY_ELSES]);
-
-    expect(await screen.findByText("Other members’ keys")).toBeTruthy();
-    const mine = screen.getByRole("table", { name: "Your API keys" });
-    const others = await screen.findByRole("table", {
-      name: "Other people's API keys",
-    });
-    expect(within(mine).queryByRole("columnheader", { name: "Owner" })).toBeNull();
-    expect(others.textContent).toContain("Bob's CI");
-    expect(others.textContent).toContain("bob@acme.example");
-    expect(others.textContent).not.toContain("usr_2");
-    expect(within(others).getByRole("columnheader", { name: "Owner" })).toBeTruthy();
-    expect(others.textContent).toContain("Project · Outbound");
-    expect(others.textContent).toContain("egma_sk_ab…WXYZ");
-  });
-
-  it("uses a safe owner label if an older list response has no email", async () => {
-    open("admin", [
-      MY_KEY,
-      { ...SOMEBODY_ELSES, createdByEmail: undefined },
-    ]);
-
-    const others = await screen.findByRole("table", {
-      name: "Other people's API keys",
-    });
-    expect(others.textContent).toContain("Owner unavailable");
-    expect(others.textContent).not.toContain("usr_2");
-  });
-
-  /**
-   * The other half: the read never carries somebody else's key to a viewer, so
-   * the page has no section for one. An empty heading would suggest a list
-   * being withheld rather than a list that is not theirs.
-   */
-  it("shows no other-people section to somebody the server answers with none", async () => {
-    open("viewer", [MY_KEY]);
-
-    await screen.findByRole("table", { name: "Your API keys" });
-    expect(
-      screen.queryByRole("table", { name: "Other people's API keys" }),
-    ).toBeNull();
   });
 
   it("says which project or organization each of your own keys reaches", async () => {

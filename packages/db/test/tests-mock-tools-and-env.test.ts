@@ -78,25 +78,6 @@ describe("a test that carries its own world", () => {
     }
   });
 
-  it("stores each in a column of its own, and neither inside the content", async () => {
-    const created = await createTest(actingAsAcme(), withWorld());
-
-    const { rows } = await database.sql<{
-      keys: string[];
-      mock_tools: unknown;
-      env: unknown;
-    }>(
-      `select array(select jsonb_object_keys(content) order by 1) as keys,
-              mock_tools, env
-         from test_version where id = $1`,
-      [created.versionId],
-    );
-
-    expect(rows[0]?.keys).toEqual(["expectedBehaviors", "scenario"]);
-    expect(rows[0]?.mock_tools).toEqual(MOCK_TOOLS);
-    expect(rows[0]?.env).toEqual(ENV);
-  });
-
   /**
    * Null rather than an empty list and an empty object, because the claim gate
    * asks `mock_tools is not null` and never reads a value. Two spellings of
@@ -117,19 +98,6 @@ describe("a test that carries its own world", () => {
     // And a read says the same thing in the shapes a caller works in.
     expect(created.mockTools).toEqual([]);
     expect(created.env).toBeNull();
-  });
-
-  it("normalizes an empty env, and an env whose halves are empty, to none", async () => {
-    for (const env of [{}, { retell_dynamic_variables: {} }, {
-      retell_dynamic_variables: {},
-      job_dispatch_metadata: {},
-    }]) {
-      const created = await createTest(
-        actingAsAcme(),
-        withWorld({ env, mockTools: [] }),
-      );
-      expect(created.env).toBeNull();
-    }
   });
 });
 

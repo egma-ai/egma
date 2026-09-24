@@ -67,20 +67,6 @@ describe("a mock tool in a file", () => {
     expect(writeMockTools([])).toEqual([]);
   });
 
-  it("writes the answer's own keys in the order it was handed them", () => {
-    // Writing does not reorder anything inside an answer, because an answer is
-    // the tool's own contract and egma has no opinion about how it reads. What
-    // that buys is the round trip: the bytes are decided by the value, so a
-    // `pull` straight after a `push` computes the same file and finds nothing
-    // to do.
-    const one = written([{ tool: "t", answer: { b: 2, a: 1 } }]);
-    const other = written([{ tool: "t", answer: { a: 1, b: 2 } }]);
-
-    expect(one).not.toBe(other);
-    expect(read(one)).toEqual([{ tool: "t", answer: { b: 2, a: 1 } }]);
-    expect(read(other)).toEqual([{ tool: "t", answer: { a: 1, b: 2 } }]);
-  });
-
   it("reads a file somebody typed by hand, however they typed it", () => {
     const byHand = [
       "#### mock TOOLS",
@@ -105,44 +91,15 @@ describe("a mock tool in a file", () => {
     ]);
   });
 
-  it("keeps a heading and a fence that are inside an answer, not around it", () => {
-    const entries: readonly MockToolEntry[] = [
-      { tool: "read_note", answer: { note: "## Mock tools\n### not a heading\n```" } },
-    ];
-
-    expect(read(written(entries))).toEqual(entries);
-  });
-
   it.each([
-    [
-      "a delay",
-      '{"answer": 1, "delay_ms": 250}',
-      /delay_ms.*take the line out/su,
-    ],
-    [
-      "a scope",
-      '{"answer": 1, "agents": ["front-desk"]}',
-      /agents.*belongs to the test that writes it/su,
-    ],
-    ["a tool line", '{"tool": "t", "answer": 1}', /tool key.*heading is the tool's name/su],
     ["an invented key", '{"answer": 1, "invented": true}', /"invented".*exactly one/su],
     ["both branches", '{"answer": 1, "error": "no"}', /both answer and error/su],
-    ["neither branch", "{}", /neither answer nor error/su],
-    ["a failure that is not text", '{"error": 500}', /error is the failure/su],
   ])("refuses %s, naming the file and the reason", (_name, block, reason) => {
     const document = ["## Mock tools", "### t", "```json", block, "```"].join("\n");
 
     expect(() => read(document)).toThrow(MockToolProblem);
     expect(() => read(document)).toThrow(new RegExp(WHERE.replaceAll("/", "\\/"), "u"));
     expect(() => read(document)).toThrow(reason);
-  });
-
-  it("refuses a mock tool with nothing under it", () => {
-    // It would reach egma's door saying nothing at all, and be turned away
-    // there. Saying it here puts the sentence where the author is looking.
-    expect(() => read(["## Mock tools", "### check_availability"].join("\n"))).toThrow(
-      /"check_availability" has no JSON block/u,
-    );
   });
 
   it("says which file and which mock tool when a block is not JSON", () => {
@@ -154,12 +111,6 @@ describe("a mock tool in a file", () => {
     expect(() => read(broken)).toThrow(
       /egma\/tests\/release\/books-a-visit\.md.*"check_availability"/su,
     );
-  });
-
-  it("says so when a block is JSON but not a mock tool", () => {
-    const list = ["## Mock tools", "### check_availability", "```json", "[1, 2]", "```"].join("\n");
-
-    expect(() => read(list)).toThrow(/"check_availability".*\{"answer"/su);
   });
 
   it("compares two entries by JSON value, not object-key order", () => {

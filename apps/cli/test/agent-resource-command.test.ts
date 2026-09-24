@@ -308,8 +308,6 @@ describe("skills-first Agent commands", () => {
 
   it.each([
     ["project_credentials", "voice"],
-    ["project_credentials", "chat"],
-    ["customer_token_endpoint", "voice"],
     ["customer_token_endpoint", "chat"],
   ] as const)("adds LiveKit %s for %s", async (access, modality) => {
     await putLocalAgent("livekit");

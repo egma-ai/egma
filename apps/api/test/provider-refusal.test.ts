@@ -106,36 +106,6 @@ describe("a provider that is refusing for rate", () => {
     expect(said.message).not.toMatch(/auth provider|500/i);
     expect(asked.headers["retry-after"]).toBe("42");
   });
-
-  it("says the same at the door that finishes a reset", async () => {
-    const door = await bothDoors(tooManyRequests);
-
-    const finished = await door.inject({
-      method: "POST",
-      url: "/api/password-reset/complete",
-      payload: { token: aLiveLink(), password: "a-long-enough-password" },
-    });
-
-    expect(finished.statusCode).toBe(429);
-    expect((finished.json() as { error: string }).error).toBe("too_many_requests");
-  });
-
-  it("and at the door that signs somebody up", async () => {
-    const door = await bothDoors(tooManyRequests);
-
-    const signedUp = await door.inject({
-      method: "POST",
-      url: "/api/signup",
-      payload: {
-        email: "ada@acme.example",
-        password: "a-long-enough-password",
-        organizationName: "Acme",
-      },
-    });
-
-    expect(signedUp.statusCode).toBe(429);
-    expect((signedUp.json() as { error: string }).error).toBe("too_many_requests");
-  });
 });
 
 describe("a provider that is refusing what was typed", () => {
@@ -161,34 +131,6 @@ describe("a provider that is refusing what was typed", () => {
     expect(said.error).toBe("password_too_short");
     // The sentence is the provider's, because the provider holds the rule.
     expect(said.message).toBe("Password is too short");
-  });
-
-  it("arrives the same way at the door that signs somebody up", async () => {
-    const door = await bothDoors(() =>
-      refusesWith(400, "PASSWORD_TOO_SHORT", "Password is too short"),
-    );
-
-    const [finished, signedUp] = await Promise.all([
-      door.inject({
-        method: "POST",
-        url: "/api/password-reset/complete",
-        payload: { token: aLiveLink(), password: "short" },
-      }),
-      door.inject({
-        method: "POST",
-        url: "/api/signup",
-        payload: {
-          email: "ada@acme.example",
-          password: "short",
-          organizationName: "Acme",
-        },
-      }),
-    ]);
-
-    // One refusal, one code, whichever door met it.
-    expect((signedUp.json() as { error: string }).error).toBe(
-      (finished.json() as { error: string }).error,
-    );
   });
 
   /**

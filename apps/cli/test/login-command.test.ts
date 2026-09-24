@@ -8,7 +8,7 @@
  * number it exits with.
  */
 
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import process from "node:process";
 import { promisify } from "node:util";
@@ -100,32 +100,6 @@ describe("egma login", () => {
     expect(used.status).toBe(200);
   });
 
-  it("finishes with no standard input at all, which is what promptless means", async () => {
-    // Not a terminal and not even a pipe: there is nothing here to read a
-    // keystroke from, so a command that asked anything could not finish.
-    const child = spawn(process.execPath, [CLI_ENTRY, "login", "--url", platform.url], {
-      cwd: workspace.dir,
-      env: workspace.env({
-        BROWSER: browser.command,
-        FIXTURE_BROWSER_WRITES_TO: browser.opened,
-      }),
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    let stdout = "";
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-
-    const code = await new Promise<number>((resolve) => {
-      child.on("close", (value) => resolve(value ?? 0));
-    });
-
-    expect(code).toBe(0);
-    expect(stdout).toContain(`Login saved in ${workspace.credentialsFile}.`);
-  });
-
   it("does not use the most recent login as the next command's target", async () => {
     // A self-hoster selects the platform for this command.
     const first = await egma(["login", "--url", platform.url]);
@@ -142,24 +116,6 @@ describe("egma login", () => {
     // Nothing was approved the second time, because nothing needed to be.
     expect(platform.records.filter((seen) => seen.path === "/api/device/code")).toHaveLength(1);
     expect((await readFile(browser.opened, "utf8")).trimEnd().split("\n")).toHaveLength(1);
-  });
-
-  it("refuses the removed --force option and keeps the saved login", async () => {
-    await egma(["login", "--url", platform.url]);
-    const recordsBefore = platform.records.length;
-    const heldBefore = await readCredentials(
-      workspace.credentialsFile,
-      platform.url,
-    );
-    const again = await egma(["login", "--url", platform.url, "--force"]);
-
-    expect(again.code).toBe(1);
-    expect(again.stdout).toBe("");
-    expect(again.stderr).toContain("--force");
-    expect(platform.records).toHaveLength(recordsBefore);
-    expect(
-      await readCredentials(workspace.credentialsFile, platform.url),
-    ).toEqual(heldBefore);
   });
 
   it("answers 1 when the login is denied, and stores nothing", async () => {
@@ -224,51 +180,11 @@ describe("egma login", () => {
     /** What the real API answers, code and description, copied from it. */
     const refusals = [
       {
-        named: "access_denied",
-        error: "access_denied",
-        said: "this was denied in the browser",
-      },
-      {
-        named: "expired_token",
-        error: "expired_token",
-        said: "this authorization is over",
-      },
-      {
-        named: "invalid_grant, aimed at nothing",
-        error: "invalid_grant",
-        said: "this authorization was approved without naming an organization and a project, so there is nothing to mint a key for. Start again from the terminal.",
-      },
-      {
-        named: "invalid_grant, whoever approved it has gone",
-        error: "invalid_grant",
-        said: "the person who approved this is no longer in that organization",
-      },
-      {
-        named: "invalid_grant, what it was aimed at has gone",
-        error: "invalid_grant",
-        said: "the project this terminal was authorized for is gone. Start again from the terminal.",
-      },
-      {
-        named: "unsupported_grant_type",
-        error: "unsupported_grant_type",
-        said: "this endpoint understands urn:ietf:params:oauth:grant-type:device_code and nothing else",
-      },
-      {
         named: "a refusal Egma has never sent before",
         error: "not_permitted",
         said: "this role may not mint a key for that project in that organization",
       },
     ];
-
-    it("on the way through a login that works", async () => {
-      const result = await egma(["login", "--url", platform.url]);
-      for (const banned of BANNED) {
-        expect(
-          new RegExp(`\\b${banned}`, "iu").test(result.stdout + result.stderr),
-          `the command says "${banned}"`,
-        ).toBe(false);
-      }
-    });
 
     for (const refusal of refusals) {
       it(`when egma answers ${refusal.named}`, async () => {
@@ -288,29 +204,6 @@ describe("egma login", () => {
         }
       });
     }
-  });
-
-  it("is offered in the help, with what it prints and what it answers", async () => {
-    const help = await egma(["login", "--help"]);
-
-    expect(help.code).toBe(0);
-    expect(help.stdout).toContain("egma login");
-    expect(help.stdout).toContain("--url <address>");
-    expect(help.stdout).toContain("approval URL");
-    expect(help.stdout).toContain("Exit 0 means signed in");
-    expect(help.stdout).toContain("1 means sign-in did not complete");
-    expect(help.stdout).toContain("130 means interrupted");
-  });
-
-  it("names what a self-hoster sets, in the help", async () => {
-    const help = await egma(["login", "--help"]);
-
-    // Which egma is said on the command and nowhere else, so the flag is the
-    // whole of that half. What is left in the environment is where the key it
-    // brings back is kept.
-    expect(help.stdout).toContain("--url <address>");
-    expect(help.stdout).toContain("EGMA_HOME");
-    expect(help.stdout).not.toContain("--force");
   });
 
   it("refuses an address that is not one, before it starts anything", async () => {

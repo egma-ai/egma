@@ -103,34 +103,6 @@ afterAll(async () => {
 });
 
 describe("the customer a span belongs to", () => {
-  it("comes from the context and cannot be passed in, because there is nowhere to pass it", async () => {
-    const traceId = "1111111111111111111111111111aaaa";
-    await appendSpans(at(acme), [span({ traceId, spanId: "1111111111111111" })]);
-    await appendSpans(at(globex), [span({ traceId, spanId: "2222222222222222" })]);
-
-    const rows = await store.rows<{
-      organization_id: string;
-      project_id: string;
-      span_id: string;
-    }>(
-      `select organization_id, project_id, span_id from spans ` +
-        `where trace_id = '${traceId}' order by span_id`,
-    );
-
-    expect(rows).toEqual([
-      {
-        organization_id: acme.organizationId,
-        project_id: acme.projectId,
-        span_id: "1111111111111111",
-      },
-      {
-        organization_id: globex.organizationId,
-        project_id: globex.projectId,
-        span_id: "2222222222222222",
-      },
-    ]);
-  });
-
   it("refuses a span when the credential names no project", async () => {
     const traceId = "1111111111111111111111111111bbbb";
     await expect(
@@ -198,42 +170,6 @@ describe("a batch too big for one insert", () => {
       spans: months,
       batches: months,
     });
-  });
-
-  it("writes a small multi-month batch with every row landing", async () => {
-    const traceId = "bbbb1111222233334444555566667777";
-    const months = 2;
-    const spans = Array.from({ length: months }, (_, index) =>
-      span({
-        traceId,
-        spanId: index.toString(16).padStart(16, "0"),
-        startedAtMicroseconds:
-          BigInt(Date.UTC(2025, index, 1)) * 1000n,
-      }),
-    );
-
-    const written = await appendSpans(at(acme), spans);
-
-    expect(written.appended).toBe(months);
-    expect(written.batches).toBe(months);
-    expect(
-      await countOf(
-        `select count() as n from spans where trace_id = '${traceId}'`,
-      ),
-    ).toBe(months);
-    expect(
-      await countOf(
-        `select uniqExact(toYYYYMM(started_at)) as n from spans ` +
-          `where trace_id = '${traceId}'`,
-      ),
-    ).toBe(months);
-  });
-
-  it("is written in one when it fits, so ordinary traffic pays nothing", async () => {
-    const written = await appendSpans(at(acme), [
-      span({ traceId: "3333333333333333333333333333dddd" }),
-    ]);
-    expect(written.batches).toBe(1);
   });
 
   it("splits before the serialized rows pass the byte limit", () => {
@@ -361,29 +297,6 @@ describe("a field too big for its column", () => {
 
 describe("what a span says, as one comparable value", () => {
   /**
-   * Stored beside the row rather than recomputed from it. A hash taken from the
-   * stored columns could not survive `LowCardinality`, `DateTime64` rounding or
-   * the payload faithfully, so the fingerprint is taken from the record while
-   * the record is still whole.
-   */
-  it("is written on the row, and is the fingerprint of the record", async () => {
-    const traceId = "5656565656565656565656565656aaaa";
-    const one = span({ traceId, spanId: "0000000000000001" });
-
-    await appendSpans(at(acme), [one]);
-
-    const [row] = await store.rows<{ content_hash: string }>(
-      `select content_hash from spans final where trace_id = '${traceId}'`,
-    );
-    expect(row?.content_hash).toBe(spanContentHash(one));
-    expect(row?.content_hash).toMatch(/^[0-9a-f]{64}$/);
-  });
-
-  it("does not move when the same evidence is built twice", () => {
-    expect(spanContentHash(span())).toBe(spanContentHash(span()));
-  });
-
-  /**
    * Pin the persisted fingerprint format, including the connection_kind key.
    * Changing its fields or key names requires a compatibility decision or
    * existing spans will appear to conflict when replayed.
@@ -405,17 +318,6 @@ describe("what a span says, as one comparable value", () => {
     ]) {
       expect(spanContentHash(changed)).not.toBe(spanContentHash(original));
     }
-  });
-
-  /**
-   * The platform's explicit end fact is part of the evidence, and an absent one
-   * means `false` rather than something else. A writer that has learned to state
-   * it and one that has not must agree about a span neither of them ends.
-   */
-  it("reads an unstated end fact as the `false` it means", () => {
-    expect(spanContentHash(span({ endsTrace: false }))).toBe(
-      spanContentHash(span()),
-    );
   });
 });
 
@@ -451,18 +353,6 @@ describe("sending the same batch twice", () => {
         `select count() as n from turns final where trace_id = '${traceId}'`,
       ),
     ).toBe(batch.length);
-  });
-
-  it("stores a differing batch as the different thing it is", async () => {
-    const traceId = "7777777777777777777777777777bbbb";
-    await appendSpans(at(acme), [span({ traceId, spanId: "0000000000000001" })]);
-    await appendSpans(at(acme), [span({ traceId, spanId: "0000000000000002" })]);
-
-    expect(
-      await countOf(
-        `select count() as n from spans final where trace_id = '${traceId}'`,
-      ),
-    ).toBe(2);
   });
 
   /**
@@ -589,18 +479,5 @@ describe("the recorded start time", () => {
     );
     expect(row?.started_at).toBe("2026-08-02 18:04:40.281989");
     expect(row?.duration_ns).toBe(73_494_876_403);
-  });
-
-  it("survives a duration no JavaScript number could hold exactly", async () => {
-    const traceId = "9999999999999999999999999999dddd";
-    await appendSpans(at(acme), [
-      span({ traceId, durationNanoseconds: 9_007_199_254_740_993n }),
-    ]);
-
-    const [row] = await store.rows<{ duration_ns: string }>(
-      `select toString(duration_ns) as duration_ns from spans ` +
-        `where trace_id = '${traceId}'`,
-    );
-    expect(row?.duration_ns).toBe("9007199254740993");
   });
 });

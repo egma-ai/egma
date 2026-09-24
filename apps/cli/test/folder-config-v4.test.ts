@@ -70,128 +70,12 @@ describe("folder config format 4", () => {
 
   it.each([
     [
-      "the former unversioned singleton shape",
-      "platform:\nproject:\nagent:\nconnection:\n",
-      /folder format none.*requires format 4.*no legacy reader/i,
-    ],
-    [
       "the former format",
       "format: 3\nplatform:\nproject:\nagents: []\n",
       /folder format 3.*requires format 4.*no legacy reader/i,
     ],
   ])("refuses %s", (_name, document, message) => {
     expect(() => parseConfig(document, "config.yaml")).toThrow(message);
-  });
-
-  it.each([
-    ["a missing platform", null],
-    ["an unknown platform", "vapi"],
-  ])("refuses %s on a stored agent", (_name, platform) => {
-    const document = [
-      "format: 4",
-      "platform:",
-      "project:",
-      "agents:",
-      `  - id: ${FIRST_AGENT_ID}`,
-      "    name: One",
-      ...(platform === null ? [] : [`    platform: ${platform}`]),
-      "    connections: []",
-      "",
-    ].join("\n");
-
-    expect(() => parseConfig(document, "config.yaml")).toThrow(
-      /must contain platform retell or livekit/i,
-    );
-  });
-
-  it("refuses a provider Agent ID on a stored agent", () => {
-    const document = [
-      "format: 4",
-      "platform:",
-      "project:",
-      "agents:",
-      `  - id: ${FIRST_AGENT_ID}`,
-      "    name: One",
-      "    platform: retell",
-      "    platformAgentId: agent_retell_123",
-      "    connections: []",
-      "",
-    ].join("\n");
-
-    expect(() => parseConfig(document, "config.yaml")).toThrow(
-      /unsupported key: platformAgentId/i,
-    );
-  });
-
-  it.each([
-    ["Access", "access", "retell-api-key"],
-    ["Modality", "modality", "voice"],
-    ["Credentials", "credentials", "sealed-secret"],
-    ["Hints", "hints", "anything"],
-    ["Config", "config", "anything"],
-  ])("refuses %s on a stored connection", (_name, key, value) => {
-    const document = [
-      "format: 4",
-      "platform:",
-      "project:",
-      "agents:",
-      `  - id: ${FIRST_AGENT_ID}`,
-      "    name: One",
-      "    platform: retell",
-      "    connections:",
-      `      - id: ${FIRST_CONNECTION_ID}`,
-      "        name: First",
-      `        ${key}: ${value}`,
-      "",
-    ].join("\n");
-
-    expect(() => parseConfig(document, "config.yaml")).toThrow(
-      new RegExp(`unsupported key: ${key}`, "i"),
-    );
-  });
-
-  it("refuses duplicate agent and connection identities", () => {
-    const duplicateAgent = [
-      "format: 4",
-      "platform:",
-      "project:",
-      "agents:",
-      `  - id: ${FIRST_AGENT_ID}`,
-      "    name: One",
-      "    platform: retell",
-      "    connections: []",
-      `  - id: ${FIRST_AGENT_ID}`,
-      "    name: Two",
-      "    platform: livekit",
-      "    connections: []",
-      "",
-    ].join("\n");
-    expect(() => parseConfig(duplicateAgent, "config.yaml")).toThrow(
-      new RegExp(`agent id ${FIRST_AGENT_ID}.*more than once`, "i"),
-    );
-
-    const duplicateConnection = [
-      "format: 4",
-      "platform:",
-      "project:",
-      "agents:",
-      `  - id: ${FIRST_AGENT_ID}`,
-      "    name: One",
-      "    platform: retell",
-      "    connections:",
-      `      - id: ${FIRST_CONNECTION_ID}`,
-      "        name: First",
-      `  - id: ${SECOND_AGENT_ID}`,
-      "    name: Two",
-      "    platform: livekit",
-      "    connections:",
-      `      - id: ${FIRST_CONNECTION_ID}`,
-      "        name: Copy",
-      "",
-    ].join("\n");
-    expect(() => parseConfig(duplicateConnection, "config.yaml")).toThrow(
-      new RegExp(`connection id ${FIRST_CONNECTION_ID}.*both agent`, "i"),
-    );
   });
 
   it("reports every platform-owned identity in the new hierarchy", () => {

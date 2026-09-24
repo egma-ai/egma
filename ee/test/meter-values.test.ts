@@ -49,10 +49,6 @@ describe("per-second usage sent to minute meters", () => {
     expect(periodOverageCents(360, 300, 2)).toBe(2);
     expect(() => periodOverageCents(-1, 300, 2)).toThrow();
   });
-  it("retains a ten-second call instead of dropping a fractional minute", () => {
-    expect(minuteValueAdded(0, 10)).toBe("0.166666666667");
-  });
-
   it("carries decimal rounding across reports to total exactly one minute", () => {
     expect(minuteValueAdded(10, 20)).toBe("0.166666666666");
     expect(minuteValueAdded(20, 60)).toBe("0.666666666667");

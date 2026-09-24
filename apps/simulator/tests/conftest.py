@@ -299,10 +299,9 @@ def start_simulator(
 MINIO_IMAGE = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
 """The release `docker-compose.yml` runs, named again here.
 
-The same release rather than a moving tag, and checked against the compose
-file by `test_deployment.py`: proving the object-storage path against an
-image nobody deploys would prove it about the wrong store the first time
-the two drifted.
+The same release rather than a moving tag: proving the object-storage path
+against an image nobody deploys would prove it about the wrong store the
+first time the two drifted.
 """
 
 OBJECT_STORAGE_ACCESS_KEY_ID = "SENTINEL-object-storage-key-id-6d19"

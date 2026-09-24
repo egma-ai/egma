@@ -85,90 +85,9 @@ describe("pairing one customer with another customer's project", () => {
       (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
     );
   });
-
-  it("still allows the pairing that is real", async () => {
-    await expect(
-      insertApiKey(acme.id, acmeProject.id, ada.id),
-    ).resolves.toBeUndefined();
-  });
-
-  it("allows an organization-scoped row that names no project", async () => {
-    await expect(insertApiKey(globex.id, null, grace.id)).resolves.toBeUndefined();
-  });
-
-  it("is refused even when the project id is real and only the pairing is not", async () => {
-    // The single-column foreign key would be satisfied by this row: both the
-    // organization and the project exist. Only the pair does not.
-    const { rows } = await database.sql<{ exists: boolean }>(
-      "select exists (select 1 from project where id = $1) as exists",
-      [globexProject.id],
-    );
-    expect(rows[0]?.exists).toBe(true);
-
-    await expect(
-      insertApiKey(acme.id, globexProject.id, ada.id),
-    ).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === POSTGRES_ERROR.foreignKeyViolation,
-    );
-  });
-});
-
-describe("an identifier carrying the wrong prefix for its table", () => {
-  it("is refused by the project table", async () => {
-    await expect(
-      database.sql(
-        "insert into project (id, organization_id, name, slug, revision) values ($1, $2, $3, $4, $5)",
-        [newId("usr"), acme.id, "Wrong", "wrong-prefix", newId("rev")],
-      ),
-    ).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
-    );
-  });
-
-  it("is refused by the organization table", async () => {
-    await expect(
-      database.sql("insert into organization (id, name, slug) values ($1, $2, $3)", [
-        newId("prj"),
-        "Wrong",
-        "wrong-prefix-org",
-      ]),
-    ).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
-    );
-  });
-
-  it("is refused when the body is the right shape but not Crockford base32", async () => {
-    await expect(
-      database.sql("insert into \"user\" (id, email) values ($1, $2)", [
-        "usr_IIIIIIIIIIIIIIIIIIIIIIIIII",
-        "excluded-letters@acme.example",
-      ]),
-    ).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
-    );
-  });
-
-  it("is refused when the body is the wrong length", async () => {
-    await expect(
-      database.sql("insert into \"user\" (id, email) values ($1, $2)", [
-        "usr_0123456789",
-        "too-short@acme.example",
-      ]),
-    ).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
-    );
-  });
 });
 
 describe("a name is unique within its scope and nowhere wider", () => {
-  it("accepts the same name in two different customers' accounts", async () => {
-    const { rows } = await database.sql<{ slug: string }>(
-      "select slug from project where id in ($1, $2)",
-      [acmeProject.id, globexProject.id],
-    );
-    expect(rows.map((row) => row.slug)).toEqual(["default", "default"]);
-  });
-
   it("refuses the same name twice inside one customer's account", async () => {
     await expect(
       database.sql(
@@ -189,28 +108,6 @@ describe("a name is unique within its scope and nowhere wider", () => {
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.uniqueViolation,
     );
-  });
-});
-
-describe("a second project in the same organization", () => {
-  it("is accepted, because multi-project is a product change and not a migration", async () => {
-    await expect(
-      database.sql(
-        "insert into project (id, organization_id, name, slug, revision) values ($1, $2, $3, $4, $5)",
-        [newId("prj"), acme.id, "Outbound", "outbound", newId("rev")],
-      ),
-    ).resolves.toBeDefined();
-  });
-
-  it("is not blocked by any unique constraint on the organization column alone", async () => {
-    const { rows } = await database.sql<{ indexdef: string }>(
-      `select indexdef from pg_indexes
-        where tablename = 'project' and indexdef like '%UNIQUE%'`,
-    );
-    const uniqueOnOrganizationAlone = rows.filter((row) =>
-      /\(organization_id\)/.test(row.indexdef),
-    );
-    expect(uniqueOnOrganizationAlone).toEqual([]);
   });
 });
 

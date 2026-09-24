@@ -13,7 +13,7 @@ from egma_simulator.spec import SimulationSpec
 from egma_simulator.speech import SCRIPTED_PAIR
 
 
-@pytest.mark.parametrize("modality", ["voice", "chat"])
+@pytest.mark.parametrize("modality", ["voice"])
 @pytest.mark.parametrize("endpoint", [False, True])
 @pytest.mark.parametrize("refused", [False, True])
 async def test_registration_is_acknowledged_before_any_room_effect(

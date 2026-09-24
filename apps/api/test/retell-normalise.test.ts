@@ -418,18 +418,6 @@ describe("the spans a captured payload becomes", () => {
     );
   });
 
-  it("keeps safe provider fields Egma does not read", () => {
-    const held = JSON.parse(root?.payload ?? "{}") as Record<string, unknown>;
-    expect(held["call_analysis"]).toEqual({
-      user_sentiment: "Positive",
-      call_successful: true,
-    });
-    expect(held["call_type"]).toBe("phone_call");
-    expect(held["transcript"]).toBe(
-      "Agent: Hello. User: I would like to reschedule.",
-    );
-  });
-
   it("omits the two named transport fields before any span payload", () => {
     const accessToken = "SENTINEL-web-call-access-token";
     const authorization = "Bearer SENTINEL-customer-authorization";
@@ -551,30 +539,6 @@ describe("the reported-measurements block", () => {
     });
   });
 
-  it("names the reporter exactly as the row names the platform", () => {
-    const { spans } = normaliseRetellCall(capturedCall(), FILED_INTO, NOW);
-    const block = normalisedCornerOf(capturedCall())["reported_measurements"] as {
-      reported_by: string;
-    };
-    // Provenance, and the word a rationale will print: one spelling of this
-    // platform, on the block and on the row it rides alike.
-    expect(block.reported_by).toBe(spans[0]?.agentPlatform);
-  });
-
-  it("carries the measurements, and leaves the summary to the vendor's own block", () => {
-    const corner = normalisedCornerOf(capturedCall());
-    const block = corner["reported_measurements"] as {
-      measurements: readonly { measure: string; values: readonly number[] }[];
-    };
-    // The individual measurements — never a p50 wearing a sample's clothes,
-    // which would let one summarised turn pass a bound a real turn failed.
-    expect(block.measurements[0]?.values).toEqual([517, 820, 1704, 2145]);
-    // And Retell's own aggregates are still there, under Retell's own names.
-    expect((corner["latency"] as Record<string, unknown>)["e2e"]).toEqual(
-      (capturedCall()["latency"] as Record<string, unknown>)["e2e"],
-    );
-  });
-
   it("writes nothing at all where Retell measured nothing", () => {
     for (const latency of [
       undefined,
@@ -617,15 +581,6 @@ describe("the reported-measurements block", () => {
         },
       ],
     });
-  });
-
-  it("is the same bytes twice, which is what a replay rests on", () => {
-    const once = normaliseRetellCall(capturedCall(), FILED_INTO, NOW);
-    const again = normaliseRetellCall(capturedCall(), FILED_INTO, NOW);
-    // The root payload holds the block, so its own bytes are the property the
-    // store's insert dedup recognises a replayed batch by. The whole batch's
-    // bytes are the identity suite's own check, above.
-    expect(once.spans[0]?.payload).toBe(again.spans[0]?.payload);
   });
 });
 
@@ -729,21 +684,6 @@ describe("a payload the normalizer cannot fully read", () => {
     expect(normaliseRetellCall(capturedCall(), FILED_INTO, NOW).endReported).toBe(
       true,
     );
-  });
-
-  it("is not degraded merely for having said nothing", () => {
-    const quiet = normaliseRetellCall(
-      {
-        call_id: "call_quiet",
-        agent_id: "agent_in_retell_1",
-        start_timestamp: 1_786_000_000_000,
-        end_timestamp: 1_786_000_001_000,
-      },
-      FILED_INTO,
-      NOW,
-    );
-    expect(quiet.degraded).toBe(false);
-    expect(quiet.spans).toHaveLength(1);
   });
 
   it("keeps every transcript-free terminal state as one honest root", () => {

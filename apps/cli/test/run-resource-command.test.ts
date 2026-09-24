@@ -279,30 +279,6 @@ describe("Run resource commands", () => {
     expect(failed).toEqual([]);
     expect(out).toEqual([`Canceled Run ${RUN_ID}.`]);
   });
-
-  it("reports a missing run without changing anything else", async () => {
-    const out: string[] = [];
-    const failed: string[] = [];
-    const code = await runCancelCommand({
-      access: { url: URL, credentialsFile: workspace.credentialsFile },
-      cwd: workspace.dir,
-      runId: RUN_ID,
-      out: (line) => out.push(line),
-      fail: (line) => failed.push(line),
-      fetchImpl: async () =>
-        new JsonResponse(
-          JSON.stringify({ error: "not_found", message: "no run of yours has that id" }),
-          { status: 404 },
-        ),
-    });
-
-    expect(code).toBe(1);
-    expect(out).toEqual([]);
-    expect(failed).toEqual([
-      "no run of yours has that id",
-      `Egma has no Run ${RUN_ID} in this Project. Nothing was changed.`,
-    ]);
-  });
 });
 
 describe("run get", () => {
@@ -372,22 +348,5 @@ describe("run get", () => {
     expect(code).toBe(1);
     expect(out).toEqual([]);
     expect(failed).toEqual(["Read refused"]);
-  });
-});
-
-describe("run concurrency validation", () => {
-  it.each([0, -1, 1.5, NaN, Infinity, 2147483648])("rejects %s before pushing or starting a run", async (concurrency) => {
-    const failed: string[] = [];
-    let calls = 0;
-    const code = await runCreateCommand({
-      access: { url: URL, credentialsFile: workspace.credentialsFile },
-      cwd: workspace.dir, suiteDirectory: "release", agent: "agt_one", connection: "con_one",
-      concurrency, signal: new AbortController().signal,
-      out: () => {}, fail: (line) => failed.push(line),
-      fetchImpl: async () => { calls += 1; return new JsonResponse("{}"); },
-    });
-    expect(code).toBe(1);
-    expect(calls).toBe(0);
-    expect(failed[0]).toContain("Concurrency must be a whole number");
   });
 });

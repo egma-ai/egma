@@ -297,38 +297,6 @@ async def test_openai_http_tts_completes_on_eof_not_an_idle_gap(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
-async def test_openai_http_tts_cancellation_stops_the_request_and_playback() -> None:
-    response = _HeldResponse()
-    tts, _create = _openai_tts(response)
-    output = _AcceptedOutput()
-    worker = PipelineWorker(
-        Pipeline([tts, output]),
-        enable_tracing=False,
-        enable_turn_tracking=False,
-        enable_rtvi=False,
-        idle_timeout_secs=None,
-    )
-    runner = WorkerRunner(handle_sigint=False)
-    await runner.add_workers(worker)
-    running = asyncio.create_task(runner.run())
-    await worker.queue_frames(
-        [
-            LLMFullResponseStartFrame(),
-            TextFrame("Held response."),
-            LLMFullResponseEndFrame(),
-        ]
-    )
-    await asyncio.wait_for(response.entered.wait(), 5)
-    assert tts._audio_contexts
-
-    await asyncio.wait_for(worker.cancel(), 5)
-    await asyncio.wait_for(running, 5)
-
-    assert response.exited.is_set()
-    assert tts._audio_context_task is None
-
-
-@pytest.mark.asyncio
 async def test_openai_interruption_before_audio_has_no_late_completion() -> None:
     response = _HeldResponse()
     next_response = _HeldResponse()

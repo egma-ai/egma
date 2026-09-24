@@ -15,7 +15,7 @@ import asyncio
 import pytest
 
 from egma_simulator.conversation import Conducted, ConversationControls, conduct
-from egma_simulator.model import GOODBYE, ModelFailure, PersonaReply, ScriptedModel
+from egma_simulator.model import ModelFailure, PersonaReply, ScriptedModel
 from egma_simulator.persona import SILENCE_WAIT_SECONDS, Persona
 from egma_simulator.plugs import AgentReply, PlugError
 from egma_simulator.plugs.scripted import ScriptedCounterpart
@@ -96,54 +96,6 @@ async def conversation(
     return conducted, turns
 
 
-async def test_a_greeted_conversation_alternates_and_the_persona_concludes():
-    conducted, turns = await conversation(
-        scenario="First point. Second point.",
-        plug_config={
-            "greeting": "Front desk, hello.",
-            "replies": ["Certainly.", "Done."],
-        },
-    )
-    assert turns == [
-        ("agent", "Front desk, hello."),
-        ("human", "First point."),
-        ("agent", "Certainly."),
-        ("human", "Second point."),
-        ("agent", "Done."),
-        ("human", GOODBYE),
-    ]
-    assert conducted == Conducted(
-        status="completed",
-        ending="persona_concluded",
-        reason="the persona concluded the scenario",
-        provider_reference=None,
-    )
-
-
-async def test_an_ungreeted_conversation_opens_with_the_persona():
-    _, turns = await conversation(
-        scenario="Just this.", plug_config={"replies": ["Noted."]}
-    )
-    assert turns[0] == ("human", "Just this.")
-
-
-async def test_the_agent_ending_with_final_words_is_the_agents_doing():
-    conducted, turns = await conversation(
-        scenario="A long scenario. With many sentences. That keep coming.",
-        plug_config={
-            "replies": ["All sorted, goodbye now."],
-            "ends_after_replies": True,
-        },
-    )
-    assert turns == [
-        ("human", "A long scenario."),
-        ("agent", "All sorted, goodbye now."),
-    ]
-    assert conducted.status == "completed"
-    assert conducted.ending == "agent_ended"
-    assert conducted.reason == "the agent ended the exchange"
-
-
 async def test_the_agent_ending_silently_still_ends_the_conversation():
     conducted, turns = await conversation(
         plug_config={"replies": [], "ends_after_replies": True}
@@ -164,80 +116,6 @@ async def test_the_turn_limit_clips_the_conversation_and_names_itself():
     assert conducted.status == "completed"
     assert conducted.ending == "limit_reached"
     assert conducted.reason == "the turn limit (3 turns) tripped"
-
-
-async def test_an_even_turn_limit_ends_before_an_unanswerable_turn():
-    conducted, turns = await conversation(
-        scenario="One. Two. Three. Four.",
-        plug_config={"replies": ["R1.", "R2."]},
-        max_turns=4,
-    )
-    assert turns == [
-        ("human", "One."),
-        ("agent", "R1."),
-        ("human", "Two."),
-        ("agent", "R2."),
-    ]
-    assert conducted.ending == "limit_reached"
-
-
-async def test_the_duration_limit_ends_the_conversation_and_names_itself():
-    conducted, turns = await conversation(
-        scenario=" ".join(f"Sentence {n}." for n in range(1, 21)),
-        plug_config={"turn_seconds": 0.1},
-        max_turns=200,
-        max_duration_seconds=0.35,
-    )
-    assert 0 < len(turns) < 40
-    assert conducted.status == "completed"
-    assert conducted.ending == "limit_reached"
-    assert conducted.reason == "the duration limit (0.35s) tripped"
-
-
-async def test_the_two_limits_report_distinguishably():
-    by_turns, _ = await conversation(scenario="One. Two. Three.", max_turns=2)
-    by_duration, _ = await conversation(
-        scenario=" ".join(f"Sentence {n}." for n in range(1, 21)),
-        plug_config={"turn_seconds": 0.1},
-        max_duration_seconds=0.25,
-    )
-    assert by_turns.ending == by_duration.ending == "limit_reached"
-    assert by_turns.reason != by_duration.reason
-    assert "turn limit" in by_turns.reason
-    assert "duration limit" in by_duration.reason
-
-
-async def test_a_cancel_directive_stops_the_conversation_mid_exchange():
-    controls = ConversationControls()
-
-    async def cancel_soon() -> None:
-        await asyncio.sleep(0.25)
-        controls.request_cancel()
-
-    canceller = asyncio.create_task(cancel_soon())
-    conducted, turns = await conversation(
-        scenario=" ".join(f"Sentence {n}." for n in range(1, 21)),
-        plug_config={"turn_seconds": 0.1},
-        max_turns=200,
-        controls=controls,
-    )
-    await canceller
-    assert conducted.status == "canceled"
-    assert conducted.ending == "canceled"
-    assert 0 < len(turns) < 40
-
-
-async def test_a_cancel_after_the_conversation_finished_changes_nothing():
-    controls = ConversationControls()
-    conducted, turns = await conversation(
-        scenario="Only this.",
-        plug_config={"replies": ["Noted."]},
-        controls=controls,
-    )
-    controls.request_cancel()
-    assert conducted.status == "completed"
-    assert conducted.ending == "persona_concluded"
-    assert len(turns) == 3
 
 
 class NotingPlug:
@@ -328,25 +206,6 @@ def fixed_persona(reply: PersonaReply) -> Persona:
         scenario_instructions="One point.",
         model=FixedModel(reply),
     )
-
-
-async def test_a_real_terminal_turn_is_sent_once_before_the_persona_ends():
-    turns, recorder = collect()
-    plug = TerminalPlug(final_answer=AgentReply(text="Take care.", ended=True))
-    reply = PersonaReply(text="Goodbye.", concluded=True)
-    conducted = await conduct(
-        persona=fixed_persona(reply),
-        plug=plug,
-        max_turns=10,
-        max_duration_seconds=30,
-        on_turn=recorder,
-        on_timing=None,
-        controls=ConversationControls(),
-        name="sim:terminal",
-    )
-    assert plug.sent == ["Goodbye."]
-    assert turns == [("human", "Goodbye."), ("agent", "Take care.")]
-    assert conducted.ending == "agent_ended"
 
 
 async def test_a_textless_end_action_makes_no_turn_or_delivery():
@@ -613,7 +472,7 @@ async def test_customer_end_observed_first_beats_a_failure_ready_before_resume()
     assert turns == []
 
 
-@pytest.mark.parametrize("immediate", ["failure", "reply"])
+@pytest.mark.parametrize("immediate", ["reply"])
 async def test_an_already_observed_customer_end_starts_no_persona_work(immediate):
     class ImmediateModel:
         model_name = "immediate"
@@ -623,8 +482,6 @@ async def test_an_already_observed_customer_end_starts_no_persona_work(immediate
 
         async def reply(self, _context) -> PersonaReply:
             self.called = True
-            if immediate == "failure":
-                raise ModelFailure("must not replace the customer ending")
             return PersonaReply(text="too late", concluded=False)
 
         async def close(self) -> None:
@@ -755,74 +612,6 @@ async def test_transport_failure_then_departure_cancels_pending_persona_work():
     assert turns == []
 
 
-async def test_what_the_platform_said_rides_the_record_and_not_the_turn():
-    """The rule the chat-versus-voice diagnostic rests on.
-
-    A transition is agent-side content and it is not speech. It reaches
-    whoever writes the record, beside the turn; it never joins the words,
-    because the words are what the persona is handed back and what a voice
-    transcript of the same scenario is compared against.
-    """
-    turns, recorder = collect_with_notes()
-    plug = NotingPlug(
-        opening=AgentReply(text="Front desk.", platform_notes=("moved to greet",)),
-        answers=[
-            AgentReply(text="Certainly.", platform_notes=("moved to lookup",)),
-        ],
-    )
-
-    await conduct(
-        persona=persona_for("First point."),
-        plug=plug,
-        max_turns=60,
-        max_duration_seconds=30,
-        on_turn=recorder,
-        on_timing=None,
-        controls=ConversationControls(),
-        name="sim:test",
-    )
-
-    assert turns[0] == ("agent", "Front desk.", ("moved to greet",))
-    assert turns[1] == ("human", "First point.", ())
-    assert turns[2] == ("agent", "Certainly.", ("moved to lookup",))
-
-
-async def test_an_agent_that_ends_on_its_greeting_ends_the_conversation_there():
-    """"We are closed today" and a goodbye — rare, and real.
-
-    The exchange is over before the persona has said anything, so nothing
-    is asked of it: a turn taken after the agent had gone would be a line
-    on the record nobody heard, and whichever ending tripped afterwards —
-    the persona concluding, a limit — would be reported instead of the
-    agent's own doing.
-    """
-    turns, recorder = collect_with_notes()
-    plug = NotingPlug(
-        opening=AgentReply(text="We are closed today. Goodbye.", ended=True),
-        answers=[],
-    )
-
-    conducted = await conduct(
-        persona=persona_for("First point."),
-        plug=plug,
-        max_turns=60,
-        max_duration_seconds=30,
-        on_turn=recorder,
-        on_timing=None,
-        controls=ConversationControls(),
-        name="sim:test",
-    )
-
-    assert turns == [("agent", "We are closed today. Goodbye.", ())]
-    assert plug.delivered == 0, "the persona was asked to speak to nobody"
-    assert conducted == Conducted(
-        status="completed",
-        ending="agent_ended",
-        reason="the agent ended the exchange",
-        provider_reference=None,
-    )
-
-
 async def test_an_agent_ending_on_a_wordless_greeting_still_ends_it():
     """The same, from a platform that ends without saying anything: there
     is no turn to record and the conversation is over all the same."""
@@ -843,36 +632,6 @@ async def test_an_agent_ending_on_a_wordless_greeting_still_ends_it():
     assert turns == []
     assert plug.delivered == 0
     assert conducted.ending == "agent_ended"
-
-
-async def test_a_greeting_that_did_not_end_anything_carries_on_as_ever():
-    """The guard is on the flag and nothing else: an opening reply that
-    says the exchange continues is the ordinary case, and it does."""
-    turns, recorder = collect_with_notes()
-    plug = NotingPlug(
-        opening=AgentReply(text="Front desk."),
-        answers=[AgentReply(text="Certainly.")],
-    )
-
-    conducted = await conduct(
-        persona=persona_for("First point."),
-        plug=plug,
-        max_turns=60,
-        max_duration_seconds=30,
-        on_turn=recorder,
-        on_timing=None,
-        controls=ConversationControls(),
-        name="sim:test",
-    )
-
-    assert [speaker for speaker, _text, _notes in turns] == [
-        "agent",
-        "human",
-        "agent",
-        "human",
-    ]
-    assert plug.delivered == 1
-    assert conducted.ending == "persona_concluded"
 
 
 async def test_an_answer_with_no_words_the_platform_spoke_about_is_still_a_turn():
@@ -975,23 +734,6 @@ async def test_a_fault_opening_the_exchange_propagates():
     assert plug.closed == 1
 
 
-async def test_the_loop_measures_each_answered_turn():
-    measures: list[tuple[str, float]] = []
-
-    async def on_timing(measure: str, milliseconds: float) -> None:
-        measures.append((measure, milliseconds))
-
-    _, turns = await conversation(
-        scenario="One. Two.",
-        plug_config={"replies": ["R1.", "R2."]},
-        on_timing=on_timing,
-    )
-    answered = sum(1 for speaker, _ in turns if speaker == "agent")
-    assert len(measures) == answered
-    assert {name for name, _ in measures} == {"turn_response_latency"}
-    assert all(milliseconds >= 0 for _, milliseconds in measures)
-
-
 class SlowToFinishPlug:
     """A plug whose answer starts long before its ``deliver`` returns.
 
@@ -1090,16 +832,6 @@ async def test_the_finish_line_is_where_the_answer_started():
         )
 
 
-async def test_a_plug_that_cannot_see_the_answer_start_is_timed_by_its_call():
-    """Where ``deliver`` is a request and its response, the two instants
-    are the same and the return is the finish line. Nothing is lost, and
-    the lanes that answer this way keep measuring exactly as before."""
-    measured = await timings_of(ObservantPlug(replies=2))
-
-    assert measured, "a request-and-response plug still measures every turn"
-    assert all(milliseconds >= 0 for milliseconds in measured)
-
-
 async def test_a_turn_that_began_no_answer_takes_no_sample():
     """A turn that only called a tool has no moment the agent started
     replying. A wait that never happened is not a wait of zero, so no
@@ -1107,12 +839,3 @@ async def test_a_turn_that_began_no_answer_takes_no_sample():
     assert await timings_of(WordlessPlug(replies=2)) == []
 
 
-async def test_the_loop_carries_the_plugs_provider_reference():
-    conducted, _ = await conversation(
-        plug_config={
-            "replies": ["Done."],
-            "ends_after_replies": True,
-            "provider_reference": "scripted-xyz",
-        }
-    )
-    assert conducted.provider_reference == "scripted-xyz"

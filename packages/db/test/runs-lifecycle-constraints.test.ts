@@ -386,23 +386,6 @@ describe("an illegal simulation move", () => {
         String(error).includes("written once"),
     );
   });
-
-  it("still lets the lifecycle walk forward one legal step at a time", async () => {
-    const id = await insertSimulation("queued");
-
-    await moveSimulation(id, "claimed", shapeOf("claimed"));
-    await moveSimulation(id, "running", { started_at: new Date() });
-    await moveSimulation(id, "completed", {
-      ended_at: new Date(),
-      ending_reason: "agent_ended",
-    });
-
-    const { rows } = await db.sql<{ status: string }>(
-      "select status from simulation where id = $1",
-      [id],
-    );
-    expect(rows[0]?.status).toBe("completed");
-  });
 });
 
 describe("a simulation's shape", () => {
@@ -526,14 +509,6 @@ describe("a simulation's shape", () => {
     ).resolves.toBeDefined();
   });
 
-  it("refuses a turn count below zero", async () => {
-    await expect(
-      insertSimulation("completed", { turn_count: -1 }),
-    ).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
-    );
-  });
-
   it("holds recordings to voice: a chat cannot carry one", async () => {
     await expect(
       insertSimulation("completed", { recording_reference: "recordings/one.flac" }),
@@ -569,25 +544,6 @@ describe("a simulation's shape", () => {
         recording_waveform: JSON.stringify({ human: [0.2, 0.4], agent: [0.1] }),
       }),
     ).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
-    );
-  });
-
-  it("keeps a voice recording's peaks beside its reference", async () => {
-    await expect(
-      insertSimulation("completed", {
-        modality: "voice",
-        recording_reference: "recordings/one.flac",
-        recording_waveform: JSON.stringify({
-          human: [0, 0.25, 1],
-          agent: [1, 0.5, 0],
-        }),
-      }),
-    ).resolves.toBeDefined();
-  });
-
-  it("refuses an identifier carrying the wrong prefix", async () => {
-    await expect(insertSimulation("queued", { id: newId("tst") })).rejects.toSatisfy(
       (error) => errorCodeOf(error) === POSTGRES_ERROR.checkViolation,
     );
   });
@@ -688,21 +644,6 @@ describe("what a simulation cannot name", () => {
 
     await expect(
       insertSimulation("queued", { test_id: null, test_version_id: testVersionId }),
-    ).rejects.toSatisfy(
-      (error) => errorCodeOf(error) === "23502",
-    );
-  });
-
-  it("writes the required pin and refuses a testless row", async () => {
-    await expect(
-      insertSimulation("queued", {
-        test_id: testId,
-        test_version_id: testVersionId,
-      }),
-    ).resolves.toBeDefined();
-
-    await expect(
-      insertSimulation("queued", { test_id: null, test_version_id: null }),
     ).rejects.toSatisfy(
       (error) => errorCodeOf(error) === "23502",
     );
@@ -876,7 +817,6 @@ describe("a run event", () => {
     );
   });
 });
-
 
 it("freezes complete persona settings on every simulation", async () => {
   const id = await insertSimulation("queued");

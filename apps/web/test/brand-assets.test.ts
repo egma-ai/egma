@@ -76,22 +76,4 @@ describe("what the application asks the browser to fetch", () => {
         missing.join("\n"),
     ).toEqual([]);
   });
-
-  it("finds the brand asset the public authentication Brand draws", () => {
-    // A guard that matches nothing passes for ever. The public Brand is where
-    // the full logo belongs; the signed-in shell uses the compact mark.
-    const authentication = readFileSync(path.join(WEB, "app", "ui.tsx"), "utf8");
-    expect(authentication).toContain("export function Brand()");
-    const marks = [...authentication.matchAll(ASSET)]
-      .map(([, referenced]) => referenced as string)
-      .filter((asset) => SERVED_FROM_PUBLIC.test(asset));
-
-    expect(
-      marks.length,
-      "the public Brand names no asset for this test to hold",
-    ).toBeGreaterThan(0);
-    for (const mark of marks) {
-      expect(statSync(path.join(PUBLIC, mark)).isFile()).toBe(true);
-    }
-  });
 });

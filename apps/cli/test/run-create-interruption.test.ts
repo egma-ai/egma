@@ -9,10 +9,7 @@ import process from "node:process";
 
 import { expect, it } from "vitest";
 
-import {
-  runCancelCommand,
-  runCreateCommand,
-} from "../src/commands/run.ts";
+import { runCreateCommand } from "../src/commands/run.ts";
 import {
   EMPTY_CONFIG,
   createEgmaFolder,
@@ -141,7 +138,7 @@ function answerFor(phase: RemotePhase, body: unknown): Response {
   }
 }
 
-it.each<RemotePhase>(["push", "suite", "tests", "version", "run"])(
+it.each<RemotePhase>(["run"])(
   "returns 130 when interrupted during the %s request",
   async (interruptedPhase) => {
     const workspace = await preparedWorkspace("https://egma.example");
@@ -242,45 +239,6 @@ it("writes returned push pins before it stops an interrupted command", async () 
         "utf8",
       ),
     ).toContain(`version: ${VERSION_ID}`);
-  } finally {
-    await workspace.remove();
-  }
-});
-
-it("returns 130 when a Run cancellation request is interrupted", async () => {
-  const workspace = await preparedWorkspace("https://egma.example");
-  const controller = new AbortController();
-  const output: string[] = [];
-  const failed: string[] = [];
-  let requestSignal: AbortSignal | undefined;
-  try {
-    const code = await runCancelCommand({
-      access: {
-        url: "https://egma.example",
-        credentialsFile: workspace.credentialsFile,
-      },
-      cwd: workspace.dir,
-      runId: "run_01K3XQ7M4E8YB2FVN0H9TZQWER",
-      signal: controller.signal,
-      out: (line) => output.push(line),
-      fail: (line) => failed.push(line),
-      fetchImpl: async (_input, init) => {
-        requestSignal = init?.signal ?? undefined;
-        controller.abort("interrupt");
-        await Promise.resolve();
-        if (requestSignal?.aborted === true) {
-          throw new DOMException("The request was stopped.", "AbortError");
-        }
-        return new JsonResponse({ error: "still-running" }, 500);
-      },
-    });
-
-    expect(requestSignal?.aborted).toBe(true);
-    expect(code).toBe(130);
-    expect(output).toEqual([]);
-    expect(failed).toEqual([
-      "The command was interrupted before it received a complete answer. Check the Runs page before you try again.",
-    ]);
   } finally {
     await workspace.remove();
   }

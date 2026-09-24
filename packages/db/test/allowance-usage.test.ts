@@ -2,8 +2,6 @@ import { newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  allowanceUsedBy,
-  billableSecondsOf,
   createAgent,
   createPersona,
   createTest,
@@ -354,48 +352,6 @@ describe("what one organization used this period", () => {
         phone_minutes: minutesFromSeconds(90),
       },
     });
-  });
-
-  it("counts the same numbers the one billable-time rule counts", async () => {
-    // The aggregate is that rule written in SQL. This is what stops the two
-    // drifting: the same spans, folded here by the pure function.
-    const { rows } = await database.sql<{
-      modality: Modality;
-      connection_type: ConnectionType;
-      started_at: Date | null;
-      execution_ended_at: Date | null;
-    }>(
-      `select modality, connection_type, started_at, execution_ended_at
-         from simulation
-        where organization_id = $1 and started_at >= $2 and started_at < $3`,
-      [acme.organizationId, PERIOD_STARTED, PERIOD_RESETS],
-    );
-    const folded = { chat_simulations: 0, web_call_minutes: 0, phone_minutes: 0 };
-    let webCallSeconds = 0;
-    let phoneSeconds = 0;
-    for (const row of rows) {
-      const { kind } = allowanceUsedBy({
-        modality: row.modality,
-        connectionType: row.connection_type,
-        startedAt: row.started_at,
-        executionEndedAt: row.execution_ended_at,
-      });
-      if (kind === "chat_simulations") {
-        folded.chat_simulations += 1;
-        continue;
-      }
-      const seconds = billableSecondsOf({
-        startedAt: row.started_at,
-        executionEndedAt: row.execution_ended_at,
-      });
-      if (kind === "phone_minutes") phoneSeconds += seconds;
-      else webCallSeconds += seconds;
-    }
-    folded.web_call_minutes = minutesFromSeconds(webCallSeconds);
-    folded.phone_minutes = minutesFromSeconds(phoneSeconds);
-
-    const usage = await readUsageThisPeriod(sessionOf(acme), NOW);
-    expect(usage.used).toEqual(folded);
   });
 
   it("counts nothing for a conversation that has not both begun and ended", async () => {

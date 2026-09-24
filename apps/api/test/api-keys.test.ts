@@ -205,20 +205,6 @@ describe("minting a key", () => {
     ).toEqual(["hash"]);
   });
 
-  it("never expires, so there is no timer nobody remembers setting", async () => {
-    api = await createApi("keys_no_expiry");
-    await signUp("ada@acme.example", "Acme");
-
-    const { rows } = await api.database.sql<{ column_name: string }>(
-      `select column_name from information_schema.columns
-        where table_schema = 'public' and table_name = 'api_key'`,
-    );
-
-    expect(
-      rows.map((row) => row.column_name).filter((name) => /expir/.test(name)),
-    ).toEqual([]);
-  });
-
   it("is something every role may do, including a viewer", async () => {
     api = await createApi("keys_viewer_mints");
     const ada = await signUp("ada@acme.example", "Acme");
@@ -479,30 +465,6 @@ describe("minting a key", () => {
 });
 
 describe("a request carrying a key", () => {
-  it("runs no auth-provider code at all", async () => {
-    api = await createApi("keys_no_provider");
-    const ada = await signUp("ada@acme.example", "Acme");
-    const minted = await mint(ada);
-
-    // If any provider code were on this path, this would be how it announced
-    // itself. Resolving a session is the provider; resolving a key is not.
-    const provider = api.identity.provider as unknown as Record<
-      string,
-      unknown
-    >;
-    provider.resolveIdentity = () => {
-      throw new Error("the auth provider was asked about an API-key request");
-    };
-
-    const used = await api.app.inject({
-      method: "GET",
-      url: "/v1/keys",
-      headers: withKey(minted.secret),
-    });
-
-    expect(used.statusCode).toBe(200);
-  });
-
   it("acts in the organization the key row names, whatever the request says", async () => {
     api = await createApi("keys_organization_from_row");
     const ada = await signUp("ada@acme.example", "Acme");

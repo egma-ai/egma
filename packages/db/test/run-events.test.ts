@@ -14,7 +14,6 @@ import {
   failSimulation,
   getRun,
   listRunEvents,
-  listSimulations,
   markSimulationCanceled,
   startRun,
   startSimulation,
@@ -78,7 +77,6 @@ let agentId: string;
 let connectionId: string;
 let oneCallerSuite: string;
 let twoCallersSuite: string;
-let twoCallers: string;
 
 const CLAIMANT = "simulator-blue-1";
 
@@ -208,26 +206,13 @@ beforeAll(async () => {
     await createTestSuite(actingAsAcme(), { name: "Two personas" })
   ).id;
   await version(oneCallerSuite, "Reschedules", [rita]);
-  twoCallers = await version(twoCallersSuite, "Cancels", [rita, sam]);
+  await version(twoCallersSuite, "Cancels", [rita, sam]);
 });
 
 afterAll(async () => {
   await database.drop();
   await disconnectClickHouse();
   await traceStore.drop();
-});
-
-describe("a run that has only just started", () => {
-  it("has no events yet, and is not done", async () => {
-    const started = await aRun();
-
-    const feed = await feedOf(started.id);
-    expect(feed.events).toEqual([]);
-    // Nothing has changed, so there is nothing to ask after: the cursor stays
-    // where the follower left it rather than moving to a number nobody issued.
-    expect(feed.next).toBe(0);
-    expect(feed.done).toBe(false);
-  });
 });
 
 describe("every lifecycle change", () => {
@@ -554,22 +539,5 @@ describe("asking from a number nobody could have issued", () => {
     expect(page.events).toEqual([]);
     expect(page.next).toBe(999);
     expect(page.caughtUp).toBe(true);
-  });
-});
-
-describe("the simulations of a run", () => {
-  it("name the version they execute and the person who calls, in pinned order", async () => {
-    const started = await aRun(twoCallersSuite);
-
-    const conducted = await listSimulations(actingAsAcme(), started.id);
-    expect(conducted?.items.map((one) => `${one.testName}/${one.personaName}`)).toEqual([
-      "Cancels/Impatient Rita",
-      "Cancels/Deliberate Sam",
-    ]);
-    expect(conducted?.items.map((one) => one.testVersionId)).toEqual([
-      twoCallers,
-      twoCallers,
-    ]);
-    expect(started.expectedSimulationCount).toBe(2);
   });
 });

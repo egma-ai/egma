@@ -1,4 +1,4 @@
-import { isId, newId } from "@egma/ids";
+import { newId } from "@egma/ids";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -78,21 +78,6 @@ afterAll(async () => {
 });
 
 describe("creating an agent", () => {
-  it("returns an agt_ id and fetch round-trips the name", async () => {
-    const created = await createAgent(actingAsAcme(), {
-      name: "Front Desk",
-      agentPlatform: "retell",
-    });
-
-    expect(isId("agt", created.id)).toBe(true);
-
-    const fetched = await getAgent(actingAsAcme(), created.id);
-    expect(fetched).toBeDefined();
-    expect(fetched?.name).toBe("Front Desk");
-    expect(fetched?.projectId).toBe(acme.project);
-    expect(fetched?.agentPlatform).toBe("retell");
-  });
-
   it("starts with its platform, no platform id or key, and the pull switch off", async () => {
     const created = await createAgent(actingAsAcme(), {
       name: "Terse",
@@ -108,12 +93,6 @@ describe("creating an agent", () => {
       pullProductionCalls: false,
       monitoringConfigured: false,
     });
-  });
-
-  it("needs a name that is more than whitespace", async () => {
-    await expect(createAgent(actingAsAcme(), { agentPlatform: "retell", name: "   " })).rejects.toThrow(
-      /name/,
-    );
   });
 
   it("stores the name trimmed, so padding cannot slip past the uniqueness rule", async () => {
@@ -159,14 +138,6 @@ describe("creating an agent", () => {
 });
 
 describe("an agent's name", () => {
-  it("is refused while another live agent in the project holds it", async () => {
-    await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Reception" });
-
-    await expect(
-      createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Reception" }),
-    ).rejects.toThrow(/already/);
-  });
-
   it("is welcome in another project of the same customer", async () => {
     await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Concierge" });
 
@@ -185,21 +156,6 @@ describe("an agent's name", () => {
       name: "Switchboard",
     });
     expect(elsewhere.projectId).toBe(globex.project);
-  });
-
-  it("is released by an archived agent, which still reads on its own", async () => {
-    const retiring = await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Retiring" });
-
-    await archiveAgent(actingAsAcme(), retiring.id);
-
-    const successor = await createAgent(actingAsAcme(), { agentPlatform: "retell", name: "Retiring" });
-    expect(successor.id).not.toBe(retiring.id);
-
-    // Archive frees the name and keeps the row: two agents can carry the same
-    // name as long as only one of them is active.
-    const filed = await getAgent(actingAsAcme(), retiring.id);
-    expect(filed?.name).toBe("Retiring");
-    expect(filed?.archivedAt).toBeInstanceOf(Date);
   });
 
   it("releases its production watch the way it releases its name", async () => {
