@@ -4,32 +4,31 @@ title: "Monitor a Pipecat agent"
 
 Pipecat monitoring sends each production conversation from your bot through the Egma SDK. You do not need a test suite or a simulation connection.
 
-## Start through the UI
+## Set up with your coding agent
 
 1. Open **Agents → Connect an agent**.
-2. Choose **Monitor production**, then select **Continue**.
-3. Select **Pipecat** and follow the setup prompts.
+2. Choose **Monitor production**, then **Pipecat**.
+3. Copy the prompt, open your bot's repository in a coding agent, and paste it.
 
-The prompts give you the agent's monitoring key. Add it and the SDK line to your bot as described below. Opening the wizard alone does not turn on monitoring.
+The coding agent asks where your bot runs in production, adds the SDK line and the settings below, and asks you before it changes a secret set or deploys. Opening the prompt alone does not turn on monitoring. To do the same by hand, follow the steps below.
 
-## Get the agent's monitoring key
+## Set the environment
 
-A production conversation is filed under your Egma agent only when the bot sends it with that agent's monitoring key. Get the key from the setup prompts above, or from your initialized agent repository:
+Create a project API key for production from your initialized agent repository:
 
 ```bash
-egma agent monitoring setup --agent "$EGMA_AGENT_ID" --platform pipecat
+egma project api-key create --name "Front desk production"
 ```
 
-The command prints the `EGMA_URL` and `EGMA_API_KEY` values for your bot. Copy the key when it is shown; it is shown once. The same key also works for `simulation`, so a bot that runs tests and production needs only this one key.
-
-With an ordinary project API key, production conversations still arrive, but they show no agent.
-
-Your bot needs both values wherever it runs. On Pipecat Cloud, add them to the agent's secret set:
+Copy the key when it is shown; it is shown once. Your bot needs three settings wherever it runs in production. On Pipecat Cloud, add them to the agent's secret set:
 
 | Variable | Value |
 | --- | --- |
 | `EGMA_URL` | `https://app.egma.ai`, or the public URL of your self-hosted Egma instance. |
-| `EGMA_API_KEY` | The agent's monitoring key. |
+| `EGMA_API_KEY` | The project API key you just created. |
+| `EGMA_AGENT_NAME` | Your agent's name in Egma, as `egma/config.yaml` lists it. |
+
+A Pipecat bot has no name of its own, so the SDK sends `EGMA_AGENT_NAME` with each production conversation, and Monitoring shows it in the Agent column, as it shows a LiveKit worker's `agent_name`. Without it, conversations still arrive and are graded, but show no agent name.
 
 The bot must be able to reach `EGMA_URL`.
 
@@ -61,7 +60,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
 Pass `runner_args` from `bot()` into the function that builds the worker, as shown in [Prepare the bot](/docs/integrations/pipecat/connect#1-prepare-the-bot).
 
-Redeploy the bot. The line records each conversation's turns, tool calls with their arguments and results, and timings, and sends them to Egma. A simulation does not also appear as a production conversation; the [SDK guide](/skills-cli-sdks/sdks/pipecat-python#b-production-monitoring) explains how `monitor` tells them apart.
+Redeploy the bot. The line records each conversation's turns, tool calls with their arguments and results, and timings, and sends them to Egma. A simulation that `simulation` reported does not also appear as a production conversation; the [SDK guide](/skills-cli-sdks/sdks/pipecat-python#b-production-monitoring) explains how `monitor` tells them apart.
+
+`monitor` never stops your bot. If `EGMA_URL` or `EGMA_API_KEY` is missing or invalid, it logs a warning and sends nothing.
 
 ## Verify a conversation
 

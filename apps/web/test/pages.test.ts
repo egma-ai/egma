@@ -534,7 +534,7 @@ describe("the pages", () => {
     expect(rewrites).toContain(
       '{ source: "/sdk/:path*", destination: `${api}/sdk/:path*` }',
     );
-    for (const route of [seam.routes.hello, seam.routes.tool, seam.routes.confirm]) {
+    for (const route of [seam.routes.hello, seam.routes.tool]) {
       expect(route).toMatch(/^\/sdk\/v1\/[a-z]+$/u);
     }
     // And the exporter's own path is under the versioned rewrite beside it.

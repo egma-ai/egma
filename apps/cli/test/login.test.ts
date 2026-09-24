@@ -373,16 +373,11 @@ describe("which egma a command talks to", () => {
 
     const naming: string[] = [];
     for (const file of written) {
-      const text = await readFile(file, "utf8");
-      if (text.includes("EGMA_URL")) {
+      if ((await readFile(file, "utf8")).includes("EGMA_URL")) {
         naming.push(path.relative(CLI_PACKAGE, file).replaceAll(path.sep, "/"));
       }
-      // Never read as this CLI's own platform selector.
-      expect(text, file).not.toMatch(/env(?:\.EGMA_URL|\[\s*["']EGMA_URL["']\s*\])/u);
     }
-    // The one mention: the Pipecat monitoring setup prints the Egma SDK's
-    // variable for the bot's own environment.
-    expect(naming).toEqual(["src/commands/agent-monitoring.ts"]);
+    expect(naming).toEqual([]);
   });
 });
 

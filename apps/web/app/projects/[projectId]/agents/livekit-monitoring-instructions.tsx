@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import {
   Tabs,
   TabsContent,
@@ -8,12 +10,7 @@ import {
 } from "@/components/ui/tabs";
 import type { LiveKitWorkerLanguage } from "@/lib/agent-setup-flow.ts";
 
-import {
-  ENVIRONMENT_VALUES,
-  InstructionSteps,
-  ProjectKeyNote,
-  type InstructionStep,
-} from "./copy-block.tsx";
+import { CopyBlock } from "./copy-block.tsx";
 
 // The repository's package manager resolves the latest SDK. The source URL is
 // unpinned for the same reason the public integration skill is unpinned: the
@@ -36,6 +33,12 @@ export async function entrypoint(ctx: JobContext) {
   await ctx.connect();
   await session.start(...);
 }`;
+const EGMA_URL_PLACEHOLDER = "<your-public-egma-url>";
+const API_KEY_PLACEHOLDER = "<your-project-api-key>";
+
+function environmentValues(egmaUrl: string): string {
+  return `EGMA_URL=${egmaUrl}\nEGMA_API_KEY=${API_KEY_PLACEHOLDER}`;
+}
 
 function WorkerSteps({
   language,
@@ -58,10 +61,10 @@ function WorkerSteps({
     },
     {
       title: "Set the environment values",
-      value: ENVIRONMENT_VALUES,
+      value: environmentValues(EGMA_URL_PLACEHOLDER),
       copyLabel: "environment values",
     },
-  ] satisfies readonly InstructionStep[];
+  ] as const;
 
   return (
     <div className="flex flex-col gap-4">
@@ -71,7 +74,21 @@ function WorkerSteps({
           line.
         </p>
       ) : null}
-      <InstructionSteps steps={steps} />
+      <ol className="m-0 flex list-none flex-col gap-5 p-0">
+        {steps.map((step, index) => (
+          <li className="flex gap-3" key={step.title}>
+            <span className="w-(--space-5) flex-none text-sm leading-(--line-normal) text-foreground tabular-nums">
+              {index + 1}
+            </span>
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <p className="m-0 text-sm leading-(--line-normal) font-medium text-foreground">
+                {step.title}
+              </p>
+              <CopyBlock value={step.value} copyLabel={step.copyLabel} />
+            </div>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }
@@ -134,10 +151,17 @@ export function LiveKitMonitoringInstructions({
         sends production conversations. In an Egma simulation room it does
         nothing, because the simulation verb sends that conversation instead.
       </p>
-      <ProjectKeyNote
-        projectId={projectId}
-        reachedBy="your deployed LiveKit worker"
-      />
+      <p className="m-0 text-sm leading-(--line-normal) text-muted-foreground">
+        Create a project key in{" "}
+        <Link
+          className="text-foreground underline underline-offset-2 pointer-hover:text-brand"
+          href={`/projects/${encodeURIComponent(projectId)}/settings/keys`}
+        >
+          API keys
+        </Link>
+        , then replace {API_KEY_PLACEHOLDER}. Set {EGMA_URL_PLACEHOLDER} to the
+        public Egma API URL that your deployed LiveKit worker can reach.
+      </p>
     </section>
   );
 }

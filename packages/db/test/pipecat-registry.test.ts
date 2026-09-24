@@ -102,7 +102,7 @@ describe("the Pipecat rows of the connection catalog", () => {
     }
   });
 
-  it("asks for one field and one credential per variant, each with one short help line", () => {
+  it("asks for one field and one credential per variant, each with its help", () => {
     const cloud = pipecat.find((option) => option.accessVariant === CLOUD);
     const selfHosted = pipecat.find((option) => option.accessVariant === SELF_HOSTED);
     expect(cloud?.accessVariantLabel).toBe("Pipecat Cloud");
@@ -124,7 +124,10 @@ describe("the Pipecat rows of the connection catalog", () => {
         required: true,
       },
     ]);
-    expect(cloud?.credentialHelp).toBe("");
+    expect(cloud?.credentialHelp).toBe(
+      "Egma starts your agent with this public key and stores it sealed. " +
+        "A read gives back its last four characters, never the key.",
+    );
 
     expect(selfHosted?.accessVariantLabel).toBe("Self-hosted");
     expect(selfHosted?.fields).toEqual([
@@ -145,7 +148,10 @@ describe("the Pipecat rows of the connection catalog", () => {
         required: true,
       },
     ]);
-    expect(selfHosted?.credentialHelp).toBe("");
+    expect(selfHosted?.credentialHelp).toBe(
+      "Egma sends these headers with every start request and stores them " +
+        "sealed. A read gives back the header names and never their values.",
+    );
   });
 
   it("refuses a Pipecat tuple on another platform", () => {

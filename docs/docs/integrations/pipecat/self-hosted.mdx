@@ -97,7 +97,7 @@ uv run uvicorn starter:app --host 0.0.0.0 --port 8080
 
 ## Connect Egma to the starter
 
-In the UI, choose **Self-hosted** as the connection type. Enter the **Start URL** and the **Auth headers** as a JSON object, such as `{"Authorization": "Bearer …"}`.
+With the prompt from **Agents → Connect an agent → Pipecat**, your coding agent asks where the bot runs. Answer **on my own servers** and give it the start URL and the auth headers, such as `{"Authorization": "Bearer …"}`.
 
 From the CLI, set `PIPECAT_START_URL` to the full start URL and load `EGMA_START_SECRET` from your secret store. This command passes the headers through standard input:
 

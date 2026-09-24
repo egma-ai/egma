@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   agentSetupPlan,
-  firstSdkAccess,
-  isSdkPlatform,
   previousAgentSetupStep,
   retellAgentCanEnterPlan,
   retellAgentsForPlan,
@@ -14,17 +12,15 @@ import {
   RETELL_LANE_HELP,
   RETELL_LANE_LABELS,
   RETELL_LANE_QUESTION,
-  SDK_ACCESS_CHOICES,
-  SDK_CONNECTION_TYPES,
-  SDK_MODALITY_CHOICES,
-  sdkConnectionTitle,
-  stepAfterSdkConnection,
-  stepAfterSdkTesting,
+  stepAfterLiveKitCredentials,
+  stepAfterLiveKitTesting,
   stepAfterPlatform,
   stepAfterRetellAgent,
   stepAfterRetellLanes,
+  type AgentSetupGoal,
   type RetellDiscoveredAgent,
 } from "../lib/agent-setup-flow.ts";
+import { pipecatSetupPrompt } from "../lib/pipecat-setup-prompt.ts";
 
 const CHAT = {
   platformAgentId: "chat_1",
@@ -268,13 +264,13 @@ describe("the goal-first agent setup plan", () => {
     expect(stepAfterPlatform("simulation", "retell")).toBe("retell-key");
     expect(stepAfterPlatform("monitoring", "retell")).toBe("retell-key");
     expect(stepAfterPlatform("simulation", "livekit")).toBe(
-      "sdk-modality",
+      "livekit-modality",
     );
     expect(stepAfterPlatform("both", "livekit")).toBe(
-      "sdk-monitoring",
+      "livekit-monitoring",
     );
     expect(stepAfterPlatform("monitoring", "livekit")).toBe(
-      "sdk-monitoring",
+      "livekit-monitoring",
     );
     // The one question leads for a simulation. Both goes straight to the
     // number chooser its phone lane needs. Monitoring finishes on the agent
@@ -309,11 +305,11 @@ describe("the goal-first agent setup plan", () => {
       previousAgentSetupStep({ step: "retell-phone", goal: "both" }),
     ).toBe("retell-agent");
     expect(
-      previousAgentSetupStep({ step: "sdk-monitoring", goal: "both" }),
+      previousAgentSetupStep({ step: "livekit-monitoring", goal: "both" }),
     ).toBe("platform");
     expect(
       previousAgentSetupStep({
-        step: "sdk-monitoring",
+        step: "livekit-monitoring",
         goal: "monitoring",
       }),
     ).toBe("platform");
@@ -327,26 +323,26 @@ describe("the goal-first agent setup plan", () => {
     const simulation = agentSetupPlan("simulation", "livekit");
     const both = agentSetupPlan("both", "livekit");
 
-    expect(stepAfterSdkConnection(simulation)).toBe("sdk-testing");
-    expect(stepAfterSdkConnection(both)).toBe("sdk-testing");
-    expect(stepAfterSdkTesting(simulation)).toBeNull();
-    expect(stepAfterSdkTesting(both)).toBeNull();
+    expect(stepAfterLiveKitCredentials(simulation)).toBe("livekit-testing");
+    expect(stepAfterLiveKitCredentials(both)).toBe("livekit-testing");
+    expect(stepAfterLiveKitTesting(simulation)).toBeNull();
+    expect(stepAfterLiveKitTesting(both)).toBeNull();
 
     expect(
-      previousAgentSetupStep({ step: "sdk-modality", goal: "simulation" }),
+      previousAgentSetupStep({ step: "livekit-modality", goal: "simulation" }),
     ).toBe("platform");
     expect(
-      previousAgentSetupStep({ step: "sdk-modality", goal: "both" }),
-    ).toBe("sdk-monitoring");
+      previousAgentSetupStep({ step: "livekit-modality", goal: "both" }),
+    ).toBe("livekit-monitoring");
     expect(
-      previousAgentSetupStep({ step: "sdk-connection", goal: "simulation" }),
-    ).toBe("sdk-modality");
+      previousAgentSetupStep({ step: "livekit-simulation", goal: "simulation" }),
+    ).toBe("livekit-modality");
     expect(
-      previousAgentSetupStep({ step: "sdk-testing", goal: "both" }),
+      previousAgentSetupStep({ step: "livekit-testing", goal: "both" }),
     ).toBeNull();
     expect(
       previousAgentSetupStep({
-        step: "sdk-monitoring",
+        step: "livekit-monitoring",
         goal: "both",
       }),
     ).toBe("platform");
@@ -354,83 +350,65 @@ describe("the goal-first agent setup plan", () => {
 });
 
 describe("Pipecat in the goal-first setup", () => {
-  it("walks LiveKit's steps, because both agents carry the Egma SDK", () => {
-    expect(isSdkPlatform("pipecat")).toBe(true);
-    expect(isSdkPlatform("livekit")).toBe(true);
-    expect(isSdkPlatform("retell")).toBe(false);
-    expect(isSdkPlatform("")).toBe(false);
+  const GOALS: readonly AgentSetupGoal[] = ["simulation", "monitoring", "both"];
 
-    for (const goal of ["simulation", "monitoring", "both"] as const) {
-      const { platform, ...pipecat } = agentSetupPlan(goal, "pipecat");
-      const { platform: livekitPlatform, ...livekit } = agentSetupPlan(
+  it("writes nothing for any goal: a coding agent does the setup", () => {
+    for (const goal of GOALS) {
+      expect(agentSetupPlan(goal, "pipecat")).toEqual({
         goal,
-        "livekit",
-      );
-      expect(platform).toBe("pipecat");
-      expect(livekitPlatform).toBe("livekit");
-      expect(pipecat).toEqual(livekit);
-      expect(stepAfterPlatform(goal, "pipecat")).toBe(
-        stepAfterPlatform(goal, "livekit"),
-      );
+        platform: "pipecat",
+        mayWriteConnection: false,
+        pullWithConnection: false,
+        pullWithoutConnection: false,
+        monitoringInstructions: false,
+        asksHowToTest: false,
+      });
     }
-    expect(stepAfterPlatform("simulation", "pipecat")).toBe("sdk-modality");
-    expect(stepAfterPlatform("both", "pipecat")).toBe("sdk-monitoring");
-    expect(stepAfterPlatform("monitoring", "pipecat")).toBe("sdk-monitoring");
-    expect(stepAfterSdkConnection(agentSetupPlan("both", "pipecat"))).toBe(
-      "sdk-testing",
-    );
-    expect(stepAfterSdkTesting(agentSetupPlan("both", "pipecat"))).toBeNull();
   });
 
-  it("offers Pipecat Cloud first, then Self-hosted, on the Daily room", () => {
-    expect(SDK_CONNECTION_TYPES.pipecat).toBe("daily_room");
-    expect(SDK_ACCESS_CHOICES.pipecat).toEqual([
-      { accessVariant: "daily_room.pipecat_cloud", label: "Pipecat Cloud" },
-      { accessVariant: "daily_room.self_hosted", label: "Self-hosted" },
-    ]);
+  it("goes from the platform to the one prompt, and Back returns to the platform", () => {
+    for (const goal of GOALS) {
+      expect(stepAfterPlatform(goal, "pipecat")).toBe("pipecat-prompt");
+      expect(previousAgentSetupStep({ step: "pipecat-prompt", goal })).toBe("platform");
+    }
+  });
+
+  it("writes the goal, Egma's address, the project and the skill into one prompt", () => {
     expect(
-      firstSdkAccess("pipecat", ["daily_room.self_hosted", "daily_room.pipecat_cloud"]),
-    ).toBe("daily_room.pipecat_cloud");
-    // A modality that offers only the second way in starts on it.
-    expect(firstSdkAccess("pipecat", ["daily_room.self_hosted"])).toBe(
-      "daily_room.self_hosted",
-    );
-    expect(firstSdkAccess("pipecat", [])).toBe("");
-    // LiveKit's select is unchanged.
-    expect(SDK_ACCESS_CHOICES.livekit.map((one) => one.label)).toEqual([
-      "Project credentials",
-      "Token endpoint",
-    ]);
-    expect(
-      firstSdkAccess("livekit", [
-        "livekit_room.customer_token_endpoint",
-        "livekit_room.project_credentials",
-      ]),
-    ).toBe("livekit_room.project_credentials");
-  });
-
-  it("titles the form with the platform and the chosen modality", () => {
-    expect(sdkConnectionTitle("pipecat", "voice")).toBe(
-      "Connect Pipecat Voice for simulations",
-    );
-    expect(sdkConnectionTitle("pipecat", "chat")).toBe(
-      "Connect Pipecat Chat for simulations",
-    );
-    expect(sdkConnectionTitle("livekit", "voice")).toBe(
-      "Connect LiveKit Voice for simulations",
-    );
-    expect(sdkConnectionTitle("pipecat", "")).toBe(
-      "Connect Pipecat for simulations",
+      pipecatSetupPrompt({
+        goal: "simulation",
+        egmaUrl: "https://app.egma.ai",
+        projectId: "prj_1",
+        agent: null,
+      }),
+    ).toBe(
+      [
+        "Set up Egma simulation testing for the Pipecat bot in this repository.",
+        "",
+        "Egma: https://app.egma.ai",
+        "Project: prj_1",
+        "",
+        "1. Install the Egma skills: npx --yes skills add egma-ai/egma",
+        "2. Follow the integrate-egma skill. Sign in with egma login; I will approve it in my browser.",
+        "3. Ask me where the bot should run for the simulations: on this machine, on Pipecat Cloud, or on my own servers.",
+        "4. Run one test suite and send me the run link.",
+        "",
+        "Ask me before you change anything in production. Never print or commit a key.",
+      ].join("\n"),
     );
   });
 
-  it("says what each modality asks of a Pipecat bot, and no more", () => {
-    const { voice, chat } = SDK_MODALITY_CHOICES.pipecat;
-    expect([voice.title, chat.title]).toEqual(["Voice", "Chat"]);
-    expect(voice.description).toContain("bot");
-    expect(voice.description).not.toContain("worker");
-    // Chat needs no code beyond the one testing line.
-    expect(chat.description).toContain("The same testing hook covers it.");
-    expect(chat.description).not.toContain("short setup");
+  it("names the agent the sheet opened from, and asks monitoring where production runs", () => {
+    const prompt = pipecatSetupPrompt({
+      goal: "monitoring",
+      egmaUrl: "https://egma.example.com",
+      projectId: "prj_1",
+      agent: { id: "agt_pipecat", name: "lakeside-front-desk" },
+    });
+    expect(prompt).toContain("Agent: lakeside-front-desk (agt_pipecat)");
+    expect(prompt).toContain(
+      "3. Ask me where the bot runs in production: on Pipecat Cloud, on my own servers, or not deployed yet.",
+    );
+    expect(prompt).toContain("4. Tell me how to check that my production calls arrive in Egma.");
   });
 });

@@ -2,15 +2,15 @@
 title: "Connect a Pipecat Cloud agent"
 ---
 
-## Connect through the UI
+## Set up with your coding agent
 
 1. Open **Agents → Connect an agent**.
-2. Choose **Run simulations**, then **Pipecat**.
-3. Choose **Voice** or **Chat**, then select **Continue**.
-4. Select **Pipecat Cloud** as the connection type. Enter your **Pipecat Cloud agent name** and a **Public API key**.
-5. Select **Continue to testing** and follow the SDK setup prompts. Prepare your bot as described below before you start a run.
+2. Choose **Run simulations**, **Monitor production** or **Set up both**, then **Pipecat**.
+3. Copy the prompt, open your bot's repository in a coding agent, and paste it.
 
-For a bot on your own servers, see [Use a self-hosted starter](/docs/integrations/pipecat/self-hosted). To test before you deploy, see [Test a bot on this machine](/docs/integrations/pipecat/this-machine).
+The coding agent installs the Egma skills and the CLI, signs you in, and asks where your bot runs: on this machine, on Pipecat Cloud, or on your own servers. It then adds the SDK line, the keys and the connections, runs your first test suite, and sends you the run link. It asks you before it changes a secret set or deploys.
+
+To do the same by hand, follow the steps below. For a bot on your own servers, see [Use a self-hosted starter](/docs/integrations/pipecat/self-hosted). To test before you deploy, see [Test a bot on this machine](/docs/integrations/pipecat/this-machine).
 
 ## 1. Prepare the bot
 
@@ -60,7 +60,7 @@ Create a project API key from your initialized agent repository:
 egma project api-key create --name "Pipecat bot"
 ```
 
-Copy the key when the CLI prints it; it is shown only once. If the bot will also [send production conversations](/docs/integrations/pipecat/monitor#get-the-agents-monitoring-key), use the agent's monitoring key instead; it works for simulations too. Your bot needs these two settings:
+Copy the key when the CLI prints it; it is shown only once. Give each place your bot runs its own key: this one is for Pipecat Cloud. If the bot will also [send production conversations](/docs/integrations/pipecat/monitor), add `EGMA_AGENT_NAME` too. Your bot needs these two settings:
 
 | Variable | Value |
 | --- | --- |
@@ -75,14 +75,9 @@ pipecat cloud secrets set my-bot-secrets \
   EGMA_API_KEY="$EGMA_API_KEY"
 ```
 
-A Pipecat Cloud cold start can take longer than Egma waits for your bot. Keep one instance warm for the agent that Egma tests:
+Then redeploy the bot, for example with `pipecat cloud deploy`. The bot reads the new secrets and code only after the redeploy.
 
-```toml
-[scaling]
-min_agents = 1
-```
-
-Pipecat Cloud charges for a reserved instance. Then redeploy the bot, for example with `pipecat cloud deploy`. The bot reads the new secrets and code only after the redeploy.
+A cold start adds a few seconds, and Egma waits up to 120 seconds for your bot. If your bot starts more slowly than that, keep one instance warm with `min_agents = 1` under `[scaling]` in `pcc-deploy.toml`. Pipecat Cloud charges for a reserved instance.
 
 ## 2. Register the agent in Egma
 

@@ -402,7 +402,12 @@ describe("a Pipecat agent from the CLI", () => {
     ]) {
       expect(listed.stdout, line).toContain(line);
     }
-    expect(listed.stdout).not.toContain("Credential guidance");
+    expect(listed.stdout).toContain(
+      "  Credential guidance: Egma starts your agent with this public key and stores it sealed. A read gives back its last four characters, never the key.",
+    );
+    expect(listed.stdout).toContain(
+      "  Credential guidance: Egma sends these headers with every start request and stores them sealed. A read gives back the header names and never their values.",
+    );
     expect(listed.stdout).not.toContain("livekit");
   });
 

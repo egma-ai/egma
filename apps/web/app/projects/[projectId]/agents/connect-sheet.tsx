@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/sheet";
 import type { Answer, Refusal } from "@/lib/api.ts";
 import {
+  modalityLabel,
   type ListedConnection,
   type ListedAgentWithConnections,
 } from "@/lib/agents.ts";
@@ -54,15 +55,8 @@ import {
   RETELL_LANE_QUESTION,
   stepAfterRetellLanes,
   type RetellLane,
-  firstSdkAccess,
-  isSdkPlatform,
-  SDK_ACCESS_CHOICES,
-  SDK_CONNECTION_TYPES,
-  SDK_MODALITY_CHOICES,
-  SDK_PLATFORM_LABELS,
-  sdkConnectionTitle,
-  stepAfterSdkConnection,
-  stepAfterSdkTesting,
+  stepAfterLiveKitTesting,
+  stepAfterLiveKitCredentials,
   stepAfterPlatform,
   stepAfterRetellAgent,
   type AgentSetupGoal,
@@ -70,9 +64,8 @@ import {
   type AgentSetupStep,
   type LiveKitWorkerLanguage,
   type RetellConnectionCandidate,
-  type SdkAccessChoice,
-  type SdkPlatform,
 } from "@/lib/agent-setup-flow.ts";
+import { pipecatSetupPrompt } from "@/lib/pipecat-setup-prompt.ts";
 import { platformAnswer, platformClient } from "@/lib/platform-client.ts";
 import { cn } from "@/lib/utils";
 import {
@@ -85,10 +78,9 @@ import { useDraftNavigation } from "@/ui/draft-navigation.tsx";
 import { Empty, Failure, Loading, NotFound } from "@/ui/page-state.tsx";
 import { useUnsavedChanges } from "@/ui/settings-read.ts";
 
+import { CopyBlock } from "./copy-block.tsx";
 import { LiveKitTestingInstructions } from "./livekit-testing-instructions.tsx";
 import { LiveKitMonitoringInstructions } from "./livekit-monitoring-instructions.tsx";
-import { PipecatMonitoringInstructions } from "./pipecat-monitoring-instructions.tsx";
-import { PipecatTestingInstructions } from "./pipecat-testing-instructions.tsx";
 import {
   ConnectionFields,
   type Draft,
@@ -154,7 +146,30 @@ type ConnectAgentSheetProps = {
 
 const NEW_AGENT = "";
 const SHORTEST_KEY = 8;
-const SELF_HOSTED = "daily_room.self_hosted";
+const PROJECT_CREDENTIALS = "livekit_room.project_credentials";
+const TOKEN_ENDPOINT = "livekit_room.customer_token_endpoint";
+
+/**
+ * What each modality is, said as the difference a person is choosing between.
+ *
+ * Which of the two are offered is the catalog's answer and never this file's.
+ * What each one means is product language, and it is written once here so the
+ * card cannot say one thing while the surface after it says another.
+ */
+const MODALITY_CHOICES: Readonly<
+  Record<"chat" | "voice", { readonly title: string; readonly description: string }>
+> = {
+  voice: {
+    title: "Voice",
+    description:
+      "Egma speaks to the agent in the room, the way a person reaches it. Your worker needs the Egma testing hook, which Egma shows you next.",
+  },
+  chat: {
+    title: "Chat",
+    description:
+      "Egma types to the agent and reads its words back. Fast, and it spends nothing on speech. Your worker needs a short setup, which Egma shows you next.",
+  },
+};
 
 function firstStep(
   goal: AgentSetupGoal | undefined,
@@ -241,16 +256,15 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   // an unanswered setup question.
   const [livekitLanguage, setLivekitLanguage] =
     useState<LiveKitWorkerLanguage>("python");
-  // The LiveKit and Pipecat walk's answers (`SdkPlatform`). The access
-  // variant is chosen with the modality, from what the catalog offers for it.
-  const [sdkModality, setSdkModality] = useState<"chat" | "voice" | "">("");
-  const [sdkAccess, setSdkAccess] = useState("");
-  // LiveKit's worker name, or a new self-hosted Pipecat agent's name.
-  const [sdkAgentName, setSdkAgentName] = useState("");
-  const [sdkConfig, setSdkConfig] = useState<
+  const [livekitModality, setLivekitModality] = useState<"chat" | "voice" | "">(
+    "",
+  );
+  const [livekitAccess, setLivekitAccess] = useState(PROJECT_CREDENTIALS);
+  const [livekitAgentName, setLivekitAgentName] = useState("");
+  const [livekitConfig, setLivekitConfig] = useState<
     Readonly<Record<string, string>>
   >({});
-  const [sdkCredentials, setSdkCredentials] = useState<
+  const [livekitCredentials, setLivekitCredentials] = useState<
     Readonly<Record<string, string>>
   >({});
 
@@ -271,11 +285,11 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     setRetellRoute("");
     setLane("");
     setLivekitLanguage("python");
-    setSdkModality("");
-    setSdkAccess("");
-    setSdkAgentName("");
-    setSdkConfig({});
-    setSdkCredentials({});
+    setLivekitModality("");
+    setLivekitAccess(PROJECT_CREDENTIALS);
+    setLivekitAgentName("");
+    setLivekitConfig({});
+    setLivekitCredentials({});
     setCompleted(null);
     setRetellProgress(null);
     setRefused(null);
@@ -413,82 +427,59 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     retellRoute,
   ]);
 
-  const sdkPlatform: SdkPlatform | null = isSdkPlatform(platform)
-    ? platform
-    : null;
-  const sdkOptions =
-    sdkPlatform === null
-      ? []
-      : optionsForPlatform(catalog, sdkPlatform).filter(
-          (one) => one.connectionType === SDK_CONNECTION_TYPES[sdkPlatform],
-        );
-  /** The modalities this Egma offers on the platform's room, in the catalog's order. */
-  const sdkModalities = [...new Set(sdkOptions.map((one) => one.modality))];
-  /** The access variants that speak the chosen modality. */
-  const sdkAccessOptions = sdkOptions.filter(
-    (one) => one.modality === sdkModality,
+  const livekitOptions =
+    platform === "livekit"
+      ? optionsForPlatform(catalog, "livekit").filter(
+          (one) => one.connectionType === "livekit_room",
+        )
+      : [];
+  /** The modalities this Egma offers on a LiveKit room, in the catalog's order. */
+  const livekitModalities = [
+    ...new Set(livekitOptions.map((one) => one.modality)),
+  ];
+  /** The access variants that speak the chosen modality — chat has exactly one. */
+  const livekitAccessOptions = livekitOptions.filter(
+    (one) => one.modality === livekitModality,
   );
-  /** The select's entries, in the product's order, as far as the catalog offers them. */
-  const sdkAccessChoices =
-    sdkPlatform === null
-      ? []
-      : SDK_ACCESS_CHOICES[sdkPlatform].filter((choice) =>
-          sdkAccessOptions.some(
-            (one) => one.accessVariant === choice.accessVariant,
-          ),
-        );
   /*
    * The pair decides the row, never the access variant alone.
    *
-   * Chat and voice share one access variant, so matching the variant would
-   * answer with whichever row the server listed first — and a chat walk would
-   * save a voice connection with nothing anywhere saying so.
+   * Chat and voice share `livekit_room.project_credentials`, so matching the
+   * variant would answer with whichever row the server listed first — and a
+   * chat walk would save a voice connection with nothing anywhere saying so.
    */
-  const sdkOption = sdkAccessOptions.find(
-    (one) => one.accessVariant === sdkAccess,
+  const livekitOption = livekitAccessOptions.find(
+    (one) => one.accessVariant === livekitAccess,
   );
-  const registeringAgent = agentId === undefined || agentId === NEW_AGENT;
-  /*
-   * The name the flow asks for beside the connection's own fields: LiveKit's
-   * worker name, which is also its config, or — for a new agent reached only
-   * by a self-hosted Pipecat starter — the agent's name, which no field of
-   * that connection carries. A Pipecat Cloud connection's agent name is its
-   * own field and names the agent too.
-   */
-  const asksAgentName =
-    sdkPlatform === "livekit" ||
-    (sdkPlatform === "pipecat" && sdkAccess === SELF_HOSTED && registeringAgent);
-  const sdkFieldValue = (key: string): string =>
-    sdkPlatform === "livekit" && key === "agentName"
-      ? sdkAgentName
-      : (sdkConfig[key] ?? "");
-  /** The name a new agent is registered under. */
-  const registrationName = (
-    asksAgentName ? sdkAgentName : sdkFieldValue("agentName")
-  ).trim();
+  const livekitFieldValue = (key: string): string =>
+    key === "agentName"
+      ? livekitAgentName
+      : (livekitConfig[key] ?? "");
   const storedRetellKey =
     agentId !== undefined &&
     known?.monitoringKeyPresent === true;
   const keyReady = storedRetellKey || apiKey.trim().length >= SHORTEST_KEY;
-  const sdkReady =
-    sdkOption !== undefined &&
-    sdkOption.fields
+  const livekitReady =
+    livekitOption !== undefined &&
+    livekitOption.fields
       .filter((field) => field.required)
-      .every((field) => sdkFieldValue(field.key).trim() !== "") &&
-    sdkOption.credentialFields
+      .every((field) => livekitFieldValue(field.key).trim() !== "") &&
+    livekitOption.credentialFields
       .filter((field) => field.required)
-      .every((field) => (sdkCredentials[field.field]?.trim() ?? "") !== "") &&
-    (!asksAgentName || sdkAgentName.trim() !== "");
+      .every(
+        (field) => (livekitCredentials[field.field]?.trim() ?? "") !== "",
+      ) &&
+    livekitAgentName.trim() !== "";
 
   const changed =
     apiKey !== "" ||
     retellAgents !== null ||
-    sdkAgentName !== "" ||
-    Object.values(sdkConfig).some((value) => value !== "") ||
-    Object.values(sdkCredentials).some((value) => value !== "");
-  const savedSdkConnection = sdkPlatform !== null && completed !== null;
+    livekitAgentName !== "" ||
+    Object.values(livekitConfig).some((value) => value !== "") ||
+    Object.values(livekitCredentials).some((value) => value !== "");
+  const savedLiveKitConnection = platform === "livekit" && completed !== null;
   useUnsavedChanges(
-    !savedSdkConnection && changed && !saving && !discovering,
+    !savedLiveKitConnection && changed && !saving && !discovering,
     saving || discovering,
   );
 
@@ -512,11 +503,11 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     setRetellRoute("");
     setLane("");
     setLivekitLanguage("python");
-    setSdkModality("");
-    setSdkAccess("");
-    setSdkAgentName("");
-    setSdkConfig({});
-    setSdkCredentials({});
+    setLivekitModality("");
+    setLivekitAccess(PROJECT_CREDENTIALS);
+    setLivekitAgentName("");
+    setLivekitConfig({});
+    setLivekitCredentials({});
     setCompleted(null);
     setRetellProgress(null);
     setRefused(null);
@@ -535,23 +526,22 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
 
   /*
    * Each modality offers whichever ways in the catalog lists for it — today
-   * every variant speaks both. A way in the new modality does not offer falls
-   * back to the first one it does, in the select's order, so the form never
-   * draws a connection type the server would refuse.
+   * both variants speak both, because the telling that a simulation is typed
+   * is the room's name, which Egma asks an endpoint for exactly as it asks
+   * for a bare one. A way in the new modality does not offer falls back to
+   * project credentials, so the form never draws a connection type the
+   * server would refuse.
    */
-  function chooseSdkModality(next: "chat" | "voice"): void {
-    if (sdkPlatform === null) return;
-    if (next !== sdkModality) {
-      setSdkConfig({});
-      setSdkCredentials({});
+  function chooseLiveKitModality(next: "chat" | "voice"): void {
+    if (next !== livekitModality) {
+      setLivekitConfig({});
+      setLivekitCredentials({});
     }
-    const offered: readonly string[] = sdkOptions
-      .filter((one) => one.modality === next)
-      .map((one) => one.accessVariant);
-    if (!offered.includes(sdkAccess)) {
-      setSdkAccess(firstSdkAccess(sdkPlatform, offered));
-    }
-    setSdkModality(next);
+    const offered = livekitOptions.some(
+      (one) => one.modality === next && one.accessVariant === livekitAccess,
+    );
+    if (!offered) setLivekitAccess(PROJECT_CREDENTIALS);
+    setLivekitModality(next);
   }
 
   function back(): void {
@@ -628,12 +618,12 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
 
     const config: Record<string, string> = {};
     for (const field of option.fields) {
-      const value = sdkFieldValue(field.key).trim();
+      const value = livekitFieldValue(field.key).trim();
       if (value !== "") config[field.key] = value;
     }
     const credentials: Record<string, string> = {};
     for (const field of option.credentialFields) {
-      const value = sdkCredentials[field.field]?.trim() ?? "";
+      const value = livekitCredentials[field.field]?.trim() ?? "";
       if (value !== "") credentials[field.field] = value;
     }
     return {
@@ -647,8 +637,6 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
   }
 
   async function saveConnection(
-    /** The platform a new agent is registered on: this walk's platform. */
-    agentPlatform: AgentSetupPlatform,
     name: string,
     body: ConnectionBody,
     /**
@@ -666,7 +654,13 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     if (onto === undefined || onto === NEW_AGENT) {
       const answer = await platformAnswer(
         registerAgent(
-          { projectId, name, agentPlatform, connection: body },
+          {
+            projectId,
+            name,
+            agentPlatform:
+              body.agentPlatform === "retell" ? "retell" : "livekit",
+            connection: body,
+          },
           { client: platformClient },
         ),
       );
@@ -975,7 +969,6 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
           platformAgentId: selectedRetellAgent.platformAgentId,
         });
         result = await saveConnection(
-          "retell",
           selectedRetellAgent.name,
           body,
           landed?.agentId,
@@ -1004,31 +997,23 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     }
   }
 
-  async function finishSdkConnection(): Promise<void> {
-    if (
-      goal === "" ||
-      plan === null ||
-      sdkPlatform === null ||
-      sdkOption === undefined
-    ) {
-      return;
-    }
+  async function finishLiveKit(): Promise<void> {
+    if (goal === "" || plan === null || livekitOption === undefined) return;
     // Saved already, and this press is the way on: a Both walk that came back
     // to this screen must not save a second connection to move forward.
     if (completed !== null) {
-      const next = stepAfterSdkConnection(plan);
+      const next = stepAfterLiveKitCredentials(plan);
       if (next === null) onConnected(completed);
       else transition(next);
       return;
     }
-    if (!sdkReady) return;
+    if (!livekitReady) return;
     const result = await saveConnection(
-      sdkPlatform,
-      registrationName,
-      connectionBody(sdkOption),
+      livekitAgentName.trim(),
+      connectionBody(livekitOption),
     );
     if (result === null) return;
-    const next = stepAfterSdkConnection(plan);
+    const next = stepAfterLiveKitCredentials(plan);
     setCompleted(result);
     transition(next);
   }
@@ -1083,14 +1068,14 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       case "retell-phone":
         await finishRetellLanes();
         return;
-      case "sdk-modality":
-        if (sdkModality !== "") transition("sdk-connection");
+      case "livekit-modality":
+        if (livekitModality !== "") transition("livekit-simulation");
         return;
-      case "sdk-connection":
-        await finishSdkConnection();
+      case "livekit-simulation":
+        await finishLiveKit();
         return;
-      case "sdk-testing": {
-        const next = plan === null ? null : stepAfterSdkTesting(plan);
+      case "livekit-testing": {
+        const next = plan === null ? null : stepAfterLiveKitTesting(plan);
         if (next !== null) {
           transition(next);
         } else if (completed === null) {
@@ -1100,15 +1085,19 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         }
         return;
       }
-      case "sdk-monitoring":
-        // Monitoring needs a source hook. Both carries LiveKit's language
-        // choice forward; it is never part of the connection.
+      case "livekit-monitoring":
+        // Monitoring needs a language-specific source hook. Both carries that
+        // instruction choice forward; it is never part of the room connection.
         if (goal === "both" && completed === null) {
-          transition("sdk-modality");
+          transition("livekit-modality");
           return;
         }
         if (completed === null) leave();
         else onConnected(completed);
+        return;
+      case "pipecat-prompt":
+        // The coding agent does the setup; the sheet saved nothing to report.
+        leave();
         return;
     }
   }
@@ -1145,8 +1134,8 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
     }
 
     const needsCatalog =
-      step === "sdk-modality" ||
-      step === "sdk-connection" ||
+      step === "livekit-modality" ||
+      step === "livekit-simulation" ||
       step === "retell-phone" ||
       // The one question can save on Continue when the phone lane was not
       // picked, and that needs the option catalog to name the row it writes.
@@ -1234,7 +1223,10 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       case "retell-key":
         return (
           <div className="flex flex-col gap-5">
-            <StepIntro title="Connect your Retell account" />
+            <StepIntro
+              title="Connect your Retell account"
+              description="Enter your Retell API key. Egma uses it to find the agents in this account."
+            />
             {storedRetellKey ? (
               <InfoBox>
                 {"This agent already holds its Retell key (ending " +
@@ -1242,11 +1234,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                   "). Egma will use it to find the account's agents."}
               </InfoBox>
             ) : (
-              <Field
-                label="Retell API key*"
-                htmlFor="retell-api-key"
-                hint="Copied from your Retell dashboard."
-              >
+              <Field label="Retell API key*" htmlFor="retell-api-key">
                 <Input
                   id="retell-api-key"
                   aria-required="true"
@@ -1368,16 +1356,15 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       case "retell-phone":
         return (
           <div className="flex flex-col gap-5">
-            <StepIntro title="Choose a phone number" />
-            <Field
-              label="Phone number*"
-              htmlFor="retell-phone-number"
-              hint={
-                "Routed to " +
+            <StepIntro
+              title="Choose a phone number"
+              description={
+                "Retell already routes these numbers to " +
                 String(selectedRetellAgent?.name ?? "this agent") +
-                " in Retell."
+                ". Choose the one Egma should use."
               }
-            >
+            />
+            <Field label="Phone number*" htmlFor="retell-phone-number">
               <Select
                 id="retell-phone-number"
                 aria-required="true"
@@ -1404,9 +1391,13 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                 ],
               ]}
             />
+            <Help>
+              Egma reads this number from Retell. It does not change your Retell
+              routing.
+            </Help>
           </div>
         );
-      case "sdk-modality":
+      case "livekit-modality":
         return (
           <div className="flex flex-col gap-5">
             <StepIntro
@@ -1416,92 +1407,75 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
             <RadioGroup
               className="gap-6"
               aria-label="Simulation modality"
-              value={sdkModality}
+              value={livekitModality}
               onValueChange={(value) =>
-                chooseSdkModality(value as "chat" | "voice")
+                chooseLiveKitModality(value as "chat" | "voice")
               }
             >
-              {sdkPlatform === null
-                ? null
-                : sdkModalities.map((one) => (
-                    <ChoiceCard
-                      key={one}
-                      value={one}
-                      title={SDK_MODALITY_CHOICES[sdkPlatform][one].title}
-                      description={
-                        SDK_MODALITY_CHOICES[sdkPlatform][one].description
-                      }
-                    />
-                  ))}
+              {livekitModalities.map((one) => (
+                <ChoiceCard
+                  key={one}
+                  value={one}
+                  title={MODALITY_CHOICES[one].title}
+                  description={MODALITY_CHOICES[one].description}
+                />
+              ))}
             </RadioGroup>
           </div>
         );
-      case "sdk-testing":
-        if (sdkModality === "") return null;
-        if (sdkPlatform === "pipecat") {
-          return completed === null ? null : (
-            <PipecatTestingInstructions
-              projectId={projectId}
-              agentId={completed.agentId}
-              access={
-                sdkAccess === SELF_HOSTED ? "self_hosted" : "pipecat_cloud"
-              }
-              monitors={goal === "both"}
-            />
-          );
-        }
-        return (
+      case "livekit-testing":
+        return livekitModality === "" ? null : (
           <LiveKitTestingInstructions
             language={livekitLanguage}
-            modality={sdkModality}
+            modality={livekitModality}
             onLanguageChange={setLivekitLanguage}
           />
         );
-      case "sdk-connection":
-        return sdkPlatform === null ? null : (
-          <SdkConnectionStep
-            platform={sdkPlatform}
-            option={sdkOption}
-            modality={sdkModality}
-            access={sdkAccess}
-            accessChoices={sdkAccessChoices}
-            asksAgentName={asksAgentName}
-            agentName={sdkAgentName}
+      case "livekit-simulation":
+        return (
+          <LiveKitSimulationStep
+            option={livekitOption}
+            access={livekitAccess}
+            chooseAccess={livekitAccessOptions.length > 1}
+            agentName={livekitAgentName}
             draft={{
-              config: sdkConfig,
-              credentials: sdkCredentials,
+              config: livekitConfig,
+              credentials: livekitCredentials,
             }}
             disabled={completed !== null}
             onAccessChange={(value) => {
-              setSdkAccess(value);
-              setSdkConfig({});
-              setSdkCredentials({});
+              setLivekitAccess(value);
+              setLivekitConfig({});
+              setLivekitCredentials({});
             }}
-            onAgentNameChange={setSdkAgentName}
+            onAgentNameChange={setLivekitAgentName}
             onDraftChange={(next) => {
-              setSdkConfig(next.config);
-              setSdkCredentials(next.credentials);
+              setLivekitConfig(next.config);
+              setLivekitCredentials(next.credentials);
             }}
           />
         );
-      case "sdk-monitoring":
-        return sdkPlatform === "pipecat" ? (
-          <PipecatMonitoringInstructions
-            agentId={registeringAgent ? null : (agentId ?? null)}
-            registers={registeringAgent && goal === "monitoring"}
-          />
-        ) : (
+      case "livekit-monitoring":
+        return (
           <LiveKitMonitoringInstructions
             projectId={projectId}
             language={livekitLanguage}
             onLanguageChange={setLivekitLanguage}
           />
         );
+      case "pipecat-prompt":
+        return goal === "" ? null : (
+          <PipecatPromptStep
+            goal={goal}
+            projectId={projectId}
+            agent={known === null ? null : { id: known.id, name: known.name }}
+          />
+        );
     }
   }
 
   const primaryLabel =
-    step === "goal" || step === "platform" || step === "sdk-modality"
+    step === "goal" || step === "platform" || step === "livekit-modality"
       ? "Continue"
       : step === "retell-agent"
         ? // The monitoring goal finishes on this step: the pull switch needs
@@ -1529,15 +1503,17 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                 : goal === "simulation"
                   ? "Set up simulation"
                   : "Set up both"
-              : step === "sdk-connection"
+              : step === "livekit-simulation"
                 ? saving
                   ? "Saving…"
                   : completed === null
                     ? "Continue to testing"
                     : "Continue"
-                : step === "sdk-monitoring" && goal === "both"
+                : step === "livekit-monitoring" && goal === "both"
                   ? "Continue to simulation"
-                  : "Return to agents";
+                  : step === "pipecat-prompt"
+                    ? "Done"
+                    : "Return to agents";
 
   const primaryDisabled =
     saving ||
@@ -1552,8 +1528,8 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
       (lane === "" || (lane !== "phone" && catalog === null))) ||
     (step === "retell-phone" &&
       (selectedVoiceRoute === undefined || catalog === null)) ||
-    (step === "sdk-modality" && sdkModality === "") ||
-    (step === "sdk-connection" && completed === null && !sdkReady);
+    (step === "livekit-modality" && livekitModality === "") ||
+    (step === "livekit-simulation" && completed === null && !livekitReady);
 
   const needsKnown = agentId !== undefined && agentId !== NEW_AGENT;
   const usable =
@@ -1597,7 +1573,7 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
             className="border-t border-border pt-5"
             secondary={
               usable ? (
-                step === "sdk-testing" ? undefined : (
+                step === "livekit-testing" ? undefined : (
                   <Button
                     type="button"
                     size="lg"
@@ -1637,6 +1613,46 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         </form>
       </SheetContent>
     </Sheet>
+  );
+}
+
+/**
+ * Pipecat's whole setup in the web app: one prompt for a coding agent.
+ *
+ * The integrate-egma skill registers the agent, adds the SDK and the
+ * connections, and asks before it changes production, so this step writes
+ * nothing. The Egma URL is this page's own origin, which serves the SDK's
+ * routes and the trace door.
+ */
+function PipecatPromptStep({
+  goal,
+  projectId,
+  agent,
+}: {
+  readonly goal: AgentSetupGoal;
+  readonly projectId: string;
+  readonly agent: { readonly id: string; readonly name: string } | null;
+}) {
+  const [egmaUrl, setEgmaUrl] = useState("");
+  useEffect(() => {
+    setEgmaUrl(window.location.origin);
+  }, []);
+  return (
+    <div className="flex flex-col gap-5">
+      <StepIntro
+        title="Set up Pipecat with your coding agent"
+        description="Open your bot's repository in a coding agent and paste this prompt. It installs the Egma skills and does the setup."
+      />
+      <CopyBlock
+        value={pipecatSetupPrompt({ goal, egmaUrl, projectId, agent })}
+        copyLabel="coding-agent prompt"
+      />
+      <Help>
+        {agent === null
+          ? "The agent appears in this list when your coding agent registers it."
+          : "Your coding agent adds its connections to this agent."}
+      </Help>
+    </div>
   );
 }
 
@@ -1743,79 +1759,10 @@ function SummaryRows({
   );
 }
 
-/**
- * How each SDK platform's connection form draws the registry's fields.
- *
- * LiveKit draws its worker name on its own, above the connection's fields,
- * and shortens three labels; Pipecat draws the registry's fields as they are.
- * Placeholders keep example values only.
- */
-const SDK_FORMS: Readonly<
-  Record<
-    SdkPlatform,
-    {
-      /** The name field the walk asks for beside the connection's fields. */
-      readonly agentName: {
-        readonly id: string;
-        readonly label: string;
-        readonly placeholder: string;
-      };
-      /** Config keys drawn by the name field rather than with the rest. */
-      readonly drawnApart: readonly string[];
-      readonly configLabels: Readonly<Record<string, string>>;
-      readonly credentialLabels: Readonly<Record<string, string>>;
-      readonly configPlaceholders: Readonly<Record<string, string>>;
-      readonly credentialPlaceholders: Readonly<Record<string, string>>;
-    }
-  >
-> = {
-  livekit: {
-    agentName: {
-      id: "livekit-agent-name",
-      label: "LiveKit agent name*",
-      placeholder: "your-livekit-agent-name",
-    },
-    drawnApart: ["agentName"],
-    configLabels: { url: "WebSocket URL" },
-    credentialLabels: { apiKey: "API key", apiSecret: "API secret" },
-    configPlaceholders: {
-      url: "wss://your-project.livekit.cloud",
-      tokenEndpoint: "https://api.example.com/livekit/token",
-    },
-    credentialPlaceholders: {
-      headers: '{"Authorization":"Bearer your-token"}',
-    },
-  },
-  pipecat: {
-    agentName: {
-      id: "pipecat-agent-name",
-      label: "Agent name*",
-      placeholder: "your-agent-name",
-    },
-    drawnApart: [],
-    configLabels: {},
-    credentialLabels: {},
-    configPlaceholders: {
-      agentName: "your-pipecat-agent-name",
-      startUrl: "https://bots.example.com/start",
-    },
-    credentialPlaceholders: {
-      headers: '{"Authorization":"Bearer your-token"}',
-    },
-  },
-};
-
-/**
- * The one connection form of a LiveKit or Pipecat simulation: the connection
- * type, the name where one is asked for, then the chosen variant's fields.
- */
-function SdkConnectionStep({
-  platform,
+function LiveKitSimulationStep({
   option,
-  modality,
   access,
-  accessChoices,
-  asksAgentName,
+  chooseAccess,
   agentName,
   draft,
   disabled,
@@ -1823,19 +1770,16 @@ function SdkConnectionStep({
   onAgentNameChange,
   onDraftChange,
 }: {
-  readonly platform: SdkPlatform;
   readonly option: ConnectionOption | undefined;
-  readonly modality: "chat" | "voice" | "";
   readonly access: string;
   /**
-   * The ways in the chosen modality offers.
+   * Whether the chosen modality has more than one way in.
    *
    * Voice and chat both have two today, and which one this is changes what
    * the form asks for. A deployment whose catalog narrows a modality to one
    * way in gets no control that pretends there is a choice.
    */
-  readonly accessChoices: readonly SdkAccessChoice[];
-  readonly asksAgentName: boolean;
+  readonly chooseAccess: boolean;
   readonly agentName: string;
   readonly draft: Draft;
   readonly disabled: boolean;
@@ -1843,73 +1787,83 @@ function SdkConnectionStep({
   readonly onAgentNameChange: (value: string) => void;
   readonly onDraftChange: (draft: Draft) => void;
 }) {
-  const form = SDK_FORMS[platform];
-  // LiveKit's worker name is a registry field drawn apart, so it keeps the
-  // registry's help line. A new self-hosted Pipecat agent's name has none.
-  const agentNameHelp = form.drawnApart.includes("agentName")
-    ? option?.fields.find((field) => field.key === "agentName")?.help
-    : undefined;
+  const endpoint = access === TOKEN_ENDPOINT;
   const presentedOption =
     option === undefined
       ? undefined
       : {
           ...option,
           fields: option.fields
-            .filter((field) => !form.drawnApart.includes(field.key))
-            .map((field) => ({
-              ...field,
-              label: form.configLabels[field.key] ?? field.label,
-            })),
-          credentialFields: option.credentialFields.map((field) => ({
-            ...field,
-            label: form.credentialLabels[field.field] ?? field.label,
-          })),
+            .filter((field) => field.key !== "agentName")
+            .map((field) =>
+              field.key === "url"
+                ? { ...field, label: "WebSocket URL" }
+                : field,
+            ),
+          credentialFields: option.credentialFields.map((field) => {
+            if (field.field === "apiKey") {
+              return { ...field, label: "API key" };
+            }
+            if (field.field === "apiSecret") {
+              return { ...field, label: "API secret" };
+            }
+            if (field.field === "headers") {
+              return {
+                ...field,
+                help:
+                  "Enter a non-empty JSON object that maps each header name to a non-empty string value.",
+              };
+            }
+            return field;
+          }),
         };
   return (
     <div className="flex flex-col gap-5">
-      <StepIntro title={sdkConnectionTitle(platform, modality)} />
-      {accessChoices.length > 1 ? (
-        <Field label="Connection type*" htmlFor={`${platform}-connection-type`}>
+      <StepIntro
+        title={
+          option === undefined
+            ? "Connect LiveKit for simulations"
+            : `Connect LiveKit ${modalityLabel(option.modality)} for simulations`
+        }
+        description={
+          endpoint
+            ? "For every simulation Egma asks your endpoint for a short-lived room token, your LiveKit server URL, and the dispatch of the worker named below."
+            : undefined
+        }
+      />
+      {chooseAccess ? (
+        <Field label="Connection type*" htmlFor="livekit-connection-type">
           <Select
-            id={`${platform}-connection-type`}
+            id="livekit-connection-type"
             aria-required="true"
             value={access}
             disabled={disabled}
             onChange={(event) => onAccessChange(event.target.value)}
           >
-            {accessChoices.map((choice) => (
-              <option key={choice.accessVariant} value={choice.accessVariant}>
-                {choice.label}
-              </option>
-            ))}
+            <option value={PROJECT_CREDENTIALS}>Project credentials</option>
+            <option value={TOKEN_ENDPOINT}>Token endpoint</option>
           </Select>
         </Field>
       ) : null}
 
-      {asksAgentName ? (
-        <Field
-          label={form.agentName.label}
-          htmlFor={form.agentName.id}
-          {...(agentNameHelp === undefined || agentNameHelp === ""
-            ? {}
-            : { hint: agentNameHelp })}
-        >
-          <Input
-            id={form.agentName.id}
-            aria-required="true"
-            value={agentName}
-            placeholder={form.agentName.placeholder}
-            disabled={disabled}
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(event) => onAgentNameChange(event.target.value)}
-          />
-        </Field>
-      ) : null}
+      <Field
+        label="LiveKit agent name*"
+        htmlFor="livekit-agent-name"
+        hint="Enter the exact agent name shown in your LiveKit Cloud dashboard."
+      >
+        <Input
+          id="livekit-agent-name"
+          aria-required="true"
+          value={agentName}
+          placeholder="your-livekit-agent-name"
+          disabled={disabled}
+          autoComplete="off"
+          spellCheck={false}
+          onChange={(event) => onAgentNameChange(event.target.value)}
+        />
+      </Field>
       {presentedOption === undefined ? (
-        <Problem>
-          {`Egma could not find this ${SDK_PLATFORM_LABELS[platform]} connection method.`}
-        </Problem>
+        <Problem>Egma could not find this LiveKit connection method.</Problem>
       ) : (
         <ConnectionFields
           option={presentedOption}
@@ -1917,8 +1871,13 @@ function SdkConnectionStep({
           onChange={onDraftChange}
           credentialsEditable
           disabled={disabled}
-          configPlaceholders={form.configPlaceholders}
-          credentialPlaceholders={form.credentialPlaceholders}
+          configPlaceholders={{
+            url: "wss://your-project.livekit.cloud",
+            tokenEndpoint: "https://api.example.com/livekit/token",
+          }}
+          credentialPlaceholders={{
+            headers: '{"Authorization":"Bearer your-token"}',
+          }}
         />
       )}
     </div>

@@ -267,7 +267,6 @@ export function ConnectionSheet({
               !liveKitForm.enabled ? undefined : (
                 <LiveKitAgentName
                   agentName={liveKitForm.agentName}
-                  help={liveKitForm.agentNameHelp}
                   onAgentNameChange={(agentName) =>
                     setEditing((current) =>
                       current === null
@@ -447,10 +446,6 @@ function ReadConnection({
   readonly option: ConnectionOption | undefined;
 }) {
   const known = new Set(option?.fields.map((field) => field.key) ?? []);
-  // Auth headers are hinted by their names, which are whole words rather than
-  // the tail of a secret, so they carry no leading ellipsis.
-  const namesOnly =
-    option?.credentialFields.some((field) => field.kind === "json") === true;
   const rows: readonly { readonly label: string; readonly value: string }[] = [
     ...(option?.fields.flatMap((field) => {
       const value = connection.config[field.key];
@@ -477,7 +472,8 @@ function ReadConnection({
       ))}
       {connection.credentialsHint === null ? null : (
         <ReadRow label="Credentials" mono>
-          {namesOnly
+          {/* A self-hosted Pipecat starter's hint is its header names: whole words, not the tail of a secret. */}
+          {connection.accessVariant === "daily_room.self_hosted"
             ? connection.credentialsHint
             : `…${connection.credentialsHint}`}
         </ReadRow>

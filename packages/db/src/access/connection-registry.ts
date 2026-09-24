@@ -46,11 +46,7 @@ export type ConfigFieldMetadata = {
   readonly key: string;
   readonly label: string;
   readonly kind: ConfigFieldKind;
-  /**
-   * One short plain-text line: what to write, or where the value comes from.
-   * Forms show it under the field and the CLI prints it. Never names a
-   * validator or a rule id.
-   */
+  /** One sentence a person can act on. Never names a validator or a rule id. */
   readonly help: string;
   /** Place this supporting field after credentials when the form requests that order. */
   readonly afterCredentials?: true;
@@ -160,10 +156,9 @@ export type AccessVariantDescriptor = {
   readonly fields: readonly ConfigFieldMetadata[];
   readonly credentials: CredentialRule;
   /**
-   * One short line about this access variant's credential as a whole, or the
-   * empty string when the fields' own help lines say enough. Forms and the CLI
-   * show nothing for an empty one. Never the refusal sentences: those name
-   * egma's internals and are written for a terminal.
+   * What a person is told about this access variant's credential, in words safe to put
+   * on a screen. Never the refusal sentences: those name egma's internals and
+   * are written for a terminal.
    */
   readonly credentialHelp: string;
   /** The credential's fields, in the order a form asks for them. */
@@ -931,7 +926,7 @@ export const CONNECTION_REGISTRY: Readonly<
             key: "retellAgentId",
             label: "Retell agent ID",
             kind: "text",
-            help: "Starts with agent_.",
+            help: "The agent's own identifier in Retell, which starts with agent_.",
           },
         ],
         credentials: {
@@ -939,7 +934,10 @@ export const CONNECTION_REGISTRY: Readonly<
           fields: ["apiKey"],
           hint: lastFourOf("apiKey"),
         },
-        credentialHelp: "",
+        credentialHelp:
+          "Egma stores your Retell API key sealed and never shows it again. " +
+          "It opens the text exchanges this connection conducts. A read gives " +
+          "back its last four characters, so you can tell two keys apart.",
         credentialFields: [
           {
             field: "apiKey",
@@ -990,7 +988,7 @@ export const CONNECTION_REGISTRY: Readonly<
             key: "retellAgentId",
             label: "Retell agent ID",
             kind: "text",
-            help: "Starts with agent_.",
+            help: "The agent's own identifier in Retell, which starts with agent_.",
           },
         ],
         credentials: {
@@ -998,7 +996,10 @@ export const CONNECTION_REGISTRY: Readonly<
           fields: ["apiKey"],
           hint: lastFourOf("apiKey"),
         },
-        credentialHelp: "",
+        credentialHelp:
+          "Egma stores your Retell API key sealed and never shows it again. " +
+          "It opens the web calls this connection places. A read gives back " +
+          "its last four characters, so you can tell two keys apart.",
         credentialFields: [
           {
             field: "apiKey",
@@ -1041,7 +1042,9 @@ export const CONNECTION_REGISTRY: Readonly<
             help: "In international form, like +15551234567.",
           },
         ],
-        credentialHelp: "A phone connection takes no credential.",
+        credentialHelp:
+          "A phone connection takes no credential. Egma dials the number " +
+          "with its own telephony configuration.",
         credentialFields: [],
         // No reuse rule, deliberately: a number is where egma dials, not who
         // answers, and two agents can legitimately share one. Registering the
@@ -1099,16 +1102,19 @@ export const CONNECTION_REGISTRY: Readonly<
             key: "url",
             label: "LiveKit WebSocket URL",
             kind: "url",
-            help: "Your LiveKit project or self-hosted server.",
+            help: "Your LiveKit project or self-hosted server, like wss://example.livekit.cloud.",
           },
           {
             key: "agentName",
             label: "LiveKit agent name",
             kind: "text",
-            help: "As shown in LiveKit Cloud.",
+            help: "The name your worker registers under. Egma dispatches that worker by name for every simulation, so the record names the agent it graded.",
           },
         ],
-        credentialHelp: "",
+        credentialHelp:
+          "This is the quickest setup. Egma mints its own room tokens from " +
+          "this pair and stores it sealed. A read gives back the last four " +
+          "characters of the key, never the secret.",
         credentialFields: [
           {
             field: "apiKey",
@@ -1163,22 +1169,26 @@ export const CONNECTION_REGISTRY: Readonly<
             key: "tokenEndpoint",
             label: "Token endpoint",
             kind: "url",
-            help: "Public HTTPS URL that returns a room token.",
+            help: "The public HTTPS URL where Egma asks for one room token per simulation. It answers with the token and your LiveKit server URL. Private network addresses are refused.",
           },
           {
             key: "agentName",
             label: "LiveKit agent name",
             kind: "text",
-            help: "As shown in LiveKit Cloud.",
+            help: "The name your worker registers under. Egma asks your endpoint to dispatch that worker by name for every simulation, so the record names the agent it graded.",
           },
         ],
-        credentialHelp: "",
+        credentialHelp:
+          "This is a customer-operated integration. Auth headers are sent " +
+          "when Egma asks your public HTTPS endpoint for a token. They are " +
+          "required so another caller cannot mint a room token. " +
+          "A read gives back the header names and never their values.",
         credentialFields: [
           {
             field: "headers",
             label: "Auth headers",
             kind: "json",
-            help: "Sent with every token request.",
+            help: 'A JSON object of header name to header value, like {"Authorization":"Bearer …"}.',
           },
         ],
         credentials: {
@@ -1254,7 +1264,9 @@ export const CONNECTION_REGISTRY: Readonly<
           // is a safe way to tell two keys apart.
           hint: lastFourOf("publicApiKey"),
         },
-        credentialHelp: "",
+        credentialHelp:
+          "Egma starts your agent with this public key and stores it sealed. " +
+          "A read gives back its last four characters, never the key.",
         credentialFields: [
           {
             field: "publicApiKey",
@@ -1288,7 +1300,9 @@ export const CONNECTION_REGISTRY: Readonly<
           // The header names and never their values — see `namesIn`.
           hint: namesIn("headers"),
         },
-        credentialHelp: "",
+        credentialHelp:
+          "Egma sends these headers with every start request and stores them " +
+          "sealed. A read gives back the header names and never their values.",
         credentialFields: [
           {
             field: "headers",

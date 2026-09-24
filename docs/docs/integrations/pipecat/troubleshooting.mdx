@@ -25,7 +25,7 @@ Egma waits up to 120 seconds from the first start request for your bot to join t
 
 | Message starts with | What to do |
 | --- | --- |
-| `your bot did not join within 120 seconds` | The start was accepted, but no bot joined. On Pipecat Cloud, a cold start can take this long: set `min_agents = 1` under `[scaling]` in `pcc-deploy.toml` and redeploy. Check the bot's logs for a crash at start, for example with `pipecat cloud agent logs <agent name>`. A `NotReported` error there means the SDK could not reach Egma: check `EGMA_URL` and `EGMA_API_KEY`. |
+| `your bot did not join within 120 seconds` | The start was accepted, but no bot joined. Check the bot's logs, for example with `pipecat cloud agent logs <agent name>`. A `NotReported` error there means the bot could not reach Egma: check `EGMA_URL` and `EGMA_API_KEY` where the bot runs (on Pipecat Cloud, in the agent's secret set, then redeploy). A crash at start has the same effect. |
 | `your bot joined but did not report to Egma` | Add `await simulation(worker, runner_args)` from `egma.pipecat` before the runner starts the worker, and install `egma[pipecat]`. Set `EGMA_URL` and `EGMA_API_KEY` where the bot runs. On Pipecat Cloud, add them to the agent's secret set and redeploy. |
 | `the test mocks "…", and this is a Pipecat Flows function` | Egma does not mock Pipecat Flows functions. A simulation whose test mocks one fails when the flow first offers that function. Remove it from the test's mock tools. Flows functions that are not mocked run normally and are recorded. |
 | `your bot reported to Egma and Egma refused the report` | Read the reason in parentheses. For a protocol version, upgrade the `egma` package. |
@@ -38,6 +38,10 @@ A message that ends with `the simulation's configured …s duration expired duri
 
 - `NotReported` comes from `simulation()` when the bot cannot complete its report to Egma. The bot does not start. Check `EGMA_URL`, `EGMA_API_KEY`, and network access from the bot to Egma.
 - `Egma could not answer the mocked tool "…"` is the result a mocked tool returns when it cannot reach Egma during a simulation. The real tool did not run.
+
+## The CLI
+
+- `Egma answered with an incomplete Agent. Check that this Egma platform is up to date.` comes from egma-cli 0.7.0 or older in a project that has a Pipecat agent. Update the CLI with `npm install --global egma-cli@latest`. Projects without a Pipecat agent are not affected.
 
 ## On this machine
 

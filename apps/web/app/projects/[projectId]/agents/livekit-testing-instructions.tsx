@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/tabs";
 import type { LiveKitWorkerLanguage } from "@/lib/agent-setup-flow.ts";
 
-import { InstructionSteps, type InstructionStep } from "./copy-block.tsx";
+import { CopyBlock } from "./copy-block.tsx";
 
 export const PYTHON_TESTING_SETUP_INSTALL =
   "pip install 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'";
@@ -259,7 +259,7 @@ function TestingSteps({
       value: contract.snippet,
       copyLabel: `${contract.languageLabel} testing code`,
     },
-  ] satisfies readonly InstructionStep[];
+  ] as const;
 
   return (
     <div className="flex flex-col gap-5">
@@ -271,7 +271,21 @@ function TestingSteps({
           ? " This needs LiveKit Agents 1.5.5 or newer in the 1.x line."
           : null}
       </p>
-      <InstructionSteps steps={steps} />
+      <ol className="m-0 flex list-none flex-col gap-5 p-0">
+        {steps.map((step, index) => (
+          <li className="flex gap-3" key={step.title}>
+            <span className="w-(--space-5) flex-none text-sm leading-(--line-normal) text-foreground tabular-nums">
+              {index + 1}
+            </span>
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              <p className="m-0 text-sm leading-(--line-normal) font-medium text-foreground">
+                {step.title}
+              </p>
+              <CopyBlock value={step.value} copyLabel={step.copyLabel} />
+            </div>
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }

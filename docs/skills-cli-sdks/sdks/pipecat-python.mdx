@@ -36,7 +36,7 @@ Use an Egma API key scoped to the project you want to send data to.
 
 Copy the key when it is shown. It is shown once, and the CLI does not save it.
 
-For production monitoring, use the agent's monitoring key from `egma agent monitoring setup --agent <Egma agent ID> --platform pipecat` or from the web app's Pipecat monitoring instructions. It works for `simulation` too. With an ordinary project key, production conversations arrive but show no agent. See [Monitor a Pipecat agent](/docs/integrations/pipecat/monitor#get-the-agents-monitoring-key).
+Give each place the bot runs its own key, for example one for your computer and one for production.
 
 Set these values where the bot runs:
 
@@ -45,7 +45,13 @@ EGMA_URL=https://app.egma.ai
 EGMA_API_KEY=<your project API key>
 ```
 
-For self-hosted Egma, use the public URL of your instance. The bot must be able to reach it. On Pipecat Cloud, add both values to the agent's secret set and redeploy. On your computer, put them in the bot's `.env`. To pass them in code instead, give `endpoint=` and `api_key=` to either function; these arguments win over the environment.
+For production monitoring, also set the agent's name in Egma, so Monitoring shows which agent took each call. A Pipecat bot has no name of its own:
+
+```bash
+EGMA_AGENT_NAME=<the agent's name in Egma>
+```
+
+For self-hosted Egma, use the public URL of your instance. The bot must be able to reach it. On Pipecat Cloud, add the values to the agent's secret set and redeploy. On your computer, put them in the bot's `.env`. To pass them in code instead, give `endpoint=` and `api_key=` to either function, and `agent_name=` to `monitor`; these arguments win over the environment.
 
 ## 3. Add the integration
 
@@ -120,7 +126,9 @@ await simulation(worker, runner_args)
 await monitor(worker, runner_args)
 ```
 
-A simulation does not also appear as a production conversation. With no `egma` key, `monitor` exports without asking Egma anything. With one, it stays silent only when Egma confirms a live simulation in your project; otherwise the conversation is production traffic and is exported.
+A simulation does not also appear as a production conversation: `monitor` stays silent when `simulation` reported the conversation to a live Egma simulation in the same process. An `egma` key in the start request does not silence it on its own, so a bot that calls only `monitor` exports every conversation as production. `monitor` makes no request of its own.
+
+`monitor` never stops your bot. If `EGMA_URL` or `EGMA_API_KEY` is missing or invalid, it logs a warning once and sends nothing. Without `EGMA_AGENT_NAME`, it sends each conversation with no agent name and logs a warning once.
 
 ## 4. Run the updated bot and verify
 

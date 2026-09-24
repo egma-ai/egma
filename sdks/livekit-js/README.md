@@ -37,11 +37,11 @@ Copy the key when it is shown. The secret is shown once, and the CLI does not sa
 Set these values in the worker's environment:
 
 ```bash
-EGMA_URL=https://api.egma.ai
+EGMA_URL=https://app.egma.ai
 EGMA_API_KEY=<your project API key>
 ```
 
-For self-hosted egma, use your egma API URL. The worker must be able to reach it. Put the key in the worker's secret store or a gitignored environment file. For a cloud worker, set it in the deployed environment as well.
+For self-hosted egma, use your egma URL. The worker must be able to reach it. Put the key in the worker's secret store or a gitignored environment file. For a cloud worker, set it in the deployed environment as well.
 
 ## 3. Add the integration
 
