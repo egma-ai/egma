@@ -92,7 +92,7 @@ const config: NextConfig = {
           source: "/mock-tools/:path*",
           destination: `${api}/mock-tools/:path*`,
         },
-        // Forward the Egma SDK's seam (hello, tool, confirm) to the API. A
+        // Forward the Egma SDK's seam (hello, tool) to the API. A
         // Pipecat bot's EGMA_URL is the same origin its OTLP exporter uses,
         // and must receive the API's answer, not Next's HTML not-found page.
         { source: "/sdk/:path*", destination: `${api}/sdk/:path*` },

@@ -66,7 +66,7 @@ describe("the HTTPS exchange, held to the in-room one", () => {
     for (const [name, exchange] of Object.entries(
       https.exchanges as Record<string, Record<string, unknown>>,
     )) {
-      expect(["hello", "tool", "confirm"], name).toContain(exchange.route);
+      expect(["hello", "tool"], name).toContain(exchange.route);
       expect(typeof exchange.status, name).toBe("number");
       if (exchange.world !== undefined) {
         expect(Object.keys(https.worlds), name).toContain(exchange.world);
