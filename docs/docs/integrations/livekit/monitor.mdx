@@ -41,13 +41,13 @@ own machine or container, so use a reachable address for a remote deployment.
     Install the [LiveKit Python SDK](/skills-cli-sdks/sdks/livekit-python):
 
     ```bash
-    uv add 'egma @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'
+    uv add 'egma[livekit] @ git+https://github.com/egma-ai/egma.git#subdirectory=sdks/python'
     ```
 
     Add this import to the file that defines your job entrypoint:
 
     ```python
-    from egma import monitor
+    from egma.livekit import monitor
     ```
 
     Make this the first statement inside the entrypoint, before `ctx.connect`

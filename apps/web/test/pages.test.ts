@@ -514,6 +514,36 @@ describe("the pages", () => {
   });
 
   /**
+   * The Egma SDK in a Pipecat bot says hello, asks for mocked tool answers
+   * and confirms a simulation at `/sdk/v1/*` on the same EGMA_URL its OTLP
+   * exporter posts `/v1/traces` to. That URL may be this origin, so every seam
+   * route has to reach the API rather than Next's HTML not-found page.
+   */
+  it("reach the API for the Egma SDK's seam at a path this instance rewrites", async () => {
+    const rewrites = await readFile(path.join(WEB, "next.config.ts"), "utf8");
+    const seam = JSON.parse(
+      await readFile(
+        path.join(
+          WEB,
+          "../../packages/simulation-contract/fixtures/seam/sdk-https-exchange.v1.json",
+        ),
+        "utf8",
+      ),
+    ) as { readonly routes: Readonly<Record<string, string>> };
+
+    expect(rewrites).toContain(
+      '{ source: "/sdk/:path*", destination: `${api}/sdk/:path*` }',
+    );
+    for (const route of [seam.routes.hello, seam.routes.tool]) {
+      expect(route).toMatch(/^\/sdk\/v1\/[a-z]+$/u);
+    }
+    // And the exporter's own path is under the versioned rewrite beside it.
+    expect(rewrites).toContain(
+      '{ source: "/v1/:path*", destination: `${api}/v1/:path*` }',
+    );
+  });
+
+  /**
    * The Settings pages reach the API paths below, and none is
    * served by this process. Without the rules the pages would post at Next and
    * read its 404 page as egma's refusal.

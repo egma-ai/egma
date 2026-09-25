@@ -14,6 +14,15 @@ const addFormats = ajvFormats.default;
  * throwing so an invalid spec does not stop the rest of a claim batch.
  */
 
+/** The earlier spec schemas a later one refers to, which compile beside it. */
+const EARLIER_SPEC_SCHEMAS: Readonly<Record<string, readonly string[]>> = {
+  "simulation-spec.v7.schema.json": ["simulation-spec.v6.schema.json"],
+  "simulation-spec.v8.schema.json": [
+    "simulation-spec.v6.schema.json",
+    "simulation-spec.v7.schema.json",
+  ],
+};
+
 /**
  * Compiled once each, on first use rather than at import, so loading the
  * package for its measure catalog never pays for — or fails on — schema
@@ -23,14 +32,11 @@ const addFormats = ajvFormats.default;
 function compileFromDisk(schemaFile: string): ValidateFunction {
   const ajv = new Ajv2020({ strict: true, allErrors: true });
   addFormats(ajv);
-  if (schemaFile === "simulation-spec.v7.schema.json") {
+  for (const earlier of EARLIER_SPEC_SCHEMAS[schemaFile] ?? []) {
     const previous = JSON.parse(
-      readFileSync(
-        new URL("../schemas/simulation-spec.v6.schema.json", import.meta.url),
-        "utf8",
-      ),
+      readFileSync(new URL(`../schemas/${earlier}`, import.meta.url), "utf8"),
     ) as Record<string, unknown>;
-    ajv.addSchema(previous, "simulation-spec.v6.schema.json");
+    ajv.addSchema(previous, earlier);
   }
   const schema: unknown = JSON.parse(
     readFileSync(new URL(`../schemas/${schemaFile}`, import.meta.url), "utf8"),
@@ -41,6 +47,7 @@ function compileFromDisk(schemaFile: string): ValidateFunction {
 let compiledSpecV5: ValidateFunction | undefined;
 let compiledSpecV6: ValidateFunction | undefined;
 let compiledSpecV7: ValidateFunction | undefined;
+let compiledSpecV8: ValidateFunction | undefined;
 let compiledReport: ValidateFunction | undefined;
 
 /**
@@ -77,6 +84,10 @@ export function specComplaints(document: unknown): readonly string[] {
   if (version === 6) {
     compiledSpecV6 ??= compileFromDisk("simulation-spec.v6.schema.json");
     return complaintsFrom(compiledSpecV6, document);
+  }
+  if (version === 8) {
+    compiledSpecV8 ??= compileFromDisk("simulation-spec.v8.schema.json");
+    return complaintsFrom(compiledSpecV8, document);
   }
   compiledSpecV7 ??= compileFromDisk("simulation-spec.v7.schema.json");
   return complaintsFrom(compiledSpecV7, document);

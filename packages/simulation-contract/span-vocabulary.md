@@ -144,6 +144,60 @@ This reverses the earlier rule that Egma observed tool facts at the seam
 (ADR-0024 §3), and retires the `egma.tool.provenance`, `egma.tool.mock_tool` and
 `egma.tool.late_attached` attributes with it.
 
+## The agent's POV: the `egma.pipecat` scope
+
+A Pipecat bot runs the Egma SDK in its own process, and the SDK writes the
+agent's record of the conversation from what it observes in the pipeline —
+not from Pipecat's own tracing, which is off by default and records no tool
+calls for ordinary LLMs. These spans are the agent's POV (ADR-0024): the same
+kinds the LiveKit SDK's spans land as, under a scope of their own.
+
+**Scope and export.** Every span rides the instrumentation scope
+**`egma.pipecat`**, whose version is the `egma` package's. The SDK posts
+OpenTelemetry over HTTP to the same ingest door as every other agent export,
+`POST /v1/traces`, with the project API key. A simulation exports every second
+and sends the root span last; production uses the exporter's ordinary batching.
+
+**How a batch names its conversation.** The span ids and the trace id are the
+SDK's own. The resource carries:
+
+| Resource attribute | Value |
+| --- | --- |
+| `egma.provider_reference` | The simulation id, from the start request's `egma` key — **only** on a simulation's export, after Egma accepted the SDK's hello. Absent on production traffic: a resource without it is production, one with it is filed under that simulation's trace id (the SDK's own trace id is kept in the payload). |
+| `session.id` | The Pipecat runner's session id, when the runner gives one. It becomes the row's provider call id. |
+| `egma.agent_name` | The agent's name in Egma, from `monitor`'s `agent_name` or `EGMA_AGENT_NAME` — **only** on production traffic, and only when the bot names its agent. It becomes the row's platform agent name, the name Monitoring shows, as `lk.agent_name` does for LiveKit. A Pipecat bot has no name of its own. |
+| `service.name` | `pipecat`. It decides nothing. |
+
+| Span name | Kind it lands as | Parent | Duration | Attributes |
+| --- | --- | --- | --- | --- |
+| `pipecat_session` | `root` | none | The whole bot run. Emitted last: when it arrives, the agent's record is complete, and on production traffic it is the end signal that starts automatic grading. | `egma.pipecat.version`, `egma.pipecat.transport` |
+| `user_turn` | `turn:human` | the root | From the caller's first speech (or text) to the moment the turn is committed. Zero on chat. | `egma.turn.text` |
+| `agent_turn` | `turn:agent` | the root | From the start of the model's answer to its last output. | `egma.turn.text`, `egma.turn.interrupted` |
+| `function_call` | `tool` | the `agent_turn` it was called in, else the root | From the call's start to its result. | `egma.tool.name`, `egma.tool.call_id`, `egma.tool.arguments`, `egma.tool.result` or `egma.tool.error` |
+| `user_speaking` | `speaking` | its `user_turn` | The caller's speech, start to stop. Voice only. | none |
+| `agent_speaking` | `speaking` | its `agent_turn` | The bot's audio, start to stop. Voice only. | none |
+| `llm_generation` | `model` | its `agent_turn` | One model request, to its last token. Optional. | none |
+| `tts_synthesis` | `tts` | its `agent_turn` | One speech request, to its last audio. Optional. | none |
+
+| Attribute | On | Value |
+| --- | --- | --- |
+| `egma.pipecat.version` | `pipecat_session` | The installed `pipecat-ai` version. |
+| `egma.pipecat.transport` | `pipecat_session` | The transport the bot ran on: `daily` in a simulation. |
+| `egma.turn.text` | `user_turn`, `agent_turn` | What was said: the transcript on voice, the text sent on chat, the model's text for the agent. |
+| `egma.turn.interrupted` | `agent_turn` | `true` when the caller interrupted the answer. Absent otherwise. |
+| `egma.tool.name` | `function_call` | The function's name, as the model called it. |
+| `egma.tool.call_id` | `function_call` | The model's own id for the call. |
+| `egma.tool.arguments` | `function_call` | The arguments, JSON-encoded, as the model emitted them. |
+| `egma.tool.result` | `function_call` | What the call returned, JSON-encoded — egma's authored answer on a mocked call, the real handler's return otherwise. |
+| `egma.tool.error` | `function_call` | Why the call failed, when it failed: the handler's error, the mock tool's authored failure, or the SDK's own sentence when Egma could not answer a mocked call. The span's status is then ERROR. |
+
+No attribute says whether a mock answered a call. That is read by name from the
+pinned test version's mock tools, as it is for every agent POV.
+
+`fixtures/spans/agent-pov/` holds worked examples: a simulation's two flushes —
+turns, speech, a mocked call and a real one that failed, then the closing turn
+with the root last — and one production flush that names no simulation.
+
 ## What the fixtures show
 
 - `chat-flush-1-turns.json`, `chat-flush-2-tools.json`,

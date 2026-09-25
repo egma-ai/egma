@@ -50,6 +50,7 @@ egma agent connection options
 egma agent connection add
 egma agent monitoring setup
 egma agent monitoring stop
+egma agent dev
 
 egma project api-key create
 egma persona list
@@ -187,6 +188,7 @@ catalog:
 ```bash
 egma agent connection options --platform retell
 egma agent connection options --platform livekit
+egma agent connection options --platform pipecat
 ```
 
 The API owns the supported Access and Modality combinations and which public or
@@ -227,6 +229,12 @@ LiveKit example:
 
 ```bash
 egma agent register --platform livekit --name Receptionist
+```
+
+Pipecat example:
+
+```bash
+egma agent register --platform pipecat --name Receptionist
 ```
 
 If `--name` is omitted, Egma uses the repository directory name. The command
@@ -291,6 +299,31 @@ EGMA_LIVEKIT_TOKEN_ENDPOINT_HEADERS='{"Authorization":"Bearer ..."}' \
 The token endpoint returns the LiveKit server URL. Use `--modality chat` for a
 chat Connection.
 
+Add a Pipecat Cloud Connection. The key is the organization's public API key,
+which starts with `pk_`:
+
+```bash
+EGMA_PIPECAT_PUBLIC_KEY=pk_... \
+  egma agent connection add \
+  --agent agt_... \
+  --access pipecat-cloud \
+  --modality voice \
+  --pipecat-agent-name my-voice-agent
+```
+
+Add a self-hosted Pipecat Connection for a bot starter on your own server:
+
+```bash
+EGMA_PIPECAT_START_HEADERS='{"Authorization":"Bearer ..."}' \
+  egma agent connection add \
+  --agent agt_... \
+  --access pipecat-self-hosted \
+  --modality voice \
+  --pipecat-start-url https://bots.example.com/start
+```
+
+Use `--modality chat` for a Pipecat chat Connection.
+
 `--name` is an optional Connection name. The platform product label is the
 default. There is no `--platform` flag on Connection creation because the Egma
 Agent supplies its platform. Run `egma agent connection add --help` for every
@@ -304,9 +337,12 @@ platform. The CLI never writes it to `egma/config.yaml` or an environment file.
 Use the canonical environment variables shown above, or use
 `--credentials-stdin`. Standard input is one JSON object with the API credential
 field names. When a coding agent starts the CLI as a child process, it can write
-`{"apiKey":"..."}` for Retell or
-`{"apiKey":"...","apiSecret":"..."}` for LiveKit directly to that process.
-It must not build a shell command that contains either secret.
+`{"apiKey":"..."}` for Retell,
+`{"apiKey":"...","apiSecret":"..."}` for LiveKit,
+`{"publicApiKey":"pk_..."}` for Pipecat Cloud, or
+`{"headers":{"Authorization":"Bearer ..."}}` for a self-hosted Pipecat starter
+directly to that process. It must not build a shell command that contains a
+secret.
 
 Do not put secrets in CLI arguments. Arguments can be saved in shell history
 and exposed through process inspection.
@@ -314,6 +350,33 @@ and exposed through process inspection.
 When an Egma Agent already has a sealed provider credential, that stored value
 wins. A leftover environment variable does not rotate it. When no stored value
 exists, explicit standard input wins over the canonical environment variable.
+
+## Run a Pipecat bot on this computer
+
+`egma agent dev` lets Egma reach a Pipecat bot that runs on your own computer,
+with no deploy and no public server. Start the bot's development runner, then
+run:
+
+```bash
+egma agent dev --agent agt_... --port 7860
+```
+
+The command needs `cloudflared` on `PATH` (`brew install cloudflared`). It opens
+a Cloudflare quick tunnel to a small guard on `127.0.0.1` that forwards requests
+to the port only when they carry this session's secret header. It then writes
+the tunnel's start URL and the secret into this machine's voice and chat
+Connections and prints their names and IDs. The first run creates them. Every
+later run updates the same two, so `egma run create --connection con_...` keeps
+working. The CLI remembers which Connections belong to this machine in
+`dev-connections.json` under `~/.egma/` (or `EGMA_HOME`), never in the
+repository, so each computer has its own. `egma agent dev` does not write them
+to `egma/config.yaml`; `egma run create` on this computer accepts them anyway.
+Only one `egma agent dev` runs per Agent on a computer.
+
+The tunnel address stays the same while you restart the bot. Keep the command
+running while simulations run, and press Ctrl-C to close the tunnel. A
+simulation that starts after that fails and tells you to run `egma agent dev`
+again.
 
 ## Pull, author, and push tests
 
@@ -449,6 +512,11 @@ That handoff is not completed setup while the public monitoring guide is still
 being authored. Follow the Python or JavaScript SDK monitoring guide directly.
 The CLI does not claim that LiveKit monitoring is active or inactive before a
 trace arrives.
+
+Pipecat works the same way: setup and stop print the integration-skill handoff.
+A Pipecat bot's monitoring needs a Project API key (`egma project api-key create`)
+and the Agent's name in `EGMA_AGENT_NAME`, which the Egma SDK sends with each
+production conversation so Monitoring shows the Agent.
 
 ## Create a Project API key
 

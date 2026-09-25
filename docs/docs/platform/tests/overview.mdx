@@ -30,7 +30,7 @@ See [Mock tool responses](/docs/platform/tests/mock-tool-responses) for examples
 
 ### Env
 
-**Env** represents startup context. These fields are passed to the connection before the conversation starts. For LiveKit, `job_dispatch_metadata` supplies the JSON data your worker reads from `ctx.job.metadata`. For Retell, `retell_dynamic_variables` supplies string values.
+**Env** represents startup context. These fields are passed to the connection before the conversation starts. For LiveKit, `job_dispatch_metadata` supplies the JSON data your worker reads from `ctx.job.metadata`. For Pipecat, `pipecat_body_params` supplies the JSON data your bot reads from `runner_args.body`. For Retell, `retell_dynamic_variables` supplies string values.
 
 This is the **Env** field in the UI and the `## Env` section in a test file. It does not set shell environment variables or store credentials.
 

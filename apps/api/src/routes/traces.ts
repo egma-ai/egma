@@ -2,7 +2,6 @@ import { gunzipSync } from "node:zlib";
 
 import {
   authorize,
-  NotPermittedError,
   providerUsageSpan,
   resolveSimulationByProviderReference,
   resolveSimulationStanding,
@@ -30,6 +29,7 @@ import {
 } from "../http/refusals.ts";
 import type { RateLimit } from "../http/rate-limit.ts";
 import { resolveRequester } from "../auth/requester.ts";
+import { traceWritingOf } from "../auth/trace-writing.ts";
 import {
   acceptsServiceToken,
   wearsServiceTokenPrefix,
@@ -645,12 +645,14 @@ export async function traceRoutes(
 
     const { auth } = requesterOf(request);
 
-    // Production telemetry must name the project it belongs to. An
-    // organization-wide key cannot provide that fact, and accepting the body
-    // would leave valid-looking spans that no Monitoring page or grader owns.
-    // Refuse it before decoding so the customer gets one clear setup error and
-    // no part of the export can land under a storage sentinel.
-    if (auth.projectId === undefined) {
+    // Production telemetry must name the project it belongs to, and writing
+    // it is a write. An organization-wide key cannot name the project, and
+    // accepting its body would leave valid-looking spans that no Monitoring
+    // page or grader owns; a read-only credential that could still file spans
+    // would be read-only in name only. Both are refused before the body is
+    // decoded, so no part of the export lands under a storage sentinel.
+    const writing = traceWritingOf(auth);
+    if (!writing.may && writing.why === "no_project") {
       return statusResponse(
         reply,
         encoding,
@@ -660,28 +662,15 @@ export async function traceRoutes(
           "for the project you want to monitor, then use that key for OTLP export.",
       );
     }
-
-    // Writing telemetry is a write, so it goes through the same function every
-    // other write in the product goes through, before the body is looked at.
-    // A read-only credential that could still file spans would be read-only in
-    // name only.
-    try {
-      authorize(auth, "ingest_traces", {
-        organizationId: auth.organizationId,
-        projectId: auth.projectId,
-      });
-    } catch (cause) {
-      if (cause instanceof NotPermittedError) {
-        return statusResponse(
-          reply,
-          encoding,
-          403,
-          RPC_PERMISSION_DENIED,
-          `${cause.message}. Sending an agent's traces is a write, and this ` +
-            "key acts at the role of whoever minted it.",
-        );
-      }
-      throw cause;
+    if (!writing.may) {
+      return statusResponse(
+        reply,
+        encoding,
+        403,
+        RPC_PERMISSION_DENIED,
+        `${writing.cause.message}. Sending an agent's traces is a write, and this ` +
+          "key acts at the role of whoever minted it.",
+      );
     }
 
     const body = Buffer.isBuffer(request.body)

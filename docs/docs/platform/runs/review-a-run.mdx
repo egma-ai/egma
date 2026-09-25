@@ -16,3 +16,16 @@ Open the printed URL in CLI, or open **Runs** in your project UI and select the 
 Execution and grading finish separately. A completed run can still have
 grading in progress, and completed execution can include simulations that
 failed to execute. Check individual simulation and grader results.
+
+## Check which evidence arrived
+
+The **Transcript** tab says whose account of the conversation it shows, in the line above the transcript:
+
+| Line | Whose account |
+| --- | --- |
+| Conversation recorded by the customer agent | The agent's own record, sent by the Egma SDK in a LiveKit worker or a Pipecat bot. |
+| Conversation from Retell | Retell's record of a web call. |
+| Conversation from the Retell API | The exchange of a Retell text-mode connection. |
+| Conversation recorded by the persona | Egma's own record of a phone call. |
+
+While the agent's own record is still arriving, the tab says **Waiting for … transcript** and shows what arrived so far. When the wait ends before the record is complete, it says **… transcript incomplete**, and the simulation's `agentPovIncomplete` field is `true`. Graders then grade the evidence that arrived, so a turn or a tool call missing from the transcript is missing from the grade too. For a LiveKit worker or a Pipecat bot, check the agent's logs and its `EGMA_URL` and `EGMA_API_KEY` settings.

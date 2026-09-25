@@ -16,14 +16,16 @@ The broad order of things that need to be setup before we can run successful tes
 
 2. Connect the agent in this repo with egma platform
  - The egma platform needs to reach the agent in this repo in order to run simulation tests with it. There are different connection strategies based on the agent platform and modality of connection. Example - retell agent with chat modality (i.e simulation testing a retell voice agent but without voice - just testing the behavior of the main LLM in a "STT-LLM-TTS" cascaded voice agent setup)
- - First off, identify which platform the agent in this repo built on. Currently egma supports connecting with agents built on livekit agents (python/ js) & retell.
+ - First off, identify which platform the agent in this repo built on. Currently egma supports connecting with agents built on livekit agents (python/ js), pipecat (python) & retell.
  - Based on the platform - refer to the platform specific connection guides. Follow the guides and come back here for following the next step.
   - For connecting a livekit agent - you must look at [guide to connect a livekit agent](./livekit-agent-connection-guide.md) which is a part of this skill's references
+  - For connecting a pipecat bot (pipecat-ai in the dependencies, a `bot(runner_args)` entry point, often a `pcc-deploy.toml`) - you must look at [guide to connect a pipecat agent](./pipecat-agent-connection-guide.md) which is a part of this skill's references
   - For connecting a retell agent - you must look at [guide to connect a retell agent](./retell-agent-connection-guide.md) which is a part of this skill's references
 
 3. Author tests
   - If this is the first time egma tests are being written in this repository, create at max four tests in one suite covering 4 most common scenrios the voice agent here encounters.
   - Refer to the `/write-voice-agent-tests` skill. This will teach you how to create a test suite and write good tests that actually move the needle in terms of trusting the voice agent's behavior. Egma tests are just simple markdown files. If this skill is not installed, you MUST first install it using `npx skills add egma-ai/egma --yes`. It contains important instructions regarding test creation, tool mocking and dynamically passing session data to simulation environment.
+  - For pipecat, run the first suite on the path the developer chose in the pipecat guide: this machine through `egma agent dev`, Pipecat Cloud, or the team's own servers. Ask before any change to production.
   - For livekit, when the SDK changes are still only on local, temporarily give the local worker a unique agent name and use it on both egma connections so that cloud deployed workers cannot pick up the simulations and error on the simulation run. Keep it running until the suite finishes. After the first run finishes/ before stopping and handing off to the developer, restore the original name in the worker and connections, stop the local worker, and tell the developer to deploy the SDK changes before starting new runs and running more simulation tests.
 
 4. Run the tests

@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
 
 from .background import BackgroundSound
 from .blob import BlobStore
@@ -21,6 +22,9 @@ from .plugs import ConnectionPlug, PlugError, VoiceConnection, plug_for
 from .recording import RECORDING_NAME, AudioFacts
 from .spec import SimulationSpec
 from .speech import SpeechProviders, voice_from_models
+
+if TYPE_CHECKING:
+    from .media.daily_room import AgentReportProbe
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +75,7 @@ def assemble(
     media: MediaSettings | None = None,
     parameters: ConductParameters | None = None,
     on_provider_reference: Callable[[str], Awaitable[None]] | None = None,
+    agent_report: AgentReportProbe | None = None,
 ) -> Assembled:
     """Validate and assemble one simulation without dialing or starting its pipeline.
     speech contains the pinned persona STT/TTS selection for separate speech mode.
@@ -85,11 +90,20 @@ def assemble(
     # not a list kept here of the ones that can. A plug that cannot takes
     # it and drops it, and the seam then says there is nothing to claim.
     mock_tools = MockToolSeam(spec.mock_tools)
-    registration = (
-        {"on_provider_reference": on_provider_reference}
-        if spec.connection_type == "livekit_room"
-        else {}
-    )
+    # Values only one lane reads go to that lane's plug alone, so no other
+    # plug's constructor has to name them: the provider-reference callback
+    # (LiveKit and Pipecat), and a Pipecat start request's agent report, body
+    # params and room expiry, which covers the duration limit.
+    registration: dict[str, object] = {}
+    if spec.connection_type == "livekit_room":
+        registration = {"on_provider_reference": on_provider_reference}
+    elif spec.connection_type == "daily_room":
+        registration = {
+            "on_provider_reference": on_provider_reference,
+            "agent_report": agent_report,
+            "pipecat_body_params": spec.pipecat_body_params,
+            "max_duration_seconds": spec.limits.max_duration_seconds,
+        }
     persona_parameters = spec.persona.parameters
     if spec.modality == "voice" and persona_parameters is not None:
         registration["background"] = BackgroundSound(
@@ -105,7 +119,7 @@ def assemble(
         # the same reason the mock-tool seam is: which of them reaches a
         # platform that keeps versions, renders variables or dispatches a
         # worker is the plug's own answer, not a list kept here of the ones
-        # that do.
+        # that do. Lane-only values ride ``registration`` above.
         agent_version=spec.agent_version,
         dynamic_variables=spec.dynamic_variables,
         job_dispatch_metadata=spec.job_dispatch_metadata,

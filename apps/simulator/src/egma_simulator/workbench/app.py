@@ -1,6 +1,7 @@
 """Local control-plane fixture for simulator development and contract tests.
-Serve claims, heartbeats, room registration, reports, and OTLP ingestion while
-recording observations. Validate lifecycle documents against schemas. The span
+Serve claims, heartbeats, room registration, reports, OTLP ingestion, and a
+stand-in for the Pipecat SDK seam and its agent report while recording
+observations. Validate lifecycle documents against schemas. The span
 sink checks JSON and simulation identity; production storage, indexing, and
 joins remain API responsibilities.
 """
@@ -17,6 +18,7 @@ from aiohttp import web
 from ..contract import ContractViolation, validate_report, validate_spec
 from ..reporting import moment
 from ..spans import SIMULATION_ID_ATTRIBUTE
+from . import sdk_seam
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,9 @@ class WorkbenchState:
         """
         self._queued: dict[str, dict] = {}
         self._claimed: dict[str, dict] = {}
+        self._claimants: dict[str, str] = {}
+        self._references: dict[str, str] = {}
+        self._agent_reports: dict[str, sdk_seam.StoredHello] = {}
         self._cancel_flags: set[str] = set()
         self._arrival = asyncio.Condition()
         self.records: list[dict] = []
@@ -98,6 +103,7 @@ class WorkbenchState:
                 if granted:
                     for spec in granted:
                         self._claimed[spec["simulation_id"]] = spec
+                        self._claimants[spec["simulation_id"]] = claimant
                     self._record(
                         "claim",
                         claimant=claimant,
@@ -218,6 +224,38 @@ class WorkbenchState:
                         span=span,
                     )
 
+    def register_reference(self, simulation_id: str, reference: str) -> None:
+        """Remember a provider reference; a fresh one forgets any earlier hello."""
+        self._references[simulation_id] = reference
+        self._agent_reports.pop(simulation_id, None)
+
+    def live_by_reference(self) -> dict[str, dict]:
+        """Claimed, uncancelled simulations whose reference is their own id."""
+        return {
+            reference: self._claimed[simulation_id]
+            for simulation_id, reference in self._references.items()
+            if reference == simulation_id
+            and simulation_id in self._claimed
+            and simulation_id not in self._cancel_flags
+        }
+
+    def record_agent_report(self, report: sdk_seam.StoredHello, reference: str) -> None:
+        self._agent_reports[reference] = report
+        self._record(
+            "agent_report",
+            simulation_id=reference,
+            state=report.state,
+            tools=[tool["name"] for tool in report.tools],
+        )
+
+    def agent_report(
+        self, simulation_id: str, claimant: str
+    ) -> sdk_seam.StoredHello | None:
+        """The latest hello for a simulation this claimant holds."""
+        if self._claimants.get(simulation_id) != claimant:
+            raise KeyError(simulation_id)
+        return self._agent_reports.get(simulation_id)
+
     def cancel(self, simulation_id: str) -> None:
         self._cancel_flags.add(simulation_id)
         self._record("cancel_directive", simulation_id=simulation_id)
@@ -294,6 +332,7 @@ def build_app(state: WorkbenchState) -> web.Application:
             raise web.HTTPBadRequest(
                 text="provider_reference must be a non-empty string"
             )
+        state.register_reference(simulation_id, reference)
         state._record(
             "provider_reference",
             simulation_id=simulation_id,
@@ -316,6 +355,47 @@ def build_app(state: WorkbenchState) -> web.Application:
             ) from refusal
         # An empty ExportTraceServiceResponse: everything landed.
         return web.json_response({})
+
+    async def agent_report(request: web.Request) -> web.Response:
+        simulation_id = request.match_info["simulation_id"]
+        body = await request.json()
+        claimant = body.get("claimant") if isinstance(body, dict) else None
+        if not isinstance(claimant, str) or not claimant:
+            raise web.HTTPBadRequest(text="claimant must be a non-empty string")
+        try:
+            report = state.agent_report(simulation_id, claimant)
+        except KeyError:
+            return web.json_response(
+                {
+                    "error": "conflict",
+                    "message": "This claim does not hold that simulation.",
+                },
+                status=409,
+            )
+        return web.json_response(sdk_seam.agent_report_answer(simulation_id, report))
+
+    async def sdk_hello(request: web.Request) -> web.Response:
+        body = await _json_or_none(request)
+        try:
+            reply, report = sdk_seam.hello(body, state.live_by_reference())
+        except sdk_seam.SeamAnswer as answer:
+            if answer.report is not None:
+                state.record_agent_report(answer.report, body["provider_reference"])
+            return web.json_response(answer.body, status=answer.status)
+        if report is not None:
+            state.record_agent_report(report, body["provider_reference"])
+        return web.json_response(reply)
+
+    async def sdk_tool(request: web.Request) -> web.Response:
+        body = await _json_or_none(request)
+        try:
+            answer = sdk_seam.tool(body, state.live_by_reference())
+        except sdk_seam.SeamAnswer as refused:
+            return web.json_response(refused.body, status=refused.status)
+        state._record(
+            "sdk_tool", simulation_id=body["provider_reference"], name=body["name"]
+        )
+        return web.json_response(answer)
 
     async def records(_request: web.Request) -> web.Response:
         return web.json_response({"records": state.records})
@@ -346,11 +426,21 @@ def build_app(state: WorkbenchState) -> web.Application:
     app.router.add_post(
         "/v1/simulations/{simulation_id}/provider-reference", provider_reference
     )
+    app.router.add_post("/v1/simulations/{simulation_id}/agent-report", agent_report)
+    app.router.add_post("/sdk/v1/hello", sdk_hello)
+    app.router.add_post("/sdk/v1/tool", sdk_tool)
     app.router.add_post("/v1/traces", traces)
     app.router.add_get("/workbench/records", records)
     app.router.add_post("/workbench/specs", offer)
     app.router.add_post("/workbench/simulations/{simulation_id}/cancel", cancel)
     return app
+
+
+async def _json_or_none(request: web.Request) -> object:
+    try:
+        return await request.json()
+    except ValueError:
+        return None
 
 
 def _simulation_named_by(resource: object) -> str | None:

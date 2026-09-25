@@ -1,0 +1,41 @@
+---
+title: "Pipecat"
+sidebarTitle: "Pipecat"
+---
+
+Egma tests and monitors Pipecat bots, whether they run on Pipecat Cloud, on your own servers, or on your computer while you build them.
+
+Add the Egma SDK to your bot. It tells Egma which tools your bot has, answers the tools a test mocks, and sends your bot's own record of each conversation to Egma.
+
+## How Egma works with Pipecat bots
+
+### For simulation
+
+For each simulation, Egma sends one **start request**, the same request a Pipecat client sends to start a bot. Your starter creates a Daily room, starts your bot in it, and answers with the room's address. Egma's persona joins that room and talks to your bot.
+
+You can connect a Pipecat bot in three ways:
+
+1. **Pipecat Cloud** - give Egma your agent name and a public API key. Pipecat Cloud creates the room and starts the bot.
+2. **Self-hosted** - give Egma the public HTTPS URL of your own bot starter and the auth headers it checks.
+3. **This machine** - run `egma agent dev` beside your bot on your computer. It opens a tunnel to Pipecat's development runner and fills in a self-hosted connection for you. No deploy is needed.
+
+You can test your bot in two modalities:
+
+1. **Voice** - runs a full voice conversation through your bot's speech-to-text, LLM, and text-to-speech.
+2. **Chat** - the persona sends text through RTVI and reads your bot's text replies. Use it to test your bot's reasoning and tools. It needs no code beyond the SDK line.
+
+Every Pipecat simulation uses the Daily transport.
+
+### For monitoring
+
+Add `monitor(worker, runner_args)` to your bot. It sends each production conversation to Egma, where you can read it and run graders on it.
+
+## Guides
+
+- [Connect a Pipecat Cloud agent](/docs/integrations/pipecat/connect)
+- [Use a self-hosted starter](/docs/integrations/pipecat/self-hosted)
+- [Test a bot on this machine](/docs/integrations/pipecat/this-machine)
+- [Chat connections and Env](/docs/integrations/pipecat/text-and-env)
+- [Monitor a Pipecat agent](/docs/integrations/pipecat/monitor)
+- [Troubleshooting](/docs/integrations/pipecat/troubleshooting)
+- [Pipecat Python SDK](/skills-cli-sdks/sdks/pipecat-python)

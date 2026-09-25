@@ -9,6 +9,7 @@ import {
   runAgentConnectionOptionsCommand,
   runAgentRegisterCommand,
 } from "./commands/agent.ts";
+import { runAgentDevCommand, withDevSessionSignal } from "./commands/agent-dev.ts";
 import {
   runAgentMonitoringSetupCommand,
   runAgentMonitoringStopCommand,
@@ -66,6 +67,7 @@ export const COMMANDS = [
   "agent connection add",
   "agent monitoring setup",
   "agent monitoring stop",
+  "agent dev",
   "project api-key create",
   "persona list",
   "persona settings",
@@ -126,7 +128,7 @@ type OptionSchema = {
 
 const REPOSITORY_OPTION = "--cwd";
 const ACCESS_VALUES =
-  "retell-api-key, retell-phone-number, livekit-project-credentials, or livekit-token-endpoint";
+  "retell-api-key, retell-phone-number, livekit-project-credentials, livekit-token-endpoint, pipecat-cloud, or pipecat-self-hosted";
 
 const SCHEMAS: Readonly<Record<Command, OptionSchema>> = {
   login: {
@@ -160,6 +162,8 @@ const SCHEMAS: Readonly<Record<Command, OptionSchema>> = {
       "--livekit-url",
       "--livekit-agent-name",
       "--livekit-token-endpoint",
+      "--pipecat-agent-name",
+      "--pipecat-start-url",
       REPOSITORY_OPTION,
     ],
     switches: ["--credentials-stdin"],
@@ -172,6 +176,10 @@ const SCHEMAS: Readonly<Record<Command, OptionSchema>> = {
   },
   "agent monitoring stop": {
     values: ["--agent", "--platform", REPOSITORY_OPTION],
+    positionals: 0,
+  },
+  "agent dev": {
+    values: ["--agent", "--port", REPOSITORY_OPTION],
     positionals: 0,
   },
   "project api-key create": {
@@ -375,15 +383,17 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
     "  egma agent register [options]",
     "  egma agent connection <command>",
     "  egma agent monitoring <command>",
+    "  egma agent dev --agent <Egma Agent ID> --port <port>",
     "",
     "Commands:",
     "  register      Register an Egma Agent identity.",
     "  connection    List provider choices or add one Connection.",
     "  monitoring    Set up or stop production monitoring for one Agent.",
+    "  dev           Reach a Pipecat bot on this computer through a tunnel.",
   ],
   "agent connection": [
     "Usage:",
-    "  egma agent connection options --platform <retell|livekit> [options]",
+    "  egma agent connection options --platform <retell|livekit|pipecat> [options]",
     "  egma agent connection add --agent <Egma Agent ID> [options]",
     "",
     "Commands:",
@@ -392,11 +402,11 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
   ],
   "agent monitoring": [
     "Usage:",
-    "  egma agent monitoring setup --agent <Egma Agent ID> --platform <retell|livekit>",
-    "  egma agent monitoring stop --agent <Egma Agent ID> --platform <retell|livekit>",
+    "  egma agent monitoring setup --agent <Egma Agent ID> --platform <retell|livekit|pipecat>",
+    "  egma agent monitoring stop --agent <Egma Agent ID> --platform <retell|livekit|pipecat>",
     "",
     "Retell setup uses the provider key already sealed on the Egma Agent.",
-    "LiveKit prints the integrate-egma skill handoff; the CLI does not edit monitoring code.",
+    "LiveKit and Pipecat print the integrate-egma skill handoff; the CLI does not edit monitoring code.",
   ],
   project: [
     "Usage:",
@@ -474,11 +484,11 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
   ],
   "agent register": [
     "Usage:",
-    "  egma agent register --platform <retell|livekit> [--name <name>] [--cwd <path>]",
+    "  egma agent register --platform <retell|livekit|pipecat> [--name <name>] [--cwd <path>]",
     "",
     "Registers one Egma Agent identity. It does not add a Connection.",
     "",
-    "  --platform <retell|livekit>   Product or framework that runs the Agent.",
+    "  --platform <retell|livekit|pipecat> Product or framework that runs the Agent.",
     "  --name <name>                 Optional name. Default: repository directory name.",
     "  --cwd <path>                  Repository root. Default: current directory.",
     "",
@@ -486,10 +496,10 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
   ],
   "agent connection options": [
     "Usage:",
-    "  egma agent connection options --platform <retell|livekit> [options]",
+    "  egma agent connection options --platform <retell|livekit|pipecat> [options]",
     "",
     "Options:",
-    "  --platform <retell|livekit>  Agent platform whose Connection choices to list.",
+    "  --platform <retell|livekit|pipecat> Agent platform whose Connection choices to list.",
     "  --agent <Egma Agent ID>       Reuse that Agent's stored provider credential.",
     "  --credentials-stdin           Read one credential JSON object from standard input.",
     "  --cwd <path>                  Repository root. Default: current directory.",
@@ -512,38 +522,58 @@ const HELP: Readonly<Record<HelpTopic, readonly string[]>> = {
     "  --livekit-url <wss-url>       LiveKit Project URL. Project credentials only.",
     "  --livekit-agent-name <name>   LiveKit worker dispatch name.",
     "  --livekit-token-endpoint <https-url> LiveKit token endpoint.",
+    "  --pipecat-agent-name <name>   Pipecat Cloud agent name. Pipecat Cloud only.",
+    "  --pipecat-start-url <https-url> Start URL of your bot starter. Self-hosted only.",
     "  --credentials-stdin           Read one credential JSON object from standard input.",
     "  --cwd <path>                  Repository root. Default: current directory.",
     "",
     "The platform API supplies the valid combinations and required fields.",
     "Otherwise use EGMA_RETELL_API_KEY, EGMA_LIVEKIT_API_KEY with",
-    "EGMA_LIVEKIT_API_SECRET, or EGMA_LIVEKIT_TOKEN_ENDPOINT_HEADERS.",
+    "EGMA_LIVEKIT_API_SECRET, EGMA_LIVEKIT_TOKEN_ENDPOINT_HEADERS,",
+    "EGMA_PIPECAT_PUBLIC_KEY, or EGMA_PIPECAT_START_HEADERS.",
   ],
   "agent monitoring setup": [
     "Usage:",
-    "  egma agent monitoring setup --agent <Egma Agent ID> --platform <retell|livekit> [options]",
+    "  egma agent monitoring setup --agent <Egma Agent ID> --platform <retell|livekit|pipecat> [options]",
     "",
     "Options:",
     "  --agent <Egma Agent ID>      Agent from egma/config.yaml.",
-    "  --platform <retell|livekit>  Must match the selected Agent.",
+    "  --platform <retell|livekit|pipecat> Must match the selected Agent.",
     "  --retell-agent <id>          Retell Agent ID for monitoring-only setup.",
     "  --credentials-stdin          Read {\"apiKey\":\"...\"} from standard input.",
     "  --cwd <path>                 Repository root. Default: current directory.",
     "",
     "Retell uses the provider key stored on the Agent. For monitoring-only setup,",
     "pass --retell-agent and supply credentials through EGMA_RETELL_API_KEY or --credentials-stdin.",
-    "LiveKit prints the integrate-egma skill command and exits incomplete.",
+    "LiveKit and Pipecat print the integrate-egma skill command and exit incomplete.",
   ],
   "agent monitoring stop": [
     "Usage:",
-    "  egma agent monitoring stop --agent <Egma Agent ID> --platform <retell|livekit> [--cwd <path>]",
+    "  egma agent monitoring stop --agent <Egma Agent ID> --platform <retell|livekit|pipecat> [--cwd <path>]",
     "",
     "Options:",
     "  --agent <Egma Agent ID>      Agent from egma/config.yaml.",
-    "  --platform <retell|livekit>  Must match the selected Agent.",
+    "  --platform <retell|livekit|pipecat> Must match the selected Agent.",
     "  --cwd <path>                 Repository root. Default: current directory.",
     "",
     "The explicit platform must match the selected Agent.",
+  ],
+  "agent dev": [
+    "Usage:",
+    "  egma agent dev --agent <Egma Agent ID> --port <port> [--cwd <path>]",
+    "",
+    "Opens a Cloudflare quick tunnel to your Pipecat bot's development runner on",
+    "this computer and writes its start URL and a new secret header into this",
+    "machine's voice and chat Connections. It runs until Ctrl-C.",
+    "",
+    "Options:",
+    "  --agent <Egma Agent ID>  A Pipecat Agent.",
+    "  --port <port>            Port of your bot's development runner, such as 7860.",
+    "  --cwd <path>             Repository root. Default: current directory.",
+    "",
+    "Needs cloudflared on PATH. The first run creates this machine's Connections;",
+    "later runs update the same ones. They are remembered in dev-connections.json",
+    "in EGMA_HOME (default ~/.egma), never in the repository.",
   ],
   "project api-key create": [
     "Usage:",
@@ -638,6 +668,8 @@ function requiredArguments(
       return required(invocation, ["--agent", "--platform"]);
     case "agent monitoring stop":
       return required(invocation, ["--agent", "--platform"]);
+    case "agent dev":
+      return required(invocation, ["--agent", "--port"]);
     case "project api-key create":
     case "suite create":
       return required(invocation, ["--name"]);
@@ -849,6 +881,8 @@ async function dispatch(
           livekitUrl: value(args, "--livekit-url"),
           livekitAgentName: value(args, "--livekit-agent-name"),
           livekitTokenEndpoint: value(args, "--livekit-token-endpoint"),
+          pipecatAgentName: value(args, "--pipecat-agent-name"),
+          pipecatStartUrl: value(args, "--pipecat-start-url"),
           credentialsStdin: switched(args, "--credentials-stdin"),
           env: process.env,
           stdin: process.stdin,
@@ -875,6 +909,16 @@ async function dispatch(
           agent: value(args, "--agent") as string,
           platform: value(args, "--platform") as string,
           signal,
+        }),
+      );
+    case "agent dev":
+      return withDevSessionSignal(async (signal) =>
+        runAgentDevCommand({
+          ...options,
+          env: process.env,
+          signal,
+          agentId: value(args, "--agent"),
+          port: value(args, "--port"),
         }),
       );
     case "project api-key create":

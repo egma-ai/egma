@@ -25,8 +25,18 @@ export type Read<T> =
  * and also checks serialized size. JSON.parse cannot detect duplicate object keys.
  */
 
-/** The two keys an env may carry, and nothing else. */
-const ENV_KEYS = ["retell_dynamic_variables", "job_dispatch_metadata"] as const;
+/** The three keys an env may carry, and nothing else. */
+const ENV_KEYS = [
+  "retell_dynamic_variables",
+  "job_dispatch_metadata",
+  "pipecat_body_params",
+] as const;
+
+/** The env keys as a sentence names them: `a, b and c`. */
+const ENV_KEYS_NAMED = `${ENV_KEYS.slice(0, -1).join(", ")} and ${ENV_KEYS.at(-1) ?? ""}`;
+
+/** The key Egma keeps for its own simulation marker in a Pipecat start request. */
+const RESERVED_PIPECAT_BODY_KEY = "egma";
 
 /** Every variable beginning this is egma's own, written by the platform. */
 const RESERVED_ENV_VARIABLE_PREFIX = "egma_";
@@ -155,9 +165,7 @@ export function readEnv(text: string): Read<TestEnv | null> {
   if (!isObject(held.value)) {
     return {
       ok: false,
-      why:
-        "env is an object with at most retell_dynamic_variables and " +
-        "job_dispatch_metadata in it",
+      why: `env is an object with at most ${ENV_KEYS_NAMED} in it`,
     };
   }
   for (const key of Object.keys(held.value)) {
@@ -166,7 +174,7 @@ export function readEnv(text: string): Read<TestEnv | null> {
         ok: false,
         why:
           `env has no ${JSON.stringify(key)} in it. An env carries ` +
-          `${ENV_KEYS.join(" and ")}, and nothing else.`,
+          `${ENV_KEYS_NAMED}, and nothing else.`,
       };
     }
   }
@@ -217,6 +225,28 @@ export function readEnv(text: string): Read<TestEnv | null> {
       };
     }
     if (Object.keys(dispatch).length > 0) env.job_dispatch_metadata = dispatch;
+  }
+  const body = held.value.pipecat_body_params;
+  if (body !== undefined && body !== null) {
+    if (!isObject(body)) {
+      return {
+        ok: false,
+        why:
+          "env.pipecat_body_params is a JSON object merged into the body of " +
+          "the start request, which your Pipecat bot reads at " +
+          'runner_args.body, and looks like {"tenant": "acme"}',
+      };
+    }
+    if (Object.hasOwn(body, RESERVED_PIPECAT_BODY_KEY)) {
+      return {
+        ok: false,
+        why:
+          `env.pipecat_body_params holds the key "${RESERVED_PIPECAT_BODY_KEY}", ` +
+          "which Egma keeps for its own simulation marker in the start " +
+          "request. Name the key something else.",
+      };
+    }
+    if (Object.keys(body).length > 0) env.pipecat_body_params = body;
   }
   return {
     ok: true,

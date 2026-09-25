@@ -8,6 +8,12 @@ import {
   type FolderAgent,
   type FolderConfig,
 } from "../folder/egma-folder.ts";
+import {
+  AGENT_PLATFORM_LABELS,
+  CHOOSE_PLATFORM,
+  isAgentPlatform,
+  type AgentPlatform,
+} from "../platform/agent-platforms.ts";
 import type { PlatformAccess } from "../platform/credentials.ts";
 import type { Fetch } from "../platform/device-flow.ts";
 import {
@@ -62,7 +68,7 @@ export type AgentMonitoringStopCommandOptions = AgentMonitoringCommandOptions & 
 
 type LocalTarget = {
   readonly config: FolderConfig & { readonly project: NonNullable<FolderConfig["project"]> };
-  readonly agent: FolderAgent & { readonly platform: "retell" | "livekit" };
+  readonly agent: FolderAgent & { readonly platform: AgentPlatform };
 };
 
 /** Resolve only the exact stable Egma Agent ID the caller supplied. */
@@ -107,7 +113,7 @@ async function localTarget(
     );
     return null;
   }
-  if (agent.platform !== "retell" && agent.platform !== "livekit") {
+  if (!isAgentPlatform(agent.platform)) {
     options.fail(
       `Agent ${oneLineFactText(agent.id, "with an unknown ID")} has no supported platform in egma/config.yaml. Run egma pull, then try again.`,
     );
@@ -120,16 +126,18 @@ async function localTarget(
   };
 }
 
-function handOffLiveKit(
+/** LiveKit and Pipecat monitoring lives in the agent's own code. */
+function handOffCodeMonitoring(
   options: AgentMonitoringCommandOptions,
   agent: LocalTarget["agent"],
   action: "setup" | "removal",
 ): number {
-  options.out(`Egma CLI does not perform LiveKit monitoring ${action}.`);
+  const label = AGENT_PLATFORM_LABELS[agent.platform];
+  options.out(`Egma CLI does not perform ${label} monitoring ${action}.`);
   options.out("Install the public integrate-egma skill:");
   options.out(`  ${INSTALL_SKILL_COMMAND}`);
   options.out(
-    `Then ask the coding agent to use it for LiveKit monitoring ${action} on Agent ${oneLineFactText(agent.id, "with an unknown ID")}.`,
+    `Then ask the coding agent to use it for ${label} monitoring ${action} on Agent ${oneLineFactText(agent.id, "with an unknown ID")}.`,
   );
   return AGENT_MONITORING_EXIT.failed;
 }
@@ -161,7 +169,7 @@ function wasInterrupted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
 }
 
-async function retellAccess(
+async function signedInOrSay(
   options: AgentMonitoringCommandOptions,
 ): Promise<Awaited<ReturnType<typeof signedInAt>>> {
   const signedIn = await signedInAt(options.access, options.env);
@@ -213,7 +221,7 @@ async function oneTimeRetellKey(
   };
 }
 
-/** Start Retell monitoring, or hand LiveKit work to the integration skill. */
+/** Start Retell monitoring, or hand LiveKit and Pipecat work to the integration skill. */
 export async function runAgentMonitoringSetupCommand(
   options: AgentMonitoringSetupCommandOptions,
 ): Promise<number> {
@@ -221,8 +229,8 @@ export async function runAgentMonitoringSetupCommand(
     return interrupted(options, "The command was interrupted before anything changed.");
   }
   const wantedPlatform = options.platform.trim().toLowerCase();
-  if (wantedPlatform !== "retell" && wantedPlatform !== "livekit") {
-    options.fail("Use --platform retell or --platform livekit. Nothing was changed.");
+  if (!isAgentPlatform(wantedPlatform)) {
+    options.fail(`${CHOOSE_PLATFORM} Nothing was changed.`);
     return AGENT_MONITORING_EXIT.failed;
   }
 
@@ -235,11 +243,11 @@ export async function runAgentMonitoringSetupCommand(
     );
     return AGENT_MONITORING_EXIT.failed;
   }
-  if (wantedPlatform === "livekit") {
-    return handOffLiveKit(options, target.agent, "setup");
+  if (wantedPlatform !== "retell") {
+    return handOffCodeMonitoring(options, target.agent, "setup");
   }
 
-  const signedIn = await retellAccess(options);
+  const signedIn = await signedInOrSay(options);
   if (wasInterrupted(options.signal)) return interrupted(options);
   if (signedIn === null) return AGENT_MONITORING_EXIT.failed;
   const platformOptions = {
@@ -384,8 +392,8 @@ export async function runAgentMonitoringStopCommand(
     return interrupted(options, "The command was interrupted before anything changed.");
   }
   const wantedPlatform = options.platform.trim().toLowerCase();
-  if (wantedPlatform !== "retell" && wantedPlatform !== "livekit") {
-    options.fail("Use --platform retell or --platform livekit. Nothing was changed.");
+  if (!isAgentPlatform(wantedPlatform)) {
+    options.fail(`${CHOOSE_PLATFORM} Nothing was changed.`);
     return AGENT_MONITORING_EXIT.failed;
   }
   const target = await localTarget(options);
@@ -397,11 +405,11 @@ export async function runAgentMonitoringStopCommand(
     );
     return AGENT_MONITORING_EXIT.failed;
   }
-  if (wantedPlatform === "livekit") {
-    return handOffLiveKit(options, target.agent, "removal");
+  if (wantedPlatform !== "retell") {
+    return handOffCodeMonitoring(options, target.agent, "removal");
   }
 
-  const signedIn = await retellAccess(options);
+  const signedIn = await signedInOrSay(options);
   if (wasInterrupted(options.signal)) return interrupted(options);
   if (signedIn === null) return AGENT_MONITORING_EXIT.failed;
   const stopped = await stopMonitoring(

@@ -95,6 +95,43 @@ function connection({
   };
 }
 
+/** A Pipecat connection, on Pipecat Cloud or behind a self-hosted starter. */
+function pipecatConnection({
+  id,
+  agentId,
+  modality = "voice",
+  config,
+}: {
+  readonly id: string;
+  readonly agentId: string;
+  readonly modality?: "voice" | "chat";
+  readonly config:
+    | { readonly agentName: string }
+    | { readonly startUrl: string };
+}) {
+  const cloud = "agentName" in config;
+  return {
+    id,
+    agentId,
+    projectId: "prj_1",
+    name: `pipecat_${modality}-${id}`,
+    agentPlatform: "pipecat",
+    connectionType: "daily_room",
+    accessVariant: cloud ? "daily_room.pipecat_cloud" : "daily_room.self_hosted",
+    modality,
+    productLabel: cloud ? "Pipecat Cloud" : "Pipecat self-hosted",
+    topology: "hosted-broker",
+    environment: null,
+    config,
+    credentialPresent: true,
+    credentialsHint: cloud ? "WXYZ" : "Authorization",
+    archived: false,
+    archivedAt: null,
+    createdAt: MOMENT,
+    updatedAt: MOMENT,
+  };
+}
+
 function agent({
   id,
   name,
@@ -109,14 +146,17 @@ function agent({
 }: {
   readonly id: string;
   readonly name: string;
-  readonly agentPlatform?: "retell" | "livekit";
+  readonly agentPlatform?: "retell" | "livekit" | "pipecat";
   readonly retellModality?: "voice" | "chat" | null;
   readonly platformAgentId?: string | null;
   readonly monitoringApiKeyHint?: string | null;
   readonly monitoringConfigured?: boolean;
   readonly pullProductionCalls?: boolean;
   readonly lastReceivedAt?: string | null;
-  readonly connections?: readonly ReturnType<typeof connection>[];
+  readonly connections?: readonly (
+    | ReturnType<typeof connection>
+    | ReturnType<typeof pipecatConnection>
+  )[];
 }) {
   return {
     id,
@@ -420,6 +460,172 @@ describe("Paper agent capability states", () => {
       "/projects/prj_1/agents?sheet=connect&agent=agt_livekit&goal=monitoring&platform=livekit",
     );
     expect(detail.queryByRole("button", { name: /(?:start|stop) monitoring/i })).toBeNull();
+  });
+
+  /** A Pipecat Cloud agent with its voice and chat connections. */
+  function pipecatCloudAgent() {
+    return agent({
+      id: "agt_pipecat",
+      name: "lakeside-front-desk",
+      agentPlatform: "pipecat",
+      connections: [
+        pipecatConnection({
+          id: "con_voice",
+          agentId: "agt_pipecat",
+          config: { agentName: "lakeside-front-desk" },
+        }),
+        pipecatConnection({
+          id: "con_chat",
+          agentId: "agt_pipecat",
+          modality: "chat",
+          config: { agentName: "lakeside-front-desk" },
+        }),
+      ],
+    });
+  }
+
+  it("lists a Pipecat agent with LiveKit's code-configured monitoring state", async () => {
+    answerWith(pipecatCloudAgent());
+
+    render(<AgentsPage />);
+    await screen.findByRole("table", { name: "Agents in this project" });
+    const row = within(rowNamed("lakeside-front-desk"));
+    expect(row.getByText("Pipecat")).toBeDefined();
+    expect(row.getByText("Configured")).toBeDefined();
+    expect(row.getByText("Configured via code").className).toContain(
+      "text-warning",
+    );
+  });
+
+  it("shows a Pipecat Cloud agent with LiveKit's shape: two facts and code-configured monitoring", async () => {
+    routed.search = "?sheet=agent&agent=agt_pipecat";
+    answerWith(pipecatCloudAgent());
+
+    render(<AgentsPage />);
+    const detail = within(
+      await screen.findByRole("dialog", { name: "lakeside-front-desk" }),
+    );
+    const agentFact = detail.getByText("Pipecat agent").parentElement;
+    expect(agentFact?.textContent).toBe("Pipecat agentlakeside-front-desk");
+    expect(agentFact?.querySelector("dd")?.className).toContain("font-mono");
+    expect(detail.getByText("Start URL").parentElement?.textContent).toBe(
+      "Start URLPipecat Cloud",
+    );
+    expect(detail.getByText("Configured via code")).toBeDefined();
+    expect(
+      detail.getByRole("link", { name: "View setup instructions" }).getAttribute("href"),
+    ).toBe(
+      "/projects/prj_1/agents?sheet=connect&agent=agt_pipecat&goal=monitoring&platform=pipecat",
+    );
+    expect(detail.queryByRole("link", { name: "Set up simulation" })).toBeNull();
+    expect(detail.queryByRole("button", { name: /(?:start|stop) monitoring/i })).toBeNull();
+  });
+
+  it("names a self-hosted Pipecat agent by its own name and its start URL", async () => {
+    routed.search = "?sheet=agent&agent=agt_self";
+    answerWith(
+      agent({
+        id: "agt_self",
+        name: "Lakeside bot",
+        agentPlatform: "pipecat",
+        connections: [
+          pipecatConnection({
+            id: "con_self",
+            agentId: "agt_self",
+            config: { startUrl: "https://bots.lakeside.example/start" },
+          }),
+        ],
+      }),
+    );
+
+    render(<AgentsPage />);
+    const detail = within(
+      await screen.findByRole("dialog", { name: "Lakeside bot" }),
+    );
+    expect(detail.getByText("Pipecat agent").parentElement?.textContent).toBe(
+      "Pipecat agentLakeside bot",
+    );
+    expect(detail.getByText("Start URL").parentElement?.textContent).toBe(
+      "Start URLhttps://bots.lakeside.example/start",
+    );
+  });
+
+  /** One Pipecat agent's details sheet, and its two facts as read. */
+  async function pipecatFactsOf(
+    connections: readonly ReturnType<typeof pipecatConnection>[],
+  ): Promise<{ readonly agent: string; readonly startUrl: string; readonly urlMono: boolean }> {
+    routed.search = "?sheet=agent&agent=agt_both";
+    answerWith(
+      agent({ id: "agt_both", name: "Front desk", agentPlatform: "pipecat", connections }),
+    );
+    const { unmount } = render(<AgentsPage />);
+    const detail = within(await screen.findByRole("dialog", { name: "Front desk" }));
+    const agentFact = detail.getByText("Pipecat agent").parentElement;
+    const urlFact = detail.getByText("Start URL").parentElement;
+    const read = {
+      agent: agentFact?.querySelector("dd")?.textContent ?? "",
+      startUrl: urlFact?.querySelector("dd")?.textContent ?? "",
+      urlMono: urlFact?.querySelector("dd")?.className.includes("font-mono") ?? false,
+    };
+    unmount();
+    cleanup();
+    return read;
+  }
+
+  /**
+   * Only self-hosted connections have a start URL, so only they speak for the
+   * fact; Pipecat Cloud stands in when there is none, and the usual empty
+   * value when there is no Pipecat connection at all.
+   */
+  it("reads the Start URL fact from self-hosted connections alone", async () => {
+    const cloud = pipecatConnection({
+      id: "con_cloud",
+      agentId: "agt_both",
+      config: { agentName: "front-desk" },
+    });
+    const dev = pipecatConnection({
+      id: "con_dev",
+      agentId: "agt_both",
+      config: { startUrl: "https://quiet-river.trycloudflare.com/start" },
+    });
+    const server = pipecatConnection({
+      id: "con_server",
+      agentId: "agt_both",
+      config: { startUrl: "https://bots.lakeside.example/start" },
+    });
+
+    // Pipecat Cloud beside one start URL: the URL, and the cloud agent's name.
+    expect(await pipecatFactsOf([cloud, dev])).toEqual({
+      agent: "front-desk",
+      startUrl: "https://quiet-river.trycloudflare.com/start",
+      urlMono: true,
+    });
+    // Two start URLs vary by connection.
+    expect(await pipecatFactsOf([cloud, dev, server])).toEqual({
+      agent: "front-desk",
+      startUrl: "Varies by connection",
+      urlMono: false,
+    });
+    // Voice and chat on one starter share one URL.
+    expect(
+      await pipecatFactsOf([dev, { ...dev, id: "con_dev_chat", modality: "chat" }]),
+    ).toEqual({
+      agent: "Front desk",
+      startUrl: "https://quiet-river.trycloudflare.com/start",
+      urlMono: true,
+    });
+    // Pipecat Cloud alone.
+    expect(await pipecatFactsOf([cloud])).toEqual({
+      agent: "front-desk",
+      startUrl: "Pipecat Cloud",
+      urlMono: false,
+    });
+    // No Pipecat connection yet.
+    expect(await pipecatFactsOf([])).toEqual({
+      agent: "Front desk",
+      startUrl: "Not saved",
+      urlMono: false,
+    });
   });
 
   it("stops Retell monitoring from details and changes the durable state", async () => {

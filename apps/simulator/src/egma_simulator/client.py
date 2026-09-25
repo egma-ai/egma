@@ -10,6 +10,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 import aiohttp
 
@@ -61,12 +62,46 @@ class TransientDeliveryFailure(Exception):
     """A document did not get through this time; the same bytes may next time."""
 
 
+class SimulationNotHeld(Exception):
+    """The control plane says this claimant no longer holds the simulation."""
+
+
 @dataclass(frozen=True)
 class ClaimedSpec:
     """One spec and the control plane instant its lease began."""
 
     document: dict
     claimed_at: datetime
+
+
+@dataclass(frozen=True)
+class AgentReport:
+    """The agent-report route's answer: what Egma's server knows of the SDK's hello."""
+
+    state: str = "waiting"
+    """``waiting``, ``accepted`` or ``refused``."""
+    code: int | None = None
+    message: str | None = None
+
+    @classmethod
+    def from_answer(cls, answer: Any) -> AgentReport:
+        """Read one 200 answer of the agent-report route."""
+        if not isinstance(answer, dict):
+            raise ValueError("the agent report is not a JSON object")
+        state = answer.get("state")
+        if state == "accepted":
+            return cls(state="accepted")
+        if state == "refused":
+            code = answer.get("code")
+            message = answer.get("message")
+            return cls(
+                state="refused",
+                code=code if isinstance(code, int) else None,
+                message=message if isinstance(message, str) else "no reason given",
+            )
+        if state == "waiting":
+            return cls()
+        raise ValueError("the agent report names no known state")
 
 
 # The OTLP/HTTP path, which is the specification's and not egma's: an
@@ -193,6 +228,34 @@ class ControlPlaneClient:
                 if attempt == REGISTRATION_ATTEMPTS - 1:
                     raise
                 await asyncio.sleep(REGISTRATION_RETRY_SECONDS * 2**attempt)
+
+    async def agent_report(self, simulation_id: str, claimant: str) -> AgentReport:
+        """Read whether the SDK's hello for a Pipecat simulation has arrived.
+
+        A 409 raises ``SimulationNotHeld``; any other failure, an unreadable
+        answer included, raises ``TransientDeliveryFailure``.
+        """
+        url = f"{self._base_url}/v1/simulations/{simulation_id}/agent-report"
+        try:
+            async with self._live_session().post(
+                url,
+                data=json.dumps({"claimant": claimant}).encode(),
+                headers={"content-type": "application/json"},
+                timeout=self._brisk_timeout,
+            ) as response:
+                if response.status == 200:
+                    try:
+                        return AgentReport.from_answer(await response.json())
+                    except ValueError as unreadable:
+                        raise TransientDeliveryFailure(
+                            f"unreadable agent report: {unreadable}"
+                        ) from unreadable
+                text = await response.text()
+                if response.status == 409:
+                    raise SimulationNotHeld(text)
+                raise TransientDeliveryFailure(f"{response.status}: {text}")
+        except UNREACHABLE as error:
+            raise TransientDeliveryFailure(f"{error!r}") from error
 
     async def heartbeat(self, simulation_id: str, claimant: str) -> str | None:
         """One beat for one running simulation; the answer may carry a directive."""

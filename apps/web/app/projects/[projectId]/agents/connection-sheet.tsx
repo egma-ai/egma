@@ -472,7 +472,10 @@ function ReadConnection({
       ))}
       {connection.credentialsHint === null ? null : (
         <ReadRow label="Credentials" mono>
-          {`…${connection.credentialsHint}`}
+          {/* A self-hosted Pipecat starter's hint is its header names: whole words, not the tail of a secret. */}
+          {connection.accessVariant === "daily_room.self_hosted"
+            ? connection.credentialsHint
+            : `…${connection.credentialsHint}`}
         </ReadRow>
       )}
       <div className="flex min-w-0 flex-col gap-2">

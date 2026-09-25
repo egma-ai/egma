@@ -25,7 +25,9 @@ import { graderDisplayName } from "../lib/presentation.ts";
 import { platformAnswer, platformClient } from "../lib/platform-client.ts";
 import {
   citedTurnPositions,
+  laneHasAnAgentPov,
   priorGrades,
+  type LANES_WITH_AN_AGENT_POV,
   type EvidenceGrade,
   type EvidencePlanItem,
   type EvidenceStep,
@@ -1415,43 +1417,57 @@ export function transcriptToolCalls(
 }
 
 type SimulationTranscriptAttribution = {
-  readonly platform: "Retell" | "LiveKit" | null;
+  readonly platform: "Retell" | "LiveKit" | "Pipecat" | null;
   readonly pov: EvidenceStep["pov"] | undefined;
   readonly label: string | null;
+};
+
+/**
+ * Who supplies the agent's own record on each agent-POV lane, and the words
+ * that say so. Keyed by the lane list, so a new agent-POV lane cannot be left
+ * without a source.
+ */
+const AGENT_POV_SOURCES: Readonly<
+  Record<
+    (typeof LANES_WITH_AN_AGENT_POV)[number],
+    {
+      readonly platform: NonNullable<SimulationTranscriptAttribution["platform"]>;
+      readonly label: string;
+    }
+  >
+> = {
+  retell_web_call: { platform: "Retell", label: "Conversation from Retell" },
+  livekit_room: {
+    platform: "LiveKit",
+    label: "Conversation recorded by the customer agent",
+  },
+  // The Egma SDK in the bot writes the agent's own record, as on LiveKit.
+  daily_room: {
+    platform: "Pipecat",
+    label: "Conversation recorded by the customer agent",
+  },
+};
+
+/** The lanes whose only account is the persona's, and the words for each. */
+const PERSONA_POV_LABELS: Readonly<Record<string, string>> = {
+  retell_text_mode: "Conversation from the Retell API",
+  phone_number: "Conversation recorded by the persona",
 };
 
 /** Select the account that supplied each connection lane's conversation. */
 function simulationTranscriptAttribution(
   evidence: SimulationEvidence,
 ): SimulationTranscriptAttribution {
-  switch (evidence.connectionSnapshot.connectionType) {
-    case "livekit_room":
-      return {
-        platform: "LiveKit",
-        pov: "agent",
-        label: "Conversation recorded by the customer agent",
-      };
-    case "retell_web_call":
-      return {
-        platform: "Retell",
-        pov: "agent",
-        label: "Conversation from Retell",
-      };
-    case "retell_text_mode":
-      return {
-        platform: null,
-        pov: "persona",
-        label: "Conversation from the Retell API",
-      };
-    case "phone_number":
-      return {
-        platform: null,
-        pov: "persona",
-        label: "Conversation recorded by the persona",
-      };
-    default:
-      return { platform: null, pov: undefined, label: null };
+  const connectionType = evidence.connectionSnapshot.connectionType;
+  if (laneHasAnAgentPov(connectionType)) {
+    const source =
+      AGENT_POV_SOURCES[connectionType as (typeof LANES_WITH_AN_AGENT_POV)[number]];
+    return { platform: source.platform, pov: "agent", label: source.label };
   }
+  const label = PERSONA_POV_LABELS[connectionType];
+  return label === undefined
+    ? { platform: null, pov: undefined, label: null }
+    : { platform: null, pov: "persona", label };
 }
 
 /** Say whose account supplied the conversation shown in a simulation. */

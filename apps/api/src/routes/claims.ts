@@ -47,6 +47,7 @@ import { acceptsServiceToken } from "../auth/service-token.ts";
 import { claimsWithheldByEntitlement } from "../claim-entitlement.ts";
 import type { CarrierRoute } from "../config.ts";
 import { invalid, notTheService } from "../http/refusals.ts";
+import { taggedMockAnswer } from "../mock-answers.ts";
 import { mockToolBase } from "./mock-endpoint.ts";
 import { platformEvent, safeExceptionType } from "../platform-log.ts";
 import { DaytonaAssignmentUncertainError } from "../voice-fleet-daytona.ts";
@@ -154,10 +155,22 @@ const SIMULATION_LIMITS = {
   voice: { max_duration_seconds: 600, max_turns: 40 },
 } as const;
 
-/** The one clean-cut contract this control plane and simulator speak. */
+/**
+ * The simulation contract versions this control plane sends. A spec's version
+ * follows its frozen persona settings: 5 before persona controls, 6 with
+ * controls, 7 with speech modes, which is current for every lane but one.
+ */
 const LEGACY_CONTRACT_VERSION = 5;
 const CONTROLLED_CONTRACT_VERSION = 6;
 const CURRENT_CONTRACT_VERSION = 7;
+/**
+ * The one lane with a version of its own: every Daily room spec is 8, which is
+ * version 7 plus the Pipecat body params and the Daily room connection. A
+ * worker that does not list 8 never receives one, so a simulator without the
+ * Daily room plug cannot be handed Pipecat work.
+ */
+const DAILY_ROOM_CONTRACT_VERSION = 8;
+
 
 type Body = Record<string, unknown>;
 
@@ -491,16 +504,17 @@ function claimAsk(body: Body): ClaimAsk | { readonly refusal: string } {
     return {
       refusal:
         "contract_versions is the simulation-contract versions this worker " +
-        `implements. Send a non-empty list that includes ${LEGACY_CONTRACT_VERSION} or ${CURRENT_CONTRACT_VERSION}.`,
+        `implements. Send a non-empty list that includes at least one of ${LEGACY_CONTRACT_VERSION}, ${CONTROLLED_CONTRACT_VERSION}, ${CURRENT_CONTRACT_VERSION} and ${DAILY_ROOM_CONTRACT_VERSION}.`,
     };
   }
   if (!contractVersions.some((version) =>
     version === LEGACY_CONTRACT_VERSION ||
     version === CONTROLLED_CONTRACT_VERSION ||
-    version === CURRENT_CONTRACT_VERSION)) {
+    version === CURRENT_CONTRACT_VERSION ||
+    version === DAILY_ROOM_CONTRACT_VERSION)) {
     return {
       refusal:
-        `this control plane sends simulation contract versions ${LEGACY_CONTRACT_VERSION}, ${CONTROLLED_CONTRACT_VERSION}, and ${CURRENT_CONTRACT_VERSION}, ` +
+        `this control plane sends simulation contract versions ${LEGACY_CONTRACT_VERSION}, ${CONTROLLED_CONTRACT_VERSION}, ${CURRENT_CONTRACT_VERSION}, and ${DAILY_ROOM_CONTRACT_VERSION}, ` +
         "and this worker does not say it can read it. Deploy the matching " +
         "simulator before it claims work.",
     };
@@ -627,8 +641,7 @@ async function assembledSpec(
   )
     ? evidence.mockTools.map((entry) => ({
         tool_name: entry.tool,
-        answer:
-          "error" in entry ? { error: entry.error } : { answer: entry.answer },
+        answer: taggedMockAnswer(entry),
       }))
     : [];
 
@@ -643,8 +656,15 @@ async function assembledSpec(
     : Object.hasOwn(personaParameters, "speech_mode")
       ? CURRENT_CONTRACT_VERSION
       : CONTROLLED_CONTRACT_VERSION;
-  if (!workerContractVersions.includes(contractVersion))
-    return { retryable: `the worker does not support simulation contract version ${contractVersion}`, deferredBy: "runtime" };
+  // A Daily room spec is version 8: version 7's persona and models, plus the
+  // test's Pipecat body params. It exists only for current persona settings.
+  const pipecat = connection.connectionType === "daily_room";
+  if (pipecat && contractVersion !== CURRENT_CONTRACT_VERSION) {
+    return { unbuildable: "a Pipecat simulation needs current persona settings" };
+  }
+  const specContractVersion = pipecat ? DAILY_ROOM_CONTRACT_VERSION : contractVersion;
+  if (!workerContractVersions.includes(specContractVersion))
+    return { retryable: `the worker does not support simulation contract version ${specContractVersion}`, deferredBy: "runtime" };
   try {
     // The source loads here, once per simulation work order. Persona choices
     // are pinned; credentials are current. A rotated AWS bundle therefore
@@ -701,8 +721,12 @@ async function assembledSpec(
       ? evidence.env?.job_dispatch_metadata
       : undefined;
 
+  // The test's own start-request body for a Pipecat bot, verbatim; absent
+  // where the test wrote none and on every other lane.
+  const pipecatBodyParams = pipecat ? evidence.env?.pipecat_body_params : undefined;
+
   const spec = {
-    contract_version: contractVersion,
+    contract_version: specContractVersion,
     simulation_id: claim.id,
     modality: claim.modality,
     connection: {
@@ -768,6 +792,9 @@ async function assembledSpec(
     ...(jobDispatchMetadata === undefined
       ? {}
       : { job_dispatch_metadata: jobDispatchMetadata }),
+    ...(pipecatBodyParams === undefined
+      ? {}
+      : { pipecat_body_params: pipecatBodyParams }),
     // No phone route means no platform block.
     ...(platform === undefined ? {} : { platform }),
   };

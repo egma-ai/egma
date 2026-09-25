@@ -12,6 +12,7 @@ import {
   getAgent as getAgentRequest,
   listAgents as listAgentsRequest,
   registerAgent as registerAgentRequest,
+  updateConnection as updateConnectionRequest,
   type AddConnectionData,
   type GetAgentResponse,
 } from "@egma/platform-api/client";
@@ -22,6 +23,7 @@ import {
   platformText,
   platformUnreachableMessage,
 } from "./client.ts";
+import { isAgentPlatform, type AgentPlatform } from "./agent-platforms.ts";
 import type { ConnectionCredentials } from "./connection-credentials.ts";
 import type { Fetch } from "./device-flow.ts";
 
@@ -49,7 +51,7 @@ export type RegisteredAgent = {
   readonly id: string;
   readonly name: string;
   readonly projectId: string;
-  readonly agentPlatform: "retell" | "livekit";
+  readonly agentPlatform: AgentPlatform;
   /** The provider's public agent id, when this agent is bound to one. */
   readonly platformAgentId: string | null;
   /** Whether the server can reuse the provider key already sealed on it. */
@@ -113,8 +115,25 @@ function opaqueIdAtom(value: unknown): string {
   return typeof value === "string" && OPAQUE_ID_ATOM.test(value) ? value : "";
 }
 
+/** What a newer egma-cli would read, said once for every listing that skipped something. */
+export const UNKNOWN_PLATFORM_NOTE =
+  "Egma has an Agent on a platform this CLI does not know, so it is left out here. Update egma-cli: npm install --global egma-cli@latest";
+export const UNKNOWN_MODALITY_NOTE =
+  "Egma has a Connection with a modality this CLI does not know, so it is left out here. Update egma-cli: npm install --global egma-cli@latest";
+
+type AgentRow =
+  | { readonly kind: "agent"; readonly agent: RegisteredAgent }
+  /** Complete, but on a platform a newer CLI knows. */
+  | { readonly kind: "unknown-platform" }
+  | { readonly kind: "incomplete" };
+
 function cleanAgent(value: unknown): RegisteredAgent | null {
-  if (typeof value !== "object" || value === null) return null;
+  const row = agentRow(value);
+  return row.kind === "agent" ? row.agent : null;
+}
+
+function agentRow(value: unknown): AgentRow {
+  if (typeof value !== "object" || value === null) return { kind: "incomplete" };
   const agent = value as Readonly<Record<string, unknown>>;
   const id = opaqueIdAtom(agent["id"]);
   const name = platformText(agent["name"]);
@@ -128,22 +147,27 @@ function cleanAgent(value: unknown): RegisteredAgent | null {
     id === "" ||
     name === "" ||
     projectId === "" ||
-    (agentPlatform !== "retell" && agentPlatform !== "livekit") ||
+    typeof agentPlatform !== "string" ||
+    platformText(agentPlatform) === "" ||
     (rawPlatformAgentId !== null && platformAgentId === "") ||
     (monitoringKeyPresent !== undefined &&
       typeof monitoringKeyPresent !== "boolean")
   ) {
-    return null;
+    return { kind: "incomplete" };
   }
+  if (!isAgentPlatform(agentPlatform)) return { kind: "unknown-platform" };
   return {
-    id,
-    name,
-    projectId,
-    agentPlatform,
-    platformAgentId,
-    ...(typeof monitoringKeyPresent === "boolean"
-      ? { monitoringKeyPresent }
-      : {}),
+    kind: "agent",
+    agent: {
+      id,
+      name,
+      projectId,
+      agentPlatform,
+      platformAgentId,
+      ...(typeof monitoringKeyPresent === "boolean"
+        ? { monitoringKeyPresent }
+        : {}),
+    },
   };
 }
 
@@ -168,9 +192,20 @@ function registrationReceipt(
   return agent === null ? null : { result, agent };
 }
 
+type ConnectionRow =
+  | { readonly kind: "connection"; readonly connection: RegisteredConnection }
+  /** Complete, but with a modality a newer CLI knows. */
+  | { readonly kind: "unknown-modality" }
+  | { readonly kind: "incomplete" };
+
 /** Turn one untrusted response value into a complete, safe connection receipt. */
 function connectionReceipt(value: unknown): RegisteredConnection | null {
-  if (typeof value !== "object" || value === null) return null;
+  const row = connectionRow(value);
+  return row.kind === "connection" ? row.connection : null;
+}
+
+function connectionRow(value: unknown): ConnectionRow {
+  if (typeof value !== "object" || value === null) return { kind: "incomplete" };
   const connection = value as Readonly<Record<string, unknown>>;
   const id = opaqueIdAtom(connection["id"]);
   const agentId = opaqueIdAtom(connection["agentId"]);
@@ -191,25 +226,27 @@ function connectionReceipt(value: unknown): RegisteredConnection | null {
     connectionType === "" ||
     accessVariant === "" ||
     productLabel === "" ||
-    (modality !== "chat" && modality !== "voice") ||
+    typeof modality !== "string" ||
+    platformText(modality) === "" ||
     (rawPlatform !== null && typeof rawPlatform !== "string") ||
     (rawHint !== null && typeof rawHint !== "string") ||
     typeof rawConfig !== "object" ||
     rawConfig === null ||
     Array.isArray(rawConfig)
   ) {
-    return null;
+    return { kind: "incomplete" };
   }
   const config: Record<string, string> = {};
   for (const [key, raw] of Object.entries(rawConfig)) {
-    if (typeof raw !== "string") return null;
+    if (typeof raw !== "string") return { kind: "incomplete" };
     config[key] = raw;
   }
   const agentPlatform = rawPlatform === null ? null : platformText(rawPlatform);
   const credentialsHint = rawHint === null ? null : platformText(rawHint);
-  if (rawPlatform !== null && agentPlatform === "") return null;
+  if (rawPlatform !== null && agentPlatform === "") return { kind: "incomplete" };
+  if (modality !== "chat" && modality !== "voice") return { kind: "unknown-modality" };
 
-  return {
+  return { kind: "connection", connection: {
     id,
     agentId,
     projectId,
@@ -221,7 +258,7 @@ function connectionReceipt(value: unknown): RegisteredConnection | null {
     productLabel,
     credentialsHint,
     config,
-  };
+  } };
 }
 
 function sameConfig(
@@ -320,7 +357,12 @@ export type ListedAgent = {
 };
 
 export type ListedAgents =
-  | { readonly kind: "agents"; readonly agents: readonly ListedAgent[] }
+  | {
+      readonly kind: "agents";
+      readonly agents: readonly ListedAgent[];
+      /** What was left out because a newer CLI knows it, said once each. */
+      readonly notes: readonly string[];
+    }
   | CommonFailure;
 
 /** Read the complete active Agent roster for one Project. */
@@ -330,6 +372,7 @@ export async function listAllAgents(
 ): Promise<ListedAgents> {
   let pageToken: string | undefined;
   const agents: ListedAgent[] = [];
+  const notes = new Set<string>();
 
   for (let page = 0; page < MOST_PAGES; page += 1) {
     const answer = await listAgentsRequest(
@@ -350,7 +393,14 @@ export async function listAllAgents(
       };
     }
     for (const row of answer.data.agents) {
-      const agent = cleanAgent(row);
+      const read = agentRow(row);
+      // An agent on a platform a newer CLI knows is left out, not a reason to
+      // refuse the whole roster.
+      if (read.kind === "unknown-platform") {
+        notes.add(UNKNOWN_PLATFORM_NOTE);
+        continue;
+      }
+      const agent = read.kind === "agent" ? read.agent : null;
       if (
         agent === null ||
         agent.projectId !== projectId ||
@@ -364,7 +414,12 @@ export async function listAllAgents(
       }
       const connections: RegisteredConnection[] = [];
       for (const raw of row.connections) {
-        const connection = connectionReceipt(raw);
+        const readConnection = connectionRow(raw);
+        if (readConnection.kind === "unknown-modality") {
+          notes.add(UNKNOWN_MODALITY_NOTE);
+          continue;
+        }
+        const connection = readConnection.kind === "connection" ? readConnection.connection : null;
         if (
           connection === null ||
           connection.projectId !== projectId ||
@@ -382,7 +437,7 @@ export async function listAllAgents(
     }
 
     const next = answer.data.nextPageToken ?? null;
-    if (next === null || next === "") return { kind: "agents", agents };
+    if (next === null || next === "") return { kind: "agents", agents, notes: [...notes] };
     pageToken = next;
   }
 
@@ -428,14 +483,21 @@ export async function readAgent(
       reason: "Egma answered without saying what it holds. Check that this Egma platform is up to date.",
     };
   }
-  const agent = cleanAgent(body.agent);
-  if (agent === null) {
+  const read = agentRow(body.agent);
+  if (read.kind === "unknown-platform") {
+    return {
+      kind: "refused",
+      reason: `Agent ${agentId} is on a platform this CLI does not know. Update egma-cli: npm install --global egma-cli@latest`,
+    };
+  }
+  if (read.kind !== "agent") {
     return {
       kind: "refused",
       reason:
         "Egma answered without a complete agent receipt. Check that this Egma platform is up to date.",
     };
   }
+  const agent = read.agent;
   if (agent.id !== agentId || agent.projectId !== projectId) {
     return {
       kind: "refused",
@@ -452,7 +514,10 @@ export async function readAgent(
   }
   const connections: RegisteredConnection[] = [];
   for (const raw of body.connections) {
-    const connection = connectionReceipt(raw);
+    const readConnection = connectionRow(raw);
+    // A modality a newer CLI knows is no connection this CLI can act on.
+    if (readConnection.kind === "unknown-modality") continue;
+    const connection = readConnection.kind === "connection" ? readConnection.connection : null;
     if (
       connection === null ||
       connection.agentId !== agentId ||
@@ -524,6 +589,73 @@ export async function addConnection(
   return { kind: "added", connection: receipt };
 }
 
+/** What a connection edit replaces. Omitted halves stay as they are. */
+export type ConnectionChanges = {
+  readonly config?: Readonly<Record<string, string>>;
+  /** Replaces the whole sealed credential. */
+  readonly credentials?: ConnectionCredentials;
+};
+
+export type UpdatedConnection =
+  | {
+      readonly kind: "updated";
+      readonly connection: RegisteredConnection;
+      /** Whether the edited connection is archived, which no edit undoes. */
+      readonly archived: boolean;
+    }
+  | { readonly kind: "not-found"; readonly reason: string }
+  | CommonFailure;
+
+/** Replace a connection's config, credentials, or both, in place. */
+export async function updateConnection(
+  agentId: string,
+  connectionId: string,
+  projectId: string,
+  changes: ConnectionChanges,
+  options: RegisterOptions,
+): Promise<UpdatedConnection> {
+  const answer = await updateConnectionRequest(
+    {
+      agentId,
+      connectionId,
+      projectId,
+      ...(changes.config === undefined ? {} : { config: { ...changes.config } }),
+      ...(changes.credentials === undefined
+        ? {}
+        : { credentials: changes.credentials.reveal() }),
+    },
+    requestOptions(options),
+  );
+  if (answer.response?.status === 404) {
+    return {
+      kind: "not-found",
+      reason: platformRefusalMessage(answer.error, answer.response.status),
+    };
+  }
+  const failed = commonFailure(answer, options);
+  if (failed !== null) return failed;
+  const raw: unknown = answer.data?.connection;
+  const receipt = connectionReceipt(raw);
+  const archived =
+    typeof raw === "object" &&
+    raw !== null &&
+    (raw as Readonly<Record<string, unknown>>)["archived"] === true;
+  if (
+    receipt === null ||
+    receipt.id !== connectionId ||
+    receipt.agentId !== agentId ||
+    receipt.projectId !== projectId ||
+    (changes.config !== undefined && !sameConfig(receipt.config, changes.config))
+  ) {
+    return {
+      kind: "refused",
+      reason:
+        "Egma answered without a complete matching Connection receipt. The Connection may still have been changed.",
+    };
+  }
+  return { kind: "updated", connection: receipt, archived };
+}
+
 /**
  * Write an agent's identity alone, bound to the platform that runs it.
  *
@@ -534,7 +666,7 @@ export async function addConnection(
 export async function registerAgentIdentity(
   registration: {
     readonly name: string;
-    readonly agentPlatform: "retell" | "livekit";
+    readonly agentPlatform: AgentPlatform;
     readonly project?: string | undefined;
   },
   options: RegisterOptions,

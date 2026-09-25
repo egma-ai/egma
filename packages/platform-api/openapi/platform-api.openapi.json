@@ -839,7 +839,8 @@
                                 "type": "string",
                                 "enum": [
                                   "retell",
-                                  "livekit"
+                                  "livekit",
+                                  "pipecat"
                                 ]
                               },
                               {
@@ -856,7 +857,8 @@
                               "retell_text_mode",
                               "retell_web_call",
                               "phone_number",
-                              "livekit_room"
+                              "livekit_room",
+                              "daily_room"
                             ]
                           },
                           "accessVariant": {
@@ -866,7 +868,9 @@
                               "retell_web_call.api_key",
                               "phone_number.public_e164",
                               "livekit_room.project_credentials",
-                              "livekit_room.customer_token_endpoint"
+                              "livekit_room.customer_token_endpoint",
+                              "daily_room.pipecat_cloud",
+                              "daily_room.self_hosted"
                             ]
                           },
                           "accessVariantLabel": {
@@ -1093,7 +1097,8 @@
                     "type": "string",
                     "enum": [
                       "retell",
-                      "livekit"
+                      "livekit",
+                      "pipecat"
                     ],
                     "description": "The product or framework that runs your agent."
                   },
@@ -1114,7 +1119,8 @@
                             "type": "string",
                             "enum": [
                               "retell",
-                              "livekit"
+                              "livekit",
+                              "pipecat"
                             ],
                             "description": "The platform that runs the agent. It must be compatible with the selected connection type and agent."
                           },
@@ -1125,12 +1131,13 @@
                       },
                       "connectionType": {
                         "type": "string",
-                        "description": "Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room connections can use voice or chat.",
+                        "description": "Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room and Pipecat Daily room connections can use voice or chat.",
                         "enum": [
                           "retell_text_mode",
                           "retell_web_call",
                           "phone_number",
-                          "livekit_room"
+                          "livekit_room",
+                          "daily_room"
                         ]
                       },
                       "accessVariant": {
@@ -1141,7 +1148,9 @@
                           "retell_web_call.api_key",
                           "phone_number.public_e164",
                           "livekit_room.project_credentials",
-                          "livekit_room.customer_token_endpoint"
+                          "livekit_room.customer_token_endpoint",
+                          "daily_room.pipecat_cloud",
+                          "daily_room.self_hosted"
                         ]
                       },
                       "modality": {
@@ -1162,7 +1171,7 @@
                       "config": {
                         "type": "object",
                         "additionalProperties": true,
-                        "description": "Non-secret settings for the selected access variant. Use only its catalog fields. Retell API variants use retellAgentId; a Retell phone connection uses phoneNumber. LiveKit project credentials use url and agentName. LiveKit token endpoints use tokenEndpoint and agentName; tokenEndpoint must be a public HTTPS URL. agentName must match the name registered by your LiveKit worker. When platformAgentId is supplied for a Retell API variant, Egma derives and confirms retellAgentId from that selection.",
+                        "description": "Non-secret settings for the selected access variant. Use only its catalog fields. Retell API variants use retellAgentId; a Retell phone connection uses phoneNumber. LiveKit project credentials use url and agentName. LiveKit token endpoints use tokenEndpoint and agentName; tokenEndpoint must be a public HTTPS URL. agentName must match the name registered by your LiveKit worker. Pipecat Cloud uses agentName, the agent name in pcc-deploy.toml. A self-hosted Pipecat starter uses startUrl, a public HTTPS URL. When platformAgentId is supplied for a Retell API variant, Egma derives and confirms retellAgentId from that selection.",
                         "examples": [
                           {
                             "retellAgentId": "agent_receptionist"
@@ -1174,13 +1183,19 @@
                           {
                             "tokenEndpoint": "https://voice.example.com/egma/token",
                             "agentName": "receptionist"
+                          },
+                          {
+                            "agentName": "receptionist"
+                          },
+                          {
+                            "startUrl": "https://bots.example.com/start"
                           }
                         ]
                       },
                       "credentials": {
                         "type": "object",
                         "additionalProperties": true,
-                        "description": "Secret fields for the selected access variant. Retell uses apiKey. LiveKit project credentials use apiKey and apiSecret. A LiveKit token endpoint requires headers: a JSON-encoded string containing a non-empty object of header names to string values. For an additional Retell connection, platformAgentId can reuse the agent's saved Retell key when credentials are omitted. For a Retell phone connection, the key confirms provider identity and is held on the agent; the phone connection itself stores no key. Responses return credential presence and hints, never the secret values.",
+                        "description": "Secret fields for the selected access variant. Retell uses apiKey. LiveKit project credentials use apiKey and apiSecret. A LiveKit token endpoint requires headers: a JSON-encoded string containing a non-empty object of header names to string values. Pipecat Cloud uses publicApiKey, the public key that starts with pk_. A self-hosted Pipecat starter requires headers in the same JSON-encoded form. For an additional Retell connection, platformAgentId can reuse the agent's saved Retell key when credentials are omitted. For a Retell phone connection, the key confirms provider identity and is held on the agent; the phone connection itself stores no key. Responses return credential presence and hints, never the secret values.",
                         "examples": [
                           {
                             "apiKey": "YOUR_RETELL_API_KEY"
@@ -1191,6 +1206,9 @@
                           },
                           {
                             "headers": "{\"Authorization\":\"Bearer YOUR_ENDPOINT_TOKEN\"}"
+                          },
+                          {
+                            "publicApiKey": "pk_YOUR_PIPECAT_PUBLIC_KEY"
                           }
                         ]
                       },
@@ -1351,7 +1369,8 @@
                           "type": "string",
                           "enum": [
                             "retell",
-                            "livekit"
+                            "livekit",
+                            "pipecat"
                           ]
                         },
                         "platformAgentId": {
@@ -1472,7 +1491,8 @@
                           "type": "string",
                           "enum": [
                             "retell",
-                            "livekit"
+                            "livekit",
+                            "pipecat"
                           ]
                         },
                         "connectionType": {
@@ -1482,7 +1502,8 @@
                             "retell_text_mode",
                             "retell_web_call",
                             "phone_number",
-                            "livekit_room"
+                            "livekit_room",
+                            "daily_room"
                           ]
                         },
                         "accessVariant": {
@@ -1493,7 +1514,9 @@
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
-                            "livekit_room.customer_token_endpoint"
+                            "livekit_room.customer_token_endpoint",
+                            "daily_room.pipecat_cloud",
+                            "daily_room.self_hosted"
                           ]
                         },
                         "modality": {
@@ -1631,7 +1654,8 @@
                           "type": "string",
                           "enum": [
                             "retell",
-                            "livekit"
+                            "livekit",
+                            "pipecat"
                           ]
                         },
                         "platformAgentId": {
@@ -1752,7 +1776,8 @@
                           "type": "string",
                           "enum": [
                             "retell",
-                            "livekit"
+                            "livekit",
+                            "pipecat"
                           ]
                         },
                         "connectionType": {
@@ -1762,7 +1787,8 @@
                             "retell_text_mode",
                             "retell_web_call",
                             "phone_number",
-                            "livekit_room"
+                            "livekit_room",
+                            "daily_room"
                           ]
                         },
                         "accessVariant": {
@@ -1773,7 +1799,9 @@
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
-                            "livekit_room.customer_token_endpoint"
+                            "livekit_room.customer_token_endpoint",
+                            "daily_room.pipecat_cloud",
+                            "daily_room.self_hosted"
                           ]
                         },
                         "modality": {
@@ -2057,7 +2085,8 @@
                             "type": "string",
                             "enum": [
                               "retell",
-                              "livekit"
+                              "livekit",
+                              "pipecat"
                             ]
                           },
                           "platformAgentId": {
@@ -2160,7 +2189,8 @@
                                   "type": "string",
                                   "enum": [
                                     "retell",
-                                    "livekit"
+                                    "livekit",
+                                    "pipecat"
                                   ]
                                 },
                                 "connectionType": {
@@ -2170,7 +2200,8 @@
                                     "retell_text_mode",
                                     "retell_web_call",
                                     "phone_number",
-                                    "livekit_room"
+                                    "livekit_room",
+                                    "daily_room"
                                   ]
                                 },
                                 "accessVariant": {
@@ -2181,7 +2212,9 @@
                                     "retell_web_call.api_key",
                                     "phone_number.public_e164",
                                     "livekit_room.project_credentials",
-                                    "livekit_room.customer_token_endpoint"
+                                    "livekit_room.customer_token_endpoint",
+                                    "daily_room.pipecat_cloud",
+                                    "daily_room.self_hosted"
                                   ]
                                 },
                                 "modality": {
@@ -2455,7 +2488,8 @@
                           "type": "string",
                           "enum": [
                             "retell",
-                            "livekit"
+                            "livekit",
+                            "pipecat"
                           ]
                         },
                         "platformAgentId": {
@@ -2578,7 +2612,8 @@
                             "type": "string",
                             "enum": [
                               "retell",
-                              "livekit"
+                              "livekit",
+                              "pipecat"
                             ]
                           },
                           "connectionType": {
@@ -2588,7 +2623,8 @@
                               "retell_text_mode",
                               "retell_web_call",
                               "phone_number",
-                              "livekit_room"
+                              "livekit_room",
+                              "daily_room"
                             ]
                           },
                           "accessVariant": {
@@ -2599,7 +2635,9 @@
                               "retell_web_call.api_key",
                               "phone_number.public_e164",
                               "livekit_room.project_credentials",
-                              "livekit_room.customer_token_endpoint"
+                              "livekit_room.customer_token_endpoint",
+                              "daily_room.pipecat_cloud",
+                              "daily_room.self_hosted"
                             ]
                           },
                           "modality": {
@@ -2847,7 +2885,8 @@
                           "type": "string",
                           "enum": [
                             "retell",
-                            "livekit"
+                            "livekit",
+                            "pipecat"
                           ]
                         },
                         "platformAgentId": {
@@ -3109,7 +3148,8 @@
                         "type": "string",
                         "enum": [
                           "retell",
-                          "livekit"
+                          "livekit",
+                          "pipecat"
                         ],
                         "description": "The platform that runs the agent. It must be compatible with the selected connection type and agent."
                       },
@@ -3120,12 +3160,13 @@
                   },
                   "connectionType": {
                     "type": "string",
-                    "description": "Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room connections can use voice or chat.",
+                    "description": "Connection type from the options catalog. Retell text mode tests a voice agent through chat; a Retell web call uses voice. LiveKit room and Pipecat Daily room connections can use voice or chat.",
                     "enum": [
                       "retell_text_mode",
                       "retell_web_call",
                       "phone_number",
-                      "livekit_room"
+                      "livekit_room",
+                      "daily_room"
                     ]
                   },
                   "accessVariant": {
@@ -3136,7 +3177,9 @@
                       "retell_web_call.api_key",
                       "phone_number.public_e164",
                       "livekit_room.project_credentials",
-                      "livekit_room.customer_token_endpoint"
+                      "livekit_room.customer_token_endpoint",
+                      "daily_room.pipecat_cloud",
+                      "daily_room.self_hosted"
                     ]
                   },
                   "modality": {
@@ -3157,7 +3200,7 @@
                   "config": {
                     "type": "object",
                     "additionalProperties": true,
-                    "description": "Non-secret settings for the selected access variant. Use only its catalog fields. Retell API variants use retellAgentId; a Retell phone connection uses phoneNumber. LiveKit project credentials use url and agentName. LiveKit token endpoints use tokenEndpoint and agentName; tokenEndpoint must be a public HTTPS URL. agentName must match the name registered by your LiveKit worker. When platformAgentId is supplied for a Retell API variant, Egma derives and confirms retellAgentId from that selection.",
+                    "description": "Non-secret settings for the selected access variant. Use only its catalog fields. Retell API variants use retellAgentId; a Retell phone connection uses phoneNumber. LiveKit project credentials use url and agentName. LiveKit token endpoints use tokenEndpoint and agentName; tokenEndpoint must be a public HTTPS URL. agentName must match the name registered by your LiveKit worker. Pipecat Cloud uses agentName, the agent name in pcc-deploy.toml. A self-hosted Pipecat starter uses startUrl, a public HTTPS URL. When platformAgentId is supplied for a Retell API variant, Egma derives and confirms retellAgentId from that selection.",
                     "examples": [
                       {
                         "retellAgentId": "agent_receptionist"
@@ -3169,13 +3212,19 @@
                       {
                         "tokenEndpoint": "https://voice.example.com/egma/token",
                         "agentName": "receptionist"
+                      },
+                      {
+                        "agentName": "receptionist"
+                      },
+                      {
+                        "startUrl": "https://bots.example.com/start"
                       }
                     ]
                   },
                   "credentials": {
                     "type": "object",
                     "additionalProperties": true,
-                    "description": "Secret fields for the selected access variant. Retell uses apiKey. LiveKit project credentials use apiKey and apiSecret. A LiveKit token endpoint requires headers: a JSON-encoded string containing a non-empty object of header names to string values. For an additional Retell connection, platformAgentId can reuse the agent's saved Retell key when credentials are omitted. For a Retell phone connection, the key confirms provider identity and is held on the agent; the phone connection itself stores no key. Responses return credential presence and hints, never the secret values.",
+                    "description": "Secret fields for the selected access variant. Retell uses apiKey. LiveKit project credentials use apiKey and apiSecret. A LiveKit token endpoint requires headers: a JSON-encoded string containing a non-empty object of header names to string values. Pipecat Cloud uses publicApiKey, the public key that starts with pk_. A self-hosted Pipecat starter requires headers in the same JSON-encoded form. For an additional Retell connection, platformAgentId can reuse the agent's saved Retell key when credentials are omitted. For a Retell phone connection, the key confirms provider identity and is held on the agent; the phone connection itself stores no key. Responses return credential presence and hints, never the secret values.",
                     "examples": [
                       {
                         "apiKey": "YOUR_RETELL_API_KEY"
@@ -3186,6 +3235,9 @@
                       },
                       {
                         "headers": "{\"Authorization\":\"Bearer YOUR_ENDPOINT_TOKEN\"}"
+                      },
+                      {
+                        "publicApiKey": "pk_YOUR_PIPECAT_PUBLIC_KEY"
                       }
                     ]
                   },
@@ -3313,7 +3365,8 @@
                           "type": "string",
                           "enum": [
                             "retell",
-                            "livekit"
+                            "livekit",
+                            "pipecat"
                           ]
                         },
                         "connectionType": {
@@ -3323,7 +3376,8 @@
                             "retell_text_mode",
                             "retell_web_call",
                             "phone_number",
-                            "livekit_room"
+                            "livekit_room",
+                            "daily_room"
                           ]
                         },
                         "accessVariant": {
@@ -3334,7 +3388,9 @@
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
-                            "livekit_room.customer_token_endpoint"
+                            "livekit_room.customer_token_endpoint",
+                            "daily_room.pipecat_cloud",
+                            "daily_room.self_hosted"
                           ]
                         },
                         "modality": {
@@ -3608,7 +3664,8 @@
                           "type": "string",
                           "enum": [
                             "retell",
-                            "livekit"
+                            "livekit",
+                            "pipecat"
                           ]
                         },
                         "platformAgentId": {
@@ -3903,7 +3960,8 @@
                           "type": "string",
                           "enum": [
                             "retell",
-                            "livekit"
+                            "livekit",
+                            "pipecat"
                           ]
                         },
                         "platformAgentId": {
@@ -4178,7 +4236,8 @@
                           "type": "string",
                           "enum": [
                             "retell",
-                            "livekit"
+                            "livekit",
+                            "pipecat"
                           ]
                         },
                         "connectionType": {
@@ -4188,7 +4247,8 @@
                             "retell_text_mode",
                             "retell_web_call",
                             "phone_number",
-                            "livekit_room"
+                            "livekit_room",
+                            "daily_room"
                           ]
                         },
                         "accessVariant": {
@@ -4199,7 +4259,9 @@
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
-                            "livekit_room.customer_token_endpoint"
+                            "livekit_room.customer_token_endpoint",
+                            "daily_room.pipecat_cloud",
+                            "daily_room.self_hosted"
                           ]
                         },
                         "modality": {
@@ -4472,7 +4534,8 @@
                           "type": "string",
                           "enum": [
                             "retell",
-                            "livekit"
+                            "livekit",
+                            "pipecat"
                           ]
                         },
                         "connectionType": {
@@ -4482,7 +4545,8 @@
                             "retell_text_mode",
                             "retell_web_call",
                             "phone_number",
-                            "livekit_room"
+                            "livekit_room",
+                            "daily_room"
                           ]
                         },
                         "accessVariant": {
@@ -4493,7 +4557,9 @@
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
-                            "livekit_room.customer_token_endpoint"
+                            "livekit_room.customer_token_endpoint",
+                            "daily_room.pipecat_cloud",
+                            "daily_room.self_hosted"
                           ]
                         },
                         "modality": {
@@ -4776,7 +4842,8 @@
                           "type": "string",
                           "enum": [
                             "retell",
-                            "livekit"
+                            "livekit",
+                            "pipecat"
                           ]
                         },
                         "connectionType": {
@@ -4786,7 +4853,8 @@
                             "retell_text_mode",
                             "retell_web_call",
                             "phone_number",
-                            "livekit_room"
+                            "livekit_room",
+                            "daily_room"
                           ]
                         },
                         "accessVariant": {
@@ -4797,7 +4865,9 @@
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
-                            "livekit_room.customer_token_endpoint"
+                            "livekit_room.customer_token_endpoint",
+                            "daily_room.pipecat_cloud",
+                            "daily_room.self_hosted"
                           ]
                         },
                         "modality": {
@@ -5122,7 +5192,8 @@
                           "type": "string",
                           "enum": [
                             "retell",
-                            "livekit"
+                            "livekit",
+                            "pipecat"
                           ]
                         },
                         "connectionType": {
@@ -5132,7 +5203,8 @@
                             "retell_text_mode",
                             "retell_web_call",
                             "phone_number",
-                            "livekit_room"
+                            "livekit_room",
+                            "daily_room"
                           ]
                         },
                         "accessVariant": {
@@ -5143,7 +5215,9 @@
                             "retell_web_call.api_key",
                             "phone_number.public_e164",
                             "livekit_room.project_credentials",
-                            "livekit_room.customer_token_endpoint"
+                            "livekit_room.customer_token_endpoint",
+                            "daily_room.pipecat_cloud",
+                            "daily_room.self_hosted"
                           ]
                         },
                         "modality": {
@@ -11008,7 +11082,8 @@
                           "type": "string",
                           "enum": [
                             "retell",
-                            "livekit"
+                            "livekit",
+                            "pipecat"
                           ]
                         },
                         "platformAgentId": {
@@ -17018,6 +17093,11 @@
                                   "type": "object",
                                   "description": "Context delivered to the LiveKit worker in ctx.job.metadata.",
                                   "additionalProperties": true
+                                },
+                                "pipecat_body_params": {
+                                  "type": "object",
+                                  "description": "JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.",
+                                  "additionalProperties": true
                                 }
                               },
                               "additionalProperties": false
@@ -17212,6 +17292,11 @@
                                       "job_dispatch_metadata": {
                                         "type": "object",
                                         "description": "Context delivered to the LiveKit worker in ctx.job.metadata.",
+                                        "additionalProperties": true
+                                      },
+                                      "pipecat_body_params": {
+                                        "type": "object",
+                                        "description": "JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.",
                                         "additionalProperties": true
                                       }
                                     },
@@ -22218,6 +22303,11 @@
                                     "type": "object",
                                     "description": "Context delivered to the LiveKit worker in ctx.job.metadata.",
                                     "additionalProperties": true
+                                  },
+                                  "pipecat_body_params": {
+                                    "type": "object",
+                                    "description": "JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.",
+                                    "additionalProperties": true
                                   }
                                 },
                                 "additionalProperties": false
@@ -22482,6 +22572,11 @@
                             "type": "object",
                             "description": "Context delivered to the LiveKit worker in ctx.job.metadata.",
                             "additionalProperties": true
+                          },
+                          "pipecat_body_params": {
+                            "type": "object",
+                            "description": "JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.",
+                            "additionalProperties": true
                           }
                         },
                         "additionalProperties": false
@@ -22674,6 +22769,11 @@
                             "job_dispatch_metadata": {
                               "type": "object",
                               "description": "Context delivered to the LiveKit worker in ctx.job.metadata.",
+                              "additionalProperties": true
+                            },
+                            "pipecat_body_params": {
+                              "type": "object",
+                              "description": "JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.",
                               "additionalProperties": true
                             }
                           },
@@ -22968,6 +23068,11 @@
                               "type": "object",
                               "description": "Context delivered to the LiveKit worker in ctx.job.metadata.",
                               "additionalProperties": true
+                            },
+                            "pipecat_body_params": {
+                              "type": "object",
+                              "description": "JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.",
+                              "additionalProperties": true
                             }
                           },
                           "additionalProperties": false
@@ -23250,6 +23355,11 @@
                               "type": "object",
                               "description": "Context delivered to the LiveKit worker in ctx.job.metadata.",
                               "additionalProperties": true
+                            },
+                            "pipecat_body_params": {
+                              "type": "object",
+                              "description": "JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.",
+                              "additionalProperties": true
                             }
                           },
                           "additionalProperties": false
@@ -23499,6 +23609,11 @@
                             "type": "object",
                             "description": "Context delivered to the LiveKit worker in ctx.job.metadata.",
                             "additionalProperties": true
+                          },
+                          "pipecat_body_params": {
+                            "type": "object",
+                            "description": "JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.",
+                            "additionalProperties": true
                           }
                         },
                         "additionalProperties": false
@@ -23666,6 +23781,11 @@
                             "job_dispatch_metadata": {
                               "type": "object",
                               "description": "Context delivered to the LiveKit worker in ctx.job.metadata.",
+                              "additionalProperties": true
+                            },
+                            "pipecat_body_params": {
+                              "type": "object",
+                              "description": "JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.",
                               "additionalProperties": true
                             }
                           },
@@ -24216,6 +24336,11 @@
                                   "job_dispatch_metadata": {
                                     "type": "object",
                                     "description": "Context delivered to the LiveKit worker in ctx.job.metadata.",
+                                    "additionalProperties": true
+                                  },
+                                  "pipecat_body_params": {
+                                    "type": "object",
+                                    "description": "JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.",
                                     "additionalProperties": true
                                   }
                                 },

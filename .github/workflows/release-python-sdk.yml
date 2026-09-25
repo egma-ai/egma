@@ -128,6 +128,12 @@ jobs:
           test -n "$wheel"
           python3 .github/livekit_compatibility.py python "$wheel"
 
+      - name: Verify the wheel against supported Pipecat versions in parallel
+        run: |
+          wheel="$(find sdks/python/dist -maxdepth 1 -name '*.whl' -print -quit)"
+          test -n "$wheel"
+          python3 .github/pipecat_compatibility.py "$wheel"
+
       - name: Start the full-path evidence stores
         run: pnpm db:up
 
@@ -208,7 +214,12 @@ jobs:
           "$clean/venv/bin/python" - <<'PY'
           import asyncio
           import os
+          import sys
           from importlib.metadata import version
+
+          import egma
+
+          assert "livekit" not in sys.modules
           from egma import monitor, simulation
           from egma import export
           from livekit import agents
@@ -263,9 +274,22 @@ jobs:
 
           required = {
               "egma/__init__.py",
+              "egma/_frameworks.py",
+              "egma/errors.py",
               "egma/export.py",
+              "egma/livekit/__init__.py",
               "egma/monitoring.py",
+              "egma/otlp.py",
+              "egma/pipecat/__init__.py",
+              "egma/pipecat/census.py",
+              "egma/pipecat/couriers.py",
+              "egma/pipecat/detect.py",
+              "egma/pipecat/export.py",
+              "egma/pipecat/https_seam.py",
+              "egma/pipecat/observer.py",
+              "egma/pipecat/verbs.py",
               "egma/room.py",
+              "egma/seam.py",
               "egma/simulation_room.py",
           }
           missing = sorted(required - wheel_names)

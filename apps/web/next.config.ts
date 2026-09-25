@@ -1,8 +1,8 @@
 import type { NextConfig } from "next";
 
 /**
- * Proxy API paths through the web origin for browser sessions and agent-platform
- * mock-tool requests. Next resolves EGMA_API_ORIGIN when building rewrites;
+ * Proxy API paths through the web origin for browser sessions, agent-platform
+ * mock-tool requests and the Egma SDK's seam. Next resolves EGMA_API_ORIGIN when building rewrites;
  * the default is the local API port.
  */
 const api = process.env.EGMA_API_ORIGIN ?? "http://127.0.0.1:3100";
@@ -92,6 +92,10 @@ const config: NextConfig = {
           source: "/mock-tools/:path*",
           destination: `${api}/mock-tools/:path*`,
         },
+        // Forward the Egma SDK's seam (hello, tool) to the API. A
+        // Pipecat bot's EGMA_URL is the same origin its OTLP exporter uses,
+        // and must receive the API's answer, not Next's HTML not-found page.
+        { source: "/sdk/:path*", destination: `${api}/sdk/:path*` },
         // `/api/health` proves only this Next process. The platform deployment
         // waits for the API and its stores directly; it must not depend on a
         // web deployment that has not happened yet.

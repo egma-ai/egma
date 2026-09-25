@@ -65,6 +65,7 @@ import {
   type LiveKitWorkerLanguage,
   type RetellConnectionCandidate,
 } from "@/lib/agent-setup-flow.ts";
+import { pipecatSetupPrompt } from "@/lib/pipecat-setup-prompt.ts";
 import { platformAnswer, platformClient } from "@/lib/platform-client.ts";
 import { cn } from "@/lib/utils";
 import {
@@ -77,6 +78,7 @@ import { useDraftNavigation } from "@/ui/draft-navigation.tsx";
 import { Empty, Failure, Loading, NotFound } from "@/ui/page-state.tsx";
 import { useUnsavedChanges } from "@/ui/settings-read.ts";
 
+import { CopyBlock } from "./copy-block.tsx";
 import { LiveKitTestingInstructions } from "./livekit-testing-instructions.tsx";
 import { LiveKitMonitoringInstructions } from "./livekit-monitoring-instructions.tsx";
 import {
@@ -1093,6 +1095,10 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         if (completed === null) leave();
         else onConnected(completed);
         return;
+      case "pipecat-prompt":
+        // The coding agent does the setup; the sheet saved nothing to report.
+        leave();
+        return;
     }
   }
 
@@ -1207,6 +1213,9 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
               ) : null}
               {known === null || known.agentPlatform === "retell" ? (
                 <ChoiceCard compact value="retell" title="Retell" />
+              ) : null}
+              {known === null || known.agentPlatform === "pipecat" ? (
+                <ChoiceCard compact value="pipecat" title="Pipecat" />
               ) : null}
             </RadioGroup>
           </div>
@@ -1454,6 +1463,14 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
             onLanguageChange={setLivekitLanguage}
           />
         );
+      case "pipecat-prompt":
+        return goal === "" ? null : (
+          <PipecatPromptStep
+            goal={goal}
+            projectId={projectId}
+            agent={known === null ? null : { id: known.id, name: known.name }}
+          />
+        );
     }
   }
 
@@ -1494,7 +1511,9 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
                     : "Continue"
                 : step === "livekit-monitoring" && goal === "both"
                   ? "Continue to simulation"
-                  : "Return to agents";
+                  : step === "pipecat-prompt"
+                    ? "Done"
+                    : "Return to agents";
 
   const primaryDisabled =
     saving ||
@@ -1594,6 +1613,46 @@ export function ConnectAgentSheet(props: ConnectAgentSheetProps) {
         </form>
       </SheetContent>
     </Sheet>
+  );
+}
+
+/**
+ * Pipecat's whole setup in the web app: one prompt for a coding agent.
+ *
+ * The integrate-egma skill registers the agent, adds the SDK and the
+ * connections, and asks before it changes production, so this step writes
+ * nothing. The Egma URL is this page's own origin, which serves the SDK's
+ * routes and the trace door.
+ */
+function PipecatPromptStep({
+  goal,
+  projectId,
+  agent,
+}: {
+  readonly goal: AgentSetupGoal;
+  readonly projectId: string;
+  readonly agent: { readonly id: string; readonly name: string } | null;
+}) {
+  const [egmaUrl, setEgmaUrl] = useState("");
+  useEffect(() => {
+    setEgmaUrl(window.location.origin);
+  }, []);
+  return (
+    <div className="flex flex-col gap-5">
+      <StepIntro
+        title="Set up Pipecat with your coding agent"
+        description="Open your bot's repository in a coding agent and paste this prompt. It installs the Egma skills and does the setup."
+      />
+      <CopyBlock
+        value={pipecatSetupPrompt({ goal, egmaUrl, projectId, agent })}
+        copyLabel="coding-agent prompt"
+      />
+      <Help>
+        {agent === null
+          ? "The agent appears in this list when your coding agent registers it."
+          : "Your coding agent adds its connections to this agent."}
+      </Help>
+    </div>
   );
 }
 

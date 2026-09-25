@@ -270,6 +270,47 @@ function tokenEndpointUrl(key: string, value: unknown): string {
   return candidate;
 }
 
+/** A public https address, with the token endpoint's rules and one example. */
+function publicHttpsUrl(key: string, value: unknown, example: string): string {
+  try {
+    return tokenEndpointUrl(key, value);
+  } catch {
+    throw new Refusal(
+      `the config's ${key} must be a public https URL, which looks like ${example}`,
+    );
+  }
+}
+
+/** A Pipecat Cloud agent name, as pcc-deploy.toml names it. */
+function pipecatAgentName(key: string, value: unknown): string {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(candidate)) {
+    throw new Refusal(
+      `the config's ${key} must be a Pipecat Cloud agent name, like ` +
+        "my-voice-agent: letters, digits, dots, dashes and underscores",
+    );
+  }
+  return candidate;
+}
+
+/** The Pipecat Cloud public key, never the private one. */
+function pipecatPublicApiKey(what: string, field: string, value: unknown): string {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (trimmed.startsWith("sk_")) {
+    throw new Refusal(
+      `${what}'s credentials need ${field} to be the public API key, which ` +
+        "starts with pk_; a private key (sk_) is never needed",
+    );
+  }
+  if (!trimmed.startsWith("pk_") || trimmed.length < SHORTEST_CREDENTIAL) {
+    throw new Refusal(
+      `${what}'s credentials need ${field} to be a Pipecat Cloud public API ` +
+        "key, which starts with pk_",
+    );
+  }
+  return trimmed;
+}
+
 /** The headers egma sends when it asks for a token, checked at create. */
 function authHeadersJson(what: string, field: string, value: unknown): string {
   const candidate = typeof value === "string" ? value.trim() : "";
@@ -462,6 +503,58 @@ const REGISTRY: Readonly<Record<string, Descriptor>> = {
     },
     simulatorAdapter: true,
   },
+  daily_room: {
+    // A starter makes the Daily room and starts the bot; the persona joins it.
+    modalities: ["voice", "chat"],
+    topology: "hosted-broker",
+    accessVariants: [
+      {
+        id: "daily_room.pipecat_cloud",
+        named: "a Pipecat Cloud connection",
+        config: { agentName: pipecatAgentName },
+        credentials: {
+          required: true,
+          fields: ["publicApiKey"],
+          gate: pipecatPublicApiKey,
+          hint: lastFourOf("publicApiKey"),
+        },
+        mixedUp:
+          "a Pipecat Cloud connection starts your agent with its public API " +
+          "key, so its credentials are shaped { publicApiKey }. Send that, or " +
+          "use daily_room.self_hosted with a startUrl and { headers }.",
+      },
+      {
+        id: "daily_room.self_hosted",
+        named: "a self-hosted Pipecat connection",
+        config: {
+          startUrl: (key, value) =>
+            publicHttpsUrl(key, value, "https://bots.example.com/start"),
+        },
+        credentials: {
+          required: true,
+          fields: ["headers"],
+          gate: authHeadersJson,
+          hint: namesIn("headers"),
+        },
+        mixedUp:
+          "a self-hosted Pipecat connection sends the start request to your " +
+          "startUrl with your auth headers, so its credentials are shaped " +
+          "{ headers }. Send those, or use daily_room.pipecat_cloud with an " +
+          "agentName and { publicApiKey }.",
+      },
+    ],
+    reuse: {
+      matchedKeys: [],
+      identityOf: (config) => {
+        const agentName = config["agentName"];
+        if (agentName !== undefined) return `pipecat-cloud|${agentName}`;
+        const startUrl = config["startUrl"];
+        if (startUrl !== undefined) return `self-hosted|${tokenEndpointIdentity(startUrl)}`;
+        return undefined;
+      },
+    },
+    simulatorAdapter: true,
+  },
 };
 
 const CONNECTION_TYPES = Object.keys(REGISTRY);
@@ -515,6 +608,34 @@ const CONNECTION_OPTIONS = [
     accessVariant: "livekit_room.customer_token_endpoint",
     modality: "chat",
     productLabel: "LiveKit chat token endpoint",
+  },
+  {
+    agentPlatform: "pipecat",
+    connectionType: "daily_room",
+    accessVariant: "daily_room.pipecat_cloud",
+    modality: "voice",
+    productLabel: "Pipecat Cloud",
+  },
+  {
+    agentPlatform: "pipecat",
+    connectionType: "daily_room",
+    accessVariant: "daily_room.pipecat_cloud",
+    modality: "chat",
+    productLabel: "Pipecat Cloud chat",
+  },
+  {
+    agentPlatform: "pipecat",
+    connectionType: "daily_room",
+    accessVariant: "daily_room.self_hosted",
+    modality: "voice",
+    productLabel: "Pipecat self-hosted",
+  },
+  {
+    agentPlatform: "pipecat",
+    connectionType: "daily_room",
+    accessVariant: "daily_room.self_hosted",
+    modality: "chat",
+    productLabel: "Pipecat self-hosted chat",
   },
 ] as const;
 
@@ -869,7 +990,6 @@ type StoredConnection = {
   readonly id: string;
   readonly agentId: string;
   readonly projectId: string;
-  readonly name: string;
   readonly agentPlatform: string | null;
   readonly connectionType: string;
   readonly accessVariant: string;
@@ -877,10 +997,13 @@ type StoredConnection = {
   readonly productLabel: string;
   readonly topology: string;
   readonly environment: string | null;
-  readonly config: Readonly<Record<string, string>>;
   /** Sealed. Nothing outside this file ever reads it back through a route. */
   credentials: Readonly<Record<string, string>> | null;
   credentialsHint: string | null;
+  config: Readonly<Record<string, string>>;
+  name: string;
+  /** Null while living. An edit never clears it, as the real access layer. */
+  archivedAt: string | null;
   readonly createdAt: string;
   updatedAt: string;
 };
@@ -914,7 +1037,7 @@ export type StoredAgent = {
 };
 
 /** The platforms an agent may be bound to, refused by name like every enum. */
-const AGENT_PLATFORMS = ["retell", "livekit"] as const;
+const AGENT_PLATFORMS = ["retell", "livekit", "pipecat"] as const;
 
 type BoundPlatform = (typeof AGENT_PLATFORMS)[number];
 
@@ -934,7 +1057,7 @@ function agentPlatformIn(value: unknown): BoundPlatform {
     !(AGENT_PLATFORMS as readonly string[]).includes(value)
   ) {
     throw new Refusal(
-      "an agent platform is required and must be retell or livekit",
+      "an agent platform is required and must be retell, livekit or pipecat",
     );
   }
   return value as BoundPlatform;
@@ -1004,6 +1127,8 @@ function connectionOut(connection: StoredConnection): Record<string, unknown> {
     environment: connection.environment,
     config: connection.config,
     credentialsHint: connection.credentialsHint,
+    archived: connection.archivedAt !== null,
+    archivedAt: connection.archivedAt,
     createdAt: connection.createdAt,
     updatedAt: connection.updatedAt,
   };
@@ -1034,6 +1159,12 @@ export type AgentControls = {
   retellAccount(apiKey: string, agents: readonly SeedRetellAgent[]): void;
   /** The project a write named, or `null`, per write. */
   readonly projectsNamed: readonly (string | null)[];
+  /** Archive one connection, as the dashboard would. */
+  archiveConnection(connectionId: string): void;
+  /** Forget one connection entirely, as if it had never been written. */
+  forgetConnection(connectionId: string): void;
+  /** The sealed credential one connection holds now. */
+  sealedOn(connectionId: string): Readonly<Record<string, string>> | null;
 };
 
 /**
@@ -1219,7 +1350,7 @@ export function agentRoutes(options: {
   ): string => {
     const taken = new Set(
       connections
-        .filter((held) => held.agentId === agentId)
+        .filter((held) => held.agentId === agentId && held.archivedAt === null)
         .map((held) => held.name),
     );
     const stem =
@@ -1227,7 +1358,11 @@ export function agentRoutes(options: {
         ? modality === "chat"
           ? "livekit_chat"
           : "livekit_voice"
-        : connectionType;
+        : connectionType === "daily_room"
+          ? modality === "chat"
+            ? "pipecat_chat"
+            : "pipecat_voice"
+          : connectionType;
     for (let n = 1; ; n += 1) {
       const candidate = `${stem}-${n}`;
       if (!taken.has(candidate)) return candidate;
@@ -1365,9 +1500,13 @@ export function agentRoutes(options: {
     const { connectionType, modality, config, credentials } = input;
     const name =
       input.name ?? freeConnectionName(agent.id, connectionType, modality);
+    // Names are unique among living connections only, as the real index.
     if (
       connections.some(
-        (held) => held.agentId === agent.id && held.name === name,
+        (held) =>
+          held.agentId === agent.id &&
+          held.name === name &&
+          held.archivedAt === null,
       )
     ) {
       throw new Refusal(
@@ -1397,11 +1536,26 @@ export function agentRoutes(options: {
       config,
       credentials: credentials === null ? null : credentials.sealed,
       credentialsHint: credentials === null ? null : credentials.hint,
+      archivedAt: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     connections.push(written);
     return written;
+  };
+
+  /** The connections a read lists: living ones only. */
+  const livingConnectionsOf = (agentId: string): readonly StoredConnection[] =>
+    connections.filter(
+      (held) => held.agentId === agentId && held.archivedAt === null,
+    );
+
+  const noSuchConnection: FixtureAnswer = {
+    status: 404,
+    body: {
+      error: "not_found",
+      message: "no connection of that agent has that id.",
+    },
   };
 
   /**
@@ -1745,9 +1899,7 @@ export function agentRoutes(options: {
               body: {
                 agents: page.map((agent) => ({
                   ...agentOut(agent),
-                  connections: connections
-                    .filter((connection) => connection.agentId === agent.id)
-                    .map(connectionOut),
+                  connections: livingConnectionsOf(agent.id).map(connectionOut),
                 })),
                 nextPageToken: more ? (page.at(-1)?.id ?? null) : null,
               },
@@ -1770,9 +1922,7 @@ export function agentRoutes(options: {
             status: 200,
             body: {
               agent: agentOut(agent),
-              connections: connections
-                .filter((held) => held.agentId === agent.id)
-                .map(connectionOut),
+              connections: livingConnectionsOf(agent.id).map(connectionOut),
             },
           };
         },
@@ -1888,6 +2038,77 @@ export function agentRoutes(options: {
           });
         },
       },
+      {
+        // Replace name, environment, config or credentials in place. Like the
+        // real access layer, an archived connection is still found and edited.
+        method: "PATCH",
+        path: "/v1/agents/:agentId/connections/:connectionId",
+        handle: (request) => {
+          if (!authorized(request.headers)) return notAuthenticated;
+          const agent = agents.find(
+            (held) => held.id === request.params["agentId"],
+          );
+          if (agent === undefined) return noSuchAgent;
+          return answering(() => {
+            projectNamed(
+              given(request.url.searchParams.get("projectId")),
+              "writes into",
+            );
+            const held = connections.find(
+              (one) =>
+                one.id === request.params["connectionId"] &&
+                one.agentId === agent.id,
+            );
+            if (held === undefined) return noSuchConnection;
+            const body = request.body ?? {};
+            refuseUnknownKeyIn(
+              body,
+              ["name", "environment", "config", "credentials"],
+              "a connection edit",
+            );
+            const config =
+              body["config"] === undefined
+                ? undefined
+                : validConfig(held.connectionType, held.accessVariant, body["config"]);
+            const credentials =
+              body["credentials"] === undefined
+                ? undefined
+                : validCredentials(
+                    held.connectionType,
+                    held.accessVariant,
+                    body["credentials"],
+                  );
+            const name =
+              body["name"] === undefined
+                ? undefined
+                : validName(body["name"], "a connection");
+            if (
+              name !== undefined &&
+              connections.some(
+                (other) =>
+                  other !== held &&
+                  other.agentId === agent.id &&
+                  other.name === name &&
+                  other.archivedAt === null,
+              )
+            ) {
+              throw new Refusal(
+                `a connection named "${name}" already exists on this agent`,
+                { status: 409, code: "name_taken" },
+              );
+            }
+            if (config !== undefined) held.config = config;
+            if (credentials !== undefined && credentials !== null) {
+              sealed.push(...Object.values(credentials.sealed));
+              held.credentials = credentials.sealed;
+              held.credentialsHint = credentials.hint;
+            }
+            if (name !== undefined) held.name = name;
+            held.updatedAt = new Date().toISOString();
+            return { status: 200, body: { connection: connectionOut(held) } };
+          });
+        },
+      },
     ],
   };
 
@@ -1915,6 +2136,17 @@ export function agentRoutes(options: {
         retellAccounts.set(apiKey, seeded);
       },
       projectsNamed,
+      archiveConnection(connectionId) {
+        const held = connections.find((one) => one.id === connectionId);
+        if (held !== undefined) held.archivedAt = new Date().toISOString();
+      },
+      forgetConnection(connectionId) {
+        const at = connections.findIndex((one) => one.id === connectionId);
+        if (at !== -1) connections.splice(at, 1);
+      },
+      sealedOn(connectionId) {
+        return connections.find((one) => one.id === connectionId)?.credentials ?? null;
+      },
       received(agentId, at = new Date()) {
         const held = agents.find((one) => one.id === agentId);
         if (held === undefined) return;

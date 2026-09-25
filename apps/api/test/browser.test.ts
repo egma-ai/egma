@@ -5664,3 +5664,52 @@ describe("run advanced settings", () => {
     }
   }, SETTLE * 2);
 });
+
+describe("Pipecat's setup, one prompt for a coding agent", () => {
+  it("offers Pipecat beside LiveKit and Retell, hands over one prompt, and saves nothing", async () => {
+    await anotherCustomer("pipecat-prompt@browser.example", "Pipecat prompt");
+    const walk = await signedInBrowser("pipecat-prompt@browser.example");
+    try {
+      const project = projectIn(walk);
+      await walk.goto(`${origin}/projects/${project}/agents?sheet=connect`);
+      await reactHasTakenOver(walk, "form");
+      await walk.getByRole("radio", { name: /^Set up both/u }).click();
+      await walk.getByRole("button", { name: "Continue" }).click();
+      const platforms = walk.getByRole("radiogroup", { name: "Agent platform" });
+      await platforms.waitFor();
+      expect(await platforms.getByRole("radio").allInnerTexts()).toEqual([
+        "LiveKit",
+        "Retell",
+        "Pipecat",
+      ]);
+
+      await walk.getByRole("radio", { name: "Pipecat" }).click();
+      await walk.getByRole("button", { name: "Continue" }).click();
+      const sheet = walk.getByRole("dialog", { name: "Set up an agent" });
+      await sheet
+        .getByRole("heading", { name: "Set up Pipecat with your coding agent" })
+        .waitFor();
+      const prompt = (await sheet.locator("pre").innerText()).trim();
+      expect(prompt.split("\n")[0]).toBe(
+        "Set up Egma simulation testing and production monitoring for the Pipecat bot in this repository.",
+      );
+      expect(prompt).toContain(`Egma: ${origin}`);
+      expect(prompt).toContain(`Project: ${project}`);
+      expect(prompt).toContain("npx --yes skills add egma-ai/egma");
+      // No form and no hand-written steps: the coding agent does the setup.
+      expect(await sheet.getByRole("textbox").count()).toBe(0);
+      expect(await sheet.innerText()).not.toContain("pip install");
+
+      await sheet.getByRole("button", { name: "Done" }).click();
+      await expect
+        .poll(() => walk.getByRole("dialog").count(), { timeout: 30_000 })
+        .toBe(0);
+      const stored = await instance.database.sql<{ agents: string }>(
+        `select count(*)::text as agents from agent where project_id = '${project}'`,
+      );
+      expect(stored.rows).toEqual([{ agents: "0" }]);
+    } finally {
+      await walk.context().close();
+    }
+  }, SETTLE * 2);
+});

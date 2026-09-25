@@ -1506,6 +1506,7 @@ describe("the suite-first Tests route", () => {
         {
           retell_dynamic_variables: { caller_name: "Margaret" },
           job_dispatch_metadata: { tenant: "acme" },
+          pipecat_body_params: { tenant: "acme" },
         },
         null,
         2,

@@ -43,6 +43,25 @@ The quarantine suite holds both halves of that.
 """
 
 
+async def first_of(*events: asyncio.Event, within: float | None) -> bool:
+    """Wait until one event occurs; False when ``within`` seconds pass first.
+
+    ``None`` waits without a deadline.
+    """
+    waiting = [asyncio.ensure_future(event.wait()) for event in events]
+    try:
+        done, _pending = await asyncio.wait(
+            waiting, return_when=asyncio.FIRST_COMPLETED, timeout=within
+        )
+    finally:
+        for unfinished in waiting:
+            if not unfinished.done():
+                unfinished.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await unfinished
+    return bool(done)
+
+
 class MediaBackendError(Exception):
     """A media backend cannot do what was asked, and says what happened.
 
@@ -274,6 +293,9 @@ class VoiceMedia:
     the audio it has written rather than the seconds that have passed,
     and a wall-clock instant read off it would be a made-up one.
     """
+    fault: Callable[[], str | None] = lambda: None
+    """The connection's own reason when it set ``failed`` itself, else None.
+    A conductor reports this reason instead of a lost transport."""
 
 
 class MediaBackend(Protocol):

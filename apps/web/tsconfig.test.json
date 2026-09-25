@@ -11,9 +11,16 @@
   // So `tsconfig.json` excludes `test/`, and the tests keep their full check
   // here instead, over the same options. `pnpm --filter @egma/web typecheck`
   // runs both, and neither file loses anything to the other.
+  //
+  // `@egma/db` resolves here and nowhere in the pages: a test holds the web's
+  // copies of registry lists to the registry, which the browser cannot import.
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "tsBuildInfoFile": "./.next/tsconfig.test.tsbuildinfo"
+    "tsBuildInfoFile": "./.next/tsconfig.test.tsbuildinfo",
+    "paths": {
+      "@/*": ["./*"],
+      "@egma/db": ["../../packages/db/src/index.ts"]
+    }
   },
   "include": ["next-env.d.ts", "test/**/*.ts", "test/**/*.tsx"],
   "exclude": ["node_modules"]

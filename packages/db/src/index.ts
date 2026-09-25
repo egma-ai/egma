@@ -239,6 +239,8 @@ export {
   credentialRuleOf,
   productLabelOf,
   accessVariantById,
+  PLATFORMS_PUSHING_TRACES,
+  platformPushesTraces,
   type ConfigFieldKind,
   type ConfigFieldMetadata,
   type ConnectionOptionMetadata,
@@ -258,7 +260,9 @@ export {
 export {
   LARGEST_JOB_DISPATCH_METADATA_BYTES,
   LARGEST_MOCK_TOOL_ANSWER_BYTES,
+  LARGEST_PIPECAT_BODY_PARAMS_BYTES,
   RESERVED_ENV_VARIABLE_PREFIX,
+  RESERVED_PIPECAT_BODY_KEY,
   serializedJobDispatchMetadata,
 } from "./access/tests.ts";
 export * from "./access/index.ts";

@@ -3,8 +3,21 @@ import type { DiscoverAgentsResponse } from "@egma/platform-api/client";
 /** The job a person asks the Connect agent flow to complete. */
 export type AgentSetupGoal = "simulation" | "monitoring" | "both";
 
-/** The two platforms the goal-first flow offers today. */
-export type AgentSetupPlatform = "retell" | "livekit";
+/** The platforms the goal-first flow offers. */
+export type AgentSetupPlatform = "retell" | "livekit" | "pipecat";
+
+/**
+ * The platforms whose agent carries the Egma SDK and sends its own traces.
+ *
+ * The registry's `PLATFORMS_PUSHING_TRACES` in `@egma/db`, which the browser
+ * cannot import; a web test holds this copy to it.
+ */
+export const SDK_PLATFORMS = ["livekit", "pipecat"] as const;
+export type SdkPlatform = (typeof SDK_PLATFORMS)[number];
+
+export function isSdkPlatform(platform: string): platform is SdkPlatform {
+  return (SDK_PLATFORMS as readonly string[]).includes(platform);
+}
 
 /** The language of the customer-owned LiveKit worker. */
 export type LiveKitWorkerLanguage = "python" | "javascript";
@@ -109,6 +122,37 @@ const PLANS: Readonly<
       pullWithConnection: false,
       pullWithoutConnection: false,
       monitoringInstructions: true,
+      asksHowToTest: false,
+    },
+  },
+  // A coding agent sets a Pipecat agent up from one prompt, whatever the
+  // goal, so the sheet writes nothing: no connection and no pull switch.
+  pipecat: {
+    simulation: {
+      goal: "simulation",
+      platform: "pipecat",
+      mayWriteConnection: false,
+      pullWithConnection: false,
+      pullWithoutConnection: false,
+      monitoringInstructions: false,
+      asksHowToTest: false,
+    },
+    monitoring: {
+      goal: "monitoring",
+      platform: "pipecat",
+      mayWriteConnection: false,
+      pullWithConnection: false,
+      pullWithoutConnection: false,
+      monitoringInstructions: false,
+      asksHowToTest: false,
+    },
+    both: {
+      goal: "both",
+      platform: "pipecat",
+      mayWriteConnection: false,
+      pullWithConnection: false,
+      pullWithoutConnection: false,
+      monitoringInstructions: false,
       asksHowToTest: false,
     },
   },
@@ -256,20 +300,23 @@ export type AgentSetupStep =
   | "livekit-modality"
   | "livekit-simulation"
   | "livekit-testing"
-  | "livekit-monitoring";
+  | "livekit-monitoring"
+  | "pipecat-prompt";
 
 /**
  * Provider capability decides the first provider-specific screen.
  *
  * LiveKit Simulation asks only what changes its connection: the modality.
  * Monitoring and Both start with instructions whose language toggle changes
- * the source hook, not the room connection.
+ * the source hook, not the room connection. Pipecat has one screen for every
+ * goal: the prompt a coding agent sets the agent up from.
  */
 export function stepAfterPlatform(
   goal: AgentSetupGoal,
   platform: AgentSetupPlatform,
 ): AgentSetupStep {
   if (platform === "retell") return "retell-key";
+  if (platform === "pipecat") return "pipecat-prompt";
   return goal === "simulation" ? "livekit-modality" : "livekit-monitoring";
 }
 
@@ -353,6 +400,8 @@ export function previousAgentSetupStep({
       // not let Back cross that write and change the modality it describes.
       return null;
     case "livekit-monitoring":
+      return "platform";
+    case "pipecat-prompt":
       return "platform";
   }
 }

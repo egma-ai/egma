@@ -17,8 +17,10 @@ import {
   stepAfterPlatform,
   stepAfterRetellAgent,
   stepAfterRetellLanes,
+  type AgentSetupGoal,
   type RetellDiscoveredAgent,
 } from "../lib/agent-setup-flow.ts";
+import { pipecatSetupPrompt } from "../lib/pipecat-setup-prompt.ts";
 
 const CHAT = {
   platformAgentId: "chat_1",
@@ -344,5 +346,69 @@ describe("the goal-first agent setup plan", () => {
         goal: "both",
       }),
     ).toBe("platform");
+  });
+});
+
+describe("Pipecat in the goal-first setup", () => {
+  const GOALS: readonly AgentSetupGoal[] = ["simulation", "monitoring", "both"];
+
+  it("writes nothing for any goal: a coding agent does the setup", () => {
+    for (const goal of GOALS) {
+      expect(agentSetupPlan(goal, "pipecat")).toEqual({
+        goal,
+        platform: "pipecat",
+        mayWriteConnection: false,
+        pullWithConnection: false,
+        pullWithoutConnection: false,
+        monitoringInstructions: false,
+        asksHowToTest: false,
+      });
+    }
+  });
+
+  it("goes from the platform to the one prompt, and Back returns to the platform", () => {
+    for (const goal of GOALS) {
+      expect(stepAfterPlatform(goal, "pipecat")).toBe("pipecat-prompt");
+      expect(previousAgentSetupStep({ step: "pipecat-prompt", goal })).toBe("platform");
+    }
+  });
+
+  it("writes the goal, Egma's address, the project and the skill into one prompt", () => {
+    expect(
+      pipecatSetupPrompt({
+        goal: "simulation",
+        egmaUrl: "https://app.egma.ai",
+        projectId: "prj_1",
+        agent: null,
+      }),
+    ).toBe(
+      [
+        "Set up Egma simulation testing for the Pipecat bot in this repository.",
+        "",
+        "Egma: https://app.egma.ai",
+        "Project: prj_1",
+        "",
+        "1. Install the Egma skills: npx --yes skills add egma-ai/egma",
+        "2. Follow the integrate-egma skill. Sign in with egma login; I will approve it in my browser.",
+        "3. Ask me where the bot should run for the simulations: on this machine, on Pipecat Cloud, or on my own servers.",
+        "4. Run one test suite and send me the run link.",
+        "",
+        "Ask me before you change anything in production. Never print or commit a key.",
+      ].join("\n"),
+    );
+  });
+
+  it("names the agent the sheet opened from, and asks monitoring where production runs", () => {
+    const prompt = pipecatSetupPrompt({
+      goal: "monitoring",
+      egmaUrl: "https://egma.example.com",
+      projectId: "prj_1",
+      agent: { id: "agt_pipecat", name: "lakeside-front-desk" },
+    });
+    expect(prompt).toContain("Agent: lakeside-front-desk (agt_pipecat)");
+    expect(prompt).toContain(
+      "3. Ask me where the bot runs in production: on Pipecat Cloud, on my own servers, or not deployed yet.",
+    );
+    expect(prompt).toContain("4. Tell me how to check that my production calls arrive in Egma.");
   });
 });

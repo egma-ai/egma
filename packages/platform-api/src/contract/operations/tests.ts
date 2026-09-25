@@ -93,9 +93,10 @@ export const testMockToolSchema = {
 } as const;
 
 /**
- * Test-owned env for Retell dynamic variables and LiveKit job dispatch
- * metadata. Preserve the snake_case keys. Variable names starting with
- * egma_ are reserved and cannot be authored by tests.
+ * Test-owned env for Retell dynamic variables, LiveKit job dispatch metadata,
+ * and Pipecat start request body params. Preserve the snake_case keys.
+ * Variable names starting with egma_ are reserved and cannot be authored by
+ * tests, and the body params cannot hold the key egma.
  */
 export const testEnvSchema = {
   type: "object",
@@ -109,6 +110,12 @@ export const testEnvSchema = {
     job_dispatch_metadata: {
       type: "object",
       description: "Context delivered to the LiveKit worker in ctx.job.metadata.",
+      additionalProperties: true,
+    },
+    pipecat_body_params: {
+      type: "object",
+      description:
+        "JSON merged into the body of each Pipecat start request; your bot reads it at runner_args.body. The key egma is reserved. At most 512 KiB once serialized.",
       additionalProperties: true,
     },
   },

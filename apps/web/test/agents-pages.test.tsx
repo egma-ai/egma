@@ -1216,7 +1216,7 @@ describe("goal-first agent setup", () => {
 
   async function choose(
     goal: "Run simulations" | "Monitor production" | "Set up both",
-    platform: "Retell" | "LiveKit",
+    platform: "Retell" | "LiveKit" | "Pipecat",
   ): Promise<void> {
     fireEvent.click(
       await screen.findByRole("radio", { name: new RegExp(`^${goal}`) }),
@@ -1311,7 +1311,7 @@ describe("goal-first agent setup", () => {
     });
   }
 
-  it("asks for the goal first, then offers LiveKit before Retell", async () => {
+  it("asks for the goal first, then offers LiveKit, Retell and Pipecat", async () => {
     sheetAnswers();
     render(<RegisterAgentPage />);
 
@@ -1351,6 +1351,7 @@ describe("goal-first agent setup", () => {
     expect(screen.getAllByRole("radio").map((one) => one.textContent)).toEqual([
       "LiveKit",
       "Retell",
+      "Pipecat",
     ]);
     for (const provider of screen.getAllByRole("radio")) {
       expect(provider.className).toContain("min-h-(--control-lg)");
@@ -3442,6 +3443,102 @@ describe("goal-first agent setup", () => {
     ).toBeDefined();
     expect(screen.getByLabelText("LiveKit agent name*")).toBeDefined();
   });
+
+  const pipecatAgent = {
+    ...AGENT,
+    id: "agt_pipecat",
+    name: "lakeside-front-desk",
+    agentPlatform: "pipecat",
+  };
+
+  /** The prompt the copy block holds, exactly as it would be copied. */
+  function copiedPrompt(): string {
+    return screen.getByRole("button", { name: "Copy coding-agent prompt" })
+      .closest("div")
+      ?.querySelector("pre")?.textContent ?? "";
+  }
+
+  it.each([
+    [
+      "Run simulations",
+      "Set up Egma simulation testing for the Pipecat bot in this repository.",
+      "Run one test suite and send me the run link.",
+    ],
+    [
+      "Monitor production",
+      "Set up Egma production monitoring for the Pipecat bot in this repository.",
+      "Tell me how to check that my production calls arrive in Egma.",
+    ],
+    [
+      "Set up both",
+      "Set up Egma simulation testing and production monitoring for the Pipecat bot in this repository.",
+      "Run one test suite and send me the run link. Then tell me how to check that my production calls arrive in Egma.",
+    ],
+  ] as const)("gives Pipecat one coding-agent prompt for %s, and saves nothing", async (goal, opening, last) => {
+    sheetAnswers();
+    render(<RegisterAgentPage />);
+    await choose(goal, "Pipecat");
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Set up Pipecat with your coding agent",
+      }),
+    ).toBeDefined();
+    const prompt = copiedPrompt();
+    expect(prompt.split("\n")[0]).toBe(opening);
+    expect(prompt).toContain(`Egma: ${window.location.origin}`);
+    expect(prompt).toContain("Project: prj_1");
+    expect(prompt).not.toContain("Agent: ");
+    expect(prompt).toContain("1. Install the Egma skills: npx --yes skills add egma-ai/egma");
+    expect(prompt).toContain(last);
+    expect(prompt).toContain(
+      "Ask me before you change anything in production. Never print or commit a key.",
+    );
+    expect(
+      screen.getByText("The agent appears in this list when your coding agent registers it."),
+    ).toBeDefined();
+    // No form, no instructions to follow by hand: the coding agent does it all.
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByText(/pip install/)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(
+      await screen.findByRole("heading", { name: "Choose your agent platform" }),
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Done" }));
+    expect(sent).toEqual([]);
+  });
+
+  it("names an existing Pipecat agent in its prompt, and offers only Pipecat", async () => {
+    routed.search = "?sheet=connect&agent=agt_pipecat&goal=monitoring&platform=pipecat";
+    sheetAnswers({
+      "/v1/agents": {
+        status: 200,
+        body: { agents: [{ ...pipecatAgent, connections: [] }], nextPageToken: null },
+      },
+    });
+    render(<AgentsPage />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Set up Pipecat with your coding agent",
+      }),
+    ).toBeDefined();
+    const prompt = copiedPrompt();
+    expect(prompt).toContain(
+      "Set up Egma production monitoring for the Pipecat bot in this repository.",
+    );
+    expect(prompt).toContain("Agent: lakeside-front-desk (agt_pipecat)");
+    expect(screen.getByText("Your coding agent adds its connections to this agent.")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(
+      await screen.findByRole("heading", { name: "Choose your agent platform" }),
+    ).toBeDefined();
+    expect(screen.getAllByRole("radio").map((one) => one.textContent)).toEqual(["Pipecat"]);
+    expect(sent).toEqual([]);
+  });
 });
 
 /* ------------------------------------------------------------------------ */
@@ -3573,6 +3670,26 @@ describe("one connection's page", () => {
       view.unmount();
       cleanup();
     }
+  });
+
+  it("shows a self-hosted Pipecat connection's header names whole", async () => {
+    answersWith({
+      ...CONNECTION,
+      name: "dev-lakeside-macbook-voice",
+      agentPlatform: "pipecat",
+      connectionType: "daily_room",
+      accessVariant: "daily_room.self_hosted",
+      productLabel: "Pipecat self-hosted",
+      modality: "voice",
+      topology: "hosted-broker",
+      config: { startUrl: "https://quiet-river.trycloudflare.com/start" },
+      credentialsHint: "X-Egma-Dev-Secret",
+    });
+    render(<ConnectionDetailPage />);
+
+    expect(
+      (await screen.findByText("Credentials")).parentElement?.textContent,
+    ).toBe("CredentialsX-Egma-Dev-Secret");
   });
 
   it("uses catalog field labels and keeps forward-compatible fields visible", async () => {
