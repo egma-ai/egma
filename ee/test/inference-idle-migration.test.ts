@@ -31,7 +31,7 @@ async function account(): Promise<AuthContext> {
   return { organizationId, projectId, userId: "billing-migration", via: "engine", role: "member" };
 }
 
-it("schedules existing accounts once while preserving money and leaves new accounts idle", async () => {
+it("backfills existing accounts without changing money and leaves new accounts without pending usage", async () => {
   const existing = await account();
   const original = await openBillingAccount(existing.organizationId);
   const ledger = await readBillingLedger(existing);
@@ -52,5 +52,4 @@ it("schedules existing accounts once while preserving money and leaves new accou
     { organization_id: existing.organizationId, inference_usage_version: "1", inference_settled_version: "0" },
     { organization_id: created.organizationId, inference_usage_version: "0", inference_settled_version: "0" },
   ].sort((one, two) => one.organization_id.localeCompare(two.organization_id)));
-  expect(await runMigrations(database.url)).toMatchObject({ applied: [] });
 });

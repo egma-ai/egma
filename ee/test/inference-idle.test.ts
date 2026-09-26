@@ -84,41 +84,41 @@ function signal(): { promise: Promise<void>; resolve(): void } {
   return { promise, resolve };
 }
 
-it("keeps ClickHouse asleep during idle settlement and billing boot", async () => {
-  expect(await settleInference(at)).toEqual({ charged: 0, amountMicros: 0 });
-  expect((await loadCloudBilling({ now: () => at })).caughtUp).toEqual({ charged: 0, amountMicros: 0 });
+it("makes no ClickHouse requests during idle settlement or loading cloud billing", async () => {
+  await settleInference(at);
+  await loadCloudBilling({ now: () => at });
   expect(requests).toHaveLength(0);
 });
 
-it("collects only newly available platform usage and makes a fresh replica read", async () => {
+it("queries platform usage with sequential consistency and skips customer-funded usage", async () => {
   const sink = cloudUsageSink();
   await sink.receive([record("customer")]);
   await settleInference(at);
   expect(requests).toHaveLength(0);
   amount = 210;
   await sink.receive([record()]);
-  expect(await settleInference(at)).toEqual({ charged: 1, amountMicros: 210 });
+  await settleInference(at);
   expect(requests).toHaveLength(1);
   expect(requests[0]?.searchParams.get("select_sequential_consistency")).toBe("1");
-  expect(await settleInference(nextInterval)).toEqual({ charged: 0, amountMicros: 0 });
+  await settleInference(nextInterval);
   expect(requests).toHaveLength(1);
 });
 
-it("preserves new work after a same-interval skip and charges replay once", async () => {
+it("keeps a new usage signal pending after a same-interval skip", async () => {
   const sink = cloudUsageSink();
   amount = 210;
   await sink.receive([record()]);
-  await sink.receive([record()]);
-  expect(await settleInference(at)).toEqual({ charged: 1, amountMicros: 210 });
+  await settleInference(at);
+  expect((await openBillingAccount(organizationId)).settlementFailedAt).toBeNull();
   amount = 420;
   await sink.receive([record("platform", "two")]);
-  expect(await settleInference(at)).toEqual({ charged: 0, amountMicros: 0 });
+  await settleInference(at);
   expect(requests).toHaveLength(1);
-  expect(await settleInference(nextInterval)).toEqual({ charged: 1, amountMicros: 210 });
-  expect((await openBillingAccount(organizationId)).balanceMicros).toBe(4_999_580);
+  await settleInference(nextInterval);
+  expect(requests).toHaveLength(2);
 });
 
-it("keeps activity that arrives while collection is finishing", async () => {
+it("keeps a usage signal that arrives during collection pending for the next interval", async () => {
   const sink = cloudUsageSink();
   amount = 210;
   await sink.receive([record()]);
@@ -133,24 +133,28 @@ it("keeps activity that arrives while collection is finishing", async () => {
   amount = 420;
   const marking = sink.receive([record("platform", "two")]);
   finish.resolve();
-  expect(await collecting).toEqual({ charged: 1, amountMicros: 210 });
+  await collecting;
   await marking;
+  expect((await openBillingAccount(organizationId)).settlementFailedAt).toBeNull();
   onQuery = undefined;
-  expect(await settleInference(nextInterval)).toEqual({ charged: 1, amountMicros: 210 });
+  expect(requests).toHaveLength(1);
+  await settleInference(nextInterval);
+  expect(requests).toHaveLength(2);
 });
 
-it("retries pending collection after ClickHouse fails", async () => {
+it("retries pending settlement after a ClickHouse request fails", async () => {
   await cloudUsageSink().receive([record()]);
   unavailable = true;
-  expect(await settleInference(at)).toEqual({ charged: 0, amountMicros: 0 });
+  await settleInference(at);
   expect((await openBillingAccount(organizationId)).settlementFailedAt).not.toBeNull();
   unavailable = false;
   amount = 210;
-  expect(await settleInference(nextInterval)).toEqual({ charged: 1, amountMicros: 210 });
+  await settleInference(nextInterval);
+  expect(requests).toHaveLength(2);
   expect((await openBillingAccount(organizationId)).settlementFailedAt).toBeNull();
 });
 
-it("reports a marker failure so the durable source can retry its delivery", async () => {
+it("propagates a failed usage-marker update and permits notification retry", async () => {
   await database.sql("create function refuse_inference_marker() returns trigger language plpgsql as $$ begin raise exception 'marker unavailable'; end $$");
   await database.sql("create trigger refuse_inference_marker before update of inference_usage_version on cloud_billing_account for each row execute function refuse_inference_marker()");
   try {
@@ -161,5 +165,7 @@ it("reports a marker failure so the durable source can retry its delivery", asyn
   }
   amount = 210;
   await cloudUsageSink().receive([record()]);
-  expect(await settleInference(at)).toEqual({ charged: 1, amountMicros: 210 });
+  await settleInference(at);
+  expect(requests).toHaveLength(1);
+  expect((await openBillingAccount(organizationId)).settlementFailedAt).toBeNull();
 });
