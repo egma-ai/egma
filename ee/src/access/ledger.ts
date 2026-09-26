@@ -7,7 +7,7 @@ import {
   schema,
   type AuthContext,
 } from "@egma/db";
-import { and, desc, eq, lt, or, sql, sum } from "drizzle-orm";
+import { and, desc, eq, gt, lt, or, sql, sum } from "drizzle-orm";
 import { inferenceChargeKey } from "../idempotency.ts";
 import { readPlanCatalog } from "../plans.ts";
 import { openBillingAccount } from "./accounts.ts";
@@ -41,6 +41,7 @@ async function prepareInferenceCollection(): Promise<void> {
 async function collectInferenceForOrganization(
   organizationId: string,
   at: Date,
+  onlyPending = false,
 ): Promise<SettledUsage> {
   try {
     await openBillingAccount(organizationId);
@@ -58,6 +59,7 @@ async function collectInferenceForOrganization(
       if (account === undefined)
         throw new Error("The billing account is missing");
       if (
+        (onlyPending && account.inferenceUsageVersion === account.inferenceSettledVersion) ||
         account.activatedAt >= intervalEndedAt ||
         (account.inferenceSettledThrough !== null &&
           account.inferenceSettledThrough >= intervalEndedAt)
@@ -112,6 +114,7 @@ async function collectInferenceForOrganization(
         .set({
           balanceMicros: sql`${cloudBillingAccount.balanceMicros} - ${amountMicros}`,
           inferenceSettledThrough: intervalEndedAt,
+          inferenceSettledVersion: account.inferenceUsageVersion,
           settlementFailedAt: null,
           updatedAt: new Date(),
         })
@@ -124,6 +127,22 @@ async function collectInferenceForOrganization(
   }
 }
 
+/** Stored usage schedules one cumulative collection, even when its delivery repeats. */
+export async function markInferenceUsageAvailable(
+  organizationIds: readonly string[],
+): Promise<void> {
+  for (const organizationId of new Set(organizationIds)) {
+    await openBillingAccount(organizationId);
+    await fencedDatabase()
+      .update(cloudBillingAccount)
+      .set({
+        inferenceUsageVersion: sql`${cloudBillingAccount.inferenceUsageVersion} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(cloudBillingAccount.organizationId, organizationId));
+  }
+}
+
 /** A billing fault makes cached balances unreliable until successful collection. */
 export async function markInferenceSettlementFailed(
   organizationId?: string,
@@ -131,7 +150,13 @@ export async function markInferenceSettlementFailed(
   try {
     await fencedDatabase()
       .update(cloudBillingAccount)
-      .set({ settlementFailedAt: new Date() })
+      .set({
+        settlementFailedAt: new Date(),
+        inferenceUsageVersion: sql`case
+          when ${cloudBillingAccount.inferenceUsageVersion} = ${cloudBillingAccount.inferenceSettledVersion}
+          then ${cloudBillingAccount.inferenceUsageVersion} + 1
+          else ${cloudBillingAccount.inferenceUsageVersion} end`,
+      })
       .where(
         organizationId === undefined
           ? undefined
@@ -142,12 +167,16 @@ export async function markInferenceSettlementFailed(
   }
 }
 
-/** Each organization is independent: one billing fault does not skip the others. */
-export async function settleInference(at = new Date()): Promise<SettledUsage> {
+/** Ordinary passes collect pending work; reconciliation also repairs missing deliveries. */
+export async function settleInference(
+  at = new Date(),
+  options: { readonly reconcile?: boolean } = {},
+): Promise<SettledUsage> {
   await prepareInferenceCollection();
   const accounts = await fencedDatabase()
     .select({ organizationId: cloudBillingAccount.organizationId })
     .from(cloudBillingAccount)
+    .where(options.reconcile ? undefined : gt(cloudBillingAccount.inferenceUsageVersion, cloudBillingAccount.inferenceSettledVersion))
     .catch(async (fault: unknown) => {
       await markInferenceSettlementFailed();
       throw fault;
@@ -159,6 +188,7 @@ export async function settleInference(at = new Date()): Promise<SettledUsage> {
       const settled = await collectInferenceForOrganization(
         account.organizationId,
         at,
+        !options.reconcile,
       );
       charged += settled.charged;
       amountMicros += settled.amountMicros;

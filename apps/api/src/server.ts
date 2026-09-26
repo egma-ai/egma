@@ -3,7 +3,6 @@ import {
   sweepPendingRetellSimulationCollections,
   takeRetellSimulationCollectionLease,
   ping,
-  pingClickHouse,
   type DrainOwnership,
 } from "@egma/db";
 import { platformOpenApi } from "@egma/platform-api/openapi";
@@ -299,8 +298,8 @@ export function buildApi(options: ServerOptions): Api {
   // would bury everything else in `docker compose logs`.
   /**
    * Acceptance health depends on Postgres, local-log capacity, and ingestion
-   * bucket reachability. Report ClickHouse and drainer health separately so a
-   * query outage does not disable evidence acceptance.
+   * bucket reachability. Drainer health comes from its actual work; routine
+   * probes do not query ClickHouse or wake an idle trace store.
    */
   const reachability = async (
     store: string,
@@ -355,9 +354,8 @@ export function buildApi(options: ServerOptions): Api {
   };
 
   app.get("/health", { logLevel: "warn" }, async (_request, reply) => {
-    const [postgres, clickhouse, ingestion] = await Promise.all([
+    const [postgres, ingestion] = await Promise.all([
       reachability("Postgres", ping),
-      reachability("ClickHouse", pingClickHouse),
       ingestionStore === undefined
         ? Promise.resolve("unreachable" as const)
         : reachability("the ingestion object store", () =>
@@ -381,7 +379,6 @@ export function buildApi(options: ServerOptions): Api {
         : { releaseSha: config.releaseSha }),
       role,
       postgres,
-      clickhouse,
       ingestion,
       // The component word, and not the raw byte and record gauges beside it: a
       // per-second curve of evidence in flight is a live-volume signal an

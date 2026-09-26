@@ -489,7 +489,11 @@ async function drainOne(held: Running, key: string): Promise<boolean> {
     // blocks under the same deduplication token, and the token would then
     // suppress the very rows the replay existed to write. Identity is what makes
     // the repeat free; the token only makes it cheap.
-    await appendSpans(auth, insertable, { segmentId: usagePending ? `${segment.segmentId}:conversation` : segment.segmentId });
+    const appended = await appendSpans(auth, insertable, { segmentId: usagePending ? `${segment.segmentId}:conversation` : segment.segmentId });
+    if (appended.usageNotificationPending) {
+      usagePending = true;
+      waitAndTryAgain(new Error("stored usage notification is pending"), "usage notification did not finish; its accepted evidence remains pending");
+    }
   } catch (cause) {
     if (cause instanceof TraceStoreRefusedError) {
       // Rows the store has looked at and will refuse forever. Retained rather

@@ -19,6 +19,7 @@ export function startInferenceSettlementJob(log: SettlementLog): {
   let timer: NodeJS.Timeout | undefined;
   let plansInitialized = false;
   let intervalMs = 300_000;
+  let reconciledHour: number | undefined;
   const tick = async (): Promise<void> => {
     try {
       // The shipped file configures this process once. Retry failed startup
@@ -30,7 +31,11 @@ export function startInferenceSettlementJob(log: SettlementLog): {
         plansInitialized = true;
       }
       await activateBilling();
-      const settled = await settleInference();
+      const at = new Date();
+      const hour = Math.floor(at.getTime() / 3_600_000);
+      const reconcile = reconciledHour !== hour;
+      const settled = await settleInference(at, { reconcile });
+      if (reconcile) reconciledHour = hour;
       if (settled.charged > 0)
         log.info({ ...settled }, "Inference usage settled");
     } catch (fault) {

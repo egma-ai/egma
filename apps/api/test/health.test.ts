@@ -638,8 +638,8 @@ describe("the API once it has booted", () => {
 
   /**
    * `/health` is write readiness: whether this process can still accept
-   * evidence and keep the promise it makes when it does. Its body still names
-   * every store, so an operator reading it sees which one is in trouble.
+   * evidence and keep the promise it makes when it does. The drain component
+   * reports progress without a query that would wake an idle trace store.
    */
   it("reports ready, having reached everything acceptance depends on", async () => {
     if (!storage.available) return;
@@ -650,22 +650,16 @@ describe("the API once it has booted", () => {
       releaseSha: "a".repeat(40),
       role: "all",
       postgres: "reachable",
-      clickhouse: "reachable",
       ingestion: "reachable",
       localLog: "writable",
     });
   });
 
   /**
-   * The failure this whole release exists to remove. A slow or absent trace
-   * store used to answer `503` here, which took the container out of its own
-   * health check and the hosted address down with it — while the write path
-   * was perfectly able to accept evidence and drain it later.
-   *
    * Last in the file, because it takes the trace store away and does not put
    * it back.
    */
-  it("stays ready while the trace store is unreachable, and says so", async () => {
+  it("stays ready without probing the trace store", async () => {
     if (!storage.available) return;
     await disconnectClickHouse();
 
@@ -674,7 +668,6 @@ describe("the API once it has booted", () => {
     expect(response.json()).toMatchObject({
       status: "ok",
       postgres: "reachable",
-      clickhouse: "unreachable",
       ingestion: "reachable",
       localLog: "writable",
     });
@@ -973,7 +966,6 @@ describe("the drain component under a trace store outage", () => {
       expect(response.statusCode).toBe(200);
       expect(response.json()).toMatchObject({
         status: "ok",
-        clickhouse: "unreachable",
         drain: "degraded",
       });
     } finally {

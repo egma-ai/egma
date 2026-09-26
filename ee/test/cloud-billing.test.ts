@@ -659,7 +659,7 @@ describe("the port contracts, against the cloud adapters", () => {
   for (const check of entitlementSourceContract(() => cloudEntitlementSource({ now: () => NOW }), { organizationId: acme.organizationId })) {
     it(`entitlement source: ${check.name}`, () => check.run());
   }
-  for (const check of usageSinkContract(() => cloudUsageSink())) {
+  for (const check of usageSinkContract(() => cloudUsageSink(), { organizationId: acme.organizationId, projectId: acme.projectId })) {
     it(`usage sink: ${check.name}`, () => check.run());
   }
 });

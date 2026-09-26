@@ -55,3 +55,43 @@ it("marks failed initialization as unavailable and retries before collecting usa
   expect(access.seedCloudPlans).toHaveBeenCalledTimes(2);
   expect(access.settleInference).toHaveBeenCalledTimes(2);
 });
+
+it("reconciles on startup and each UTC hour, with pending-only checks between them", async () => {
+  vi.setSystemTime(new Date("2026-09-07T12:17:00Z"));
+  job = startInferenceSettlementJob(log);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(access.settleInference).toHaveBeenLastCalledWith(
+    new Date("2026-09-07T12:17:00Z"), { reconcile: true },
+  );
+  await vi.advanceTimersByTimeAsync(180_000);
+  expect(access.settleInference).toHaveBeenLastCalledWith(
+    new Date("2026-09-07T12:20:00Z"), { reconcile: false },
+  );
+  await vi.advanceTimersByTimeAsync(2_100_000);
+  expect(access.settleInference).toHaveBeenLastCalledWith(
+    new Date("2026-09-07T12:55:00Z"), { reconcile: false },
+  );
+  await vi.advanceTimersByTimeAsync(300_000);
+  expect(access.settleInference).toHaveBeenLastCalledWith(
+    new Date("2026-09-07T13:00:00Z"), { reconcile: true },
+  );
+  await vi.advanceTimersByTimeAsync(300_000);
+  expect(access.settleInference).toHaveBeenLastCalledWith(
+    new Date("2026-09-07T13:05:00Z"), { reconcile: false },
+  );
+});
+
+it("retries failed full reconciliation before returning to pending-only checks", async () => {
+  access.settleInference.mockRejectedValueOnce(new Error("collection unavailable"));
+  job = startInferenceSettlementJob(log);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(access.markInferenceSettlementFailed).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(300_000);
+  expect(access.settleInference).toHaveBeenLastCalledWith(
+    new Date("2026-09-07T12:05:00Z"), { reconcile: true },
+  );
+  await vi.advanceTimersByTimeAsync(300_000);
+  expect(access.settleInference).toHaveBeenLastCalledWith(
+    new Date("2026-09-07T12:10:00Z"), { reconcile: false },
+  );
+});

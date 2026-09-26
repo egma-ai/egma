@@ -135,11 +135,9 @@ export type StoredUsageRecord = {
 /**
  * Where priced usage records go after they are stored.
  *
- * **It must not throw, and the caller guards anyway.** A record is a durable
- * row before the sink sees it, so a sink that failed has lost a delivery and
- * not a fact — everything it would have done can be rebuilt from the rows. A
- * sink that could fail a write, on the other hand, would turn a billing outage
- * into a simulator that cannot record what it spent.
+ * A record is durable before the sink sees it. A failed notification does not
+ * fail that append; its result tells the drainer to retain the source and
+ * retry. Replays must tolerate the same stored identity again.
  */
 export type UsageSink = {
   receive(records: readonly StoredUsageRecord[]): Promise<void>;

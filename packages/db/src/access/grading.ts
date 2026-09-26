@@ -29,6 +29,7 @@ import { graderDefinition, projectGrader } from "../schema/graders.ts";
 import { laneProducesAnAgentPov, type Modality } from "../schema/agents.ts";
 import {
   gradingJob,
+  simulationGradingHandoff,
   type FrozenGradingEntry,
   type GradingJobStatus,
   type GradingSource,
@@ -401,6 +402,18 @@ async function settleOrdinaryRequest(
   return { kind: "queued", jobId: queued.job.id, created: queued.created };
 }
 
+async function recordSimulationGradingHandoff(
+  on: Queryable,
+  auth: AuthContext,
+  simulationId: string,
+): Promise<void> {
+  await on.insert(simulationGradingHandoff).values({
+    simulationId,
+    organizationId: auth.organizationId,
+    projectId: projectOf(auth),
+  }).onConflictDoNothing();
+}
+
 /**
  * Receive the two facts that make one trace gradeable.
  *
@@ -451,7 +464,7 @@ export async function requestGradingIn(
     if (resolved === undefined) {
       throw new Error(`completed simulation ${simulationId} has no grading plan`);
     }
-    return settleOrdinaryRequest(on, auth, {
+    const result = await settleOrdinaryRequest(on, auth, {
       source: "simulation",
       simulationId,
       traceId: input.traceId,
@@ -459,6 +472,8 @@ export async function requestGradingIn(
       runId: row.runId,
       entries: resolved.map(frozen),
     });
+    await recordSimulationGradingHandoff(on, auth, simulationId);
+    return result;
   }
 
   if (input.runId !== undefined) {
@@ -737,7 +752,10 @@ export async function recordSimulationEvidenceErrorIn(
       `completed simulation ${input.simulationId} has no grading plan`,
     );
   }
-  if (resolved.length === 0) return false;
+  if (resolved.length === 0) {
+    await recordSimulationGradingHandoff(on, auth, input.simulationId);
+    return false;
+  }
 
   const grades = await readTraceGrades(auth, {
     source: "simulation",
@@ -745,6 +763,7 @@ export async function recordSimulationEvidenceErrorIn(
     runId: input.runId,
   });
   if (allEntriesHaveResults(resolved.map(frozen), grades.current).complete) {
+    await recordSimulationGradingHandoff(on, auth, input.simulationId);
     return false;
   }
 
@@ -768,6 +787,7 @@ export async function recordSimulationEvidenceErrorIn(
     })
     .onConflictDoNothing()
     .returning({ id: gradingJob.id });
+  await recordSimulationGradingHandoff(on, auth, input.simulationId);
   return inserted !== undefined;
 }
 
@@ -989,8 +1009,7 @@ let retellCollectionCursor: string | undefined;
 
 /**
  * Find completed Retell web calls still inside their original evidence deadline
- * whose final agent record is not query-visible. The simulation row is the durable
- * recovery record; no grading-job state is used because completed jobs are deleted.
+ * whose final agent record is not query-visible and whose handoff is still owed.
  */
 export async function sweepPendingRetellSimulationCollections(): Promise<
   readonly PendingRetellSimulationCollection[]
@@ -1010,8 +1029,10 @@ export async function sweepPendingRetellSimulationCollections(): Promise<
     })
     .from(simulation)
     .innerJoin(run, eq(run.id, simulation.runId))
+    .leftJoin(simulationGradingHandoff, eq(simulationGradingHandoff.simulationId, simulation.id))
     .where(and(
       eq(simulation.status, "completed"),
+      isNull(simulationGradingHandoff.simulationId),
       isNotNull(simulation.providerReference),
       gt(simulation.heartbeatAt, notBefore),
       sql`${run.connectionSnapshot}->>'connectionType' = 'retell_web_call'`,
@@ -1057,11 +1078,11 @@ export async function sweepPendingRetellSimulationCollections(): Promise<
 }
 
 /**
- * Check completed simulations without queued grading jobs across all organizations.
+ * Check completed simulations whose grading handoff is still owed.
  * Use Egma's completion heartbeat for the lookback window and the wait bound.
  * Request grading when evidence is ready.
- * Finished jobs may have been deleted; requestGradingIn returns terminal without
- * creating work when all graders already have results.
+ * The receipt survives deletion of a finished job, so idle sweeps do not read
+ * evidence or grades for simulations already handed off.
  */
 export async function settleSimulationsPastTheAgentPovBound(options?: {
   /**
@@ -1099,12 +1120,14 @@ export async function settleSimulationsPastTheAgentPovBound(options?: {
     })
     .from(simulation)
     .innerJoin(run, eq(run.id, simulation.runId))
-    // Grading was never asked for. The queue row is the whole of that record.
+    // Outstanding work and its durable receipt both exclude completed handoffs.
     .leftJoin(gradingJob, eq(gradingJob.simulationId, simulation.id))
+    .leftJoin(simulationGradingHandoff, eq(simulationGradingHandoff.simulationId, simulation.id))
     .where(
       and(
         eq(simulation.status, "completed"),
         isNull(gradingJob.id),
+        isNull(simulationGradingHandoff.simulationId),
         gt(simulation.heartbeatAt, notBefore),
       ),
     )
