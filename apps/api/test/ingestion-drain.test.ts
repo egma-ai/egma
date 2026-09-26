@@ -6,9 +6,14 @@ import {
   DRAIN_ADVISORY_LOCK,
   getSimulation,
   getGradingJobForTrace,
+  installBillingPlugIn,
+  openBillingPlugIn,
   openDrainOwnership,
+  providerUsageSpan,
+  readPlatformUsageTotal,
   readProductionGradingPlan,
   type AuthContext,
+  type StoredUsageRecord,
 } from "@egma/db";
 import { newId } from "@egma/ids";
 import { traceIdOfSimulation } from "@egma/simulation-contract";
@@ -20,6 +25,7 @@ import { openSingleConnection } from "../../../packages/db/test/support/database
 
 import {
   forgetRetainedDefects,
+  isTransientDrainFailure,
   retainedDefects,
 } from "../src/ingestion/defects.ts";
 import { startDrainer, type Drainer } from "../src/ingestion/drainer.ts";
@@ -30,6 +36,7 @@ import {
 } from "@egma/ingestion";
 import {
   contentHashOf,
+  recordFor,
   spanFor,
   type IngestionRecord,
 } from "@egma/ingestion";
@@ -59,6 +66,30 @@ import {
  * wrappers inject individual failures; database constraints refuse selected writes.
  * Local-log restart before upload is covered in ingestion-accept.test.ts.
  */
+
+describe("retrying trace-store timeouts", () => {
+  it("retries the ClickHouse client timeout without an error code", () => {
+    expect(isTransientDrainFailure(new Error("Timeout error."))).toBe(true);
+  });
+
+  it("retries when the ClickHouse client timeout is a wrapped cause", () => {
+    const cause = new Error("segment identities could not be checked", {
+      cause: new Error("the trace-store request failed", {
+        cause: new Error("Timeout error."),
+      }),
+    });
+    expect(isTransientDrainFailure(cause)).toBe(true);
+  });
+
+  it.each([
+    "Timeout error",
+    "timeout error.",
+    "Timeout error. Invalid schema",
+    "a schema defect caused a timeout",
+  ])("does not retry an unrelated error message: %s", (message) => {
+    expect(isTransientDrainFailure(new Error(message))).toBe(false);
+  });
+});
 
 const storage: ObjectStorage = await startObjectStorage("ingestion-drain");
 
@@ -362,6 +393,69 @@ describe.skipIf(!storage.available)("draining an accepted segment", () => {
     });
     expect(await physicalReceiptCount(traceId)).toBe(1);
     expect(await gradingJobCount(traceId)).toBe(0);
+  });
+
+  it("keeps accepted usage pending after a failed billing notification and completes its replay", async () => {
+    const traceId = "cc00000000000000000000000000cc01";
+    const spanId = "cc0000000000cc01";
+    const occurredAt = new Date("2026-09-08T12:00:00.000Z");
+    const usage = providerUsageSpan({
+      identity: { work: "simulation", simulationId: newId("sim"), spanId },
+      traceId,
+      occurredAt,
+      provider: "openai",
+      model: "gpt-4o-mini",
+      operation: "openai_chat_completions",
+      quantities: { input_tokens: 1_000, output_tokens: 100 },
+      measurement: "provider_reported",
+      paymentSource: "platform",
+      rawUsage: { prompt_tokens: 1_000, completion_tokens: 100 },
+    });
+    const key = await accepted([...aConversation(traceId), recordFor(usage)]);
+    const received: StoredUsageRecord[] = [];
+    let billingUnavailable = true;
+    const restore = installBillingPlugIn({
+      ...openBillingPlugIn(),
+      usage: {
+        async receive(records) {
+          if (billingUnavailable) throw new Error("billing is unavailable");
+          received.push(...records);
+        },
+      },
+    });
+
+    try {
+      expect(await drainer.drainNow()).toBe(0);
+      expect((await pending()).map((object) => object.key)).toContain(key);
+      expect(await countOf(
+        `select count() as n from spans final where trace_id = '${traceId}'`,
+      )).toBe(3);
+      await expect(readProductionGradingPlan(auth, traceId)).resolves.toMatchObject({
+        traceId,
+        entries: [],
+      });
+
+      billingUnavailable = false;
+      expect(await drainer.drainNow()).toBe(1);
+      expect((await pending()).map((object) => object.key)).not.toContain(key);
+      expect(received).toEqual([{
+        id: JSON.stringify([scope.organizationId, scope.projectId, traceId, spanId]),
+        organizationId: scope.organizationId,
+        projectId: scope.projectId,
+        occurredAt,
+        provider: "openai",
+        model: "gpt-4o-mini",
+        paymentSource: "platform",
+        amountMicros: 210,
+      }]);
+      await expect(readPlatformUsageTotal({
+        organizationId: scope.organizationId,
+        occurredAtOrAfter: occurredAt,
+      })).resolves.toEqual({ amountMicros: 210n, requests: 1n });
+    } finally {
+      restore();
+      await bucket.delete(key);
+    }
   });
 
   it("keeps the object when the handoff fails, and replays only the missing effect", async () => {

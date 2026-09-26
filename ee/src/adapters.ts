@@ -9,7 +9,6 @@ import {
   type StartDecision,
   type StartRequest,
   faultTolerantEntitlements,
-  discardingUsageSink,
   type UsageSink,
 } from "@egma/db";
 
@@ -20,6 +19,7 @@ import {
   openBillingAccount,
   readEntitlementFacts,
   markInferenceSettlementFailed,
+  markInferenceUsageAvailable,
   type BillingAccount,
   type CloudPlan,
   type EntitlementFacts,
@@ -221,9 +221,15 @@ export function cloudEntitlementSource(
   });
 }
 
-/** Charging runs on observed intervals; notifications need no cloud action. */
+/** The durable account marker schedules collection after platform usage lands. */
 export function cloudUsageSink(): UsageSink {
-  return discardingUsageSink();
+  return {
+    receive: (records) => markInferenceUsageAvailable(
+      records
+        .filter((record) => record.paymentSource === "platform")
+        .map((record) => record.organizationId),
+    ),
+  };
 }
 
 /** Both cloud adapters, as one deployment holds them. */

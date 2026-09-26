@@ -56,6 +56,7 @@ const TABLE_PREFIX: Readonly<Record<string, IdPrefix>> = {
   run_event: "run",
   simulation: "sim",
   grading_job: "gjb",
+  simulation_grading_handoff: "sim",
   // One pulled agent's machine notebook: cursor, windows, lease, retry clock.
   monitoring_state: "mst",
   // A provider call egma could not fetch or normalize: its bounded retry

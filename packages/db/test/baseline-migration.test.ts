@@ -43,6 +43,8 @@ const CURRENT_MIGRATIONS = [
   PERSONA_SETTINGS_SIMPLIFICATION,
   SIMULATION_RECORDING_WAVEFORM,
   PIPECAT_DAILY_ROOM,
+  "0010_clickhouse_idle_billing.sql",
+  "0011_simulation_grading_handoff.sql",
 ];
 /** Everything the settings simplification was written to run after. */
 const BEFORE_SETTINGS_SIMPLIFICATION = CURRENT_MIGRATIONS.slice(

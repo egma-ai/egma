@@ -13,6 +13,7 @@ export async function readPlatformUsageTotal(input: {
       floor: input.occurredAtOrAfter.getTime(),
     },
     format: "JSONEachRow",
+    clickhouse_settings: { select_sequential_consistency: "1" },
   });
   const [row] = await result.json<{
     amount: string;

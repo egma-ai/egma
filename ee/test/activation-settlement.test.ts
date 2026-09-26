@@ -23,6 +23,7 @@ import {
 import {
   readBillingLedger,
   readLedgerBalance,
+  settleInference,
   settleInferenceForOrganization,
 } from "../src/access/ledger.ts";
 import { seedCloudPlans } from "../src/access/plans.ts";
@@ -128,6 +129,28 @@ it("activates existing organizations once, keeps their reset day and preserves t
   });
   expect(await readLedgerBalance(one)).toBe(12_000_000);
   expect((await readBillingLedger(two)).entries).toHaveLength(1);
+});
+
+it("recovers stored usage without an activity signal during full reconciliation", async () => {
+  const one = await customer();
+  await activateBilling(cutoff);
+  // This fixture stores usage without installing the cloud activity sink.
+  await usage(one, "0000000000000010");
+  expect(await settleInference(new Date("2026-09-07T12:05:00Z"))).toEqual({
+    charged: 0,
+    amountMicros: 0,
+  });
+  expect(
+    await settleInference(new Date("2026-09-07T13:00:00Z"), { reconcile: true }),
+  ).toEqual({ charged: 1, amountMicros: 210 });
+  expect(
+    await settleInference(new Date("2026-09-07T14:00:00Z"), { reconcile: true }),
+  ).toEqual({ charged: 0, amountMicros: 0 });
+  expect(
+    (await readBillingLedger(one)).entries.filter(
+      (entry) => entry.kind === "inference_charge",
+    ),
+  ).toHaveLength(1);
 });
 
 it("collects eligible observed usage once across replicas, late visibility and replay", async () => {

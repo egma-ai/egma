@@ -14,6 +14,7 @@ import {
   createTest,
   createTestSuite,
   disconnectClickHouse,
+  finishGradingJob,
   getGradingJobForTrace,
   pinnedSimulationGraders,
   readTraceGrading,
@@ -24,6 +25,7 @@ import {
   settleSimulationsPastTheAgentPovBound,
   startRun,
   startSimulation,
+  sweepPendingRetellSimulationCollections,
   type AuthContext,
   type NewSpan,
   type SimulationClaim,
@@ -228,6 +230,42 @@ afterAll(async () => {
 });
 
 describe.each<Platform>(["livekit", "retell", "pipecat"])("%s final evidence", (platform) => {
+  it("makes no trace-store request after the grading handoff finishes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(Date.now() + 2 * 60 * 60 * 1_000));
+    const conversation = await completedConversation(platform);
+    const final = finalEvidence(conversation);
+    await appendSpans(auth, [final]);
+    await recordSimulationTraces(auth, [final]);
+    const jobs = await claimGradingJobs({ claimant: "idle-grader", capacity: 50 });
+    const job = jobs.find(({ traceId }) => traceId === conversation.traceId);
+    if (job === undefined) throw new Error("the completed conversation has no grading job");
+    await appendGrades(job.auth, job.entries.map((entry) => ({
+      source: "simulation" as const,
+      traceId: conversation.traceId,
+      traceStartedAtMicroseconds: conversation.span.startedAtMicroseconds,
+      runId: conversation.claim.runId,
+      projectGraderId: entry.projectGraderId,
+      graderDefinitionId: entry.graderDefinitionId,
+      graderDefinitionVersion: entry.graderDefinitionVersion,
+      parameterValues: entry.parameterValues,
+      graderPassThreshold: entry.graderPassThreshold,
+      gradingSequence: 1,
+      gradedAtMicroseconds: BigInt(Date.now()) * 1_000n,
+      score: 1,
+      details: { rationale: "The expected behavior passed." },
+    })));
+    await finishGradingJob(job.auth, job.id, job.claimedBy);
+    expect(await getGradingJobForTrace(auth, conversation.traceId)).toBeUndefined();
+    await disconnectClickHouse();
+    try {
+      expect(await settleSimulationsPastTheAgentPovBound()).toEqual([]);
+      expect(await sweepPendingRetellSimulationCollections()).toEqual([]);
+    } finally {
+      connectClickHouse({ clickhouseUrl: store.url, maxOpenConnections: 3 });
+    }
+  });
+
   it("keeps grading pending past thirty seconds and queues when the final record arrives", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const conversation = await completedConversation(platform);

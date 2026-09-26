@@ -141,6 +141,9 @@ export const cloudBillingAccount = pgTable(
     /** Usage before this immutable boundary is excluded. */
     activatedAt: moment("activated_at").notNull(),
     inferenceSettledThrough: moment("inference_settled_through"),
+    /** Stored platform usage advances this account's pending settlement work. */
+    inferenceUsageVersion: bigint("inference_usage_version", { mode: "number" }).notNull().default(0),
+    inferenceSettledVersion: bigint("inference_settled_version", { mode: "number" }).notNull().default(0),
     settlementFailedAt: moment("settlement_failed_at"),
     /**
      * The inference balance in millionths of a US dollar, as a materialised
@@ -158,6 +161,12 @@ export const cloudBillingAccount = pgTable(
       ...PLAN_CODES,
     ]),
     check("cloud_billing_account_stripe_failure_version_is_exact", sql`${table.stripeFailureVersion} >= 0 and ${table.stripeFailureVersion} <= 9007199254740991`),
+    check(
+      "cloud_billing_account_inference_versions_are_exact",
+      sql`${table.inferenceSettledVersion} >= 0
+        and ${table.inferenceSettledVersion} <= ${table.inferenceUsageVersion}
+        and ${table.inferenceUsageVersion} <= 9007199254740991`,
+    ),
     check(
       "cloud_billing_account_subscription_status_allowed",
       sql`${table.stripeSubscriptionStatus} is null

@@ -181,6 +181,7 @@ const BILLING_PORTS = [
   "settleInference",
   "settleInferenceForOrganization",
   "markInferenceSettlementFailed",
+  "markInferenceUsageAvailable",
 ];
 
 /** Verified webhook facts and the timer's customer-wide Stripe sweep. */

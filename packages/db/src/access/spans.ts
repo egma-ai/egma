@@ -130,6 +130,8 @@ export type AppendedSpans = {
   readonly appended: number;
   /** How many inserts it took. More than one means the batch was split. */
   readonly batches: number;
+  /** Keep the durable source until the stored usage notification succeeds. */
+  readonly usageNotificationPending?: true;
 };
 
 /**
@@ -568,7 +570,10 @@ export async function appendSpans(
   }] : []);
   if (usage.length > 0) {
     try { await billing().usage.receive(usage); }
-    catch (cause) { console.error("usage sink failed after durable ClickHouse append; its facts remain available", cause); }
+    catch (cause) {
+      console.error("usage sink failed after durable ClickHouse append; retain its source for notification retry", cause);
+      return { appended: spans.length, batches: batches.length, usageNotificationPending: true };
+    }
   }
   return { appended: spans.length, batches: batches.length };
 }

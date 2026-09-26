@@ -119,8 +119,8 @@ export function defectOf(cause: unknown): IngestionDefect | undefined {
 }
 
 /**
- * Classify retryable drain failures by string error codes, known connection
- * messages, or timeout/network error names, including wrapped causes.
+ * Classify retryable drain failures by string error codes, known connection or
+ * ClickHouse timeout messages, and timeout/network names, including wrapped causes.
  * Callers handle known permanent error classes first. This is a heuristic;
  * a code alone does not prove that an error will resolve.
  */
@@ -132,7 +132,8 @@ export function isTransientDrainFailure(cause: unknown): boolean {
   ) {
     if (
       error instanceof Error &&
-      /not connected to (?:ClickHouse|Postgres)/.test(error.message)
+      (error.message === "Timeout error." ||
+        /not connected to (?:ClickHouse|Postgres)/.test(error.message))
     ) {
       return true;
     }

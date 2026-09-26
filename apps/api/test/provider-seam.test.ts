@@ -124,6 +124,7 @@ describe("the provider's footprint on the schema", () => {
     "run_event",
     "session",
     "simulation",
+    "simulation_grading_handoff",
     "test",
     "test_persona",
     "test_suite",

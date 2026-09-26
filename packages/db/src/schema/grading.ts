@@ -47,6 +47,30 @@ export type GradingJobStatus = (typeof GRADING_JOB_STATUSES)[number];
 export const GRADING_SOURCES = ["simulation", "production"] as const;
 export type GradingSource = (typeof GRADING_SOURCES)[number];
 
+/** A durable receipt keeps recovery from reopening a completed handoff. */
+export const simulationGradingHandoff = pgTable(
+  "simulation_grading_handoff",
+  {
+    simulationId: idText("simulation_id").primaryKey(),
+    organizationId: idText("organization_id").notNull(),
+    projectId: idText("project_id").notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    prefixCheck("simulation_grading_handoff_id_prefix", table.simulationId, "sim"),
+    foreignKey({
+      name: "simulation_grading_handoff_project_organization_fk",
+      columns: [table.projectId, table.organizationId],
+      foreignColumns: [project.id, project.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "simulation_grading_handoff_simulation_project_fk",
+      columns: [table.simulationId, table.projectId],
+      foreignColumns: [simulation.id, simulation.projectId],
+    }).onDelete("cascade"),
+  ],
+);
+
 /**
  * Temporary grading work for a completed trace, with all selected grader entries
  * frozen before claim. Workers lease rows with SKIP LOCKED; notifications only
