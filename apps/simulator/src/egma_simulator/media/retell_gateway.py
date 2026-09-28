@@ -8,7 +8,6 @@ Provider status confirms normal remote endings; lost media remains an error.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import fractions
 import json
 import logging
@@ -57,9 +56,10 @@ from . import (
 
 logger = logging.getLogger(__name__)
 CONNECT_SECONDS = 30.0
+SESSION_CREATE_CLEANUP_SECONDS = 11.0
 HTTP_RESPONSE_BYTES = 128 * 1024
-FINAL_AUDIO_SECONDS = 2.0
-FINAL_AUDIO_GRACE_SECONDS = 0.2
+FINAL_RTP_SECONDS = 2.0
+FINAL_PIPELINE_SECONDS = 30.0
 MAX_AUDIO_CATCHUP_SECONDS = 0.1
 DEFAULT_ICE_SERVERS = [{"urls": "stun:stun.l.google.com:19302"}]
 
@@ -215,6 +215,7 @@ class RetellGatewayBackend:
             f"{quote(settings.call_id, safe='')}/v1/webrtc/sessions"
         )
         self._session_id: str | None = None
+        self._session_create: asyncio.Task[dict[str, Any]] | None = None
         self._peer: RTCPeerConnection | None = None
         self._input: _GatewayInput | None = None
         self._reader: asyncio.Task[None] | None = None
@@ -231,10 +232,12 @@ class RetellGatewayBackend:
         self._closing = False
         self._dialed = False
 
-    def _event(self, name: str, text: str, **attributes: object) -> None:
+    def _event(
+        self, name: str, text: str, *, level: int = logging.INFO, **attributes: object
+    ) -> None:
         log_event(
             logger,
-            logging.INFO,
+            level,
             f"egma.retell.gateway.{name}",
             text,
             attributes={
@@ -311,16 +314,19 @@ class RetellGatewayBackend:
 
                 await peer.setLocalDescription(await peer.createOffer())
                 assert peer.localDescription is not None
-                document = await self._request(
-                    "POST",
-                    self._session_url,
-                    document={"identity": "client", "sdp": peer.localDescription.sdp},
+                if self._closing:
+                    raise MediaBackendError(
+                        "Retell gateway was closed during connection"
+                    )
+                self._session_create = asyncio.create_task(
+                    self._create_session(peer.localDescription.sdp),
+                    name="retell-gateway-create-session",
                 )
-                session_id = document.get("session_id")
-                if isinstance(session_id, str) and session_id:
-                    self._session_id = session_id
-                else:
-                    raise MediaBackendError("Retell gateway answered no session_id")
+                document = await asyncio.shield(self._session_create)
+                if self._closing:
+                    raise MediaBackendError(
+                        "Retell gateway was closed during connection"
+                    )
                 sdp = document.get("sdp")
                 if not isinstance(sdp, str) or not sdp:
                     raise MediaBackendError("Retell gateway answered no SDP")
@@ -344,6 +350,18 @@ class RetellGatewayBackend:
             raise MediaBackendError(
                 self._fault or "Retell gateway connection failed"
             ) from fault
+
+    async def _create_session(self, offer: str) -> dict[str, Any]:
+        document = await self._request(
+            "POST",
+            self._session_url,
+            document={"identity": "client", "sdp": offer},
+        )
+        session_id = document.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            raise MediaBackendError("Retell gateway answered no session_id")
+        self._session_id = session_id
+        return document
 
     async def wait_answered(self, seconds: float) -> str:
         await first_of(self._audio, self.ended, self.failed, within=seconds)
@@ -453,15 +471,24 @@ class RetellGatewayBackend:
             if not confirmed:
                 self._fail("Retell gateway media ended without a normal call ending")
                 return
-            # The gateway can keep sending silence after the call ended.
-            # Give final RTP audio time to arrive without waiting for silence to stop.
-            await asyncio.sleep(FINAL_AUDIO_GRACE_SECONDS)
+            # A remote hangup cannot play queued persona audio. Release its
+            # writer so the final inbound frames and end marker can pass.
+            self._outbound.stop()
             if self._reader is not None and not self._reader.done():
-                self._reader.cancel()
-                await asyncio.gather(self._reader, return_exceptions=True)
+                # The gateway can keep sending silence after a call ends. Read
+                # through track EOF when it comes, with a bound for an open track.
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(self._reader), FINAL_RTP_SECONDS
+                    )
+                except TimeoutError:
+                    self._reader.cancel()
+                    await asyncio.gather(self._reader, return_exceptions=True)
+            if self._closing or self.failed.is_set():
+                return
             input_transport = self._input
             assert input_transport is not None
-            async with asyncio.timeout(FINAL_AUDIO_SECONDS):
+            async with asyncio.timeout(FINAL_PIPELINE_SECONDS):
                 await input_transport.drain()
                 completed = asyncio.Event()
                 await input_transport.push_frame(RemoteParticipantLeftFrame(completed))
@@ -494,14 +521,54 @@ class RetellGatewayBackend:
         self._outbound.stop()
         peer, self._peer = self._peer, None
         if peer is not None:
-            with contextlib.suppress(Exception):
+            try:
                 async with asyncio.timeout(3.0):
                     await peer.close()
+            except Exception as fault:
+                self._event(
+                    "peer_close_failed",
+                    "Retell gateway local peer close failed",
+                    level=logging.WARNING,
+                    error_type=type(fault).__name__,
+                )
+        if self._session_create is not None:
+            try:
+                await asyncio.wait_for(
+                    self._session_create, SESSION_CREATE_CLEANUP_SECONDS
+                )
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if current is not None and current.cancelling():
+                    raise
+                self._event(
+                    "session_create_unconfirmed",
+                    "Retell gateway session creation could not be confirmed",
+                    level=logging.WARNING,
+                    error_type="CancelledError",
+                )
+            except Exception as fault:
+                self._event(
+                    "session_create_unconfirmed",
+                    "Retell gateway session creation could not be confirmed",
+                    level=logging.WARNING,
+                    error_type=type(fault).__name__,
+                )
         session_id, self._session_id = self._session_id, None
-        if session_id is not None:
-            with contextlib.suppress(Exception):
-                async with asyncio.timeout(3.0):
-                    await self._request(
-                        "DELETE", f"{self._session_url}/{quote(session_id, safe='')}"
-                    )
+        if session_id is None:
+            self._event("local_closed", "Retell gateway local media closed")
+            return
+        try:
+            async with asyncio.timeout(3.0):
+                await self._request(
+                    "DELETE", f"{self._session_url}/{quote(session_id, safe='')}"
+                )
+        except Exception as fault:
+            self._event(
+                "session_delete_failed",
+                "Retell gateway session deletion failed",
+                level=logging.WARNING,
+                error_type=type(fault).__name__,
+            )
+            self._event("local_closed", "Retell gateway local media closed")
+            return
         self._event("closed", "Retell gateway session closed")

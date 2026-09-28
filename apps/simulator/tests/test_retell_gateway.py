@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fractions
+import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -43,6 +45,7 @@ from egma_simulator.media.retell_gateway import (
     RetellGatewaySettings,
     _GatewayAudioTrack,
 )
+from egma_simulator.platform_logging import EVENT_NAME
 
 TOKEN = "gateway-token-sentinel"
 CALL_ID = "call-local-peer"
@@ -76,6 +79,24 @@ class NoAudio(AudioStreamTrack):
         raise MediaStreamError
 
 
+class FinalTone(Tone):
+    """Keep a distinct last phrase on the wire after final status arrives."""
+
+    def __init__(self) -> None:
+        super().__init__(700)
+        self.status_seen_at: float | None = None
+
+    async def recv(self) -> AudioFrame:
+        if self.status_seen_at is not None:
+            elapsed = time.monotonic() - self.status_seen_at
+            if elapsed >= 1.2:
+                self.stop()
+                raise MediaStreamError
+            if elapsed >= 0.7:
+                self.frequency = 930
+        return await super().recv()
+
+
 @dataclass
 class GatewayPeer:
     peers: list[RTCPeerConnection] = field(default_factory=list)
@@ -86,6 +107,7 @@ class GatewayPeer:
     deleted: list[str] = field(default_factory=list)
     offers: list[str] = field(default_factory=list)
     frequency: int | None = 700
+    audio_track: AudioStreamTrack | None = None
 
     async def final_status(self) -> bool:
         return self.ended
@@ -107,7 +129,8 @@ class GatewayPeer:
                 self.readers.append(asyncio.create_task(self._receive(track)))
 
             peer.addTrack(
-                Tone(self.frequency) if self.frequency is not None else NoAudio()
+                self.audio_track
+                or (Tone(self.frequency) if self.frequency is not None else NoAudio())
             )
             await peer.setRemoteDescription(
                 RTCSessionDescription(document["sdp"], "offer")
@@ -289,6 +312,137 @@ async def test_real_peer_carries_audio_and_distinguishes_remote_end(
         assert peer.deleted == ["peer-session"]
 
 
+async def test_final_agent_audio_arriving_after_status_reaches_the_recording(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(retell_gateway, "DEFAULT_ICE_SERVERS", [])
+    final_tone = FinalTone()
+    peer = GatewayPeer(audio_track=final_tone)
+    status_checked = asyncio.Event()
+
+    async def poll_status() -> bool:
+        if peer.ended:
+            final_tone.status_seen_at = time.monotonic()
+            status_checked.set()
+        return peer.ended
+
+    async with serving(peer.app()) as base_url:
+        backend = RetellGatewayBackend(
+            settings=RetellGatewaySettings(base_url, CALL_ID, TOKEN),
+            simulation_id="sim-final-agent-words",
+            poll_remote_end=poll_status,
+        )
+        media = await backend.create_transport()
+        capture = Capture()
+        worker = PipelineWorker(
+            Pipeline([*media.input, *media.output, capture]),
+            idle_timeout_secs=None,
+            enable_tracing=False,
+            enable_turn_tracking=False,
+            enable_rtvi=False,
+        )
+        runner = WorkerRunner(handle_sigint=False)
+        await runner.add_workers(worker)
+        running = asyncio.create_task(runner.run())
+        try:
+            await asyncio.wait_for(capture.started.wait(), 3)
+            await backend.dial()
+            await backend.wait_answered(3)
+            peer.ended = True
+            await asyncio.wait_for(status_checked.wait(), 4)
+            await asyncio.wait_for(media.ended.wait(), 5)
+            assert not media.failed.is_set()
+            assert len(capture.markers) == 1
+            assert final_tone.status_seen_at is not None
+            # The last 250 ms was produced well after the old 200 ms cutoff.
+            rate = capture.audio[0].sample_rate
+            received = b"".join(frame.audio for frame in capture.audio)
+            tail = received[-rate // 2 :]
+            assert dominant_frequency(tail, rate) == pytest.approx(930, abs=15)
+        finally:
+            await backend.teardown()
+            await worker.queue_frame(EndFrame())
+            await asyncio.wait_for(running, 3)
+            await peer.close()
+
+
+async def test_confirmed_hangup_waits_for_slow_input_and_ordered_marker():
+    backend = RetellGatewayBackend(
+        settings=RetellGatewaySettings("http://unused.invalid", CALL_ID, TOKEN),
+        simulation_id="sim-slow-final-audio",
+    )
+    media = await backend.create_transport()
+    backend._audio.set()
+    input_transport = media.input[0]
+    markers: list[RemoteParticipantLeftFrame] = []
+
+    async def drain() -> None:
+        await asyncio.sleep(2.2)
+
+    async def acknowledge(frame: RemoteParticipantLeftFrame) -> None:
+        markers.append(frame)
+        await asyncio.sleep(2.2)
+        frame.completed.set()
+
+    input_transport.drain = drain
+    input_transport.push_frame = acknowledge
+    try:
+        await asyncio.wait_for(backend._finish_remote_close(confirmed=True), 7)
+        assert len(markers) == 1
+        assert media.ended.is_set()
+        assert not media.failed.is_set()
+    finally:
+        await backend.teardown()
+
+
+async def test_confirmed_hangup_releases_unplayed_persona_audio():
+    backend = RetellGatewayBackend(
+        settings=RetellGatewaySettings("http://unused.invalid", CALL_ID, TOKEN),
+        simulation_id="sim-unplayed-final-audio",
+    )
+    media = await backend.create_transport()
+    capture = Capture()
+    worker = PipelineWorker(
+        Pipeline([*media.input, *media.output, capture]),
+        idle_timeout_secs=None,
+        enable_tracing=False,
+        enable_turn_tracking=False,
+        enable_rtvi=False,
+    )
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker)
+    running = asyncio.create_task(runner.run())
+    writing_started = asyncio.Event()
+    original_write = backend._outbound.write
+
+    async def observed_write(audio: bytes) -> bool:
+        writing = asyncio.create_task(original_write(audio))
+        await asyncio.sleep(0)
+        writing_started.set()
+        return await writing
+
+    backend._outbound.write = observed_write
+    try:
+        await asyncio.wait_for(capture.started.wait(), 2)
+        backend._audio.set()
+        await worker.queue_frame(OutputAudioRawFrame(bytes(24_000), 24_000, 1))
+        await asyncio.wait_for(writing_started.wait(), 2)
+        assert backend._outbound._pending
+        assert not capture.played
+        await asyncio.wait_for(backend._finish_remote_close(confirmed=True), 2)
+        assert media.ended.is_set()
+        assert not media.failed.is_set()
+        assert len(capture.markers) == 1
+    finally:
+        await backend.teardown()
+        await worker.queue_frame(EndFrame())
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(running, 3)
+        if not running.done():
+            await worker.cancel()
+            await running
+
+
 async def test_interruption_discards_pending_gateway_audio():
     backend = RetellGatewayBackend(
         settings=RetellGatewaySettings("http://unused.invalid", CALL_ID, TOKEN),
@@ -362,7 +516,7 @@ async def test_provider_startup_status_is_checked_before_first_audio(
             await asyncio.wait_for(capture.started.wait(), 3)
             await backend.dial()
             with pytest.raises(MediaBackendError) as status:
-                await backend.wait_answered(4)
+                await backend.wait_answered(6)
             assert not backend._audio.is_set()
             if provider_error:
                 assert status.value.ending == "error"
@@ -446,6 +600,155 @@ async def test_cleanup_does_not_wait_for_the_monitor_that_called_teardown():
         await asyncio.wait_for(backend._monitor, 1)
     await asyncio.wait_for(backend.teardown(), 1)
     assert backend._cleanup_task.done()
+
+
+async def test_canceling_dial_still_deletes_a_late_gateway_session(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(retell_gateway, "DEFAULT_ICE_SERVERS", [])
+    received = asyncio.Event()
+    release = asyncio.Event()
+    deleted: list[str] = []
+    app = web.Application()
+
+    async def create(request: web.Request) -> web.Response:
+        assert request.headers["Authorization"] == f"Bearer {TOKEN}"
+        assert (await request.json())["identity"] == "client"
+        received.set()
+        await release.wait()
+        return web.json_response({"session_id": "late-session", "sdp": "v=0\r\n"})
+
+    async def delete(request: web.Request) -> web.Response:
+        deleted.append(request.match_info["session_id"])
+        return web.Response(status=204)
+
+    path = "/webrtc-proxy/{call_id}/v1/webrtc/sessions"
+    app.router.add_post(path, create)
+    app.router.add_delete(path + "/{session_id}", delete)
+    async with serving(app) as base_url:
+        backend = RetellGatewayBackend(
+            settings=RetellGatewaySettings(base_url, CALL_ID, TOKEN),
+            simulation_id="sim-canceled-dial",
+        )
+        await backend.create_transport()
+        dialing = asyncio.create_task(backend.dial())
+        await asyncio.wait_for(received.wait(), 4)
+        peer = backend._peer
+        dialing.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await dialing
+        closing = asyncio.create_task(backend.teardown())
+        await asyncio.sleep(0.02)
+        assert not closing.done(), "cleanup must wait for the session ID"
+        release.set()
+        await asyncio.wait_for(closing, 3)
+        assert deleted == ["late-session"]
+        assert backend._session_create.done()
+        assert peer.connectionState == "closed"
+
+
+async def test_cleanup_of_unanswered_session_creation_is_bounded(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    monkeypatch.setattr(retell_gateway, "SESSION_CREATE_CLEANUP_SECONDS", 0.02)
+    backend = RetellGatewayBackend(
+        settings=RetellGatewaySettings("http://unused.invalid", CALL_ID, TOKEN),
+        simulation_id="sim-unanswered-create",
+    )
+    backend._session_create = asyncio.create_task(asyncio.Event().wait())
+    with caplog.at_level(logging.WARNING):
+        await asyncio.wait_for(backend.teardown(), 1)
+    assert backend._session_create.cancelled()
+    assert any(
+        getattr(record, EVENT_NAME, None)
+        == "egma.retell.gateway.session_create_unconfirmed"
+        for record in caplog.records
+    )
+
+
+async def test_canceled_session_request_does_not_block_deleting_a_known_session():
+    backend = RetellGatewayBackend(
+        settings=RetellGatewaySettings("http://unused.invalid", CALL_ID, TOKEN),
+        simulation_id="sim-canceled-create",
+    )
+    backend._session_id = "known-session"
+    backend._session_create = asyncio.create_task(asyncio.Event().wait())
+    backend._session_create.cancel()
+    await asyncio.gather(backend._session_create, return_exceptions=True)
+    deleted: list[str] = []
+
+    async def remove_session(method: str, url: str) -> dict:
+        assert method == "DELETE"
+        deleted.append(url)
+        return {}
+
+    backend._request = remove_session
+    await asyncio.wait_for(backend.teardown(), 1)
+    assert deleted == [backend._session_url + "/known-session"]
+
+
+async def test_failed_session_delete_is_reported_without_leaking_credentials(
+    caplog: pytest.LogCaptureFixture,
+):
+    turn_credential = "turn-password-sentinel"
+    app = web.Application()
+    deleted: list[str] = []
+
+    async def refuse_delete(request: web.Request) -> web.Response:
+        deleted.append(request.match_info["session_id"])
+        return web.Response(status=503, text=f"{TOKEN} {turn_credential}")
+
+    app.router.add_delete(
+        "/webrtc-proxy/{call_id}/v1/webrtc/sessions/{session_id}", refuse_delete
+    )
+
+    class ClosingPeer:
+        closed = False
+
+        async def close(self) -> None:
+            self.closed = True
+
+    async with serving(app) as base_url:
+        backend = RetellGatewayBackend(
+            settings=RetellGatewaySettings(
+                base_url,
+                CALL_ID,
+                TOKEN,
+                ice_servers=[
+                    {
+                        "urls": "turn:localhost:3478",
+                        "username": "turn-user",
+                        "credential": turn_credential,
+                    }
+                ],
+            ),
+            simulation_id="sim-delete-refused",
+        )
+        backend._session_id = "refused-session"
+        peer = ClosingPeer()
+        backend._peer = peer
+        media = await backend.create_transport()
+        media.ended.set()
+        with caplog.at_level(logging.INFO):
+            await backend.teardown()
+            await backend.teardown()
+        assert peer.closed
+        assert deleted == ["refused-session"]
+        assert not media.failed.is_set()
+        warnings = [
+            record
+            for record in caplog.records
+            if getattr(record, EVENT_NAME, None)
+            == "egma.retell.gateway.session_delete_failed"
+        ]
+        assert len(warnings) == 1
+        assert warnings[0].levelno == logging.WARNING
+        assert not any(
+            getattr(record, EVENT_NAME, None) == "egma.retell.gateway.closed"
+            for record in caplog.records
+        )
+        assert TOKEN not in caplog.text
+        assert turn_credential not in caplog.text
 
 
 async def test_audio_pacing_does_not_accumulate_scheduler_overshoot(
