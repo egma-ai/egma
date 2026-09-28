@@ -95,7 +95,7 @@ async function webCall(
   agentVersion: number,
   variables: Record<string, string>,
 ): Promise<{ status: number; document: Record<string, unknown> }> {
-  const answer = await scratch("POST", "/v2/create-web-call", {
+  const answer = await scratch("POST", "/v3/create-web-call", {
     agent_id: agentId,
     agent_version: agentVersion,
     retell_llm_dynamic_variables: variables,

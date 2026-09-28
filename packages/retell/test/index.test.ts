@@ -417,6 +417,44 @@ describe("Retell phone-number discovery", () => {
 });
 
 describe("Retell provider data", () => {
+  it("omits gateway relay credentials only from top-level ICE servers", () => {
+    const document = {
+      call_id: "call_gateway",
+      access_token: "gateway-join-token",
+      transport: "gateway",
+      expires_at: 1790812800000,
+      ice_servers: [
+        { urls: "stun:stun.example.com:3478" },
+        {
+          urls: ["turn:relay.example.com:3478", "turns:relay.example.com:5349"],
+          username: "relay-user",
+          credential: "relay-secret",
+          credentialType: "password",
+        },
+      ],
+      metadata: {
+        ice_servers: [{ username: "customer-user", credential: "customer-data" }],
+        username: "customer-name",
+        credential: "customer-evidence",
+      },
+    };
+
+    expect(safeRetellProviderData(document)).toEqual({
+      call_id: document.call_id,
+      transport: document.transport,
+      expires_at: document.expires_at,
+      ice_servers: [
+        { urls: "stun:stun.example.com:3478" },
+        {
+          urls: ["turn:relay.example.com:3478", "turns:relay.example.com:5349"],
+          credentialType: "password",
+        },
+      ],
+      metadata: document.metadata,
+    });
+    expect(document.ice_servers[1]).toHaveProperty("credential", "relay-secret");
+  });
+
   it("omits the access token and the named SIP authentication headers", () => {
     const safe = safeRetellProviderData({
       call_id: "call_1",

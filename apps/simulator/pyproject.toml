@@ -19,6 +19,7 @@ dependencies = [
     "referencing>=0.37.0",
     "rfc3339-validator>=0.1.4",
     "structlog>=26.1.0",
+    "aiortc==1.14.0",
 ]
 
 [project.scripts]

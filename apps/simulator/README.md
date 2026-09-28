@@ -42,8 +42,8 @@ touching the others:
   the agent's worker dispatched into it. `retell_web_call` reaches a
   Retell *voice* agent the same way its browser callers do: egma creates
   the call itself — against a named version of the agent, with this
-  simulation's variables attached — and Retell answers with a way into a
-  LiveKit room, so the plug creates and the room media joins.
+  simulation's variables attached — and Retell returns gateway WebRTC
+  connection details. The gateway media backend carries the call audio.
   `retell_text_mode` reaches the same Retell *voice* agent in **text**:
   it speaks Retell's agent-playground completion API, which keeps nothing
   between requests, so every request carries the whole history, the
@@ -576,7 +576,7 @@ src/egma_simulator/
                   platform, phone.py dials a number, livekit.py holds
                   an exchange in the agent's own room,
                   retell_web_call.py creates a Retell web call and
-                  conducts it in the room that call opens, and
+                  conducts it over gateway WebRTC, and
                   retell_text_mode.py conducts a Retell voice agent in
                   text, with no call and no audio anywhere.
   media/          The media-backend seam: how a voice exchange's Pipecat

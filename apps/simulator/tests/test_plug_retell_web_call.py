@@ -1,12 +1,12 @@
-"""Use a local Retell HTTP stub for call creation and a room stub for the join.
-Check version and variable forwarding, returned token use, simulation output,
-failures, and departure without attempting to delete Retell's room.
+"""Check v3 call creation and voice conduction with scripted media.
+Actual gateway signaling and audio peers are tested in test_retell_gateway.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -17,20 +17,39 @@ from room_stub import RoomStub
 from egma_simulator.blob import FilesystemBlobStore
 from egma_simulator.contract import AGENT_NEVER_JOINED, ERROR, NOT_ANSWERED
 from egma_simulator.conversation import Conducted, ConversationControls
-from egma_simulator.media.livekit_room import PLATFORM_NAMED_ROOM, RoomSettings
-from egma_simulator.media.room import ROOM_PREFIX, room_name_for
+from egma_simulator.media.livekit_room import RoomSettings
+from egma_simulator.media.retell_gateway import RetellGatewaySettings
 from egma_simulator.model import GOODBYE, ScriptedModel
 from egma_simulator.persona import Persona
 from egma_simulator.pipeline import assemble
 from egma_simulator.plugs import PlugError, VoiceConnection, failed_ending, plug_for
 from egma_simulator.plugs import retell_web_call as web_call_plug
-from egma_simulator.plugs.retell_web_call import (
-    RETELL_ROOM_HOST,
-    RetellWebCall,
-)
+from egma_simulator.plugs.retell_web_call import RetellWebCall
 from egma_simulator.redaction import REDACTED
 from egma_simulator.spec import SimulationSpec
 from egma_simulator.speech import SCRIPTED_PAIR
+
+
+@dataclass
+class GatewayStub(RoomStub):
+    """Reuse scripted media below the gateway backend boundary.
+
+    The real gateway's HTTP signaling and peer audio are tested separately.
+    """
+
+    connections: list[RetellGatewaySettings] = field(default_factory=list)
+
+    def driver(self, *, settings: RetellGatewaySettings, **arguments: Any):
+        self.connections.append(settings)
+        arguments.pop("poll_remote_end", None)
+        return super().driver(
+            settings=RoomSettings(
+                url="wss://scripted.invalid", given_token=settings.access_token
+            ),
+            mock_tools=None,
+            **arguments,
+        )
+
 
 SENTINEL_KEY = "SENTINEL-retell-web-call-key-4c81de"
 """The account key that creates the call. A sentinel because every path
@@ -59,7 +78,6 @@ def web_call_spec(
     *,
     base_url: str,
     agent_id: str = AN_AGENT,
-    room_host: str | None = None,
     agent_version: object = A_DRAFT,
     dynamic_variables: object = None,
     scenario: str = A_SCENARIO,
@@ -74,8 +92,6 @@ def web_call_spec(
     and by the two facts the lane rides on, and by nothing else.
     """
     config: dict = {"retellAgentId": agent_id, "baseUrl": base_url}
-    if room_host is not None:
-        config["roomHost"] = room_host
     return a_spec(
         simulation_id,
         modality="voice",
@@ -104,7 +120,7 @@ told apart from an explicit ``None`` a test means to hand over."""
 
 
 def web_call(
-    room: RoomStub,
+    room: GatewayStub,
     *,
     base_url: str,
     modality: str = "voice",
@@ -122,9 +138,7 @@ def web_call(
             if config is None
             else config
         ),
-        credentials=(
-            {"apiKey": SENTINEL_KEY} if credentials is UNSET else credentials
-        ),
+        credentials=({"apiKey": SENTINEL_KEY} if credentials is UNSET else credentials),
         simulation_id=A_SIMULATION,
         agent_version=agent_version,
         dynamic_variables=(
@@ -136,7 +150,7 @@ def web_call(
 
 async def web_call_walk(
     tmp_path: Path,
-    room: RoomStub,
+    room: GatewayStub,
     monkeypatch: pytest.MonkeyPatch,
     *,
     base_url: str,
@@ -150,7 +164,7 @@ async def web_call_walk(
     counterparts is every line the service would run, the Pipecat conductor
     that drives the room included.
     """
-    monkeypatch.setattr(web_call_plug, "LiveKitRoomBackend", room.driver)
+    monkeypatch.setattr(web_call_plug, "RetellGatewayBackend", room.driver)
     spec = SimulationSpec.from_document(web_call_spec(base_url=base_url, **overrides))
     turns: list[tuple[str, str]] = []
 
@@ -180,27 +194,31 @@ async def web_call_walk(
     return conducted, turns, assembled
 
 
-def assert_egma_only_joined(room: RoomStub) -> None:
-    """Egma made no room, asked for nobody, and deleted nothing.
-
-    All three halves of the same property, and the safety-carrying one:
-    the room belongs to Retell. Egma holds a token that opens it and
-    nothing more, so a request to create, to dispatch or to delete would
-    be a power egma does not have — and asking for one would spend a
-    request to be refused, or, worse, would work against the wrong LiveKit.
-    """
-    assert room.rooms == [], "egma made no room; Retell opened it"
-    assert room.dispatches == [], "egma asked for nobody; Retell puts its own agent in"
-    assert room.deleted == [], "egma deleted nothing; Retell closes what it made"
+def assert_egma_only_joined(room: GatewayStub) -> None:
+    """The scripted fixture must receive no LiveKit room operations."""
+    assert room.rooms == []
+    assert room.dispatches == []
+    assert room.deleted == []
 
 
 def test_the_registry_knows_the_retell_web_call_plug():
-    assert plug_for("retell_web_call") is RetellWebCall
+    factory = plug_for("retell_web_call")
+    assert factory is not None
+    assert isinstance(
+        factory(
+            modality="voice",
+            access_variant="retell_web_call.api_key",
+            config={"retellAgentId": AN_AGENT},
+            credentials={"apiKey": SENTINEL_KEY},
+            simulation_id=A_SIMULATION,
+        ),
+        RetellWebCall,
+    )
 
 
 def test_a_web_call_is_one_pipecat_voice_connection():
     """The seam gives Pipecat the transport instead of exchanging PCM."""
-    connection = web_call(RoomStub(), base_url="http://127.0.0.1:1")
+    connection = web_call(GatewayStub(), base_url="http://127.0.0.1:1")
     assert isinstance(connection, VoiceConnection)
     assert not hasattr(connection, "exchange")
     assert not hasattr(connection, "sample_rate_hz")
@@ -221,7 +239,7 @@ async def test_a_web_call_spec_conducts_a_whole_simulation(
     record's join to Retell's telemetry is Retell's own call id.
     """
     running = await start_retell_stub(api_key=SENTINEL_KEY)
-    room = RoomStub(
+    room = GatewayStub(
         greeting="Remedy after hours, how can I help?",
         replies=["Of course — could I take your name?", "Booked for Thursday."],
     )
@@ -259,9 +277,11 @@ async def test_a_web_call_spec_conducts_a_whole_simulation(
     # The room was joined with what that creation handed back, at Retell's
     # own host — the token from *this* call, not a token from anywhere.
     assert len(room.joined_with) == 1
-    way_in = room.joined_with[0]
-    assert way_in.token == created["access_token"]
-    assert way_in.url == RETELL_ROOM_HOST
+    way_in = room.connections[0]
+    assert way_in.access_token == created["access_token"]
+    assert way_in.base_url == running.base_url
+    assert way_in.call_id == created["call_id"]
+    assert way_in.ice_servers == [{"urls": "stun:stun.l.google.com:19302"}]
 
     # And the record's join to Retell's telemetry is the call, which is the
     # one name both sides can look this exchange up by.
@@ -281,7 +301,7 @@ async def test_the_agent_ending_the_call_is_the_agent_ending_it(
     """Retell's participant leaving is the agent ending the exchange, and
     everything said up to that moment stays on the record."""
     running = await start_retell_stub(api_key=SENTINEL_KEY)
-    room = RoomStub(
+    room = GatewayStub(
         greeting="Remedy after hours.",
         replies=["I am afraid I have to go. Goodbye."],
         hangs_up_after_replies=True,
@@ -310,7 +330,7 @@ async def test_a_limit_ends_the_call_and_egma_still_leaves(
     """A simulation stopped by its own walls ends deliberately, and it is
     never the agent failing. Egma leaves the room either way."""
     running = await start_retell_stub(api_key=SENTINEL_KEY)
-    room = RoomStub(
+    room = GatewayStub(
         greeting="Remedy after hours.", replies=["One.", "Two.", "Three."]
     )
     conducted, _turns, _assembled = await web_call_walk(
@@ -336,7 +356,7 @@ async def test_a_call_naming_no_version_and_no_variables_asks_for_the_agent(
     was not asked for is one it chooses itself, and an empty variable block
     is a set of values it would render."""
     running = await start_retell_stub(api_key=SENTINEL_KEY)
-    room = RoomStub(greeting="Remedy after hours.", replies=["Noted."])
+    room = GatewayStub(greeting="Remedy after hours.", replies=["Noted."])
     await web_call_walk(
         tmp_path,
         room,
@@ -359,7 +379,7 @@ async def test_egma_never_stands_in_this_agents_tool_path(
     tools, so no call of the agent's ever reaches the seam — which is the
     truth, because egma never stood in their path in this room."""
     running = await start_retell_stub(api_key=SENTINEL_KEY)
-    room = RoomStub(greeting="Remedy after hours.", replies=["Noted."])
+    room = GatewayStub(greeting="Remedy after hours.", replies=["Noted."])
     _conducted, _turns, assembled = await web_call_walk(
         tmp_path,
         room,
@@ -391,7 +411,7 @@ async def test_a_creation_retell_refuses_is_a_fault_in_its_words(
         api_key=SENTINEL_KEY,
         refuses_web_call="agent_b0e2e9cb267c47e7e7026cd8e8 has no version 106",
     )
-    room = RoomStub()
+    room = GatewayStub()
     plug = web_call(room, base_url=running.base_url)
 
     with pytest.raises(PlugError) as refused:
@@ -417,7 +437,7 @@ async def test_a_creation_that_failed_left_nothing_to_be_spent(start_retell_stub
     running = await start_retell_stub(
         api_key=SENTINEL_KEY, refuses_web_call="that agent has no version 106"
     )
-    plug = web_call(RoomStub(), base_url=running.base_url)
+    plug = web_call(GatewayStub(), base_url=running.base_url)
 
     for _attempt in range(2):
         with pytest.raises(PlugError) as refused:
@@ -436,7 +456,7 @@ async def test_a_creation_that_hands_back_no_way_in_is_refused(start_retell_stub
     running = await start_retell_stub(
         api_key=SENTINEL_KEY, web_call_without_a_token=True
     )
-    room = RoomStub()
+    room = GatewayStub()
     plug = web_call(room, base_url=running.base_url)
 
     with pytest.raises(PlugError) as refused:
@@ -452,7 +472,7 @@ async def test_a_key_the_platform_refuses_fails_without_saying_the_key(
     start_retell_stub,
 ):
     running = await start_retell_stub(api_key="the-only-key-this-stub-honors")
-    room = RoomStub()
+    room = GatewayStub()
     plug = web_call(room, base_url=running.base_url)
 
     with pytest.raises(PlugError) as refused:
@@ -474,7 +494,7 @@ async def test_a_platform_that_says_the_key_back_is_quoted_without_it(
     running = await start_retell_stub(
         api_key="the-only-key-this-stub-honors", echo_key_in_refusal=True
     )
-    plug = web_call(RoomStub(), base_url=running.base_url)
+    plug = web_call(GatewayStub(), base_url=running.base_url)
 
     with pytest.raises(PlugError) as refused:
         await plug.prepare()
@@ -488,7 +508,7 @@ async def test_a_platform_that_says_the_key_back_is_quoted_without_it(
 
 async def test_a_platform_that_answers_nowhere_fails_without_saying_the_key():
     """A closed port: the other way a platform is absent."""
-    plug = web_call(RoomStub(), base_url="http://127.0.0.1:1")
+    plug = web_call(GatewayStub(), base_url="http://127.0.0.1:1")
 
     with pytest.raises(PlugError) as refused:
         await plug.prepare()
@@ -509,7 +529,7 @@ async def test_a_token_is_spent_on_its_join_and_never_offered_twice(
     than sent — the answer is already known, and asking would spend a
     request to be told so."""
     running = await start_retell_stub(api_key=SENTINEL_KEY)
-    room = RoomStub(greeting="Remedy after hours.")
+    room = GatewayStub(greeting="Remedy after hours.")
     plug = web_call(room, base_url=running.base_url)
 
     await plug.prepare()
@@ -533,7 +553,7 @@ async def test_a_room_that_will_not_take_the_way_in_says_why(start_retell_stub):
     the one fact that explains most of them.
     """
     running = await start_retell_stub(api_key=SENTINEL_KEY)
-    room = RoomStub(refuses_join="access token is no longer valid")
+    room = GatewayStub(refuses_join="access token is no longer valid")
     plug = web_call(room, base_url=running.base_url)
 
     await plug.prepare()
@@ -544,7 +564,6 @@ async def test_a_room_that_will_not_take_the_way_in_says_why(start_retell_stub):
     told = str(refused.value)
     assert failed_ending(refused.value) == ERROR
     assert "access token is no longer valid" in told
-    assert "opens one room once" in told
     assert running.stub.web_calls[0]["call_id"] in told
     assert running.stub.web_calls[0]["access_token"] not in told
     assert SENTINEL_KEY not in told
@@ -562,7 +581,7 @@ async def test_an_agent_that_never_joins_is_never_the_agent_failing(
     """
     monkeypatch.setattr(web_call_plug, "AGENT_JOIN_SECONDS", 0.05)
     running = await start_retell_stub(api_key=SENTINEL_KEY)
-    room = RoomStub(agent_joins=False)
+    room = GatewayStub(agent_joins=False)
     plug = web_call(room, base_url=running.base_url)
 
     await plug.prepare()
@@ -586,7 +605,7 @@ async def test_an_agent_that_joins_and_publishes_nothing_never_joined_either(
     and conducting against it would grade an agent that never spoke."""
     monkeypatch.setattr(web_call_plug, "AGENT_JOIN_SECONDS", 0.05)
     running = await start_retell_stub(api_key=SENTINEL_KEY)
-    room = RoomStub(agent_publishes_audio=False)
+    room = GatewayStub(agent_publishes_audio=False)
     plug = web_call(room, base_url=running.base_url)
 
     await plug.prepare()
@@ -608,7 +627,7 @@ async def test_closing_a_call_that_was_never_created_is_safe():
     """``close`` is called whatever happened, including before anything was
     created — and a plug that never made a call must not try to leave a
     room that was never joined."""
-    room = RoomStub()
+    room = GatewayStub()
     plug = web_call(room, base_url="http://127.0.0.1:1")
     await plug.close()
     await plug.close()
@@ -616,7 +635,7 @@ async def test_closing_a_call_that_was_never_created_is_safe():
 
 
 async def test_opening_before_creating_is_refused_rather_than_guessed():
-    plug = web_call(RoomStub(), base_url="http://127.0.0.1:1")
+    plug = web_call(GatewayStub(), base_url="http://127.0.0.1:1")
     with pytest.raises(PlugError) as refused:
         await plug.open()
     assert failed_ending(refused.value) == ERROR
@@ -634,14 +653,14 @@ async def test_egma_leaves_the_room_however_the_simulation_ends(
     right to make would spend a request to be refused."""
     running = await start_retell_stub(api_key=SENTINEL_KEY)
 
-    natural = RoomStub(greeting="Remedy after hours.", replies=["Noted."])
+    natural = GatewayStub(greeting="Remedy after hours.", replies=["Noted."])
     await web_call_walk(
         tmp_path, natural, monkeypatch, base_url=running.base_url, scenario="One point."
     )
     assert not natural.room.joined
     assert_egma_only_joined(natural)
 
-    canceled = RoomStub(greeting="Remedy after hours.", replies=["Noted."])
+    canceled = GatewayStub(greeting="Remedy after hours.", replies=["Noted."])
     conducted, _turns, _assembled = await web_call_walk(
         tmp_path,
         canceled,
@@ -653,7 +672,6 @@ async def test_egma_leaves_the_room_however_the_simulation_ends(
     assert conducted.status == "canceled"
     assert not canceled.room.joined
     assert_egma_only_joined(canceled)
-
 
 
 class CancelsOnceUnderWay(ConversationControls):
@@ -695,7 +713,7 @@ async def test_nothing_a_simulation_produces_carries_the_key_or_the_token(
     running = await start_retell_stub(
         api_key=SENTINEL_KEY, web_call_token="SENTINEL-web-call-access-token-a91f7"
     )
-    room = RoomStub(
+    room = GatewayStub(
         greeting="Remedy after hours.", replies=["Noted."], agent_joins=agent_joins
     )
 
@@ -719,7 +737,7 @@ async def test_nothing_a_simulation_produces_carries_the_key_or_the_token(
 
     produced += [record.getMessage() for record in caplog.records]
     produced.append(repr(room.backends[0]))
-    produced.append(repr(room.backends[0]._settings))
+    produced.append(repr(room.connections[0]))
 
     minted = running.stub.web_calls[0]["access_token"]
     assert any(produced), "there was nothing to scan, which always passes"
@@ -728,40 +746,15 @@ async def test_nothing_a_simulation_produces_carries_the_key_or_the_token(
         assert minted not in piece
 
 
-async def test_egma_never_invents_a_name_for_a_room_retell_named(
+async def test_the_provider_reference_is_available_before_audio_connects(
     start_retell_stub,
 ):
-    """The room has a name already, and egma is never told it.
-
-    Pipecat prints the room name into every connect and disconnect line, so
-    a name made up here — ``egma-sim-<simulation>``, the one egma uses for
-    rooms it opens itself — would put a string in the logs that exists in
-    nobody's telemetry and that no one can look up on either side. What
-    joins the two records is Retell's call id, which the plug carries as
-    the provider reference instead.
-    """
     running = await start_retell_stub(api_key=SENTINEL_KEY)
-    room = RoomStub(greeting="Remedy after hours.")
-    plug = web_call(room, base_url=running.base_url)
+    gateway = GatewayStub()
+    plug = web_call(gateway, base_url=running.base_url)
     await plug.prepare()
-    await plug.close()
-
-    named = room.backends[0].room_name
-    assert named == PLATFORM_NAMED_ROOM
-    assert not named.startswith(ROOM_PREFIX), "that prefix is for rooms egma opens"
-    assert A_SIMULATION not in named
-    assert room_name_for(A_SIMULATION) != named
-    # And the reference the record really carries is Retell's own.
     assert plug.provider_reference == running.stub.web_calls[0]["call_id"]
-
-
-def test_the_way_in_is_a_secret_the_settings_know_they_hold():
-    """The token is registered before anything can quote it, so a room that
-    echoed it back would get it scrubbed like any other credential."""
-    settings = RoomSettings(url=RETELL_ROOM_HOST, given_token="a-token")
-    assert settings.secrets == ("a-token",)
-    assert "a-token" not in repr(settings)
-    assert not settings.mints_its_own, "egma minted nothing; it was handed this"
+    await plug.close()
 
 
 # -- Connections the plug does not understand --------------------------------
@@ -777,6 +770,7 @@ def test_the_way_in_is_a_secret_the_settings_know_they_hold():
         {"retellAgentId": AN_AGENT, "baseUrl": ""},
         {"retellAgentId": AN_AGENT, "roomHost": ""},
         {"retellAgentId": AN_AGENT, "roomHost": 7},
+        {"retellAgentId": AN_AGENT, "roomHost": "wss://old.livekit.cloud"},
         {"retellAgentId": AN_AGENT, "roomHost": "retell-ai.livekit.cloud"},
         {"retellAgentId": AN_AGENT, "retellAgentld": "a typo"},
         {"retellAgentId": AN_AGENT, "apiKey": "a secret in the wrong block"},
@@ -785,13 +779,13 @@ def test_the_way_in_is_a_secret_the_settings_know_they_hold():
 )
 def test_config_the_plug_does_not_understand_is_refused(config: dict):
     with pytest.raises(PlugError):
-        web_call(RoomStub(), base_url="http://127.0.0.1:1", config=config)
+        web_call(GatewayStub(), base_url="http://127.0.0.1:1", config=config)
 
 
 def test_a_config_typo_is_named_in_the_refusal():
     with pytest.raises(PlugError) as refusal:
         web_call(
-            RoomStub(),
+            GatewayStub(),
             base_url="http://127.0.0.1:1",
             config={"retellAgentId": AN_AGENT, "roomHostt": "a typo"},
         )
@@ -804,13 +798,13 @@ def test_a_config_typo_is_named_in_the_refusal():
 )
 def test_credentials_of_the_wrong_shape_are_refused(credentials: object):
     with pytest.raises(PlugError):
-        web_call(RoomStub(), base_url="http://127.0.0.1:1", credentials=credentials)
+        web_call(GatewayStub(), base_url="http://127.0.0.1:1", credentials=credentials)
 
 
 def test_a_credential_refusal_names_the_key_and_never_its_value():
     with pytest.raises(PlugError) as refusal:
         web_call(
-            RoomStub(),
+            GatewayStub(),
             base_url="http://127.0.0.1:1",
             credentials={"apiKey": SENTINEL_KEY, "apiSecret": SENTINEL_KEY},
         )
@@ -820,7 +814,7 @@ def test_a_credential_refusal_names_the_key_and_never_its_value():
 
 def test_the_plug_speaks_voice_only():
     with pytest.raises(PlugError) as refusal:
-        web_call(RoomStub(), base_url="http://127.0.0.1:1", modality="chat")
+        web_call(GatewayStub(), base_url="http://127.0.0.1:1", modality="chat")
     assert "chat" in str(refusal.value)
 
 
@@ -836,60 +830,43 @@ def test_an_access_variant_this_plug_does_not_hold_is_refused():
     assert "retell_chat_api.api_key" in str(refusal.value)
 
 
-def test_the_room_host_is_retells_own_and_a_connection_may_name_another():
-    """One value, in one place, tracked against Retell's own SDK — and
-    overridable, so a deployment can follow Retell moving its
-    infrastructure without waiting for a release of egma."""
-    assert RETELL_ROOM_HOST.startswith("wss://")
-    assert "livekit" in RETELL_ROOM_HOST
-
-    stock = web_call(RoomStub(), base_url="http://127.0.0.1:1")
-    assert stock.room_host == RETELL_ROOM_HOST
-
-    named = web_call(
-        RoomStub(),
-        base_url="http://127.0.0.1:1",
-        config={
-            "retellAgentId": AN_AGENT,
-            "baseUrl": "http://127.0.0.1:1",
-            "roomHost": "wss://retell-eu.livekit.cloud",
-        },
-    )
-    assert named.room_host == "wss://retell-eu.livekit.cloud"
-
-
-async def test_the_room_is_reached_at_the_host_the_connection_named(
-    start_retell_stub,
-):
-    """Whatever the connection says is where the join goes."""
-    running = await start_retell_stub(api_key=SENTINEL_KEY)
-    room = RoomStub(greeting="Remedy after hours.")
-    plug = web_call(
-        room,
-        base_url=running.base_url,
-        config={
-            "retellAgentId": AN_AGENT,
-            "baseUrl": running.base_url,
-            "roomHost": "wss://retell-eu.livekit.cloud",
-        },
-    )
-    await plug.prepare()
-    await plug.close()
-
-    assert room.joined_with[0].url == "wss://retell-eu.livekit.cloud"
-
-
-def test_the_plug_and_the_stub_agree_on_where_a_web_call_is_created():
-    """The two sides of this suite name one path, rather than a stub that
-    serves whatever it is asked for.
-
-    It does not say the path is Retell's — nothing hermetic can. What
-    settles that is the API reference, and the ``/v2/`` prefix the shared
-    Retell client already uses for the calls it makes.
-    """
+def test_call_creation_uses_the_current_retell_contract():
     from retell_stub import RetellStub
 
     served = {
         resource.canonical for resource in RetellStub().build_app().router.resources()
     }
-    assert web_call_plug.CREATE_PATH in served
+    assert web_call_plug.CREATE_PATH == "/v3/create-web-call"
+    assert "/v3/create-web-call" in served
+    assert "/v2/create-web-call" not in served
+
+
+@pytest.mark.parametrize(
+    "connection_details",
+    [
+        {"transport": "livekit"},
+        {"transport": None},
+        {"ice_servers": None},
+        {"ice_servers": ["stun:host"]},
+        {"ice_servers": [{"urls": "https://invalid.example"}]},
+        {"ice_servers": [{"urls": []}]},
+        {"ice_servers": [{"urls": "turn:host", "credential": 7}]},
+        {"expires_at": None},
+        {"expires_at": True},
+        {"expires_at": 1},
+    ],
+)
+async def test_invalid_gateway_details_fail_before_connecting(
+    start_retell_stub, connection_details
+):
+    running = await start_retell_stub(
+        api_key=SENTINEL_KEY,
+        web_call_connection_overrides=connection_details,
+    )
+    gateway = GatewayStub()
+    plug = web_call(gateway, base_url=running.base_url)
+    with pytest.raises(PlugError):
+        await plug.prepare()
+    assert plug.provider_reference == running.stub.web_calls[0]["call_id"]
+    assert gateway.connections == []
+    await plug.close()

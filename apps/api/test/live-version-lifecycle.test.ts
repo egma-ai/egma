@@ -126,7 +126,7 @@ async function webCall(
   agentVersion: number,
   variables: Record<string, string>,
 ): Promise<{ status: number; document: Record<string, unknown> }> {
-  const response = await fetch(`${RETELL_API}/v2/create-web-call`, {
+  const response = await fetch(`${RETELL_API}/v3/create-web-call`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${named("EGMA_LIVE_RETELL_API_KEY")}`,
