@@ -240,6 +240,13 @@ def _daily_room(*, modality: str, **rest: object) -> ConnectionPlug | VoiceConne
     return daily_room(modality=modality, **rest)
 
 
+def _retell_web_call(*, modality: str, **rest: object) -> VoiceConnection:
+    """Load the gateway client only for Retell voice simulations."""
+    from .retell_web_call import RetellWebCall
+
+    return RetellWebCall(modality=modality, **rest)
+
+
 def plug_for(connection_type: str) -> PlugFactory | None:
     """The plug factory registered for one connection type, or ``None``.
 
@@ -249,7 +256,6 @@ def plug_for(connection_type: str) -> PlugFactory | None:
     from .loopback import LoopbackCounterpart
     from .phone import PhoneCall
     from .retell_text_mode import RetellTextMode
-    from .retell_web_call import RetellWebCall
     from .scripted import ScriptedCounterpart
 
     return {
@@ -258,6 +264,6 @@ def plug_for(connection_type: str) -> PlugFactory | None:
         "loopback": LoopbackCounterpart,
         "phone_number": PhoneCall,
         "retell_text_mode": RetellTextMode,
-        "retell_web_call": RetellWebCall,
+        "retell_web_call": _retell_web_call,
         "scripted": ScriptedCounterpart,
     }.get(connection_type)

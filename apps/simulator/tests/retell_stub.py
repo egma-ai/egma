@@ -71,6 +71,9 @@ class RetellStub:
     """A creation the platform answers 2xx with nothing to join by — the
     shape a plug must refuse rather than carry half an exchange on."""
 
+    web_call_connection_overrides: dict = field(default_factory=dict)
+    """Override gateway reply fields to exercise malformed connection details."""
+
     calls: list[dict] = field(default_factory=list)
     """Every request served, in order — the whole exchange on the record."""
 
@@ -222,13 +225,7 @@ class RetellStub:
         )
 
     async def _create_web_call(self, request: web.Request) -> web.Response:
-        """One web call, registered — and the way into its room handed back.
-
-        Retell answers this with a LiveKit access token and nothing else
-        about where the room is: the host is Retell's own infrastructure,
-        which the caller already has to know. So does this stub, which
-        knows nothing about rooms at all.
-        """
+        """Return v3 gateway connection details for one registered web call."""
         self._authorized(request)
         body = await request.json()
         agent_id = body.get("agent_id")
@@ -259,15 +256,14 @@ class RetellStub:
         self.web_calls.append(call)
         answered = {
             "call_id": call["call_id"],
-            "call_type": "web_call",
-            "agent_id": agent_id,
-            "call_status": "registered",
             "access_token": call["access_token"],
+            "transport": "gateway",
+            "ice_servers": [{"urls": "stun:stun.l.google.com:19302"}],
+            "expires_at": int(time.time() * 1000) + 60_000,
         }
-        if body.get("agent_version") is not None:
-            answered["agent_version"] = body["agent_version"]
         if self.web_call_without_a_token:
             del answered["access_token"]
+        answered.update(self.web_call_connection_overrides)
         return web.json_response(answered, status=201)
 
     async def _end_chat(self, request: web.Request) -> web.Response:
@@ -285,7 +281,7 @@ class RetellStub:
         app.router.add_post("/create-chat-completion", self._create_chat_completion)
         app.router.add_get("/get-chat/{chat_id}", self._get_chat)
         app.router.add_patch("/end-chat/{chat_id}", self._end_chat)
-        app.router.add_post("/v2/create-web-call", self._create_web_call)
+        app.router.add_post("/v3/create-web-call", self._create_web_call)
         return app
 
 

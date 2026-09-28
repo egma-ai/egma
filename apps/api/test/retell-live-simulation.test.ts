@@ -126,12 +126,22 @@ function expectWebEvidenceToMatchRetell(
   const transcript = publicTranscript(body);
   const woven = providerCall.transcript_with_tool_calls;
   if (!Array.isArray(woven)) throw new Error("Retell final record has no woven transcript");
+  // Retell can finalize overlapping turns out of order. Use speech start time.
   const providerTurns = woven.flatMap((entry) => {
     if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return [];
     const message = entry as Record<string, unknown>;
     if ((message.role !== "user" && message.role !== "agent") || typeof message.content !== "string") return [];
-    return [{ kind: message.role === "user" ? "turn:human" : "turn:agent", text: message.content }];
-  });
+    const firstWord = Array.isArray(message.words) ? message.words[0] : undefined;
+    const start = typeof firstWord === "object" && firstWord !== null
+      ? (firstWord as Record<string, unknown>).start
+      : undefined;
+    return [{
+      kind: message.role === "user" ? "turn:human" : "turn:agent",
+      text: message.content,
+      start: typeof start === "number" ? start : 0,
+    }];
+  }).sort((left, right) => left.start - right.start)
+    .map(({ kind, text }) => ({ kind, text }));
   const egmaTurns = transcript.turns
     .filter((turn) => turn.pov === "agent")
     .map((turn) => ({ kind: turn.kind, text: turn.text }));

@@ -657,8 +657,8 @@ type CallOutcome =
  * One hydrated call, normalized and handed to the shared acceptance module.
  *
  * The call is made safe before anything reads it, which is where Retell's own
- * `access_token` and named authentication headers are left out — the only
- * omissions this contract makes, and made by construction rather than by
+ * `access_token`, ICE relay credentials, and named SIP authentication headers
+ * are left out by their position in the provider document rather than by
  * looking at what evidence happens to contain.
  */
 async function acceptCall(

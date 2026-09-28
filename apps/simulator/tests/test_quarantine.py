@@ -29,6 +29,7 @@ ALLOWED_DEPENDENCIES = {
     # Load provider libraries only when configured; the tests below check this.
     "pipecat-ai",
     "livekit",
+    "aiortc",  # Retell gateway WebRTC signaling and audio transport
     "loguru",  # what pipecat logs through, gathered under one filter
     "structlog",  # JSON rendering, context binding, and exception processing
     "nltk",  # pipecat's tokenizer, held to no downloads (see __init__)
@@ -131,7 +132,8 @@ def test_no_module_imports_anything_from_outside_the_app():
     # Distribution names above are not always module names. The OTLP encoder's
     # generated protobuf types live under Google's shared namespace.
     # Deepgram and websockets are locked by the declared Pipecat Deepgram extra
-    # and used directly only by its Daytona transport shim.
+    # and used directly only by its Daytona transport shim. aiortc supplies
+    # PyAV for the gateway's PCM frames and resampling.
     allowed_modules = {
         "aiohttp",
         "openai",
@@ -144,6 +146,8 @@ def test_no_module_imports_anything_from_outside_the_app():
         "structlog",
         "nltk",
         "livekit",
+        "aiortc",
+        "av",
         "daily",
         "boto3",
         "botocore",
@@ -362,7 +366,7 @@ def test_an_unconfigured_simulator_loads_no_provider_library():
         print(json.dumps(sorted(
             name for name in sys.modules
             if name.split(".")[0] in (
-                "deepgram", "livekit", "daily", "boto3", "botocore"
+                "deepgram", "livekit", "daily", "aiortc", "av", "boto3", "botocore"
             )
             or name.startswith("pipecat.services.deepgram")
             or name.startswith("pipecat.services.cartesia")

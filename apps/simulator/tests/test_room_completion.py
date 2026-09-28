@@ -1,8 +1,9 @@
-"""Provider completion and media failure stay distinct at the real callbacks."""
+"""LiveKit closure and Retell gateway provider confirmation stay distinct."""
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -14,6 +15,7 @@ from test_plug_livekit import ScriptedRtcRoom
 from test_plug_retell_web_call import AN_AGENT, SENTINEL_KEY
 
 from egma_simulator.media.livekit_room import TextRoom
+from egma_simulator.media.retell_gateway import RetellGatewayBackend
 from egma_simulator.media.room import JoinedRoom
 from egma_simulator.plugs import retell_web_call
 from egma_simulator.plugs.retell_web_call import RetellWebCall
@@ -27,6 +29,8 @@ class FinalCallStub(RetellStub):
     checks: int = 0
     pending_checks: int = 0
     response_delay: float = 0
+    pending_http_status: int | None = None
+    checked_ids: list[str] = field(default_factory=list)
     checking: asyncio.Event = field(default_factory=asyncio.Event)
 
     def build_app(self) -> web.Application:
@@ -35,9 +39,12 @@ class FinalCallStub(RetellStub):
         async def get_call(request: web.Request) -> web.Response:
             self._authorized(request)
             self.checks += 1
+            self.checked_ids.append(request.match_info["call_id"])
             self.checking.set()
             if self.response_delay:
                 await asyncio.sleep(self.response_delay)
+            if self.pending_http_status is not None and self.checks == 1:
+                return web.Response(status=self.pending_http_status)
             return web.json_response(
                 {
                     "call_id": self.returned_id or request.match_info["call_id"],
@@ -165,24 +172,43 @@ async def test_local_chat_cleanup_does_not_turn_a_failure_into_an_ending():
     assert not room.ended.is_set()
 
 
+@dataclass
+class GatewayCompletionProbe:
+    """Capture the provider callback at the real gateway driver boundary."""
+
+    confirm: Callable[[], Awaitable[bool]] | None = None
+
+    def driver(self, **arguments: Any) -> RetellGatewayBackend:
+        self.confirm = arguments["confirm_remote_end"]
+        return RetellGatewayBackend(**arguments)
+
+    async def check(self) -> bool:
+        assert self.confirm is not None
+        return await self.confirm()
+
+
+def gateway_call(base_url: str, probe: GatewayCompletionProbe) -> RetellWebCall:
+    return RetellWebCall(
+        modality="voice",
+        access_variant="retell_web_call.api_key",
+        config={"retellAgentId": AN_AGENT, "baseUrl": base_url},
+        credentials={"apiKey": SENTINEL_KEY},
+        simulation_id="sim-completion",
+        driver=probe.driver,
+    )
+
+
 @pytest.mark.parametrize("reason", ["agent_hangup", "inactivity", "user_hangup"])
-async def test_retell_final_ended_status_confirms_a_whole_room_close(reason: str):
+async def test_retell_final_ended_status_confirms_the_created_gateway_call(reason: str):
     stub = FinalCallStub(api_key=SENTINEL_KEY, reason=reason)
+    probe = GatewayCompletionProbe()
     async with serving(stub) as server:
-        plug = RetellWebCall(
-            modality="voice",
-            access_variant="retell_web_call.api_key",
-            config={"retellAgentId": AN_AGENT, "baseUrl": server.base_url},
-            credentials={"apiKey": SENTINEL_KEY},
-            simulation_id="sim-completion",
-        )
+        plug = gateway_call(server.base_url, probe)
         media = await plug.prepare()
-        client, markers = connected_room(plug._room._room, media)
         try:
-            await disconnect(client, media, rtc.DisconnectReason.CLIENT_INITIATED)
-            assert not media.failed.is_set(), "Retell ended this call normally"
-            assert media.ended.is_set()
-            assert len(markers) == 1
+            assert media.transport_name == "Retell gateway WebRTC"
+            assert await probe.check()
+            assert stub.checked_ids == [plug.provider_reference]
             assert stub.checks == 1
         finally:
             await plug.close()
@@ -269,107 +295,66 @@ async def test_retell_cannot_confirm_a_failed_unfinished_or_different_call(
 ):
     monkeypatch.setattr(retell_web_call, "FINAL_STATUS_SECONDS", 0.05)
     stub = FinalCallStub(api_key=SENTINEL_KEY, status=status, returned_id=returned_id)
+    probe = GatewayCompletionProbe()
     async with serving(stub) as server:
-        plug = RetellWebCall(
-            modality="voice",
-            access_variant="retell_web_call.api_key",
-            config={"retellAgentId": AN_AGENT, "baseUrl": server.base_url},
-            credentials={"apiKey": SENTINEL_KEY},
-            simulation_id="sim-completion",
-        )
+        plug = gateway_call(server.base_url, probe)
         media = await plug.prepare()
-        client, markers = connected_room(plug._room._room, media)
         try:
-            await disconnect(client, media, rtc.DisconnectReason.ROOM_DELETED)
-            assert media.failed.is_set()
+            assert not await probe.check()
             assert not media.ended.is_set()
-            assert not markers
-            assert stub.checks >= 1
+            assert stub.checked_ids == [plug.provider_reference]
         finally:
             await plug.close()
 
 
-async def test_retell_final_status_can_arrive_after_the_room_close():
+async def test_retell_final_status_can_arrive_after_an_ongoing_response():
     stub = FinalCallStub(api_key=SENTINEL_KEY, pending_checks=1)
+    probe = GatewayCompletionProbe()
     async with serving(stub) as server:
-        plug = RetellWebCall(
-            modality="voice",
-            access_variant="retell_web_call.api_key",
-            config={"retellAgentId": AN_AGENT, "baseUrl": server.base_url},
-            credentials={"apiKey": SENTINEL_KEY},
-            simulation_id="sim-completion",
-        )
-        media = await plug.prepare()
-        client, markers = connected_room(plug._room._room, media)
+        plug = gateway_call(server.base_url, probe)
+        await plug.prepare()
         try:
-            await disconnect(client, media, rtc.DisconnectReason.CLIENT_INITIATED)
-            assert media.ended.is_set()
-            assert not media.failed.is_set()
-            assert len(markers) == 1
+            assert await probe.check()
+            assert stub.checked_ids == [plug.provider_reference] * 2
             assert stub.checks == 2
         finally:
             await plug.close()
 
 
-async def test_local_teardown_cancels_a_pending_provider_status_check():
+async def test_canceling_a_pending_provider_status_check_does_not_complete_media():
     stub = FinalCallStub(api_key=SENTINEL_KEY, response_delay=0.2)
+    probe = GatewayCompletionProbe()
     async with serving(stub) as server:
-        plug = RetellWebCall(
-            modality="voice",
-            access_variant="retell_web_call.api_key",
-            config={"retellAgentId": AN_AGENT, "baseUrl": server.base_url},
-            credentials={"apiKey": SENTINEL_KEY},
-            simulation_id="sim-completion",
-        )
+        plug = gateway_call(server.base_url, probe)
         media = await plug.prepare()
-        room = plug._room._room
-        client, markers = connected_room(room, media)
-        closing = asyncio.create_task(
-            disconnect(client, media, rtc.DisconnectReason.CLIENT_INITIATED)
-        )
+        checking = asyncio.create_task(probe.check())
         try:
             await asyncio.wait_for(stub.checking.wait(), 1)
+            checking.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await checking
             await asyncio.wait_for(plug.close(), 0.1)
-            await closing
+            assert not media.ended.is_set()
             assert not media.failed.is_set()
-            assert not markers, (
-                "a canceled simulation must not complete from provider status"
-            )
-            assert room._remote_close.done()
+            assert stub.checked_ids == [plug.provider_reference]
         finally:
+            checking.cancel()
+            await asyncio.gather(checking, return_exceptions=True)
             await plug.close()
-            await asyncio.gather(closing, return_exceptions=True)
 
 
-@pytest.mark.parametrize("status", ["ended", "error"])
-async def test_participant_departure_during_provider_check_keeps_one_ending(
-    status: str,
+@pytest.mark.parametrize("http_status", [404, 503])
+async def test_retell_retries_a_transient_status_response_for_the_same_call(
+    http_status: int,
 ):
-    stub = FinalCallStub(api_key=SENTINEL_KEY, response_delay=0.05, status=status)
+    stub = FinalCallStub(api_key=SENTINEL_KEY, pending_http_status=http_status)
+    probe = GatewayCompletionProbe()
     async with serving(stub) as server:
-        plug = RetellWebCall(
-            modality="voice",
-            access_variant="retell_web_call.api_key",
-            config={"retellAgentId": AN_AGENT, "baseUrl": server.base_url},
-            credentials={"apiKey": SENTINEL_KEY},
-            simulation_id="sim-completion",
-        )
-        media = await plug.prepare()
-        room = plug._room._room
-        client, markers = connected_room(room, media)
-        closing = asyncio.create_task(
-            disconnect(client, media, rtc.DisconnectReason.CLIENT_INITIATED)
-        )
+        plug = gateway_call(server.base_url, probe)
+        await plug.prepare()
         try:
-            await asyncio.wait_for(stub.checking.wait(), 1)
-            transport = room._transport
-            left = transport._event_handlers["on_participant_disconnected"].handlers[0]
-            await left(transport, "agent")
-            await closing
-            await room._remote_close
-            assert media.ended.is_set()
-            assert not media.failed.is_set()
-            assert len(markers) == 1
+            assert await probe.check()
+            assert stub.checked_ids == [plug.provider_reference] * 2
+            assert stub.checks == 2
         finally:
             await plug.close()
-            await asyncio.gather(closing, return_exceptions=True)
