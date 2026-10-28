@@ -159,7 +159,7 @@ async def test_a_warm_bot_starts_at_once(kind: Any, quick: None):
     assert took < 0.2
     (ready,) = client_readies(rig)
     assert ready["label"] == "rtvi-ai"
-    assert ready["data"]["version"] == "2.1.0"
+    assert ready["data"]["version"] == "2.2.0"
     assert ready["id"]
 
 

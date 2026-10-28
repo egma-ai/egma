@@ -14,7 +14,7 @@ from typing import Any
 
 from pipecat.transports.daily.transport import DailyTransport, DailyTransportClient
 
-PINNED_PIPECAT = "1.9.0"
+PINNED_PIPECAT = "1.14.0"
 
 
 class _NativeClient:
@@ -123,6 +123,7 @@ async def test_every_joining_participant_has_its_microphone_captured():
     class _Params:
         audio_in_enabled = True
         audio_in_user_tracks = True
+        video_in_sources = {}
 
     class _Client:
         in_sample_rate = 16000

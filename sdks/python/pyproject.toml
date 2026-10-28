@@ -1,6 +1,6 @@
 [project]
 name = "egma"
-version = "0.4.0"
+version = "0.4.1"
 description = "Test and monitor LiveKit and Pipecat agents with Egma."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -39,7 +39,7 @@ livekit = [
 # Each minor is tested before it joins this range. The SDK, its tests and the
 # CI matrix read this range; it is written nowhere else.
 pipecat = [
-    "pipecat-ai>=1.9,<1.12",
+    "pipecat-ai>=1.9,<1.15",
     # The HTTPS seam's client. Pipecat depends on it too.
     "aiohttp>=3.11.12,<4",
 ]

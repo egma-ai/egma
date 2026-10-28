@@ -41,7 +41,7 @@ def test_pipecat_comes_with_the_pipecat_extra_and_no_livekit():
     pipecat = {name: spec for name, spec, extra in _declared() if extra == "pipecat"}
 
     assert ">=1.9" in pipecat["pipecat-ai"]
-    assert "<1.12" in pipecat["pipecat-ai"]
+    assert "<1.15" in pipecat["pipecat-ai"]
     assert not any(name.startswith("livekit") for name in pipecat)
 
 

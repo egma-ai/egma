@@ -221,7 +221,11 @@ async def test_pipeline_stt_startup_failure_keeps_its_source_and_cancels_promptl
 
     leg, connector = ear(monkeypatch, [refused(502)] * 3)
     if cancel:
-        monkeypatch.setattr(speech, "OPENAI_STT_RETRY_DELAY_SECONDS", 60)
+        async def held_connect(*args, **kwargs):
+            connector.attempted.set()
+            await asyncio.Event().wait()
+
+        connector.side_effect = held_connect
     build_legs = conductor_module.build_legs
 
     def with_real_stt(*args, **kwargs):

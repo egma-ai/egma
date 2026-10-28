@@ -15,7 +15,7 @@ from egma import _frameworks
 
 RANGES = [
     pytest.param("livekit-agents", "livekit", "1.6.6", "1.9", id="livekit"),
-    pytest.param("pipecat-ai", "pipecat", "1.9", "1.12", id="pipecat"),
+    pytest.param("pipecat-ai", "pipecat", "1.9", "1.15", id="pipecat"),
 ]
 
 
@@ -39,7 +39,8 @@ def test_the_range_is_read_from_the_extra(distribution, extra, floor, ceiling):
         ("pipecat-ai", "pipecat", "1.8.1", True),
         ("pipecat-ai", "pipecat", "1.9.0", False),
         ("pipecat-ai", "pipecat", "1.11.4", False),
-        ("pipecat-ai", "pipecat", "1.12.0", True),
+        ("pipecat-ai", "pipecat", "1.14.0", False),
+        ("pipecat-ai", "pipecat", "1.15.0", True),
         ("pipecat-ai", "pipecat", "2.0", True),
         ("pipecat-ai", "pipecat", "not a version", False),
         ("pipecat-ai", "pipecat", "unknown", False),

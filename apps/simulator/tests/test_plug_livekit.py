@@ -307,7 +307,9 @@ async def test_pipecat_17_unsubscribe_drains_before_participant_departure():
     conversion_started = asyncio.Event()
     convert = asyncio.Event()
 
-    async def gated_conversion(_event: object) -> AudioRawFrame:
+    async def gated_conversion(
+        _event: object, _participant_id: str
+    ) -> AudioRawFrame:
         conversion_started.set()
         await convert.wait()
         return AudioRawFrame(audio=bytes(320), sample_rate=16000, num_channels=1)

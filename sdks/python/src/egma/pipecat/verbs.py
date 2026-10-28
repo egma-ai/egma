@@ -452,14 +452,20 @@ async def simulation(
 async def _keep_speech_off(worker: Any, reference: str) -> None:
     """Make every LLM answer text only, for a chat simulation egma confirmed.
 
-    One ``LLMConfigureOutputFrame(skip_tts=True)`` enters at the top of the
-    pipeline before any other frame the bot queues. The RTVI processor and
-    the LLM service both keep it, so the greeting and the answer after a
-    tool call are not spoken either.
+    Set the initial state before the pipeline starts: the first RTVI input
+    can interrupt and discard a queued output configuration frame. Also
+    queue the frame so every processor sees the chat configuration.
     """
     from pipecat.frames.frames import LLMConfigureOutputFrame
+    from pipecat.processors.frameworks.rtvi.processor import RTVIProcessor
+    from pipecat.services.llm_service import LLMService
 
     try:
+        for processor in census.processors_in(worker):
+            if isinstance(processor, LLMService):
+                processor._skip_tts = True
+            elif isinstance(processor, RTVIProcessor):
+                processor._llm_skip_tts = True
         await worker.queue_frames([LLMConfigureOutputFrame(skip_tts=True)])
     except Exception:
         logger.exception(

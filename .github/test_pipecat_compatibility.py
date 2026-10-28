@@ -7,7 +7,9 @@ from pipecat_compatibility import supported_minors, tool_dependencies
 
 class PipecatCompatibilityTests(unittest.TestCase):
     def test_every_minor_of_the_declared_range_is_checked(self):
-        self.assertEqual(supported_minors(), ("1.9", "1.10", "1.11"))
+        self.assertEqual(
+            supported_minors(), ("1.9", "1.10", "1.11", "1.12", "1.13", "1.14")
+        )
 
     def test_the_check_installs_neither_the_index_egma_nor_livekit(self):
         for requirement in tool_dependencies():

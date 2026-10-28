@@ -221,7 +221,7 @@ async def test_openai_http_tts_completes_on_eof_not_an_idle_gap(monkeypatch) -> 
     monkeypatch.setattr(
         pipecat.utils.string,
         "_sent_tokenizer",
-        lambda: (
+        lambda _language: (
             lambda text: [
                 f"{part.strip()}." for part in text.split(".") if part.strip()
             ]
@@ -257,8 +257,8 @@ async def test_openai_http_tts_completes_on_eof_not_an_idle_gap(monkeypatch) -> 
             ]
         )
         await asyncio.wait_for(first_response.entered.wait(), 5)
-        assert len(tts._audio_contexts) == 1
-        context_id = next(iter(tts._audio_contexts))
+        assert len(tts.get_audio_contexts()) == 1
+        context_id = next(iter(tts.get_audio_contexts()))
         with pytest.raises(TimeoutError):
             await asyncio.wait_for(conductor.stopped.wait(), 3.2)
 
@@ -270,7 +270,7 @@ async def test_openai_http_tts_completes_on_eof_not_an_idle_gap(monkeypatch) -> 
         first_response.middle.set()
         await asyncio.wait_for(first_response.ended.wait(), 5)
         await asyncio.wait_for(second_response.entered.wait(), 5)
-        assert list(tts._audio_contexts) == [context_id]
+        assert tts.get_audio_contexts() == [context_id]
         with pytest.raises(TimeoutError):
             await asyncio.wait_for(conductor.stopped.wait(), 3.2)
 
@@ -319,7 +319,7 @@ async def test_openai_http_tts_cancellation_stops_the_request_and_playback() -> 
         ]
     )
     await asyncio.wait_for(response.entered.wait(), 5)
-    assert tts._audio_contexts
+    assert tts.get_audio_contexts()
 
     await asyncio.wait_for(worker.cancel(), 5)
     await asyncio.wait_for(running, 5)
@@ -374,7 +374,7 @@ async def test_openai_interruption_before_audio_has_no_late_completion() -> None
         assert response.exited.is_set()
         assert conductor.stop_count == 0
         assert conductor.stop_errors == []
-        assert not tts._audio_contexts
+        assert not tts.get_audio_contexts()
         assert conductor.turns == []
 
         conductor.stopped.clear()
@@ -454,7 +454,7 @@ async def test_openai_http_tts_failure_reaps_context_through_pipeline(
         )
         await asyncio.wait_for(failed.wait(), 1)
         assert isinstance(errors[0].exception, error_type)
-        assert not tts._audio_contexts
+        assert not tts.get_audio_contexts()
     finally:
         if not running.done():
             await worker.cancel()

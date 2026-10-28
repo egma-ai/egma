@@ -8,7 +8,7 @@ requires-python = ">=3.11"
 # `pipecat-ai` as `pipecat.flows`; the standalone `pipecat-ai-flows` package
 # stops at pipecat-ai 1.4.
 dependencies = [
-    "pipecat-ai[cartesia,daily,deepgram,openai,runner,silero]==1.11.0",
+    "pipecat-ai[cartesia,daily,deepgram,openai,runner,silero]==1.14.0",
     "pipecatcloud>=1.2,<2",
 ]
 

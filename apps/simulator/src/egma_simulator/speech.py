@@ -617,16 +617,15 @@ def build_vad(providers: SpeechProviders) -> VADAnalyzer:
     from pipecat.audio.vad.silero import SileroVADAnalyzer
 
     detector = SileroVADAnalyzer(params=CONVERSATION_VAD)
-    if getattr(detector, "_last_reset_time", None) != 0:
+    if getattr(detector, "_windows_since_reset", None) != 0:
         raise SpeechFault(
             "the pinned pipecat release changed the silero state-reset seam"
         )
-    # Pipecat 1.7 resets Silero's recurrent state every five wall-clock
-    # seconds. On telephone line noise that can create speech which is not
-    # there. A fresh detector is built for every simulation, so its model is
-    # already clean at the stream boundary and must keep that state until the
-    # simulation ends.
-    detector._last_reset_time = math.inf
+    # Pipecat resets Silero's recurrent state after enough quiet audio.
+    # On telephone line noise that can create speech which is not there.
+    # Each simulation starts with a clean model and keeps that state until
+    # the simulation ends.
+    detector._windows_since_reset = -math.inf
     return detector
 
 
