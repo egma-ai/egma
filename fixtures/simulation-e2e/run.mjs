@@ -76,7 +76,7 @@ for (const access of gptLivePersona ? ["project_credentials", "customer_token_en
           SIMULATION_E2E_LANGUAGE: language,
           SIMULATION_E2E_MODALITY: modality,
           SIMULATION_E2E_ACCESS: access,
-          LIVEKIT_E2E_PYTHON_AGENTS_VERSION: "1.7.1",
+          LIVEKIT_E2E_PYTHON_AGENTS_VERSION: "1.8.7",
           LIVEKIT_E2E_JAVASCRIPT_AGENTS_VERSION: "1.7.1",
         },
       });

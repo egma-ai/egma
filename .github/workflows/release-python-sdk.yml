@@ -161,7 +161,7 @@ jobs:
             exit 1
           fi
           wheel="$(realpath "$(find sdks/python/dist -maxdepth 1 -name '*.whl' -print -quit)")"
-          version="1.7.1"
+          version="1.8.7"
 
           run_case() {
             modality="$1"
