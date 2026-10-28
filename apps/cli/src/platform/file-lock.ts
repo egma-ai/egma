@@ -8,6 +8,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { readlinkSync } from "node:fs";
 import { readFile, rm, stat, writeFile } from "node:fs/promises";
 import { uptime } from "node:os";
 import path from "node:path";
@@ -33,6 +34,17 @@ export function processIsAlive(pid: number): boolean {
 /** Whether a running process is a Node runtime; undefined where that cannot be told. */
 export function processRunsNode(pid: number): boolean | undefined {
   if (process.platform === "win32") return undefined;
+  if (process.platform === "linux") {
+    try {
+      const executable = path.basename(
+        readlinkSync(`/proc/${String(pid)}/exe`).replace(/ \(deleted\)$/u, ""),
+      ).toLowerCase();
+      return executable === path.basename(process.execPath).toLowerCase() ||
+        executable === "node" || executable === "nodejs";
+    } catch {
+      // A restricted /proc falls back to the process-name probe below.
+    }
+  }
   const answer = spawnSync("ps", ["-p", String(pid), "-o", "comm="], {
     encoding: "utf8",
     timeout: 2_000,
