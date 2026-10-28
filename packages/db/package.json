@@ -24,7 +24,7 @@
     "@egma/ids": "workspace:*",
     "@egma/metrics": "workspace:*",
     "@egma/simulation-contract": "workspace:*",
-    "better-auth": "^1.6.25",
+    "better-auth": "^1.7.14",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.16.3"
   },
