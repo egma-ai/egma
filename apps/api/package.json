@@ -30,7 +30,7 @@
     "better-auth": "^1.7.14",
     "fastify": "^5.12.1",
     "livekit-server-sdk": "^2.18.0",
-    "nodemailer": "^9.0.3",
+    "nodemailer": "^10.2.1",
     "posthog-node": "^5.49.1",
     "protobufjs": "^8.7.1"
   },
