@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import sys
+from dataclasses import replace
 from fractions import Fraction
 from typing import Any
 
@@ -23,7 +24,11 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.openai.live import events
 from pipecat.services.openai.live.llm import OpenAILiveLLMService
-from pipecat.workers.llm.backend_llm_worker import BackendLLMWorker
+from pipecat.workers.llm.backend_llm_worker import (
+    BackendIdle,
+    BackendLLMWorker,
+    BackendOutput,
+)
 from pipecat.workers.runner import WorkerRunner
 
 from .blob import BlobStore
@@ -126,9 +131,9 @@ class _ObservedLiveService(OpenAILiveLLMService):
                     )
                 )
 
-    async def _run_client_delegation(self, delegation):
-        await super()._run_client_delegation(delegation)
-        if self._end_requested.is_set():
+    async def _on_backend_event(self, event):
+        await super()._on_backend_event(event)
+        if isinstance(event, BackendIdle) and self._end_requested.is_set():
             self._backend_final_sent()
 
     async def conclusion_playout_target(self, evidence: _LiveEvidence) -> int:
@@ -410,9 +415,15 @@ class LiveConductor:
                 ),
                 conclusion_started=conclusion_started,
             )
+
+            async def spoken_backend_reply(output: BackendOutput) -> BackendOutput:
+                # Egma returns speech instructions without Pipecat's prose marker.
+                return replace(output, prefers_spoken=not output.is_thought)
+
             backend = BackendLLMWorker(
                 llm=backend_service,
                 context=persona.context([]),
+                transform_output=spoken_backend_reply,
             )
             live = _ObservedLiveService(
                 api_key=self._selection.key,

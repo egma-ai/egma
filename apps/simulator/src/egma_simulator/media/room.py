@@ -86,7 +86,7 @@ one — so both begin here.
 
 CONNECT_SECONDS = 30.0
 AUDIO_STREAM_CLOSE_SECONDS = 2.0
-PIPECAT_VERSION = "1.9.0"
+PIPECAT_VERSION = "1.14.0"
 LIVEKIT_VERSION = "1.1.14"
 QUOTED_REFUSAL_CHARS = 200
 
@@ -890,6 +890,7 @@ class JoinedRoom:
             room_name=self._room_name,
             params=LiveKitParams(
                 audio_in_enabled=True,
+                audio_in_user_tracks=True,
                 audio_out_enabled=True,
                 audio_out_sample_rate=24_000,
                 audio_out_mixer=audio_out_mixer,

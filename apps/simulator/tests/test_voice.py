@@ -395,10 +395,6 @@ def test_one_live_simulation_keeps_one_silero_model_state(
     monkeypatch: pytest.MonkeyPatch,
 ):
     """A detector starts clean, then keeps its context until this simulation ends."""
-    from pipecat.audio.vad import silero
-
-    now = [0.0]
-    monkeypatch.setattr(silero.time, "time", lambda: now[0])
     detector = build_vad(SpeechProviders(vad="silero"))
     detector.set_sample_rate(16000)
 
@@ -414,8 +410,8 @@ def test_one_live_simulation_keeps_one_silero_model_state(
         reset_states(batch_size)
 
     monkeypatch.setattr(detector._model, "reset_states", count_reset)
-    now[0] = 6.0
-    detector.voice_confidence(window)
+    for _ in range(6 * 16000 // detector.num_frames_required()):
+        detector.voice_confidence(window)
 
     assert resets == 0
     assert build_vad(SpeechProviders(vad="silero")) is not detector
