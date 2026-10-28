@@ -60,6 +60,6 @@
   "devDependencies": {
     "@livekit/agents": "1.7.1",
     "@livekit/rtc-node": "^0.13.34",
-    "zod": "^4.1.8"
+    "zod": "^4.6.6"
   }
 }
