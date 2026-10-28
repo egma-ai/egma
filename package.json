@@ -38,7 +38,7 @@
     "playwright-core": "^1.62.1",
     "skills": "1.5.22",
     "typescript": "^5.9.3",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.12"
   },
   "pnpm": {
     "overrides": {
