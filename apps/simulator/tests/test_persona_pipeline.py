@@ -705,7 +705,7 @@ async def test_voice_plays_a_streamed_sentence_before_model_completion(outcome):
             assert len(conductor.failures) == 1
             assert isinstance(conductor.failures[0], ModelFailure)
             assert not conductor.concluded
-            assert not legs.tts._audio_contexts
+            assert not legs.tts.get_audio_contexts()
             await worker.queue_frame(EndFrame())
             await asyncio.wait_for(running, 2)
             return

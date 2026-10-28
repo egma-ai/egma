@@ -65,6 +65,7 @@ def connected_room(room: JoinedRoom, media: Any) -> tuple[Any, list[object]]:
     input_transport._audio_in_queue = asyncio.Queue()
     client = input_transport._client
     client._room = ScriptedRtcRoom()
+    client._connected = True
     room._input_drain.watch_mutes()
     room._connected.set()
     room.carrying_audio.set()

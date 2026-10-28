@@ -14,9 +14,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import aiohttp
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.open_ai_adapter import (
+from pipecat.adapters.llm.schemas.function_schema import FunctionSchema
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.llm.services.open_ai_adapter import (
     OpenAILLMAdapter,
     openai_is_given,
 )
@@ -238,8 +238,8 @@ class OpenAICompatibleModel:
             text,
         )
 
-    def _request(self, context: LLMContext) -> dict[str, Any]:
-        invocation = _OPENAI_ADAPTER.get_llm_invocation_params(
+    async def _request(self, context: LLMContext) -> dict[str, Any]:
+        invocation = await _OPENAI_ADAPTER.get_llm_invocation_params(
             context,
             system_instruction=None,
             convert_developer_to_user=False,
@@ -255,7 +255,7 @@ class OpenAICompatibleModel:
         return asked
 
     async def reply(self, context: LLMContext) -> PersonaReply:
-        asked = self._request(context)
+        asked = await self._request(context)
         try:
             async with self._live_session().post(
                 f"{self._base_url}/chat/completions",
@@ -360,7 +360,7 @@ class OpenAICompatibleModel:
                 body: dict[str, Any] = {}
                 finish_reason: str | None = None
                 async with await self._stream_client.chat.completions.create(
-                    **self._request(context),
+                    **(await self._request(context)),
                     stream=True,
                     stream_options={"include_usage": True},
                 ) as stream:
