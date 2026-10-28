@@ -13,6 +13,6 @@
     "@livekit/agents": "1.7.1",
     "@livekit/agents-plugin-openai": "1.7.1",
     "@livekit/agents-plugin-silero": "1.7.1",
-    "zod": "^4.1.8"
+    "zod": "^4.6.6"
   }
 }
