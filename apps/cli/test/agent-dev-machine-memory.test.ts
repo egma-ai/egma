@@ -4,7 +4,8 @@
  * process that holds it is gone.
  */
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -93,5 +94,22 @@ describe("this machine's dev connections", () => {
     await writeFile(path.join(folder, "empty.lock"), "", "utf8");
     expect(await lockIsStale(path.join(folder, "empty.lock"))).toBe(false);
     expect(await lockIsStale(path.join(folder, "empty.lock"), -1)).toBe(true);
+  });
+
+  it.skipIf(process.platform !== "linux")("keeps a lock held by a Node process with a changed title", async () => {
+    const node = spawn(process.execPath, [
+      "-e",
+      "process.title = 'egma-lock-owner'; process.send('ready'); setInterval(() => {}, 1_000)",
+    ], { stdio: ["ignore", "ignore", "ignore", "ipc"] });
+    await once(node, "message");
+    try {
+      expect(processRunsNode(node.pid as number)).toBe(true);
+      await writeFile(`${file}.lock`, `${String(node.pid)}\n`, "utf8");
+      expect(await lockIsStale(`${file}.lock`)).toBe(false);
+    } finally {
+      const exited = once(node, "exit");
+      node.kill();
+      await exited;
+    }
   });
 });
