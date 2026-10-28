@@ -90,7 +90,7 @@ def check(wheel: Path, minor: str, directory: Path, log) -> None:
             "assert Path(egma.__file__).is_relative_to(sys.prefix); "
             "assert version('pipecat-ai').startswith(sys.argv[1] + '.'), "
             "version('pipecat-ai'); "
-            "assert version('openai').split('.')[0] == '2', version('openai'); "
+            "assert version('openai').split('.')[0] in ('2', '3'), version('openai'); "
             "found = sorted(d.metadata['Name'] for d in distributions() "
             "if d.metadata['Name'].lower().startswith('livekit')); "
             "assert not found, found",

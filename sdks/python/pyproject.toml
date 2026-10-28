@@ -1,6 +1,6 @@
 [project]
 name = "egma"
-version = "0.4.1"
+version = "0.4.2"
 description = "Test and monitor LiveKit and Pipecat agents with Egma."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,21 +19,19 @@ classifiers = [
 # extra, so a Pipecat bot never installs LiveKit and a LiveKit worker never
 # installs Pipecat.
 dependencies = [
-    # LiveKit Agents 1.6 passes an httpx client into OpenAI and does not bound
-    # OpenAI itself; OpenAI 3 moved to httpx2. Kept in the base so a LiveKit
-    # worker that installs plain egma keeps OpenAI 2. Every supported Pipecat
-    # minor accepts OpenAI 2.
-    "openai>=2,<3",
-    "opentelemetry-exporter-otlp-proto-http>=1.39,<2",
-    "opentelemetry-sdk>=1.39,<2",
+    # Supported framework releases use OpenAI 2 or 3. Keep the next major out
+    # until the framework compatibility checks cover it.
+    "openai>=2,<4",
+    "opentelemetry-exporter-otlp-proto-http>=1.45.1,<2",
+    "opentelemetry-sdk>=1.45.1,<2",
 ]
 
 [project.optional-dependencies]
-# LiveKit 1.6.6 uses session-scoped mocks during tool execution. Validate its
-# testing API and private tracer provider access before adding another minor
-# release. The SDK reads this range back from its own metadata at import.
+# LiveKit 1.8.7 permits the patched OpenTelemetry API. Validate its testing API
+# and private tracer provider access before adding another minor release. The
+# SDK reads this range back from its own metadata at import.
 livekit = [
-    "livekit-agents>=1.6.6,<1.9",
+    "livekit-agents>=1.8.7,<1.9",
 ]
 # The tool hook reads Pipecat's function-call runner, which is not public API.
 # Each minor is tested before it joins this range. The SDK, its tests and the
@@ -54,7 +52,7 @@ Documentation = "https://github.com/egma-ai/egma/tree/main/sdks/python#readme"
 # which they install from the built wheel.
 dev = [
     "egma[livekit,pipecat]",
-    "livekit-plugins-openai>=1.6.6,<1.9",
+    "livekit-plugins-openai>=1.8.7,<1.9",
     "packaging>=24",
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",

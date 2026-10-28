@@ -161,7 +161,7 @@ jobs:
             exit 1
           fi
           wheel="$(realpath "$(find sdks/python/dist -maxdepth 1 -name '*.whl' -print -quit)")"
-          version="1.7.1"
+          version="1.8.7"
 
           run_case() {
             modality="$1"
@@ -210,7 +210,7 @@ jobs:
           clean="$(mktemp -d)"
           uv venv --python 3.11 "$clean/venv"
           uv pip install --python "$clean/venv/bin/python" \
-            "$wheel" "livekit-agents[openai]==1.6.6"
+            "$wheel" "livekit-agents[openai]==1.8.7"
           "$clean/venv/bin/python" - <<'PY'
           import asyncio
           import os
@@ -240,7 +240,7 @@ jobs:
 
           expected = os.environ["RELEASE_VERSION"]
           assert version("egma") == expected
-          assert version("openai").split(".", 1)[0] == "2"
+          assert version("openai").split(".", 1)[0] == "3"
           assert agents.JobContext is not None
           assert callable(simulation)
           assert callable(monitor)

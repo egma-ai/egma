@@ -470,7 +470,7 @@ jobs:
           retention-days: 7
 
   simulation-e2e-livekit:
-    name: Simulation to grade (${{ matrix.language }}, LiveKit 1.7.1, ${{ matrix.modality }}, ${{ matrix.access }}, ${{ matrix.persona_mode }} persona, mocks on)
+    name: Simulation to grade (${{ matrix.language }}, LiveKit ${{ matrix.agents_version }}, ${{ matrix.modality }}, ${{ matrix.access }}, ${{ matrix.persona_mode }} persona, mocks on)
     if: ${{ github.ref == 'refs/heads/main' || github.base_ref == 'main' || github.event_name == 'workflow_dispatch' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
@@ -481,6 +481,11 @@ jobs:
       fail-fast: false
       matrix:
         language: [python, javascript]
+        include:
+          - language: python
+            agents_version: "1.8.7"
+          - language: javascript
+            agents_version: "1.7.1"
         modality: [chat, voice]
         access: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.gpt_live_personas && '["project_credentials", "customer_token_endpoint"]' || '["project_credentials"]') }}
         # Normal CI keeps the existing separate speech path. A manual run can
@@ -610,7 +615,7 @@ jobs:
           SIMULATION_E2E_ACCESS: ${{ matrix.access }}
           SIMULATION_E2E_PERSONA_MODE: ${{ matrix.persona_mode }}
           SIMULATION_E2E_MOCKS: "on"
-          LIVEKIT_E2E_PYTHON_AGENTS_VERSION: "1.7.1"
+          LIVEKIT_E2E_PYTHON_AGENTS_VERSION: "1.8.7"
           LIVEKIT_E2E_JAVASCRIPT_AGENTS_VERSION: "1.7.1"
           EGMA_E2E_SESSION_DELAY_MS: "10000"
         run: >-
@@ -626,7 +631,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: simulation-e2e-${{ matrix.language }}-livekit-1.7.1-${{ matrix.modality }}-${{ matrix.access }}-${{ matrix.persona_mode }}-on-${{ github.sha }}
+          name: simulation-e2e-${{ matrix.language }}-livekit-${{ matrix.agents_version }}-${{ matrix.modality }}-${{ matrix.access }}-${{ matrix.persona_mode }}-on-${{ github.sha }}
           path: .proofs/simulation-e2e/*
           include-hidden-files: true
           if-no-files-found: error

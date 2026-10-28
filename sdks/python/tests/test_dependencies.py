@@ -20,20 +20,19 @@ def _declared() -> list[tuple[str, str, str]]:
     return found
 
 
-def test_the_base_install_carries_no_agent_framework_and_keeps_openai_2():
+def test_the_base_install_carries_no_agent_framework_and_bounds_openai():
     base = {name: spec for name, spec, extra in _declared() if not extra}
 
     assert not any(name.startswith(("livekit", "pipecat")) for name in base)
-    # LiveKit Agents 1.6 does not bound OpenAI itself and breaks on OpenAI 3,
-    # so the bound holds for a LiveKit worker that installs plain egma.
+    # Each supported framework selects its compatible OpenAI major.
     assert ">=2" in base["openai"]
-    assert "<3" in base["openai"]
+    assert "<4" in base["openai"]
 
 
 def test_livekit_comes_with_the_livekit_extra():
     livekit = {name: spec for name, spec, extra in _declared() if extra == "livekit"}
 
-    assert ">=1.6.6" in livekit["livekit-agents"]
+    assert ">=1.8.7" in livekit["livekit-agents"]
     assert "<1.9" in livekit["livekit-agents"]
 
 

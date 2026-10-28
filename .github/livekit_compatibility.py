@@ -17,8 +17,8 @@ PYTHON_SDK = ROOT / "sdks/python"
 # Minimum support, minor boundaries, the customer pin, and the highest
 # reviewed release.
 JS_VERSIONS = ("1.5.5", "1.6.0", "1.6.4", "1.7.0", "1.7.1")
-# Keep the previously locked version and the releases between the floor and lock.
-PYTHON_INTERMEDIATE_VERSIONS = ("1.6.9", "1.7.0", "1.7.1")
+# The security floor and locked release currently cover the same minor.
+PYTHON_INTERMEDIATE_VERSIONS = ()
 LIVE_TESTS = (
     "livekit_tests/test_live_room_detection.py",
     "livekit_tests/test_live_mockable.py",
@@ -80,7 +80,7 @@ def check_plain_install(wheel, version, directory, log):
             "from egma import monitor, simulation; "
             "assert callable(simulation) and callable(monitor); "
             "assert version('livekit-agents') == sys.argv[1]; "
-            "assert version('openai').split('.')[0] == '2', version('openai')",
+            "assert version('openai').split('.')[0] == '3', version('openai')",
             version,
         ],
         log,
@@ -111,7 +111,7 @@ def check_python(wheel, version, dev_dependencies, directory, log):
             "--python",
             str(python),
             # The documented install: the LiveKit extra carries the OpenAI bound
-            # that livekit-agents 1.6 does not declare itself.
+            # needed by existing LiveKit workers.
             f"egma[livekit] @ {Path(wheel).resolve().as_uri()}",
             f"livekit-agents=={version}",
             f"livekit-plugins-openai=={version}",

@@ -311,7 +311,7 @@ def python_worker_environment(directory: Path) -> tuple[Path, SDKArtifact]:
     if len(wheels) != 1:
         raise RuntimeError(f"expected one Python wheel, found {wheels}")
     agents_version = os.environ.get(
-        "LIVEKIT_E2E_PYTHON_AGENTS_VERSION", "1.7.1"
+        "LIVEKIT_E2E_PYTHON_AGENTS_VERSION", "1.8.7"
     ).strip()
     checked(
         ["uv", "venv", "--python", "3.11", str(venv)],
