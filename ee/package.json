@@ -22,7 +22,7 @@
     "@egma/db": "workspace:*",
     "@egma/ids": "workspace:*",
     "drizzle-orm": "^0.45.2",
-    "fastify": "^5.6.1",
+    "fastify": "^5.12.7",
     "stripe": "22.6.1"
   }
 }

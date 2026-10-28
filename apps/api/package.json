@@ -28,7 +28,7 @@
     "@opentelemetry/instrumentation-undici": "^0.31.0",
     "@opentelemetry/sdk-node": "^0.221.0",
     "better-auth": "^1.7.14",
-    "fastify": "^5.12.1",
+    "fastify": "^5.12.7",
     "livekit-server-sdk": "^2.18.0",
     "nodemailer": "^10.2.1",
     "posthog-node": "^5.49.1",
