@@ -44,7 +44,9 @@
   "pnpm": {
     "overrides": {
       "js-yaml@4": "^4.3.2",
-      "esbuild@<0.25.0": "^0.25.12"
+      "esbuild@<0.25.0": "^0.25.12",
+      "@livekit/agents@1.7.1>sharp": "0.35.5",
+      "onnxruntime-node@1.24.3>adm-zip": "0.6.1"
     }
   }
 }
